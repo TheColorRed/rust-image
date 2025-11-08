@@ -1,0 +1,13 @@
+import { Button, StandardButton, HorizontalBox, ScrollView, VerticalBox, ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { WindowContentBase } from "../window-content-base.slint";
+import { ActionButton, ButtonType } from "../../components/action-button.slint";
+
+export component NewProjectDialog inherits WindowContentBase {
+    window-width: 500px;
+    window-height: 500px;
+    background: Theme.background-light;
+
+    callback create(int, int, color);
+    callback cancel();
+}

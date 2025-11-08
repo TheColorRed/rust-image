@@ -1,0 +1,49 @@
+import { TabBar } from "../../components/tabs/tab-bar.slint";
+import { MenuBar } from "../../components/menu-bar/util/menu-bar.slint";
+import { DialogState } from "../../globals/dialog-state.slint";
+import { CloseButton, MaximizeButton, MinimizeButton, RestoreButton } from "./buttons.slint";
+
+export component TitleBar {
+    in property <string> title: "Dialog";
+
+    function drag-window(event: PointerEvent) {
+        if (event.kind == PointerEventKind.down) {
+            DialogState.window-move();
+        }
+    }
+
+    Rectangle {
+        background: #222222;
+        width: 100%;
+        HorizontalLayout {
+            height: 30px;
+            width: 100%;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                Text {
+                    text: title;
+                    color: white;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    pointer-event(event) => {
+                        root.drag-window(event);
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+
+                CloseButton {
+                    clicked => {
+                        DialogState.close();
+                    }
+                }
+            }
+        }
+    }
+}

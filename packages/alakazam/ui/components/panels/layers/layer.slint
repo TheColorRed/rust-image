@@ -1,0 +1,93 @@
+import {UIProject, UILayer, AppState} from "../../../globals/app-state.slint";
+
+export global LayerActions {
+    callback selected-layer-changed([UILayer]);
+}
+
+export component Layer inherits Rectangle {
+    height: 50px;
+    background: rect-fa.has-hover && !layer-focused ? #5a5ae5 : layer-focused ? #ffffff58 : #ffffff2e;
+
+    in-out property <UILayer> layer;
+
+    property <bool> rename-layer: false;
+    property <string> layer-name: layer.name;
+    property <image> layer-image: layer.image;
+    property <bool> layer-visible: layer.visible;
+    property <bool> layer-focused: layer.focused;
+    property <[UILayer]> layers: AppState.projects[AppState.active-project].layers;
+
+    rect-fa := TouchArea {
+        property <float> pressed-value;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            layer-focused = true;
+            LayerActions.selected-layer-changed([layer]);
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                // self.pressed-value = root.value;
+                self.mouse-cursor = MouseCursor.grabbing;
+            }
+        }
+        moved => {
+            if (self.enabled && self.pressed) {
+                self.mouse-y;
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding: 5px;
+        alignment: start;
+        spacing: 10px;
+        preferred-width: 100%;
+        min-width: 150px;
+
+        Image {
+            source: layer-image;
+            preferred-height: 100px;
+            image-fit: contain;
+            image-rendering: smooth;
+            preferred-width: 30px;
+            min-width: 30px;
+        }
+
+        if (rename-layer): TextInput {
+            text: root.layer-name;
+            vertical-alignment: center;
+            padding: 5px;
+
+            accepted => {
+                root.layer-name = self.text;
+                rename-layer = false;
+            }
+
+            rejected => {
+                rename-layer = false;
+            }
+
+            changed has-focus => {
+                if (self.has-focus) {
+                    self.select-all();
+                }
+            }
+
+            init => {
+                // self.focus();
+            }
+        }
+
+        if(!rename-layer): Text {
+            text: root.layer-name;
+            vertical-alignment: center;
+            padding: 5px;
+
+            ta := TouchArea {
+                double-clicked => {
+                    rename-layer = true;
+                }
+            }
+        }
+    }
+}

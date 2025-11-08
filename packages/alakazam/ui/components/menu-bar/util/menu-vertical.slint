@@ -1,0 +1,17 @@
+import { AppMenu } from "../menu-globals.slint";
+
+export component MenuVertical {
+    z: 100;
+    Rectangle {
+        drop-shadow-color: #000000;
+        drop-shadow-blur: 10px;
+        drop-shadow-offset-y: 5px;
+        VerticalLayout {
+            min-width: 200px;
+            max-width: 400px;
+            preferred-width: 200px;
+
+            @children
+        }
+    }
+}

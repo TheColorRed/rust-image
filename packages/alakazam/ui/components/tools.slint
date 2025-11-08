@@ -1,0 +1,98 @@
+import { Theme } from "../theme.slint";
+import { Tooltip } from "./tooltip.slint";
+
+component Tool inherits Rectangle {
+    in-out property <image> source <=> image.source;
+    in-out property <bool> active: false;
+    in property <int> index;
+    in property <string> tooltip: "";
+
+    callback clicked(int);
+
+    background: active ? Theme.background-dark : transparent;
+    width: 38px;
+    height: 30px;
+
+    // border-color: Theme.background-lightest;
+    // border-width: 1px;
+
+    if (tooltip != "" && ta.has-hover): Tooltip {
+        position: right;
+        tooltip: root.tooltip;
+        parent-width: root.width;
+    }
+
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            image := Image {
+                width: 18px;
+                source: @image-url("");
+            }
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked(root.index);
+        }
+    }
+}
+
+export component Tools inherits VerticalLayout {
+    width: 44px;
+    alignment: start;
+    property <int> active: 0;
+
+    Rectangle {
+        background: Theme.background-lighter;
+        height: 100%;
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                padding-top: 2px;
+                Tool {
+                    tooltip: "Move";
+                    source: @image-url("../icons/tools/arrows-up-down-left-right.svg");
+                    active: root.active == 0;
+                    index: 0;
+                    clicked(index) => {
+                        root.active = index;
+                    }
+                }
+
+                Tool {
+                    tooltip: "Square Marquee";
+                    source: @image-url("../icons/tools/square-dashed.svg");
+                    active: root.active == 1;
+                    index: 1;
+                    clicked(index) => {
+                        root.active = index;
+                    }
+                }
+
+                Tool {
+                    tooltip: "Pencil";
+                    source: @image-url("../icons/tools/pencil.svg");
+                    active: root.active == 2;
+                    index: 2;
+                    clicked(index) => {
+                        root.active = index;
+                    }
+                }
+
+                Tool {
+                    tooltip: "Pen";
+                    source: @image-url("../icons/tools/pen-fancy.svg");
+                    active: root.active == 3;
+                    index: 3;
+                    clicked(index) => {
+                        root.active = index;
+                    }
+                }
+            }
+        }
+    }
+}

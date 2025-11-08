@@ -1,0 +1,11 @@
+[package]
+name = "rotate-test"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+abra = { path = "../../abra" }
+
+[[bin]]
+name = "rotate-test"
+path = "main.rs"

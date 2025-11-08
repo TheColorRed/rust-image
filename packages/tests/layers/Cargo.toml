@@ -1,0 +1,11 @@
+[package]
+name = "layers-test"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+abra = { path = "../../abra" }
+
+[[bin]]
+name = "layers-test"
+path = "main.rs"

@@ -1,0 +1,97 @@
+import { Button, ListView, HorizontalBox, VerticalBox, GridBox, ScrollView } from "std-widgets.slint";
+import { AppMenu, MenuItem } from "components/menu-bar/menu.slint";
+import { TabBar } from "components/tabs/tab-bar.slint";
+import { Tab } from "components/tabs/tab.slint";
+import { AppState } from "globals/app-state.slint";
+import { Welcome } from "welcome.slint";
+import { Stage } from "components/stage.slint";
+import { Panels } from "components/panels/panels.slint";
+import { HorizontalResize } from "components/horizontal-resize.slint";
+import { TitleBar } from "./components/title-bar/title-bar-main.slint";
+import { Theme } from "theme.slint";
+import { Tools } from "components/tools.slint";
+
+export { AppMenu }
+export { LayerActions } from "components/panels/layers/layer.slint";
+
+export component AppWindow inherits Window {
+    title: "Alakazam";
+    accessible-role: AccessibleRole.button;
+    min-height: 600px;
+    min-width: 800px;
+    no-frame: true;
+    resize-border-width: 5px;
+
+    Rectangle {
+        background: Theme.background;
+        // border-color: #ffffff;
+        // border-width: 1px;
+        // border-radius: 5px;
+
+        ta := TouchArea {
+            clicked => {
+                AppMenu.opened-menu = "";
+                AppMenu.opened-submenu = "";
+                AppMenu.is-menu-opened = false;
+            }
+        }
+
+        fs := FocusScope {
+            key-pressed(event) => {
+                if (event.modifiers.control && event.text == "v") {
+                    AppState.paste();
+                    accept
+                }
+                reject
+            }
+        }
+
+        VerticalLayout {
+
+            TitleBar {
+                z: 100;
+            }
+
+            if (AppState.projects.length > 0): TabBar {
+                for x in AppState.projects: Tab {
+                    text: x.name;
+                    index: x.index;
+                }
+            }
+
+            // if(AppState.projects.length == 0): Welcome { }
+            // if(AppState.projects.length > 0):
+            HorizontalLayout {
+                alignment: start;
+                spacing: 5px;
+
+                tools := Tools { }
+
+                stage := Stage {
+                    horizontal-stretch: 1;
+                    init => {
+                        stage.x = 0px;
+                        stage.width = root.width - 310px;
+                    }
+                }
+
+                HorizontalResize {
+                    min-right: 310px;
+                    min-left: 200px;
+                    left-width: stage.width;
+                    right-width: panels.width;
+                    parent-width: parent.width;
+                    color: #545454;
+                    moved(x) => {
+                        stage.width = x - 5px;
+                        stage.x = 0px;
+                        panels.x = x + 5px;
+                        panels.width = root.width - x - 5px;
+                    }
+                }
+
+                panels := Panels { }
+            }
+        }
+    }
+}

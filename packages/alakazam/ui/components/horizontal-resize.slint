@@ -1,0 +1,108 @@
+import { Theme } from "../theme.slint";
+
+export component HorizontalResize {
+    in-out property <length> size <=> rect.width;
+    in-out property <brush> color <=> rect.background;
+    property <bool> resizing: false;
+    callback moved(length);
+
+    /// The minimum distance the right side of the horizontal resize can be from the right side of the parent.
+    in-out property <length> min-right: 0px;
+    /// The minimum distance the left side of the horizontal resize can be from the left side of the parent.
+    in-out property <length> min-left: 0px;
+
+    in-out property <length> left-width: 0px;
+    in-out property <length> right-width: 0px;
+    in-out property <length> parent-width: 0px;
+
+    rect := Rectangle {
+        width: 3px;
+        background: Theme.background;
+        ta := TouchArea {
+            mouse-cursor: ew-resize;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    resizing = true;
+                } else if (event.kind == PointerEventKind.up) {
+                    resizing = false;
+                }
+            }
+            moved => {
+                if (resizing) {
+                    // move the item to the left or right but keeping the left/right min-* in mind
+                    if ((root.x + self.mouse-x > min-left) && (root.x + self.mouse-x < parent-width - min-right)) {
+                        root.x = root.x + self.mouse-x;
+                        root.moved(root.x);
+                    }
+                    // if the mouse is outside the bounds of the resize, set the x to the min or max
+                    else if (root.x + self.mouse-x <= min-left) {
+                        root.x = min-left;
+                        root.moved(root.x);
+                    } else if (root.x + self.mouse-x >= parent-width - min-right) {
+                        root.x = parent-width - min-right;
+                        root.moved(root.x);
+                    }
+
+
+                    // if ((root.x + self.mouse-x > min-left) && (root.x + self.mouse-x < parent-width - min-right)) {
+                    //     root.x = root.x + self.mouse-x;
+                    //     root.moved(root.x);
+                    // }
+                    // // if the mouse is outside the bounds of the resize, set the x to the min or max
+                    // else if (root.x + self.mouse-x <= min-left) {
+                    //     root.x = min-left;
+                    //     root.moved(root.x);
+                    // } else if (root.x + self.mouse-x >= parent-width - min-right) {
+                    //     root.x = parent-width - min-right;
+                    //     root.moved(root.x);
+                    // }
+                }
+            }
+        }
+    }
+}
+
+export component VerticalResize {
+    in-out property <length> size <=> rect.height;
+    in-out property <brush> color <=> rect.background;
+    property <bool> resizing: false;
+    callback moved(length);
+
+    /// The minimum distance the bottom side of the vertical resize can be from the bottom side of the parent.
+    in-out property <length> min-bottom: 0px;
+    /// The minimum distance the top side of the vertical resize can be from the top side of the parent.
+    in-out property <length> min-top: 0px;
+
+    in-out property <length> parent-height: 0px;
+
+    rect := Rectangle {
+        height: 3px;
+        background: Theme.background;
+        ta := TouchArea {
+            mouse-cursor: ns-resize;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    resizing = true;
+                } else if (event.kind == PointerEventKind.up) {
+                    resizing = false;
+                }
+            }
+            moved => {
+                if (resizing) {
+                    if ((root.y + self.mouse-y > min-top) && (root.y + self.mouse-y < parent-height - min-bottom)) {
+                        root.y = root.y + self.mouse-y;
+                        root.moved(root.y);
+                    }
+                    // if the mouse is outside the bounds of the resize, set the y to the min or max
+                    else if (root.y + self.mouse-y <= min-top) {
+                        root.y = min-top;
+                        root.moved(root.y);
+                    } else if (root.y + self.mouse-y >= parent-height - min-bottom) {
+                        root.y = parent-height - min-bottom;
+                        root.moved(root.y);
+                    }
+                }
+            }
+        }
+    }
+}

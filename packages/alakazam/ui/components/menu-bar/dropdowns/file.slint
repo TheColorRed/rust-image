@@ -1,0 +1,45 @@
+import { AppMenu } from "../menu-globals.slint";
+import { MenuItem, MenuVertical, MenuDropdown, MenuItemMore } from "../util/util.slint";
+import { Separator as MenuSeparator } from "../../separator.slint";
+
+export component FileMenu inherits MenuDropdown {
+    x: AppMenu.menu-x;
+    y: AppMenu.menu-y;
+    id: "file-dropdown";
+
+    MenuVertical {
+        MenuItem {
+            text: "New";
+            id: "new";
+        }
+
+        MenuItem {
+            text: "Open";
+            id: "open";
+        }
+
+        MenuItem {
+            text: "Save";
+            id: "save";
+        }
+
+        MenuItem {
+            text: "Save As";
+            id: "save-as";
+        }
+
+        MenuSeparator { }
+
+        MenuItemMore {
+            text: "Export";
+            id: "export";
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            text: "Exit";
+            id: "exit";
+        }
+    }
+}

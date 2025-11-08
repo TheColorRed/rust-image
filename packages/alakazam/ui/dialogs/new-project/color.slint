@@ -1,0 +1,65 @@
+import { ComboBox } from "std-widgets.slint";
+
+import { TextField } from "../../components/text-field.slint";
+import { DialogState } from "../../globals/dialog-state.slint";
+
+export component ColorBlock inherits Rectangle {
+    in-out property <brush> bg-color <=> color-rect.background;
+
+    property <int> combo-box-index <=> combo-box.current-index;
+
+    changed combo-box-index => {
+        if (combo-box-index == 0) {
+            root.bg-color = #ffffff;
+        } else if (combo-box-index == 1) {
+            root.bg-color = #000000;
+        } else if (combo-box-index == 2) {
+            root.bg-color = #f0f0f0;
+        } else if (combo-box-index == 3) {
+            root.bg-color = #000000;
+        } else if (combo-box-index == 4) {
+            root.bg-color = #00000000;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 5px;
+        HorizontalLayout {
+            text := Text {
+                text: "Background Color";
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 20px;
+                combo-box := ComboBox {
+                    model: [
+                        "White",
+                        "Black",
+                        "Background Color",
+                        "Foreground Color",
+                        "Transparent",
+                        "Custom"
+                    ];
+                    current-index: 0;
+                    init => {
+                        root.bg-color = #ffffff;
+                    }
+                }
+
+                color-rect := Rectangle {
+                    width: 30px;
+                    height: 30px;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            DialogState.dispatch-self-event("color-picker-window");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

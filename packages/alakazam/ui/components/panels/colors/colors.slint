@@ -1,0 +1,165 @@
+import { Theme } from "../../../theme.slint";
+
+export enum ColorType {
+    Foreground,
+    Background,
+}
+
+export global ColorPanel {
+    in-out property <float> hue-time;
+    in-out property <float> x-time;
+    in-out property <float> y-time;
+
+    in property <image> hue-bar;
+    // The transparent to opaque black gradient
+    in property <image> color-box-foreground;
+    // The white to selected color gradient
+    in property <image> color-box-background;
+
+    in-out property <color> fg-color: white;
+    in-out property <color> bg-color: black;
+
+    in property <image> cursor;
+    in property <length> cursor-x: 0px;
+    in property <length> cursor-y: 0px;
+
+    // A number between 0 and 1
+    callback hue-changed(float, float, float);
+    // the mouse x and y position in the color box, a number between 0 and 1 and the color type (foreground or background)
+    callback color-changed(float, float, float, ColorType);
+}
+
+export component Colors inherits Rectangle {
+    background: Theme.background;
+    in-out property <float> box-width: 250.0;
+    in-out property <float> box-height: 250.0;
+    in-out property <float> hue-size: 250.0;
+
+    function hue-change(position: length) {
+        ColorPanel.hue-time = clamp((position / 1px) / hue-size, 0.0, 1.0);
+        ColorPanel.hue-changed(ColorPanel.hue-time, ColorPanel.x-time, ColorPanel.y-time);
+    }
+
+    function color-change(mouse-x: length, mouse-y: length, type: ColorType) {
+        ColorPanel.x-time = clamp((mouse-x / 1px) / box-width, 0.0, 1.0);
+        ColorPanel.y-time = clamp((mouse-y / 1px) / box-height, 0.0, 1.0);
+        ColorPanel.color-changed(ColorPanel.hue-time, ColorPanel.x-time, ColorPanel.y-time, type);
+    }
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        Rectangle {
+            property <length> size: 24px;
+            property <length> offset: 15px;
+            width: size + offset;
+            height: size + offset;
+
+            Rectangle {
+                x: offset;
+                y: offset;
+                width: size + 3px;
+                height: size + 3px;
+                border-color: #000000;
+                border-width: 3px;
+                Rectangle {
+                    width: size;
+                    height: size;
+                    background: ColorPanel.bg-color;
+                    border-color: white;
+                    border-width: 1px;
+                }
+            }
+
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: size + 3px;
+                height: size + 3px;
+                border-color: #000000;
+                border-width: 3px;
+                z: 1;
+                Rectangle {
+                    width: size;
+                    height: size;
+                    background: ColorPanel.fg-color;
+                    border-color: white;
+                    border-width: 1px;
+                }
+            }
+        }
+
+        // Display the color picker main box
+        Rectangle {
+            width: box-width * 1px;
+            height: box-width * 1px;
+
+            Image {
+                x: 0px;
+                y: 0px;
+                width: box-width * 1px;
+                source: ColorPanel.color-box-background;
+            }
+
+            Image {
+                width: box-width * 1px;
+                source: ColorPanel.color-box-foreground;
+                z: 1;
+                x: 0px;
+                y: 0px;
+                color-ta := TouchArea {
+                    property <bool> down: false;
+                    property <ColorType> type: ColorType.Foreground;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            down = true;
+                            if (event.button == PointerEventButton.left) {
+                                type = ColorType.Foreground;
+                            } else if (event.button == PointerEventButton.right) {
+                                type = ColorType.Background;
+                            }
+                            color-change(color-ta.mouse-x, color-ta.mouse-y, type);
+                        } else if (event.kind == PointerEventKind.up) {
+                            down = false;
+                        } else if (event.kind == PointerEventKind.move) {
+                            if (down) {
+                                color-change(color-ta.mouse-x, color-ta.mouse-y, type);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Image {
+                z: 2;
+                x: ColorPanel.cursor-x;
+                y: ColorPanel.cursor-y;
+                source: ColorPanel.cursor;
+            }
+        }
+
+        // Display the hue bar
+        Image {
+            height: hue-size * 1px;
+            width: 24px;
+            source: ColorPanel.hue-bar;
+
+            hue-ta := TouchArea {
+                property <bool> down: false;
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                        down = true;
+                        hue-change(hue-ta.mouse-y);
+                    } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                        down = false;
+                    } else if (event.kind == PointerEventKind.move) {
+                        if (down) {
+                            hue-change(hue-ta.mouse-y);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

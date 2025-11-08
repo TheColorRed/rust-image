@@ -1,0 +1,33 @@
+import { TitleBar } from "./components/title-bar/title-bar-dialog.slint";
+import { NewProjectDialog } from "./dialogs/new-project/main.slint";
+import { DialogState } from "./globals/dialog-state.slint";
+
+export component DialogWindow inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    min-width: 100px;
+    min-height: 100px;
+    in property <string> window-type: "new-project";
+    in property <string> window-title <=> title-bar.title;
+
+    property <length> title-bar-height: 30px;
+
+    VerticalLayout {
+        title-bar := TitleBar {
+            width: 100%;
+            height: root.title-bar-height;
+        }
+
+        Rectangle {
+            if(window-type == "new-project"): NewProjectDialog {
+                window-ready(width, height) => {
+                    root.width = width;
+                    root.height = height + root.title-bar-height;
+                }
+                close-window => {
+                    DialogState.close();
+                }
+            }
+        }
+    }
+}

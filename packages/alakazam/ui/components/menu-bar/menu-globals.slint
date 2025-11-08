@@ -1,0 +1,20 @@
+export global AppMenu {
+    callback trigger-action(string);
+
+    in-out property <bool> is-menu-opened: false;
+    // Only one menu can be opened at a time
+    // These properties are used to determine which menu is opened
+    // and where it is opened
+    in-out property <string> opened-menu: "";
+    in-out property <length> menu-x: 0px;
+    in-out property <length> menu-y: 0px;
+
+    // Only one submenu can be opened at a time
+    // These properties are used to determine which submenu is opened
+    // and where it is opened
+    in-out property <string> opened-submenu;
+    in-out property <length> submenu-x: 0px;
+    in-out property <length> submenu-y: 30px;
+
+    in-out property <string> mouse-current-menu;
+}

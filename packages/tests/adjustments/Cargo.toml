@@ -1,0 +1,11 @@
+[package]
+name = "adjustments-test"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+abra = { path = "../../abra" }
+
+[[bin]]
+name = "adjustments-test"
+path = "main.rs"

@@ -1,0 +1,40 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run",
+      "type": "shell",
+      "options": {
+        "env": {
+          "SLINT_BACKEND": "winit-skia"
+        }
+      },
+      "command": "cargo",
+      "args": [
+        "run",
+        "--bin",
+        "alakazam"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+    },
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "~/.cargo/bin/cargo",
+      "args": [
+        "build",
+        "--release",
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+    },
+  ]
+}

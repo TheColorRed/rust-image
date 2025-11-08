@@ -1,0 +1,19 @@
+export component WindowContentBase inherits Rectangle {
+    in property <length> window-width;
+    in property <length> window-height;
+
+    callback window-ready(length, length);
+    callback close-window();
+
+    changed window-height => {
+        self.height = window-height;
+    }
+
+    changed window-width => {
+        self.width = window-width;
+    }
+
+    init => {
+        window-ready(window-width, window-height);
+    }
+}

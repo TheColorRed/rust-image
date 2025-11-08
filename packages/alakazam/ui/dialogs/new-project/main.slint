@@ -1,0 +1,172 @@
+import { Button, StandardButton, HorizontalBox, ScrollView, VerticalBox, ComboBox, LineEdit } from "std-widgets.slint";
+import { NewProjectTabBar } from "./tab-bar.slint";
+import { Theme } from "../../theme.slint";
+import { SizeRow } from "./size-row.slint";
+import { ColorBlock } from "./color.slint";
+import { WindowContentBase } from "../window-content-base.slint";
+import { ActionButton, ButtonType } from "../../components/action-button.slint";
+
+component NewItem inherits Rectangle {
+    in property <string> text <=> text.text;
+    in property <image> icon <=> image.source;
+
+    background: ta.has-hover ? #ffffff0f : transparent;
+    width: 140px;
+    height: 140px;
+    border-radius: 10px;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        alignment: center;
+        image := Image {
+            source: @image-url("../../icons/file-circle-plus.svg");
+            height: 50px;
+        }
+
+        text := Text {
+            horizontal-alignment: center;
+            font-size: 14px;
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+    }
+}
+
+export component NewProjectDialog inherits WindowContentBase {
+    window-width: 1000px;
+    window-height: 700px;
+    background: Theme.background-light;
+
+    property <string> orientation <=> height-field.orientation;
+    property <int> doc-width <=> width-field.size;
+    property <int> doc-height <=> height-field.size;
+
+    callback create(int, int, color);
+    callback cancel();
+
+    function flip-orientation(cur-width: int, cur-height: int) {
+        doc-height = cur-width;
+        doc-width = cur-height;
+    }
+
+    function calc-orientation() {
+        if (doc-width >= doc-height) {
+            orientation = "landscape";
+        } else {
+            orientation = "portrait";
+        }
+    }
+
+    changed doc-width => {
+        calc-orientation();
+    }
+
+    changed doc-height => {
+        calc-orientation();
+    }
+
+    VerticalLayout {
+        height: 700px;
+        Rectangle {
+            height: 50px;
+            NewProjectTabBar {
+                width: 100%;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            border-color: Theme.background-lightest;
+            border-width: 1px;
+        }
+
+        HorizontalLayout {
+            Rectangle {
+                background: Theme.background-dark;
+                ScrollView {
+                    horizontal-bar-policy: always-off;
+                    HorizontalLayout {
+                        alignment: center;
+                        GridLayout {
+                            padding: 30px;
+                            spacing: 20px;
+
+                            NewItem {
+                                text: "Custom";
+                            }
+
+                            NewItem {
+                                text: "Custom";
+                            }
+
+                            NewItem {
+                                text: "Custom";
+                            }
+
+                            NewItem {
+                                text: "Custom";
+                            }
+
+                            NewItem {
+                                text: "Custom";
+                                row: 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                VerticalLayout {
+                    padding: 30px;
+
+                    Rectangle {
+                        VerticalLayout {
+                            spacing: 20px;
+                            alignment: start;
+                            width-field := SizeRow {
+                                text: "Width";
+                                show: "size";
+                                size: 800;
+                            }
+
+                            height-field := SizeRow {
+                                text: "Height";
+                                show: "orientation";
+                                size: 600;
+                                flip-orientation => {
+                                    flip-orientation(root.doc-width, root.doc-height);
+                                }
+                            }
+
+                            color-field := ColorBlock {
+                                bg-color: Theme.background-light;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 20px;
+                        ActionButton {
+                            text: "Create";
+                            clicked => {
+                                root.create(root.doc-width, root.doc-height, Theme.background-light);
+                            }
+                        }
+
+                        ActionButton {
+                            text: "Cancel";
+                            type: ButtonType.Secondary;
+                            clicked => {
+                                root.close-window();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

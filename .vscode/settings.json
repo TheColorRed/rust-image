@@ -1,0 +1,58 @@
+{
+  "cSpell.words": [
+    "abra",
+    "arboard",
+    "bincode",
+    "bresenham",
+    "finalizer",
+    "finalizers",
+    "hwnd",
+    "inplace",
+    "mkdirp",
+    "ndarray",
+    "oneshot",
+    "resvg",
+    "rxrs",
+    "serde",
+    "simd",
+    "skia",
+    "slint",
+    "sobel",
+    "struct",
+    "Supersampling",
+    "Unorm",
+    "Unsubscribable",
+    "usize",
+    "wgpu",
+    "Wgsl",
+    "winit",
+    "workgroups"
+  ],
+  "slint.includePaths": [
+    "packages/app/ui"
+  ],
+  "svg.preview.background": "editor",
+  "editor.semanticTokenColorCustomizations": {
+      "enabled": true,
+      "rules": {
+          "*.mutable": {
+              "italic": true,
+              "bold": true,
+              "underline": false,
+          },
+      }
+  },
+  "chat.tools.terminal.autoApprove": {
+    "/.+/": true,
+    "cargo run": true,
+    "cargo build": true,
+    "./target/release/layers-test.exe": true,
+    "./target/debug/layers-test.exe": true,
+    "~/.cargo/bin/cargo.EXE": true
+  },
+  "git.ignoreLimitWarning": true,
+  "rust-analyzer.lens.references.method.enable": true,
+  "rust-analyzer.lens.references.trait.enable": true,
+  "rust-analyzer.lens.references.adt.enable": true,
+  "rust-analyzer.lens.references.enumVariant.enable": true,
+}

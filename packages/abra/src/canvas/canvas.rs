@@ -1,0 +1,243 @@
+//! The Canvas public API struct.
+
+use std::cell::RefCell;
+use std::fmt::Debug;
+use std::rc::Rc;
+
+use crate::canvas::AddCanvasOptions;
+use crate::image::Image;
+use crate::utils::fs::WriterOptions;
+
+use super::canvas_inner::CanvasInner;
+use super::canvas_transform::CanvasTransform;
+use super::layer::Layer;
+use super::layer_inner::LayerInner;
+use super::layer_options_applier;
+use super::options_new_layer::NewLayerOptions;
+
+impl Debug for Canvas {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let canvas = self.inner_canvas.borrow();
+    f.debug_struct("Canvas")
+      .field("id", &canvas.id)
+      .field("name", &canvas.name)
+      .field("width", &canvas.width.get())
+      .field("height", &canvas.height.get())
+      .field("layer_count", &canvas.layers.len())
+      .field("layers", &canvas.layers)
+      .finish()
+  }
+}
+
+/// A canvas is a group of layers that can be manipulated together.
+/// They can be moved, resized, cropped, and saved as a single image.
+/// Multiple canvases can be children of other canvases to create complex compositions.
+/// Calling save on the canvas will merge all the layers and save the final image.
+/// ```ignore
+/// let canvas = Canvas::new("My Project");
+/// let layers = canvas.layers_mut();
+/// layers.add_layer_from_path("Layer1", "path/to/image.png", None);
+/// canvas.save("path/to/output.png", None);
+/// ```
+pub struct Canvas {
+  /// Reference to the inner canvas.
+  inner_canvas: Rc<RefCell<CanvasInner>>,
+}
+
+impl Canvas {
+  /// Creates a new project with the given name and an empty canvas of a size of 0x0.
+  pub fn new(name: &str) -> Self {
+    Canvas {
+      inner_canvas: Rc::new(RefCell::new(CanvasInner::new(name))),
+    }
+  }
+
+  /// Creates a new project with the given name and a blank canvas with the given dimensions.
+  pub fn new_blank(name: &str, width: u32, height: u32) -> Self {
+    Canvas {
+      inner_canvas: Rc::new(RefCell::new(CanvasInner::new_blank(name, width, height))),
+    }
+  }
+
+  /// Creates a new project with the given name and a canvas from the image at the given path.
+  pub fn new_from_path(name: &str, path: &str, options: Option<NewLayerOptions>) -> Self {
+    Canvas {
+      inner_canvas: Rc::new(RefCell::new(CanvasInner::new_from_path(name, path, options))),
+    }
+  }
+
+  /// Saves the canvas to a file.
+  pub fn save(&self, path: &str, options: Option<WriterOptions>) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.save(path, options);
+  }
+
+  /// Flattens all layers into a single layer.
+  /// All layers will be merged into one layer and removed.
+  pub fn flatten(&self) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.flatten();
+  }
+
+  /// Calls save on the canvas to merge layers and output the final image.
+  pub fn update_canvas(&self) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.update_canvas();
+  }
+
+  /// Gets the dimensions of the canvas
+  pub fn dimensions(&self) -> (u32, u32) {
+    let canvas = self.inner_canvas.borrow();
+    (canvas.width.get(), canvas.height.get())
+  }
+
+  /// Gets the position of the canvas within its parent
+  pub fn position(&self) -> (i32, i32) {
+    let canvas = self.inner_canvas.borrow();
+    canvas.position()
+  }
+
+  /// Sets the position of the canvas within its parent
+  pub fn set_position(&self, x: i32, y: i32) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.set_global_position(x, y);
+  }
+
+  /// Adds a new layer from a file path using a fluent API.
+  /// This returns `Self` to allow method chaining without needing `layers_mut()`.
+  ///
+  /// # Example
+  /// ```ignore
+  /// let project = Canvas::new("My Project")
+  ///     .add_layer_from_path("Background", "bg.png", None)
+  ///     .add_layer_from_path("Overlay", "overlay.png", Some(NewLayerOptions {
+  ///         anchor: Some(Anchor::TopRight),
+  ///     }));
+  /// project.save("output.png", None);
+  /// ```
+  pub fn add_layer_from_path(self, name: &str, path: &str, options: Option<NewLayerOptions>) -> Self {
+    let image = Image::new_from_path(path);
+    self.add_layer_from_image(name, image, options)
+  }
+
+  /// Adds a new canvas as a child canvas.
+  pub fn add_canvas(&self, canvas: Canvas, options: Option<AddCanvasOptions>) {
+    let canvas_rc = Rc::new(RefCell::new(canvas));
+
+    // Set the parent reference on the child canvas
+    self.inner_canvas.borrow().set_parent(Some(self.inner_canvas.clone()));
+
+    let mut inner_canvas = self.inner_canvas.borrow_mut();
+    inner_canvas.add_canvas_rc(canvas_rc, options);
+  }
+  /// Sets the position of this canvas to the given anchor point within its parent canvas.
+  pub fn anchor_to_canvas(&self, anchor: crate::Anchor) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.anchor_to_canvas(anchor);
+  }
+
+  /// Applies the stored anchor to position the canvas using parent dimensions
+  pub(crate) fn apply_anchor_with_parent_dimensions(&self, parent_width: i32, parent_height: i32) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.apply_anchor_with_parent_dimensions(parent_width, parent_height);
+  }
+
+  /// Adds a new layer from an image using a fluent API.
+  /// This returns `Self` to allow method chaining.
+  ///
+  /// # Example
+  /// ```ignore
+  /// let img = Image::new_from_color(100, 100, Color::white());
+  /// let project = Canvas::new("My Project")
+  ///     .add_layer_from_image("White Layer", img, None);
+  /// ```
+  pub fn add_layer_from_image(self, name: &str, image: Image, options: Option<NewLayerOptions>) -> Self {
+    let canvas_rc = self.inner_canvas.clone();
+    let mut layer = LayerInner::new(name, image);
+    layer.set_canvas(canvas_rc);
+
+    let layer_rc = Rc::new(RefCell::new(layer));
+
+    // Determine if this is the first layer before modifying canvas
+    let is_first_layer = {
+      let canvas = self.inner_canvas.borrow();
+      canvas.width.get() == 0 && canvas.height.get() == 0
+    };
+
+    // Add to canvas
+    {
+      let mut canvas = self.inner_canvas.borrow_mut();
+      let (width, height) = layer_rc.borrow().dimensions::<u32>();
+      canvas.layers.push(layer_rc.clone());
+
+      // Set canvas size from first layer (before applying size options)
+      if is_first_layer {
+        canvas.set_canvas_size(width, height);
+      }
+    }
+
+    // Apply options
+    {
+      let mut layer_mut = layer_rc.borrow_mut();
+      let (canvas_width, canvas_height) = self.dimensions();
+      layer_options_applier::apply_layer_options(&mut layer_mut, options.as_ref(), canvas_width, canvas_height);
+    }
+
+    // If this was the first layer and size options were applied, update canvas size to match resized layer
+    if is_first_layer {
+      let (new_width, new_height) = layer_rc.borrow().dimensions::<u32>();
+      let mut canvas = self.inner_canvas.borrow_mut();
+      if new_width > 0 && new_height > 0 {
+        canvas.set_canvas_size(new_width, new_height);
+      }
+    }
+
+    self
+  }
+
+  /// Gets a layer by its index.
+  /// Returns None if the index is out of bounds.
+  pub fn get_layer_by_index(&self, index: usize) -> Option<Layer> {
+    let canvas = self.inner_canvas.borrow();
+    canvas.layers.get(index).cloned().map(Layer::from_inner)
+  }
+
+  /// Gets a layer by its name.
+  /// Returns the first layer with the matching name, or None if not found.
+  pub fn get_layer_by_name(&self, name: &str) -> Option<Layer> {
+    let canvas = self.inner_canvas.borrow();
+    canvas
+      .layers
+      .iter()
+      .find(|layer_rc| {
+        let layer = layer_rc.borrow();
+        layer.name() == name
+      })
+      .cloned()
+      .map(Layer::from_inner)
+  }
+
+  /// Gets all layers in the canvas.
+  pub fn layers(&self) -> Vec<Layer> {
+    let canvas = self.inner_canvas.borrow();
+    canvas.layers.iter().cloned().map(Layer::from_inner).collect()
+  }
+
+  /// Gets the number of layers in the canvas.
+  pub fn layer_count(&self) -> usize {
+    let canvas = self.inner_canvas.borrow();
+    canvas.layers.len()
+  }
+
+  /// Gets a clone of the result image (internal use only).
+  /// This is used when compositing child canvases.
+  pub(crate) fn get_result_image(&self) -> Image {
+    let canvas = self.inner_canvas.borrow();
+    canvas.get_result_image()
+  }
+
+  /// Returns a handler for applying transform operations to the canvas
+  pub fn transform(&self) -> CanvasTransform {
+    CanvasTransform::new(self.inner_canvas.clone())
+  }
+}

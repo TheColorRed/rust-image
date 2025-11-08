@@ -1,0 +1,112 @@
+import {AppMenu} from "../menu-globals.slint";
+
+component MenuItemBase {
+    in-out property <string> id;
+    in-out property <bool> active: true;
+    in property <string> text: "Test Text";
+    in property <length> item-height: 30px;
+    in property <color> background-color: #222222;
+    in property <TextHorizontalAlignment> alignment: TextHorizontalAlignment.left;
+    in property <bool> is-action: false;
+    in property <bool> is-more: false;
+    in property <bool> is-root: false;
+    in property <bool> is-submenu: false;
+    property <color> background-hover-color: #313131;
+
+    preferred-width: 200px;
+    Rectangle {
+        background: ta.has-hover ? background-hover-color : background-color;
+        ta := TouchArea {
+            pointer-event => {
+                // If the menu is opened and the user hovers over a item that has a submenu
+                // open the submenu to the right of the item
+                if (ta.has-hover && is-more) {
+                    // AppMenu.submenu-item-clicked(root.id, root.x + root.width, root.y);
+                    AppMenu.submenu-x = root.x + root.width;
+                    AppMenu.submenu-y = root.y;
+                    AppMenu.opened-submenu = root.id;
+                }
+                // If the menu is opened and the user hovers over a different root item
+                // close the opened menu and open the new one
+                if (AppMenu.is-menu-opened && is-root && ta.has-hover) {
+                    AppMenu.opened-menu = root.id;
+                    AppMenu.menu-x = root.x;
+                    AppMenu.menu-y = root.y + root.height;
+                    AppMenu.opened-submenu = "";
+                }
+                // Close the submenu if the user hovers over a different item that is not in the submenu
+                if (AppMenu.mouse-current-menu != "" && !is-more && !is-submenu) {
+                    AppMenu.opened-submenu = "";
+                }
+            }
+            clicked => {
+                // If the item is a root and the user clicks on it open/close the menu
+                if (is-root) {
+                    // If the menu is already opened and the user clicks on the root item
+                    // close the menu and set the opened-menu to an empty string
+                    if (AppMenu.opened-menu == root.id) {
+                        AppMenu.opened-menu = "";
+                        AppMenu.opened-submenu = "";
+                        AppMenu.is-menu-opened = false;
+                    }
+                    // If the menu is not opened and the user clicks on the root item
+                    // open the menu and set the opened-menu to the root id
+                    else {
+                        AppMenu.opened-menu = root.id;
+                        AppMenu.menu-x = root.x;
+                        AppMenu.opened-submenu = "";
+                        AppMenu.is-menu-opened = true;
+                    }
+                } else {
+                    if (!is-more) {
+                        AppMenu.trigger-action(root.id);
+                        AppMenu.opened-menu = "";
+                        AppMenu.opened-submenu = "";
+                        AppMenu.is-menu-opened = false;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: LayoutAlignment.space-between;
+            padding-left: 10px;
+            padding-right: 10px;
+            Text {
+                text: text;
+                color: #ffffff;
+                horizontal-alignment: alignment;
+                vertical-alignment: TextVerticalAlignment.center;
+                height: item-height;
+            }
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                if(is-more): Image {
+                    vertical-alignment: ImageVerticalAlignment.center;
+                    source: @image-url("../../../icons/chevron-right.svg");
+                    height: 16px;
+                    width: 10px;
+                }
+            }
+        }
+    }
+}
+
+export component MenuItem inherits MenuItemBase {
+    is-action: true;
+}
+
+export component MenuItemMore inherits MenuItemBase {
+    is-more: true;
+}
+
+export component RootMenuItem inherits MenuItemBase {
+    is-root: true;
+    preferred-width: 20px;
+    alignment: TextHorizontalAlignment.center;
+}
+
+export component SubMenuItem inherits MenuItemBase {
+    is-submenu: true;
+}

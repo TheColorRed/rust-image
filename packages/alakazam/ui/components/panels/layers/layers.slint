@@ -1,0 +1,163 @@
+import { ComboBox, LineEdit, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Separator } from "../../separator.slint";
+import { Layer } from "layer.slint";
+import { UIProject, AppState } from "../../../globals/app-state.slint";
+import { Theme } from "../../../theme.slint";
+import { Tooltip } from "../../tooltip.slint";
+
+component LayerActionButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tooltip: "";
+    callback action;
+    background: ta.has-hover ? #626262 : Theme.background;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.action();
+        }
+    }
+
+    if(ta.has-hover && self.tooltip != ""): Tooltip {
+        tooltip: root.tooltip;
+        parent-height: root.width;
+    }
+
+    HorizontalLayout {
+        padding: 5px;
+        Image {
+            width: 16px;
+            height: 16px;
+            source: root.icon;
+        }
+    }
+}
+
+export component Layers inherits Rectangle {
+    background: Theme.background;
+
+    property <UIProject> project: AppState.projects[AppState.active-project];
+
+    property <float> value: 0;
+    // property <UIProject> project: {
+    //     layers: [
+    //         {
+    //             name: "Top Layer",
+    //             visible: true,
+    //             opacity: 100,
+    //             blend-mode: "Normal",
+    //             image: @image-url("C:\\Users\\untun\\Documents\\vscode\\rust\\image\\assets\\bikini.jpg"),
+    //         },
+    //         {
+    //             name: "Background",
+    //             visible: true,
+    //             opacity: 100,
+    //             blend-mode: "Normal",
+    //             image: @image-url("C:\\Users\\untun\\Documents\\vscode\\rust\\image\\assets\\34KK-breasts.webp"),
+    //         }
+    //     ]
+    // };
+
+    fs := FocusScope { }
+
+    ta := TouchArea {
+        clicked => {
+            fs.focus();
+        }
+    }
+
+    VerticalLayout {
+        padding: 5px;
+        spacing: 5px;
+
+        // The Blend Mode and Opacity controls
+        HorizontalLayout {
+            spacing: 20px;
+
+            ComboBox {
+                model: [
+                    "Normal",
+                    "Multiply",
+                    "Screen",
+                    "Overlay",
+                    "Darken",
+                    "Lighten",
+                    "Color Dodge",
+                    "Color Burn",
+                    "Hard Light",
+                    "Soft Light",
+                    "Difference",
+                    "Exclusion",
+                    "Hue",
+                    "Saturation",
+                    "Color",
+                    "Luminosity"
+                ];
+            }
+
+            HorizontalLayout {
+                spacing: 5px;
+                Text {
+                    text: "Opacity:";
+                    vertical-alignment: center;
+                }
+
+                w := PopupWindow {
+                    Text {
+                        text: "Opacity";
+                    }
+                }
+
+                LineEdit {
+                    input-type: number;
+                    width: 60px;
+                    text: "100%";
+
+                    changed has-focus => {
+                        if (self.has-focus) {
+                            self.select-all();
+                        }
+                    }
+
+                    accepted => {
+                        if (self.text == "") {
+                            self.text = "100%";
+                        } else {
+                            self.text = clamp(self.text.to-float(), 0, 100);
+                            self.text = self.text + "%";
+                        }
+                        fs.focus();
+                    }
+                }
+            }
+        }
+
+        Separator { }
+
+        VerticalLayout {
+
+            // The layers
+            ScrollView {
+                min-height: 110px;
+                VerticalLayout {
+                    spacing: 2px;
+                    alignment: start;
+                    for x in project.layers: Layer {
+                        layer: x;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                LayerActionButton {
+                    icon: @image-url("../../../icons/square-plus.svg");
+                }
+
+                LayerActionButton {
+                    tooltip: "Add Layer";
+                    icon: @image-url("../../../icons/square-plus.svg");
+                }
+            }
+        }
+    }
+}

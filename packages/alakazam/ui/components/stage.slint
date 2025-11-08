@@ -1,0 +1,38 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppState } from "../globals/app-state.slint";
+
+export component Stage inherits ScrollView {
+    property <float> zoom: AppState.projects[AppState.active-project].zoom;
+    property <length> image-width: AppState.projects[AppState.active-project].image-width;
+    property <length> image-height: AppState.projects[AppState.active-project].image-height;
+
+    property <length> display-width: image-width * zoom;
+    property <length> display-height: image-height * zoom;
+
+    // property <image> stage-image: @image-url("C:\\Users\\untun\\Documents\\vscode\\rust\\image\\assets\\34KK-breasts.webp");
+    property <image> stage-image: AppState.stage-image;
+
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                border-width: 1px;
+                height: display-height;
+                width: display-width;
+                // width: zoom > 0 ? display-width : 100px;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #2f2f2f;
+                border-color: yellow;
+
+                Image {
+                    height: stage-image.height * 1px;
+                    image-rendering: smooth;
+                    source: stage-image;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,19 @@
+import { AppMenu } from "../menu-globals.slint";
+import { SubMenuItem, MenuDropdown, MenuVertical } from "../util/util.slint";
+
+export component ExportMenu inherits MenuDropdown {
+    x: AppMenu.submenu-x;
+    y: AppMenu.submenu-y;
+    id: "export-dropdown";
+    MenuVertical {
+        SubMenuItem {
+            text: "Quick Export as PNG";
+            id: "quick-export-png";
+        }
+
+        SubMenuItem {
+            text: "Export as...";
+            id: "export-as";
+        }
+    }
+}

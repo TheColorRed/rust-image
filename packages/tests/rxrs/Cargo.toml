@@ -1,0 +1,11 @@
+[package]
+name = "rxrs-tests"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+rxrs = { path = "../../rxrs" }
+
+[[bin]]
+name = "rxrs-test"
+path = "main.rs"

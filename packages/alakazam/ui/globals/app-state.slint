@@ -1,0 +1,47 @@
+export struct UILayer {
+    name: string,
+    visible: bool,
+    opacity: float,
+    blend-mode: string,
+    image: image,
+    focused: bool,
+}
+
+export struct UIProject {
+    name: string,
+    index: int,
+    dirty: bool,
+    zoom: float,
+    image-width: length,
+    image-height: length,
+    layers: [UILayer],
+}
+
+export global AppState {
+    callback active-project-changed(int);
+    callback close-tab(int);
+    callback paste();
+
+    callback request-size-toggle();
+    callback request-close();
+    callback request-minimize();
+    callback request-maximize();
+    callback request-restore();
+
+    callback window-move();
+
+    in-out property <bool> is-maximized: true;
+    in property <int> active-project: -1;
+    in property <image> stage-image;
+    in-out property <[UIProject]> projects;
+
+    changed active-project => {
+        active-project-changed(active-project);
+    }
+}
+
+export global UserSettings {
+    // %name% will be replaced with the name of the file+extension
+    // %color% will be replaced with the color of the file (RGB/HSL/etc)
+    in-out property <string> tab-format: "%name% (%color%)";
+}

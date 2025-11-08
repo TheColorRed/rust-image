@@ -1,0 +1,25 @@
+[package]
+name = "alakazam"
+version = "1.0.0"
+edition = "2021"
+# build = "build.rs"
+
+[dependencies]
+abra = { path = "../abra" }
+rfd = "0.15.0"
+arboard = "3.4.1"
+bincode = "2.0.1"
+serde = { version = "1.0", features = ["derive"] }
+# slint = "1.8.0"
+slint = { git = "https://github.com/slint-ui/slint", features = [
+  "renderer-skia-opengl",
+] }
+slint-build = { git = "https://github.com/slint-ui/slint" }
+i-slint-backend-winit = { git = "https://github.com/slint-ui/slint" }
+i-slint-core = { git = "https://github.com/slint-ui/slint" }
+winit = "0.30.5"
+rayon = "1.10"
+
+[[bin]]
+name = "alakazam"
+path = "main.rs"

@@ -1,0 +1,19 @@
+import { AppMenu } from "../menu-globals.slint";
+
+export component MenuDropdown {
+    in-out property <string> id;
+    x: 0;
+    y: 0;
+    z: 100;
+    @children
+
+    ta := TouchArea {
+        pointer-event => {
+            if (ta.has-hover) {
+                AppMenu.mouse-current-menu = id;
+            } else {
+                AppMenu.mouse-current-menu = "";
+            }
+        }
+    }
+}

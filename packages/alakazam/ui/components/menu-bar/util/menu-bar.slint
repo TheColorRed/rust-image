@@ -1,0 +1,56 @@
+import { RootMenuItem } from "menu-item.slint";
+import { AppMenu } from "../menu-globals.slint";
+import { FileMenu } from "../dropdowns/file.slint";
+import { EditMenu } from "../dropdowns/edit.slint";
+import { ExportMenu } from "../dropdowns/export.slint";
+
+export component MenuBar {
+
+    Rectangle {
+        if(AppMenu.opened-menu == "root-file"): FileMenu { }
+        if(AppMenu.opened-menu == "root-edit"): EditMenu { }
+
+        // Sub menus
+        if(AppMenu.opened-submenu == "export"): ExportMenu { }
+    }
+
+    Rectangle {
+        background: #222222;
+
+        HorizontalLayout {
+            alignment: LayoutAlignment.start;
+            GridLayout {
+                height: 30px;
+                RootMenuItem {
+                    text: "File";
+                    id: "root-file";
+                }
+
+                RootMenuItem {
+                    text: "Edit";
+                    id: "root-edit";
+                }
+
+                RootMenuItem {
+                    text: "Image";
+                    id: "root-image";
+                }
+
+                RootMenuItem {
+                    text: "Layer";
+                    id: "root-layer";
+                }
+
+                RootMenuItem {
+                    text: "Filter";
+                    id: "root-filter";
+                }
+
+                RootMenuItem {
+                    text: "View";
+                    id: "root-view";
+                }
+            }
+        }
+    }
+}

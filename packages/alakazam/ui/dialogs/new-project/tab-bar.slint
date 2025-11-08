@@ -1,0 +1,50 @@
+import { Button } from "std-widgets.slint";
+
+component TabButton inherits Rectangle {
+    in property <string> text <=> label.text;
+    in-out property <bool> selected: false;
+
+    VerticalLayout {
+        alignment: end;
+        label := Text {
+            font-size: 14px;
+        }
+
+        Rectangle {
+            height: 15px;
+        }
+
+        Rectangle {
+            height: 1px;
+
+            border-width: 1.25px;
+            border-color: root.selected ? white : transparent;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.selected = true;
+        }
+    }
+}
+
+export component NewProjectTabBar inherits Rectangle {
+    HorizontalLayout {
+        alignment: start;
+        spacing: 30px;
+        padding-left: 30px;
+        padding-right: 30px;
+
+        TabButton {
+            text: "Recent";
+            selected: true;
+        }
+
+        TabButton {
+            text: "Saved";
+            selected: false;
+        }
+    }
+}

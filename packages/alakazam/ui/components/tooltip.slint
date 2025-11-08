@@ -1,0 +1,53 @@
+export enum TooltipPosition {
+  above,
+  below,
+  left,
+  right,
+}
+
+export component Tooltip inherits Rectangle {
+    in property <string> tooltip <=> text.text;
+    in property <length> parent-x: 0;
+    in property <length> parent-y: 0;
+    in property <length> parent-width: 0;
+    in property <length> parent-height: 0;
+    in property <TooltipPosition> position: TooltipPosition.above;
+
+    z: 1000;
+
+    function set-position() {
+        if (position == TooltipPosition.above) {
+            root.y = parent-y - parent-height - 5px;
+        } else if (position == TooltipPosition.below) {
+            root.y = parent-y + parent-height + 5px;
+        } else if (position == TooltipPosition.left) {
+            root.x = parent-x - parent-width - 5px;
+        } else if (position == TooltipPosition.right) {
+            root.x = parent-x + parent-width + 5px;
+        }
+    }
+
+    // center the popup window above the button
+    // x: parent-x + (root.width - (self.width + text.width)) / 2;
+    // y: parent-y - self.height - 5px;
+    width: text.width + 10px;
+    height: text.height + 10px;
+    padding: 5px;
+
+    Rectangle {
+        height: 100%;
+        width: 100%;
+        background: #242424;
+        drop-shadow-blur: 5px;
+        drop-shadow-color: #0000004b;
+        drop-shadow-offset-x: 0;
+        drop-shadow-offset-y: 2px;
+    }
+
+    text := Text {
+        color: #ffffff;
+        init => {
+            set-position();
+        }
+    }
+}

@@ -1,0 +1,34 @@
+import { AppMenu } from "../menu-globals.slint";
+import { MenuItem, MenuVertical, MenuDropdown } from "../util/util.slint";
+
+export component EditMenu inherits MenuDropdown {
+    x: AppMenu.menu-x;
+    y: AppMenu.menu-y;
+    id: "edit-dropdown";
+    MenuVertical {
+        MenuItem {
+            text: "Undo";
+            id: "undo";
+        }
+
+        MenuItem {
+            text: "Redo";
+            id: "redo";
+        }
+
+        MenuItem {
+            text: "Cut";
+            id: "cut";
+        }
+
+        MenuItem {
+            text: "Copy";
+            id: "copy";
+        }
+
+        MenuItem {
+            text: "Paste";
+            id: "paste";
+        }
+    }
+}

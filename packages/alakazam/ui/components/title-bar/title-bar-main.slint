@@ -1,0 +1,106 @@
+import { TabBar } from "../../components/tabs/tab-bar.slint";
+import { MenuBar } from "../../components/menu-bar/util/menu-bar.slint";
+import { AppState } from "../../globals/app-state.slint";
+import { CloseButton, MaximizeButton, MinimizeButton, RestoreButton } from "./buttons.slint";
+
+export component TitleBar {
+    in property <bool> has-menu-bar: true;
+    in property <string> title: "Alakazam";
+
+    in property <bool> has-minimize: true;
+    in property <bool> has-maximize: true;
+
+    function double-clicked() {
+        AppState.request-size-toggle();
+        AppState.is-maximized = !AppState.is-maximized;
+    }
+
+    function drag-window(event: PointerEvent) {
+        if (event.kind == PointerEventKind.down) {
+            AppState.is-maximized = false;
+            AppState.window-move();
+        }
+    }
+
+    Rectangle {
+        background: #222222;
+        width: 100%;
+        HorizontalLayout {
+            height: 30px;
+            width: 100%;
+
+            if(has-menu-bar): MenuBar { }
+
+            if(has-menu-bar): Rectangle {
+                horizontal-stretch: 1;
+                Text {
+                    text: title;
+                    color: white;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    double-clicked => {
+                        root.double-clicked();
+                    }
+                    pointer-event(event) => {
+                        root.drag-window(event);
+                    }
+                }
+            }
+
+            if(!has-menu-bar): Rectangle {
+                height: 30px;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    alignment: start;
+                    padding-left: 10px;
+                    Text {
+                        text: title;
+                        color: white;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    double-clicked => {
+                        root.double-clicked();
+                    }
+                    pointer-event(event) => {
+                        root.drag-window(event);
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                if (root.has-minimize): MinimizeButton {
+                    clicked => {
+                        AppState.request-minimize();
+                    }
+                }
+
+                if (root.has-maximize && !AppState.is-maximized): MaximizeButton {
+                    clicked => {
+                        AppState.request-maximize();
+                        AppState.is-maximized = true;
+                    }
+                }
+                if (root.has-maximize && AppState.is-maximized): RestoreButton {
+                    clicked => {
+                        AppState.request-restore();
+                        AppState.is-maximized = false;
+                    }
+                }
+
+                CloseButton {
+                    clicked => {
+                        AppState.request-close();
+                    }
+                }
+            }
+        }
+    }
+}

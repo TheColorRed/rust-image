@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  # "packages/rxrs",
+  "packages/abra",
+  # "packages/alakazam",
+  "packages/tests/*",
+]
+default-members = [
+  # "packages/rxrs",
+  # "packages/abra",
+  # "packages/alakazam",
+  "packages/tests/*",
+]
+
+resolver = "2"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

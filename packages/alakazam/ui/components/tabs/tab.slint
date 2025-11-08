@@ -1,0 +1,72 @@
+import {AppState} from "../../globals/app-state.slint";
+import {Button} from "std-widgets.slint";
+
+export component Tab {
+    in-out property <string> text: "Image";
+    in-out property <int> index;
+
+    property <bool> dirty: AppState.projects[index].dirty;
+
+    Rectangle {
+        background: AppState.active-project == index ? #313131 : ta.has-hover ? #313131 : #222222;
+        drop-shadow-color: #000000;
+        drop-shadow-blur: 1px;
+        ta := TouchArea {
+            clicked => {
+                AppState.active-project = index;
+                // AppState.active-project-changed(index);
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            alignment: LayoutAlignment.space-between;
+            spacing: 10px;
+            preferred-width: 20px;
+            Rectangle {
+                preferred-width: 50px;
+                height: 30px;
+                HorizontalLayout {
+                    alignment: LayoutAlignment.center;
+                    Text {
+                        text: text;
+                        color: AppState.active-project == index ? #ffffff : #ffffff7f;
+                        letter-spacing: 1px;
+                        font-weight: 800;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+
+                    if (dirty): Text {
+                        text: "*";
+                        color: #ffffff7f;
+                        font-weight: 800;
+                        font-size: 16px;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                Rectangle {
+                    border-color: close_ta.has-hover ? #ffffff1e : transparent;
+                    border-width: 1px;
+                    height: 20px;
+                    width: 20px;
+                    Image {
+                        height: 16px;
+                        width: 16px;
+                        image-fit: ImageFit.contain;
+                        source: @image-url("../../icons/xmark.svg");
+                        close_ta := TouchArea {
+                            clicked => {
+                                AppState.close-tab(index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

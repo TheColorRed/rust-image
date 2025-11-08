@@ -1,0 +1,77 @@
+export component MinimizeButton inherits Rectangle {
+    background: ta.has-hover ? #322c27 : transparent;
+    width: 58px;
+
+    callback clicked(string);
+
+    Image {
+        source: @image-url("../../icons/window-minimize.svg");
+        width: 12px;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked("minimize");
+            // AppState.request-minimize();
+        }
+    }
+}
+
+export component MaximizeButton inherits Rectangle {
+    background: ta.has-hover ? #322c27 : transparent;
+    width: 58px;
+
+    callback clicked(string);
+
+    Image {
+        source: @image-url("../../icons/square.svg");
+        width: 12px;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked("maximize");
+            // AppState.request-maximize();
+            // AppState.is-maximized = true;
+        }
+    }
+}
+
+export component RestoreButton inherits Rectangle {
+    background: ta.has-hover ? #322c27 : transparent;
+    width: 58px;
+
+    callback clicked(string);
+
+    Image {
+        source: @image-url("../../icons/window-restore.svg");
+        width: 12px;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked("restore");
+            // AppState.request-restore();
+            // AppState.is-maximized = false;
+        }
+    }
+}
+
+export component CloseButton inherits Rectangle {
+    background: ta.has-hover ? #c42b1c : transparent;
+    width: 58px;
+
+    callback clicked(string);
+
+    Image {
+        source: @image-url("../../icons/xmark.svg");
+        width: 12px;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked("close");
+            // AppState.request-quit();
+        }
+    }
+}

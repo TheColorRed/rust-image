@@ -1,0 +1,117 @@
+import { Separator } from "components/separator.slint";
+import { AppMenu } from "components/menu-bar/menu-globals.slint";
+import { Theme } from "./theme.slint";
+
+export global WelcomeActon {
+    callback open-project();
+}
+
+component Section inherits VerticalLayout {
+    in property <string> title;
+    padding-bottom: 20px;
+    spacing: 5px;
+
+    Text {
+        text: title;
+        font-size: 18px;
+        color: Theme.background-lightest;
+        horizontal-alignment: left;
+    }
+
+    @children
+}
+
+component Link inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    callback clicked;
+
+    link-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 10px;
+
+        if(icon.width != 0): Image {
+            height: 16px;
+            width: 16px;
+            source: icon;
+            image-fit: contain;
+            image-rendering: smooth;
+        }
+
+        Text {
+            color: #61afef;
+            font-size: 14px;
+            text: text;
+        }
+    }
+}
+
+export component Welcome {
+    VerticalLayout {
+        alignment: LayoutAlignment.stretch;
+        padding: 50px;
+        HorizontalLayout {
+            spacing: 20px;
+            VerticalLayout {
+                spacing: 10px;
+                width: 200px;
+                Text {
+                    text: "Alakazam";
+                    font-size: 24px;
+                    color: #ffffff50;
+                    font-weight: 600;
+                }
+
+                Section {
+                    Link {
+                        text: "Home";
+                        icon: @image-url("icons/house.svg");
+                    }
+
+                    Link {
+                        text: "Learn";
+                        icon: @image-url("icons/lightbulb-on.svg");
+                    }
+                }
+
+                Section {
+                    title: "Start";
+                    Separator { }
+
+                    Link {
+                        text: "New Project";
+                        clicked => {
+                            AppMenu.trigger-action("new");
+                            // new-project-dialog.show();
+                        }
+                    }
+
+                    Link {
+                        text: "Open Project";
+                        clicked => {
+                            AppMenu.trigger-action("open");
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Recent";
+                }
+            }
+
+            VerticalLayout {
+                Text {
+                    text: "Open a project to get started.";
+                    font-size: 16px;
+                    color: #ffffff50;
+                }
+            }
+        }
+    }
+}

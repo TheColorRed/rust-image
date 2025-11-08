@@ -1,0 +1,83 @@
+import { TextField } from "../../components/text-field.slint";
+import { ComboBox } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+
+export component SizeRow inherits Rectangle {
+    in property <string> text <=> text.text;
+    in property <string> show;
+    in-out property <string> orientation: "landscape";
+    in-out property <int> size <=> size.size;
+
+    callback flip-orientation(string);
+
+    VerticalLayout {
+        spacing: 5px;
+        HorizontalLayout {
+            text := Text {
+                text: "";
+                width: 80px;
+            }
+
+            if(root.show == "orientation"): Text {
+                text: "Orientation";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 20px;
+            size := TextField { }
+
+            if(root.show == "size"): ComboBox {
+                model: ["Pixels", "Inches", "Centimeters", "Millimeters", "Points", "Picas"];
+            }
+
+            if(root.show == "orientation"): HorizontalLayout {
+                spacing: 10px;
+
+                Rectangle {
+                    width: 20px;
+                    Image {
+                        states [
+                            active when root.orientation == "portrait": {
+                                source: @image-url("../../icons/image-portrait-active.svg");
+                            }
+                        ]
+                        source: @image-url("../../icons/image-portrait.svg");
+                        width: 20px;
+                        ta-portrait := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if (root.orientation == "landscape") {
+                                    root.orientation = "portrait";
+                                    root.flip-orientation("portrait");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 30px;
+                    Image {
+                        states [
+                            active when root.orientation == "landscape": {
+                                source: @image-url("../../icons/image-landscape-active.svg");
+                            }
+                        ]
+                        source: @image-url("../../icons/image-landscape.svg");
+                        height: 28px;
+                        ta-landscape := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if (root.orientation == "portrait") {
+                                    root.orientation = "landscape";
+                                    root.flip-orientation("landscape");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

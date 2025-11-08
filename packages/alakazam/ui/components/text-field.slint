@@ -1,0 +1,41 @@
+import { Theme } from "../theme.slint";
+
+export component TextField inherits Rectangle {
+    in-out property <int> size;
+    in property <length> margin;
+
+    background: Theme.background-dark;
+    height: 30px;
+    width: 60px;
+    clip: true;
+    forward-focus: input;
+
+    VerticalLayout {
+        alignment: center;
+        padding-left: 10px;
+        padding-right: 10px;
+        input := TextInput {
+            property <length> computed-x;
+
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            text: size + "";
+            font-size: 14px;
+            color: white;
+            input-type: number;
+            single-line: true;
+
+            edited => {
+                size = self.text.to-float();
+            }
+
+            cursor-position-changed(cursor-position) => {
+                if cursor-position.x + self.computed_x < root.margin {
+                    self.computed_x = - cursor-position.x + root.margin;
+                } else if cursor-position.x + self.computed_x > parent.width - root.margin - self.text-cursor-width {
+                    self.computed_x = parent.width - cursor-position.x - root.margin - self.text-cursor-width;
+                }
+            }
+        }
+    }
+}
