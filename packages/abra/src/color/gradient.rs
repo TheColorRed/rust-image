@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 use super::Color;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 /// The color stops for a gradient.
 pub struct ColorStop {
   /// The color of the stop.
@@ -33,6 +33,7 @@ impl ColorStop {
   }
 }
 
+#[derive(Debug)]
 /// Describes how to interpolate between colors in a gradient.
 pub struct Gradient {
   stops: Vec<ColorStop>,
@@ -40,13 +41,15 @@ pub struct Gradient {
 
 impl Display for Gradient {
   /// Displays the gradient as a string.
-  fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-    // write one on each line
-    let mut s = String::new();
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let mut results = vec![];
     for stop in self.stops.iter() {
-      s.push_str(&format!("{:?}\n", stop));
+      results.push(format!(
+        "stop=rgba({}, {}, {}, {}) at {}",
+        stop.color.r, stop.color.g, stop.color.b, stop.color.a, stop.time
+      ));
     }
-    writeln!(f, "{}", s)
+    write!(f, "{}", results.join("; "))
   }
 }
 
@@ -90,14 +93,20 @@ impl Gradient {
   /// Creates a new gradient that goes from one color to black.
   pub fn to_black(from: Color) -> Gradient {
     Gradient {
-      stops: vec![ColorStop::new(from, 0.0), ColorStop::new(Color::from_hex(0x000000), 1.0)],
+      stops: vec![
+        ColorStop::new(from, 0.0),
+        ColorStop::new(Color::from_hex(0x000000), 1.0),
+      ],
     }
   }
 
   /// Creates a new gradient that goes from one color to white.
   pub fn to_white(from: Color) -> Gradient {
     Gradient {
-      stops: vec![ColorStop::new(from, 0.0), ColorStop::new(Color::from_hex(0xFFFFFF), 1.0)],
+      stops: vec![
+        ColorStop::new(from, 0.0),
+        ColorStop::new(Color::from_hex(0xFFFFFF), 1.0),
+      ],
     }
   }
 

@@ -1,7 +1,5 @@
 //! Utilities for applying layer options when creating a new layer.
 
-use crate::utils::debug::DebugInfo;
-
 use super::anchor::Anchor;
 use super::layer_inner::LayerInner;
 use super::layer_size_applier;

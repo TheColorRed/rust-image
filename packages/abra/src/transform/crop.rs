@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{image::Image, utils::debug::DebugInfo};
+use crate::{image::Image, utils::debug::DebugTransform};
 
 /// Trait for cropping functionality.
 pub trait Crop {
@@ -26,5 +26,5 @@ pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
   }
 
   image.set_new_pixels(new_pixels, width, height);
-  DebugInfo::Crop(old_width, old_height, width, height, duration.elapsed()).log();
+  DebugTransform::Crop(old_width, old_height, width, height, duration.elapsed()).log();
 }

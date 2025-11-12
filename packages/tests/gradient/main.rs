@@ -1,8 +1,6 @@
 use abra::{
-  adjustments::color::{gradient_map, gradient_map_reverse},
-  color::{gradient::Gradient, Color},
-  combine::blend,
-  draw::gradient::{self, linear_gradient},
+  color::{Color, Gradient},
+  draw::gradient::linear_gradient,
   geometry::path::Path,
   image::Image,
 };
@@ -12,10 +10,10 @@ const OUT_FILE: &str = "out/gradient.png";
 
 pub fn main() {
   // let (width, height) = image.dimensions();
-  let mut image = abra::image::Image::new(30, 250);
+  let mut image = Image::new(30, 250);
   // let mut image = abra::image::Image::new_from_path(IN_FILE);
 
-  let gradient = Gradient::to_black(Color::red());
+  let gradient = Gradient::to_black(Color::green());
   // let path: Path = Path::new(vec![(0, 0), (0, 250)]);
   let path: Path = Path::line(0, 0, 0, 250);
 

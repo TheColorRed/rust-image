@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 use crate::canvas::AddCanvasOptions;
+use crate::canvas::Origin;
 use crate::image::Image;
 use crate::utils::fs::WriterOptions;
 
@@ -72,23 +73,47 @@ impl Canvas {
     canvas.save(path, options);
   }
 
-  /// Flattens all layers into a single layer.
-  /// All layers will be merged into one layer and removed.
-  pub fn flatten(&self) {
+  /// Converts the entire canvas into a single Image by flattening all layers and child canvases.
+  pub fn as_image(&self) -> Image {
     let mut canvas = self.inner_canvas.borrow_mut();
-    canvas.flatten();
+    canvas.as_image()
   }
 
-  /// Calls save on the canvas to merge layers and output the final image.
-  pub fn update_canvas(&self) {
-    let mut canvas = self.inner_canvas.borrow_mut();
-    canvas.update_canvas();
+  /// Flattens all layers into a single layer.
+  /// All layers will be merged into one layer and removed.
+  pub fn flatten(self) -> Self {
+    {
+      let mut canvas = self.inner_canvas.borrow_mut();
+      canvas.flatten();
+    }
+    self
+  }
+
+  /// Updates the canvas by re-compositing all layers and child canvases.
+  ///
+  /// This does not consume the `Canvas` wrapper; it returns a new `Canvas`
+  /// that shares the same inner `Rc<RefCell<CanvasInner>>`.
+  pub fn update_canvas(&self) -> Canvas {
+    {
+      let mut canvas = self.inner_canvas.borrow_mut();
+      canvas.update_canvas();
+    }
+
+    Canvas {
+      inner_canvas: self.inner_canvas.clone(),
+    }
   }
 
   /// Gets the dimensions of the canvas
-  pub fn dimensions(&self) -> (u32, u32) {
+  pub fn dimensions<T>(&self) -> (T, T)
+  where
+    T: TryFrom<u32>,
+    <T as TryFrom<u32>>::Error: std::fmt::Debug,
+  {
     let canvas = self.inner_canvas.borrow();
-    (canvas.width.get(), canvas.height.get())
+    let width = T::try_from(canvas.width.get()).unwrap();
+    let height = T::try_from(canvas.height.get()).unwrap();
+    (width, height)
   }
 
   /// Gets the position of the canvas within its parent
@@ -101,6 +126,30 @@ impl Canvas {
   pub fn set_position(&self, x: i32, y: i32) {
     let mut canvas = self.inner_canvas.borrow_mut();
     canvas.set_global_position(x, y);
+  }
+
+  /// Sets the rotation in degrees for the canvas within its parent
+  pub fn set_rotation(&mut self, degrees: Option<f32>) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.set_rotation(degrees);
+  }
+
+  /// Gets the rotation in degrees for the canvas within its parent
+  pub fn rotation(&self) -> Option<f32> {
+    let canvas = self.inner_canvas.borrow();
+    canvas.rotation()
+  }
+
+  /// Sets the origin point (anchor position within the canvas bounds).
+  pub fn set_origin(&self, origin: Origin) {
+    let mut canvas = self.inner_canvas.borrow_mut();
+    canvas.set_origin(origin);
+  }
+
+  /// Gets the origin point (anchor position within the canvas bounds).
+  pub fn origin(&self) -> Origin {
+    let canvas = self.inner_canvas.borrow();
+    canvas.origin()
   }
 
   /// Adds a new layer from a file path using a fluent API.

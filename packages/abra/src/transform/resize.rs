@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::time::Instant;
 
 use crate::image::Image;
-use crate::utils::debug::DebugInfo;
+use crate::utils::debug::DebugTransform;
 use rayon::prelude::*;
 
 /// Trait for resizing functionality.
@@ -390,7 +390,7 @@ fn resize_impl(p_image: &mut Image, p_width: u32, p_height: u32, p_algorithm: Re
 /// - If the target size is larger than the original size, Bicubic is chosen for quality upscaling.
 /// - If the target size is smaller than the original size but not less than half, Bilinear is chosen for a good balance.
 /// - If the target size is the same as the original size, Bilinear is used as a default.
-fn get_resize_algorithm(
+pub(crate) fn get_resize_algorithm(
   p_algorithm: Option<ResizeAlgorithm>,
   p_old_width: u32,
   p_old_height: u32,
@@ -399,11 +399,16 @@ fn get_resize_algorithm(
 ) -> ResizeAlgorithm {
   match p_algorithm {
     Some(ResizeAlgorithm::Auto) | None => {
+      // Uses the Lanczos algorithm when downscaling more than half for best quality.
       if p_width < p_old_width / 2 || p_height < p_old_height / 2 {
         ResizeAlgorithm::Lanczos
-      } else if p_width > p_old_width || p_height > p_old_height {
+      }
+      // Uses Bicubic when upscaling for better quality.
+      else if p_width > p_old_width || p_height > p_old_height {
         ResizeAlgorithm::Bicubic
-      } else if p_width < p_old_width || p_height < p_old_height {
+      }
+      // Uses Bilinear for moderate downscaling.
+      else if p_width < p_old_width || p_height < p_old_height {
         ResizeAlgorithm::Bilinear
       } else {
         ResizeAlgorithm::Bicubic
@@ -431,7 +436,7 @@ pub fn resize(p_image: &mut Image, p_width: u32, p_height: u32, p_algorithm: Opt
     resize_impl(p_image, p_width, p_height, resolved_algo);
   }
 
-  DebugInfo::Resize(resolved_algo, old_width, old_height, p_width, p_height, start.elapsed()).log();
+  DebugTransform::Resize(resolved_algo, old_width, old_height, p_width, p_height, start.elapsed()).log();
 }
 
 /// Resize the image to the given width keeping the aspect ratio.

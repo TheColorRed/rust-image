@@ -4,14 +4,16 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::canvas::AddCanvasOptions;
-use crate::combine::blend;
-use crate::combine::blend::blend_images_at_with_opacity;
-use crate::image::Image;
-use crate::utils::fs::WriterOptions;
 use crate::Anchor;
 use crate::Canvas;
 use crate::Channels;
+use crate::canvas::AddCanvasOptions;
+use crate::canvas::Origin;
+use crate::combine::blend;
+use crate::combine::blend::blend_images_at_with_opacity;
+use crate::image::Image;
+use crate::transform::Rotate;
+use crate::utils::fs::WriterOptions;
 
 use super::layer_inner::LayerInner;
 use super::options_new_layer::NewLayerOptions;
@@ -42,6 +44,10 @@ pub(crate) struct CanvasInner {
   pub needs_recompose: Cell<bool>,
   /// The anchor point for positioning relative to the parent canvas.
   anchor: Option<Anchor>,
+  /// The rotation in degrees for positioning within the parent canvas.
+  rotation: Cell<Option<f32>>,
+  /// The origin point (anchor position within the canvas bounds).
+  origin: Origin,
 }
 
 impl CanvasInner {
@@ -60,6 +66,8 @@ impl CanvasInner {
       parent: RefCell::new(None),
       needs_recompose: Cell::new(true),
       anchor: None,
+      rotation: Cell::new(None),
+      origin: Origin::default(),
     }
   }
 
@@ -103,16 +111,25 @@ impl CanvasInner {
       let parent_width = self.width.get() as i32;
       let parent_height = self.height.get() as i32;
 
-      let child_dims = canvas_rc.borrow().dimensions();
-      let child_width = child_dims.0 as i32;
-      let child_height = child_dims.1 as i32;
+      let child_dims = canvas_rc.borrow().dimensions::<i32>();
+      let child_width = child_dims.0;
+      let child_height = child_dims.1;
 
-      let anchor = options.as_ref().and_then(|o| o.anchor).unwrap_or(Anchor::Center);
-      let (x, y) = anchor.calculate_position(parent_width, parent_height, child_width, child_height);
+      let positions = options.as_ref().and_then(|o| o.position);
+      let (x, y) = if let Some((x, y)) = positions {
+        (x, y)
+      } else {
+        let anchor = options.as_ref().and_then(|o| o.anchor).unwrap_or(Anchor::Center);
+        let (x, y) = anchor.calculate_position(parent_width, parent_height, child_width, child_height);
+        (x, y)
+      };
 
-      // Set the child canvas position using public API
-      let canvas_borrow = canvas_rc.borrow();
+      // Set the child canvas position and rotation using public API
+      let mut canvas_borrow = canvas_rc.borrow_mut();
       canvas_borrow.set_position(x, y);
+      if let Some(rotation) = options.as_ref().and_then(|o| o.rotation) {
+        canvas_borrow.set_rotation(Some(rotation));
+      }
     }
 
     self.canvases.push(canvas_rc);
@@ -153,9 +170,15 @@ impl CanvasInner {
     // Second pass: Blend child canvases
     for child_canvas_rc in self.canvases.iter() {
       let child_canvas = child_canvas_rc.borrow();
-      let (child_width, child_height) = child_canvas.dimensions();
+      let (child_width, child_height) = child_canvas.dimensions::<u32>();
       if child_width > 0 && child_height > 0 {
-        let child_result = child_canvas.get_result_image();
+        let mut child_result = child_canvas.get_result_image();
+
+        // Apply rotation if set
+        if let Some(rotation_degrees) = child_canvas.rotation() {
+          child_result.rotate(rotation_degrees, None);
+        }
+
         let (child_x, child_y) = child_canvas.position();
         blend_images_at_with_opacity(&mut canvas, &child_result, 0, 0, child_x, child_y, blend::normal, 1.0);
       }
@@ -201,7 +224,8 @@ impl CanvasInner {
     if let Some(anchor) = self.anchor {
       let (self_width, self_height) = self.dimensions::<i32>();
       let (x, y) = anchor.calculate_position(parent_width, parent_height, self_width, self_height);
-      // Directly update position cells
+      // Position the canvas directly at the calculated anchor position
+      // The anchor calculation already handles proper centering/positioning
       self.x.set(x);
       self.y.set(y);
     }
@@ -223,6 +247,16 @@ impl CanvasInner {
     (self.x.get(), self.y.get())
   }
 
+  /// Sets the rotation in degrees for the canvas within its parent.
+  pub fn set_rotation(&mut self, degrees: Option<f32>) {
+    self.rotation.set(degrees);
+  }
+
+  /// Gets the rotation in degrees for the canvas within its parent.
+  pub fn rotation(&self) -> Option<f32> {
+    self.rotation.get()
+  }
+
   /// Gets the dimensions of the canvas.
   pub fn dimensions<T>(&self) -> (T, T)
   where
@@ -232,6 +266,16 @@ impl CanvasInner {
     let width = T::try_from(self.width.get()).unwrap();
     let height = T::try_from(self.height.get()).unwrap();
     (width, height)
+  }
+
+  /// Sets the origin point (anchor position within the canvas bounds).
+  pub fn set_origin(&mut self, origin: Origin) {
+    self.origin = origin;
+  }
+
+  /// Gets the origin point (anchor position within the canvas bounds).
+  pub fn origin(&self) -> Origin {
+    self.origin.clone()
   }
 
   /// Flattens all layers in the canvas into a single layer.
@@ -251,5 +295,13 @@ impl CanvasInner {
       self.update_canvas();
     }
     self.result.save(path, options);
+  }
+
+  /// Converts the entire canvas into a single Image by flattening all layers and child canvases.
+  pub fn as_image(&mut self) -> Image {
+    if self.needs_recompose.get() {
+      self.update_canvas();
+    }
+    self.result.as_ref().clone()
   }
 }

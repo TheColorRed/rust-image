@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{image::Image, utils::debug::DebugInfo};
+use crate::{image::Image, utils::debug::DebugTransform};
 use rayon::prelude::*;
 
 /// Flip the image along the horizontal axis.
@@ -21,7 +21,7 @@ pub fn horizontal(image: &mut Image) {
   });
 
   image.set_rgba(new_pixels);
-  DebugInfo::Flip("Horizontal".into(), width, height, duration.elapsed()).log();
+  DebugTransform::Flip("Horizontal".into(), width, height, duration.elapsed()).log();
 }
 
 /// Flip the image along the vertical axis.
@@ -42,5 +42,5 @@ pub fn vertical(image: &mut Image) {
   });
 
   image.set_rgba(new_pixels);
-  DebugInfo::Flip("Vertical".into(), width, height, duration.elapsed()).log();
+  DebugTransform::Flip("Vertical".into(), width, height, duration.elapsed()).log();
 }

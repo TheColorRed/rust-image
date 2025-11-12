@@ -1,4 +1,4 @@
-use crate::{utils::fs::file_info::FileInfo, Channels};
+use crate::{Channels, utils::fs::file_info::FileInfo};
 use png::Decoder;
 use std::fs::File;
 use std::io::BufReader;

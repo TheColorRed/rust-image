@@ -10,7 +10,7 @@ pub fn main() {
 
   let start_time = std::time::Instant::now();
 
-  transform::rotate(&mut image, 45.);
+  transform::rotate(&mut image, 45., None);
   color::threshold(&mut image, 128);
 
   println!("Rotation took: {:?}", start_time.elapsed());

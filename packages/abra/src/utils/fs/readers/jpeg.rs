@@ -1,7 +1,7 @@
 use jpeg_decoder as jpeg;
 
-use crate::utils::fs::file_info::FileInfo;
 use crate::Channels;
+use crate::utils::fs::file_info::FileInfo;
 use std::fs::File;
 use std::io::BufReader;
 

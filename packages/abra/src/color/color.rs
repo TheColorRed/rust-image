@@ -6,7 +6,7 @@ use crate::color::to_rgb::hsv_to_rgb;
 use super::to_hsl::rgb_to_hsl;
 use super::to_hsv::rgb_to_hsv;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 /// A color with red, green, blue, and alpha values.
 pub struct Color {
   /// The red value of the color.
@@ -225,5 +225,10 @@ impl Color {
   pub fn luminance(&self) -> f32 {
     let (r, g, b) = self.rgb();
     (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0
+  }
+
+  /// Returns the color as a tuple of u8 values (r, g, b, a).
+  pub fn as_u8(&self) -> (u8, u8, u8, u8) {
+    (self.r, self.g, self.b, self.a)
   }
 }

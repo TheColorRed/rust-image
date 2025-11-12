@@ -3,8 +3,8 @@ use std::fs::{self, read};
 use resvg::tiny_skia;
 use resvg::usvg::{self, Options};
 
-use crate::utils::fs::file_info::FileInfo;
 use crate::Channels;
+use crate::utils::fs::file_info::FileInfo;
 
 /// Reads an SVG file and returns the image data
 pub fn read_svg(file: &str) -> Result<FileInfo, String> {

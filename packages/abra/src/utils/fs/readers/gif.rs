@@ -1,4 +1,4 @@
-use crate::{utils::fs::file_info::FileInfo, Channels};
+use crate::{Channels, utils::fs::file_info::FileInfo};
 use gif::DecodeOptions;
 use std::fs::File;
 

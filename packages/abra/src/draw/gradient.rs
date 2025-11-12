@@ -1,6 +1,9 @@
+use std::time::Instant;
+
 use crate::color::gradient::Gradient;
 use crate::geometry::path::Path;
 use crate::image::Image;
+use crate::utils::debug::DebugDrawing;
 use rayon::prelude::*;
 
 /// Creates a radial gradient starting at x1, y1 and ending at x2, y2.
@@ -34,6 +37,7 @@ pub fn radial_gradient(image: &mut Image, radius: u32, gradient: Gradient) {
 /// The gradient starts with the first color in the list and ends with the last color in the list.
 /// The gradient is applied to the entire image not just the line.
 pub fn linear_gradient(image: &mut Image, path: Path, stops: Gradient) {
+  let duration = Instant::now();
   image.mut_pixels_with_position(|x, y, mut pixel| {
     let mut r_sum = 0.0;
     let mut g_sum = 0.0;
@@ -60,4 +64,6 @@ pub fn linear_gradient(image: &mut Image, path: Path, stops: Gradient) {
     pixel[2] = (b_sum / samples as f32) as u8;
     pixel[3] = (a_sum / samples as f32) as u8;
   });
+
+  DebugDrawing::Gradient(stops, path, duration.elapsed()).log();
 }

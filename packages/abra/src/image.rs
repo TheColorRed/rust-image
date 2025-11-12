@@ -1,17 +1,18 @@
 use std::time::Instant;
 
+use crate::Channels;
 use crate::color::Color;
-use crate::transform::{crop, Crop, Resize, ResizeAlgorithm, TransformHandler};
+use crate::transform::{Crop, Resize, ResizeAlgorithm, Rotate, TransformHandler, crop};
 use crate::utils::debug::DebugInfo;
+use crate::utils::fs::WriterOptions;
 use crate::utils::fs::file_info::FileInfo;
 use crate::utils::fs::readers::svg::read_svg;
 use crate::utils::fs::readers::{gif::read_gif, jpeg::read_jpg, png::read_png, webp::read_webp};
 use crate::utils::fs::writers::{gif::write_gif, jpeg::write_jpg, png::write_png, webp::write_webp};
-use crate::utils::fs::WriterOptions;
-use crate::Channels;
 use ndarray::{Array1, ArrayViewMut1, Axis};
 use rayon::prelude::*;
 
+#[derive(Debug)]
 /// An image.
 pub struct Image {
   /// The width of the image.
@@ -214,11 +215,7 @@ impl Image {
   pub fn set_rgb(&mut self, data: Vec<u8>) {
     let (width, height) = self.dimensions::<usize>();
     if data.len() != width * height * 3 {
-      panic!(
-        "Trying to set {} pixels into an image with {} pixels.",
-        data.len(),
-        self.width * self.height * 3
-      );
+      panic!("Trying to set {} pixels into an image with {} pixels.", data.len(), self.width * self.height * 3);
     }
 
     // Replace the colors with the new RGB data ignoring the alpha channel
@@ -242,13 +239,16 @@ impl Image {
   /// * `pixels` - The pixels for the channel.
   pub fn set_channel(&mut self, channel: &str, pixels: Vec<u8>) {
     let mut current = self.colors.to_vec();
-    current.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| match channel {
-      "r" => chunk[0] = pixels[i],
-      "g" => chunk[1] = pixels[i],
-      "b" => chunk[2] = pixels[i],
-      "a" => chunk[3] = pixels[i],
-      _ => (),
-    });
+    current
+      .par_chunks_mut(4)
+      .enumerate()
+      .for_each(|(i, chunk)| match channel {
+        "r" => chunk[0] = pixels[i],
+        "g" => chunk[1] = pixels[i],
+        "b" => chunk[2] = pixels[i],
+        "a" => chunk[3] = pixels[i],
+        _ => (),
+      });
     self.colors = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, current).unwrap();
   }
 
@@ -280,6 +280,27 @@ impl Image {
     self.set_rgba(pixels);
   }
 
+  /// Checks if the image or image data is in RGBA format.
+  /// * `data` - Optional image data to check. If None, checks the image itself.
+  pub fn is_rgba(&self, data: Option<Vec<u8>>) -> bool {
+    if let Some(pixels) = data {
+      pixels.len() == (self.width * self.height * 4) as usize
+    } else {
+      println!("len: {}", self.colors.len());
+      self.colors.len() == (self.width * self.height * 4) as usize
+    }
+  }
+
+  /// Checks if the image or image data is in RGB format.
+  /// * `data` - Optional image data to check. If None, checks the image itself.
+  pub fn is_rgb(&self, data: Option<Vec<u8>>) -> bool {
+    if let Some(pixels) = data {
+      pixels.len() == (self.width * self.height * 3) as usize
+    } else {
+      self.colors.len() == (self.width * self.height * 3) as usize
+    }
+  }
+
   /// Get the pixel at a specific location.
   /// * `x` - The x coordinate.
   /// * `y` - The y coordinate.
@@ -288,12 +309,7 @@ impl Image {
     if index + 3 >= self.colors.len() {
       return None;
     }
-    Some((
-      self.colors[index],
-      self.colors[index + 1],
-      self.colors[index + 2],
-      self.colors[index + 3],
-    ))
+    Some((self.colors[index], self.colors[index + 1], self.colors[index + 2], self.colors[index + 3]))
   }
 
   /// Set the pixel at a specific location.
@@ -424,10 +440,14 @@ impl Image {
   where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
   {
-    self.colors.axis_chunks_iter_mut(Axis(0), 4).into_par_iter().for_each(|row| {
-      callback(row);
-      // row.axis_iter_mut(Axis(0)).into_par_iter().for_each(|pixel| callback(pixel));
-    });
+    self
+      .colors
+      .axis_chunks_iter_mut(Axis(0), 4)
+      .into_par_iter()
+      .for_each(|row| {
+        callback(row);
+        // row.axis_iter_mut(Axis(0)).into_par_iter().for_each(|pixel| callback(pixel));
+      });
   }
 
   /// Iterate over the channels of the image to apply a function on each channel including the alpha channel.
@@ -445,9 +465,13 @@ impl Image {
   where
     F: Fn(u8) -> u8 + Send + Sync,
   {
-    self.colors.axis_chunks_iter_mut(Axis(0), 4).into_par_iter().for_each(|mut row| {
-      row.iter_mut().take(3).for_each(|pixel| *pixel = callback(*pixel));
-    });
+    self
+      .colors
+      .axis_chunks_iter_mut(Axis(0), 4)
+      .into_par_iter()
+      .for_each(|mut row| {
+        row.iter_mut().take(3).for_each(|pixel| *pixel = callback(*pixel));
+      });
   }
 
   /// Iterate over a specific channel of the image to apply a function on each pixel of that channel.
@@ -461,9 +485,21 @@ impl Image {
       .into_par_iter()
       .for_each(|mut row| match channel {
         "r" => row.iter_mut().take(1).for_each(|pixel| *pixel = callback(*pixel)),
-        "g" => row.iter_mut().skip(1).take(1).for_each(|pixel| *pixel = callback(*pixel)),
-        "b" => row.iter_mut().skip(2).take(1).for_each(|pixel| *pixel = callback(*pixel)),
-        "a" => row.iter_mut().skip(3).take(1).for_each(|pixel| *pixel = callback(*pixel)),
+        "g" => row
+          .iter_mut()
+          .skip(1)
+          .take(1)
+          .for_each(|pixel| *pixel = callback(*pixel)),
+        "b" => row
+          .iter_mut()
+          .skip(2)
+          .take(1)
+          .for_each(|pixel| *pixel = callback(*pixel)),
+        "a" => row
+          .iter_mut()
+          .skip(3)
+          .take(1)
+          .for_each(|pixel| *pixel = callback(*pixel)),
         _ => (),
       });
   }
@@ -569,6 +605,13 @@ impl Resize for Image {
 
   fn resize_height_relative(&mut self, p_height: i32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
     crate::transform::height_relative(self, p_height, algorithm);
+    self
+  }
+}
+
+impl Rotate for Image {
+  fn rotate(&mut self, degrees: f32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+    crate::transform::rotate(self, degrees, algorithm);
     self
   }
 }

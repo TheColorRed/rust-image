@@ -54,6 +54,16 @@ description: Naming conventions for public API items and internal structs.
 
 - Always use the `set_` prefix for setter methods.
 
+## Function names
+
+- `as_*` for functions that return a reference or view of the object in a different form without consuming or cloning it.
+- `to_*` for functions that return a new owned instance of the object in a different form, typically involving cloning or conversion.
+- `with_*` for builder-style methods that return a modified instance of the object, often used in method chaining.
+- `is_*` for functions that return a boolean indicating a state or property of the object.
+- `has_*` for functions that return a boolean indicating the presence of a feature or component within the object.
+- `from_*` for constructor functions that create an instance of an object from another type or representation.
+- `into_*` for functions that consume the object and convert it into another type or representation.
+
 ## Function parameters
 
 Function parameters should be prefixed with `p_` to differentiate them variables within the function body. This makes it clear which variables are inputs to the function and which are local variables. It also allows us to re-use parameter names that might otherwise conflict with local variable names.

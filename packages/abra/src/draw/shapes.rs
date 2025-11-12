@@ -1,5 +1,5 @@
 use crate::{
-  color::Color,
+  color::{Color, Fill},
   geometry::{
     path::{Path, Rect},
     point::Point,
@@ -9,7 +9,7 @@ use crate::{
 use rayon::prelude::*;
 
 /// Draws a rectangle.
-pub fn rect(image: &mut Image, start: Point, rect: Path, color: Color)
+pub fn rect(image: &mut Image, start: Point, rect: Path, fill: Fill)
 where
   Path: Rect,
 {
@@ -25,7 +25,10 @@ where
     let x = i as i32 % width;
     let y = (i as i32 / width) as i32;
     if x >= pos_x && x < pos_x + rect_width && y >= pos_y && y < pos_y + rect_height {
-      let (r, g, b, a) = color.rgba();
+      let (r, g, b, a) = match fill {
+        Fill::Solid(color) => color.rgba(),
+        _ => Color::black().rgba(),
+      };
       let alpha = a as f32 / 255.0;
 
       // Extract the existing pixel color
@@ -48,7 +51,7 @@ where
 }
 
 /// Draws an ellipse.
-pub fn ellipse_filled(image: &mut Image, center: Point, size: Path, color: Color)
+pub fn ellipse_filled(image: &mut Image, center: Point, size: Path, fill: Fill)
 where
   Path: Rect,
 {
@@ -59,7 +62,10 @@ where
   let (center_x, center_y) = (center_x as i32, center_y as i32);
   let (size_width, size_height) = size.dimensions();
   let (size_width, size_height) = (size_width as i32 / 2, size_height as i32 / 2);
-  let (r, g, b, a) = color.rgba();
+  let (r, g, b, a) = match fill {
+    Fill::Solid(color) => color.rgba(),
+    _ => Color::black().rgba(),
+  };
 
   // Draw the ellipse on the image at the given position with the given color.
   pixels.par_chunks_mut(4).enumerate().for_each(|(i, pixel)| {
@@ -86,7 +92,8 @@ where
         let sub_dx_base = dx + (sx as f32 * inv_samples) - 0.5;
         for sy in 0..samples {
           let sub_dy_base = dy + (sy as f32 * inv_samples) - 0.5;
-          let sub_ellipse_value = (sub_dx_base * sub_dx_base) * size_height_sq + (sub_dy_base * sub_dy_base) * size_width_sq;
+          let sub_ellipse_value =
+            (sub_dx_base * sub_dx_base) * size_height_sq + (sub_dy_base * sub_dy_base) * size_width_sq;
           if sub_ellipse_value < ellipse_threshold {
             coverage += 1.0;
           }
@@ -152,7 +159,8 @@ where
       let sub_dx_base = dx + (sx as f32 * inv_samples) - 0.5;
       for sy in 0..samples {
         let sub_dy_base = dy + (sy as f32 * inv_samples) - 0.5;
-        let sub_ellipse_value = (sub_dx_base * sub_dx_base) * size_height_sq + (sub_dy_base * sub_dy_base) * size_width_sq;
+        let sub_ellipse_value =
+          (sub_dx_base * sub_dx_base) * size_height_sq + (sub_dy_base * sub_dy_base) * size_width_sq;
         if sub_ellipse_value < ellipse_threshold {
           coverage += 1.0;
         }
@@ -196,9 +204,9 @@ where
 }
 
 /// Draws a circle.
-pub fn circle(image: &mut Image, center: Point, radius: u32, color: Color) {
+pub fn circle(image: &mut Image, center: Point, radius: u32, fill: Fill) {
   let size = Rect::new_rect(radius * 2, radius * 2);
-  ellipse_filled(image, center, size, color);
+  ellipse_filled(image, center, size, fill);
 }
 
 /// Draws a circle outline.
@@ -207,7 +215,7 @@ pub fn circle_stroke(image: &mut Image, center: Point, radius: u32, color: Color
   ellipse_stroke(image, center, size, color, stroke_width);
 }
 
-/// Draws a polygon.
+/// Draws a polygon with a filled in color.
 pub fn polygon(image: &mut Image, start: Point, path: Path, color: Color) {
   // - Draw the polygon on the image at the given position with the given color.
   // - The path is a list of points that make up the polygon and are drawn relative to the start point.
@@ -234,7 +242,12 @@ pub fn polygon(image: &mut Image, start: Point, path: Path, color: Color) {
     let y = (i as i32 / width) as f32;
     if point_in_polygon(
       ((x - start_point.0) as i32, (y - start_point.1) as i32),
-      &Path::new(adjusted_path.iter().map(|&(px, py)| Point::new(px as i32, py as i32)).collect()),
+      &Path::new(
+        adjusted_path
+          .iter()
+          .map(|&(px, py)| Point::new(px as i32, py as i32))
+          .collect(),
+      ),
     ) {
       let (r, g, b, a) = color.rgba();
       let alpha = a as f32 / 255.0;
@@ -276,7 +289,9 @@ fn point_in_polygon(point: (i32, i32), path: &Path) -> bool {
   inside
 }
 
-fn is_part_of_stroke(x: f32, y: f32, center_x: f32, center_y: f32, radius_x: f32, radius_y: f32, stroke_width: u32) -> bool {
+fn is_part_of_stroke(
+  x: f32, y: f32, center_x: f32, center_y: f32, radius_x: f32, radius_y: f32, stroke_width: u32,
+) -> bool {
   let dx = x - center_x;
   let dy = y - center_y;
   let stroke = stroke_width as f32 / 2.0;

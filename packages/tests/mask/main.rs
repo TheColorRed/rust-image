@@ -1,6 +1,6 @@
 use abra::{
   adjustments::color,
-  color::{gradient::Gradient, Color},
+  color::{Color, Gradient},
   image::Image,
 };
 

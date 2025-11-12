@@ -1,10 +1,23 @@
+use std::fmt::Display;
+
 use super::point::Point;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// A path is a list of points that can be used to follow.
 pub struct Path {
   /// The points of the path.
   points: Vec<Point>,
+}
+
+impl Display for Path {
+  /// Displays the path as a string.
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let mut results = vec![];
+    for point in self.points.iter() {
+      results.push(format!("point=({}, {})", point.x(), point.y()));
+    }
+    write!(f, "{}", results.join("; "))
+  }
 }
 
 impl Path {

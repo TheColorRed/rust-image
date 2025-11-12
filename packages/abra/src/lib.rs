@@ -23,6 +23,8 @@ pub mod image;
 pub mod mask;
 /// Path module
 pub mod path;
+/// Plugin module
+pub mod plugin;
 /// Transform module
 pub mod transform;
 /// Utilities module

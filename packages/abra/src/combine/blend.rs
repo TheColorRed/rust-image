@@ -581,3 +581,36 @@ pub fn luminosity(a: RGBA, b: RGBA) -> RGBA {
   let (r, g, b) = hsl_to_rgb(h1, s1, l2);
   (r, g, b, a.3)
 }
+
+/// Returns the name of the blend mode function.
+#[allow(unpredictable_function_pointer_comparisons)]
+pub fn blend_mode_name(mode: fn(RGBA, RGBA) -> RGBA) -> &'static str {
+  match () {
+    _ if mode == normal => "Normal",
+    _ if mode == darken => "Darken",
+    _ if mode == average => "Average",
+    _ if mode == multiply => "Multiply",
+    _ if mode == color_burn => "Color Burn",
+    _ if mode == linear_burn => "Linear Burn",
+    _ if mode == lighten => "Lighten",
+    _ if mode == screen => "Screen",
+    _ if mode == color_dodge => "Color Dodge",
+    _ if mode == linear_dodge => "Linear Dodge",
+    _ if mode == overlay => "Overlay",
+    _ if mode == soft_light => "Soft Light",
+    _ if mode == hard_light => "Hard Light",
+    _ if mode == vivid_light => "Vivid Light",
+    _ if mode == linear_light => "Linear Light",
+    _ if mode == pin_light => "Pin Light",
+    _ if mode == hard_mix => "Hard Mix",
+    _ if mode == difference => "Difference",
+    _ if mode == exclusion => "Exclusion",
+    _ if mode == subtract => "Subtract",
+    _ if mode == divide => "Divide",
+    _ if mode == hue => "Hue",
+    _ if mode == saturation => "Saturation",
+    _ if mode == color => "Color",
+    _ if mode == luminosity => "Luminosity",
+    _ => "Unknown",
+  }
+}

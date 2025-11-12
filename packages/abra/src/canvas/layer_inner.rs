@@ -3,6 +3,7 @@
 use crate::{
   canvas::anchor::Anchor,
   canvas::canvas_inner::CanvasInner,
+  canvas::origin::Origin,
   combine::blend::{self, RGBA},
   image::Image,
 };
@@ -33,6 +34,13 @@ pub(crate) struct LayerInner {
   canvas: Rc<RefCell<CanvasInner>>,
   /// The anchor point for positioning relative to the canvas.
   anchor: Option<Anchor>,
+  /// The origin point within the layer that the anchor refers to.
+  origin: Origin,
+  /// The dimensions to use for anchoring calculations, separate from image dimensions.
+  /// Used when effects like drop shadow expand the image beyond content bounds.
+  anchor_dimensions: Option<(u32, u32)>,
+  /// The positional offset applied when anchoring so effects like drop shadow don't shift placement.
+  anchor_offset: (i32, i32),
 }
 
 impl Debug for LayerInner {
@@ -49,6 +57,7 @@ impl Debug for LayerInner {
   }
 }
 
+#[allow(dead_code)]
 impl LayerInner {
   /// Creates a new layer with the given name, image, and canvas
   pub fn new(name: &str, image: Image) -> LayerInner {
@@ -66,6 +75,9 @@ impl LayerInner {
       y: 0,
       canvas: tmp_canvas,
       anchor: None,
+      origin: Origin::default(),
+      anchor_dimensions: None,
+      anchor_offset: (0, 0),
     }
   }
 
@@ -117,15 +129,56 @@ impl LayerInner {
     self.anchor = Some(anchor);
   }
 
+  /// Checks if the layer has an anchor set.
+  pub fn has_anchor(&self) -> bool {
+    self.anchor.is_some()
+  }
+
+  /// Sets the origin point within the layer for anchor positioning.
+  pub fn set_origin(&mut self, origin: Origin) {
+    self.origin = origin;
+  }
+
+  /// Gets the current origin point for anchor positioning.
+  pub fn origin(&self) -> Origin {
+    self.origin
+  }
+
+  /// Sets the positional offset used when applying anchor placement.
+  pub fn set_anchor_offset(&mut self, p_x: i32, p_y: i32) {
+    self.anchor_offset = (p_x, p_y);
+  }
+
+  /// Clears the positional offset used during anchor placement.
+  pub fn clear_anchor_offset(&mut self) {
+    self.anchor_offset = (0, 0);
+  }
+
+  /// Gets the anchor dimensions if set, otherwise returns image dimensions.
+  pub fn anchor_dimensions(&self) -> (u32, u32) {
+    self.anchor_dimensions.unwrap_or_else(|| self.image.dimensions::<u32>())
+  }
+
+  /// Sets the anchor dimensions to use for anchoring calculations.
+  pub fn set_anchor_dimensions(&mut self, width: u32, height: u32) {
+    self.anchor_dimensions = Some((width, height));
+  }
+
+  /// Clears the anchor dimensions, reverting to using image dimensions for anchoring.
+  pub fn clear_anchor_dimensions(&mut self) {
+    self.anchor_dimensions = None;
+  }
+
   /// Applies the stored anchor to position the layer, given canvas dimensions
   /// This version directly updates x and y to avoid nested borrows of the canvas
   pub fn apply_anchor_with_canvas_dimensions(&mut self, canvas_width: i32, canvas_height: i32) {
     if let Some(anchor) = self.anchor {
-      let (self_width, self_height) = self.image.dimensions::<i32>();
-      let (x, y) = anchor.calculate_position(canvas_width, canvas_height, self_width, self_height);
-      // Directly update position fields to avoid nested borrow
-      self.x = x;
-      self.y = y;
+      let (self_width, self_height) = self.anchor_dimensions();
+      let (x, y) = anchor.calculate_position(canvas_width, canvas_height, self_width as i32, self_height as i32);
+      // Position the layer directly at the calculated anchor position
+      // The anchor calculation already handles proper centering/positioning
+      self.x = x + self.anchor_offset.0;
+      self.y = y + self.anchor_offset.1;
     }
   }
 
@@ -327,6 +380,9 @@ impl Clone for LayerInner {
       y: self.y,
       canvas: self.canvas.clone(),
       anchor: self.anchor,
+      origin: self.origin,
+      anchor_dimensions: self.anchor_dimensions,
+      anchor_offset: self.anchor_offset,
     }
   }
 }

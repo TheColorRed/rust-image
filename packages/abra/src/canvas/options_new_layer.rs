@@ -3,7 +3,6 @@
 use crate::{
   combine::blend::{self, RGBA},
   transform::ResizeAlgorithm,
-  utils::debug::DebugInfo,
 };
 
 use super::anchor::Anchor;

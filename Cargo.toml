@@ -2,6 +2,7 @@
 members = [
   # "packages/rxrs",
   "packages/abra",
+  "packages/plugins/*",
   # "packages/alakazam",
   "packages/tests/*",
 ]

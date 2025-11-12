@@ -1,0 +1,13 @@
+[package]
+name = "plugins-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { path = "../../abra" }
+collage = { path = "../../plugins/collage" }
+rayon = "1.11.0"
+
+[[bin]]
+name = "plugins-test"
+path = "main.rs"

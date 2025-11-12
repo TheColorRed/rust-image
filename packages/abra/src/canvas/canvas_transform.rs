@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::transform::{Crop, Resize, ResizeAlgorithm};
+use crate::transform::{Crop, Resize, ResizeAlgorithm, Rotate};
 
 use super::canvas_inner::CanvasInner;
 
@@ -266,6 +266,19 @@ impl Crop for CanvasTransform {
       crop_all_layers(&mut canvas, crop_x, crop_y, width, height);
       canvas.width.set(width);
       canvas.height.set(height);
+      canvas.needs_recompose.set(true);
+    }
+    self
+  }
+}
+
+impl Rotate for CanvasTransform {
+  fn rotate(&mut self, degrees: f32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+    {
+      let canvas = self.canvas.borrow_mut();
+      for i in 0..canvas.layers.len() {
+        canvas.layers[i].borrow_mut().image_mut().rotate(degrees, algorithm);
+      }
       canvas.needs_recompose.set(true);
     }
     self
