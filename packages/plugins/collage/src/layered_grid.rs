@@ -34,7 +34,7 @@ impl CollagePlugin {
       selected_data.push((image, rotation));
     }
 
-    let processed_data: Vec<_> = selected_data
+    let processed_canvases: Vec<_> = selected_data
       .into_par_iter()
       .enumerate()
       .map(|(idx, (image, rotation))| {
@@ -43,39 +43,52 @@ impl CollagePlugin {
           ((i % (cell_count as f32).sqrt() as u32) * cell_width) as i32,
           ((i / (cell_count as f32).sqrt() as u32) * cell_height) as i32,
         );
-        (image, rotation, position)
+
+        // Create canvas and apply transformations in parallel
+        let transform_image = std::sync::Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
+        let canvas = Canvas::new("Cell")
+          .add_layer_from_image("empty", transform_image, None)
+          .add_layer_from_image("image", image, Some(NewLayerOptions::new().with_size(LayerSize::Cover(None))));
+
+        let mut canvas_options = AddCanvasOptions::new().with_position(position.0, position.1);
+
+        if let Some(empty_layer) = canvas.get_layer_by_name("empty") {
+          if let Some(image_layer) = canvas.get_layer_by_name("image") {
+            let (width, height) = empty_layer.dimensions::<u32>();
+            image_layer.transform().crop(0, 0, width, height);
+          }
+        }
+
+        if let Some(rot) = rotation {
+          canvas_options = canvas_options.with_rotation(rot);
+        }
+
+        (canvas, canvas_options)
       })
       .collect();
 
-    for (image, rotation, position) in processed_data {
-      let transform_image = Image::new_from_color(cell_width, cell_height, Color::transparent());
-      let canvas = Canvas::new("Cell")
-        .add_layer_from_image("empty", transform_image, None)
-        .add_layer_from_image(
-          "image",
-          (*image).clone(),
-          Some(NewLayerOptions::new().with_size(LayerSize::Cover(None))),
-        );
-
-      let mut canvas_options = AddCanvasOptions::new().with_position(position.0, position.1);
-
-      if let Some(empty_layer) = canvas.get_layer_by_name("empty") {
-        if let Some(image_layer) = canvas.get_layer_by_name("image") {
-          let (width, height) = empty_layer.dimensions::<u32>();
-          image_layer.transform().crop(0, 0, width, height);
+    // Add all processed canvases to root canvas sequentially (Canvas::add_canvas requires mutable access)
+    for (canvas, canvas_options) in processed_canvases {
+      // Queue effects on the child canvas's layers using the builder
+      if let Some(opts) = &self.options {
+        if let Some(effects) = &opts.effects {
+          for layer in canvas.layers() {
+            let builder = layer.effects();
+            let builder = if let Some(drop_shadow_effect) = &effects.drop_shadow {
+              builder.with_drop_shadow(drop_shadow_effect.clone())
+            } else {
+              builder
+            };
+            if let Some(stroke_effect) = &effects.stroke {
+              builder.with_stroke(stroke_effect.clone());
+            }
+          }
         }
-      }
-
-      if let Some(rot) = rotation {
-        canvas_options = canvas_options.with_rotation(rot);
-      }
-
-      if let Some(layer) = canvas.layers().last() {
-        self.apply_effects(&layer);
       }
 
       root_canvas.add_canvas(canvas, Some(canvas_options));
     }
+
     root_canvas
   }
 }

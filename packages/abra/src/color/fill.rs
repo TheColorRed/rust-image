@@ -4,6 +4,7 @@ use crate::{
 };
 
 use std::fmt::Display;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 /// The fill style for drawing shapes, effects, and other graphical that require a fill.
@@ -13,7 +14,7 @@ pub enum Fill {
   /// A gradient fill.
   Gradient(Gradient),
   /// An image fill.
-  Image(Image),
+  Image(Arc<Image>),
 }
 
 impl Display for Fill {

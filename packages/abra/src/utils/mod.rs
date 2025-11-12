@@ -6,3 +6,5 @@ pub mod debug;
 pub mod fs;
 /// Kernel module
 pub mod kernel;
+/// Parallel image loading utilities
+pub mod loader;

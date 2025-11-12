@@ -1,44 +1,44 @@
 //! The Layer public API struct.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use crate::canvas::layer_effects::LayerEffects;
-use crate::{canvas::layer_inner::LayerInner, combine::blend::RGBA};
+use crate::canvas::{LayerEffects, layer_inner::LayerInner};
+use crate::combine::blend::RGBA;
 
 pub use super::anchor::Anchor;
 pub use super::layer_transform::LayerTransform;
 pub use super::origin::Origin;
 
 /// A layer in a project.
-/// This is the public API struct that wraps `Rc<RefCell<LayerInner>>`.
+/// This is the public API struct that wraps `Arc<Mutex<LayerInner>>`.
 #[derive(Debug)]
 pub struct Layer {
   /// Reference to the inner layer.
-  inner_layer: Rc<RefCell<LayerInner>>,
+  inner_layer: Arc<Mutex<LayerInner>>,
 }
 
 impl Layer {
   /// Creates a new layer with the given name and image.
-  pub fn new(name: &str, image: crate::image::Image) -> Self {
+  pub fn new(name: &str, image: Arc<crate::image::Image>) -> Self {
     Layer {
-      inner_layer: Rc::new(RefCell::new(LayerInner::new(name, image))),
+      inner_layer: Arc::new(Mutex::new(LayerInner::new(name, image))),
     }
   }
 
-  /// Creates a new Layer wrapper from an `Rc<RefCell<LayerInner>>`.
-  pub(crate) fn from_inner(inner_layer: Rc<RefCell<LayerInner>>) -> Self {
+  /// Creates a new Layer wrapper from an `Arc<Mutex<LayerInner>>`.
+  pub(crate) fn from_inner(inner_layer: Arc<Mutex<LayerInner>>) -> Self {
     Layer { inner_layer }
   }
 
   /// Borrows the layer immutably.
-  pub(crate) fn borrow(&self) -> std::cell::Ref<'_, LayerInner> {
-    self.inner_layer.borrow()
+  pub(crate) fn borrow(&self) -> std::sync::MutexGuard<'_, LayerInner> {
+    self.inner_layer.lock().unwrap()
   }
 
   /// Borrows the layer mutably.
-  pub(crate) fn borrow_mut(&self) -> std::cell::RefMut<'_, LayerInner> {
-    self.inner_layer.borrow_mut()
+  pub(crate) fn borrow_mut(&self) -> std::sync::MutexGuard<'_, LayerInner> {
+    self.inner_layer.lock().unwrap()
   }
 }
 
@@ -90,9 +90,9 @@ impl Layer {
     LayerTransform::new(self.inner_layer.clone())
   }
 
-  /// Returns a handler for applying effects to the layer.
+  /// Returns the effects builder for queuing effects to be applied during rendering.
   pub fn effects(&self) -> LayerEffects {
-    LayerEffects::new(self.inner_layer.clone())
+    LayerEffects::new().with_layer(self.inner_layer.clone())
   }
 
   layer_method_mut!(

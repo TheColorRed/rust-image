@@ -33,6 +33,7 @@ pub mod utils;
 // pub use canvas::{Anchor, Canvas, Layer};
 pub use canvas::{Anchor, Canvas, Layer, LayerSize, NewLayerOptions};
 pub use image::Image;
+pub use utils::loader::{ImageLoader, LoadedImages};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 /// The number of channels in an image

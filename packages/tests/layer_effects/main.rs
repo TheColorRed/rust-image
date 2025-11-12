@@ -5,7 +5,7 @@ use abra::{
     color::{grayscale, invert, reduce_opacity, threshold},
     contrast, hue, saturation,
   },
-  canvas::{Anchor, DropShadowOptions, Shadow, Stroke, StrokeOptions},
+  canvas::{Anchor, DropShadowOptions, StrokeOptions},
   color::Color,
   combine::blend,
   image::Image,
@@ -25,7 +25,7 @@ pub fn main() {
   if let Some(layer) = canvas.get_layer_by_name("Image") {
     layer
       .effects()
-      .stroke(StrokeOptions::new().with_size(10).with_opacity(0.5));
+      .with_stroke(StrokeOptions::new().with_size(20).with_opacity(0.5));
   }
 
   canvas.save(OUT_FILE, None);

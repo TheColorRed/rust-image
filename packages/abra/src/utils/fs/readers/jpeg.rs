@@ -8,7 +8,9 @@ use std::io::BufReader;
 /// Reads a JPEG file and returns the image data
 pub fn read_jpg(file: &str) -> Result<FileInfo, String> {
   let file = File::open(file).map_err(|e| e.to_string())?;
-  let mut decoder = jpeg::Decoder::new(BufReader::new(file));
+  // Use a larger read buffer to reduce syscalls and improve sequential throughput
+  let reader = BufReader::with_capacity(1 << 20, file); // 1 MiB
+  let mut decoder = jpeg::Decoder::new(reader);
 
   let pixels = decoder.decode().expect("error decoding jpeg");
   let metadata = decoder.info().unwrap();

@@ -1,15 +1,21 @@
 use crate::{Channels, utils::fs::file_info::FileInfo};
 use gif::DecodeOptions;
 use std::fs::File;
+use std::io::BufReader;
 
 /// Reads a GIF file and returns the first frame's image data
 pub fn read_gif(file: &str) -> Result<FileInfo, String> {
   let file = File::open(file).map_err(|e| e.to_string())?;
   let decoder = DecodeOptions::new();
-  let mut decoder = decoder.read_info(file).map_err(|e| e.to_string())?;
+  // Wrap in a buffered reader to reduce syscalls
+  let reader = BufReader::with_capacity(1 << 20, file); // 1 MiB
+  let mut decoder = decoder.read_info(reader).map_err(|e| e.to_string())?;
 
   // Decode the first frame
-  let frame = decoder.read_next_frame().map_err(|e| e.to_string())?.ok_or("No frames in GIF")?;
+  let frame = decoder
+    .read_next_frame()
+    .map_err(|e| e.to_string())?
+    .ok_or("No frames in GIF")?;
 
   let width = frame.width as u32;
   let height = frame.height as u32;

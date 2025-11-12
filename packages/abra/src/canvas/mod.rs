@@ -12,7 +12,7 @@ mod canvas_transform;
 mod effects;
 /// The Layer public API struct.
 mod layer;
-/// Effects that can be applied to layers.
+/// Layer effects configuration and builder.
 mod layer_effects;
 /// The internal layer implementation.
 mod layer_inner;
@@ -24,8 +24,6 @@ mod layer_size_applier;
 mod layer_transform;
 /// Options for adding a canvas to another canvas.
 mod options_add_canvas;
-/// Options for applying effects to layers.
-mod options_layer_effects;
 /// Options for creating a new layer in a canvas.
 mod options_new_layer;
 /// Origin points for layer positioning.
@@ -34,11 +32,10 @@ mod origin;
 pub use anchor::Anchor;
 pub use canvas::Canvas;
 pub use canvas_transform::CanvasTransform;
-pub use effects::{DropShadowOptions, Shadow, Stroke, StrokeOptions, drop_shadow, stroke};
+pub use effects::{DropShadowOptions, StrokeOptions};
 pub use layer::Layer;
 pub use layer_effects::LayerEffects;
 pub use layer_transform::LayerTransform;
 pub use options_add_canvas::AddCanvasOptions;
-pub use options_layer_effects::LayerEffectOptions;
 pub use options_new_layer::{LayerSize, NewLayerOptions};
 pub use origin::Origin;

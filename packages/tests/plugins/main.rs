@@ -1,41 +1,43 @@
 use abra::{
-  canvas::{DropShadowOptions, LayerEffectOptions, StrokeOptions},
+  ImageLoader,
+  canvas::{DropShadowOptions, LayerEffects, StrokeOptions},
   color::{Color, Fill},
   plugin::Plugin,
 };
 use abra_collage::{CollageOptions, CollagePlugin, CollageStyle};
 
 pub fn main() {
-  let start = std::time::Instant::now();
-  let images = vec![
-    abra::image::Image::new_from_path("assets/bikini.jpg"),
-    abra::image::Image::new_from_path("assets/aletta-ocean.jpg"),
+  let image_paths = vec![
+    "assets/bikini.jpg",
+    "assets/aletta-ocean.jpg",
     // "assets/nude/malena.jpg",
-    abra::image::Image::new_from_path("assets/nude/krasivaya.jpg"),
-    abra::image::Image::new_from_path("assets/nude/ellen.jpg"),
-    abra::image::Image::new_from_path("assets/nude/tan-girl.jpg"),
-    abra::image::Image::new_from_path("assets/nude/lay-down.jpg"),
-    abra::image::Image::new_from_path("assets/nude/black-hair-and-big-boobs.webp"),
-    abra::image::Image::new_from_path("assets/nude/gravure-idol-black-hair-chest.jpg"),
+    "assets/nude/krasivaya.jpg",
+    "assets/nude/ellen.jpg",
+    "assets/nude/tan-girl.jpg",
+    "assets/nude/lay-down.jpg",
+    "assets/nude/black-hair-and-big-boobs.webp",
+    "assets/nude/gravure-idol-black-hair-chest.jpg",
   ];
 
-  println!("Loaded {} images in {:?}", images.len(), start.elapsed());
+  println!("Loading {} images in parallel...", image_paths.len());
+  let load_start = std::time::Instant::now();
 
-  let bg_image = images[0].clone();
-  let mut collage_plugin = CollagePlugin::new((1024 * 3, 1024 * 2), images)
+  let loader = ImageLoader::FromPaths(image_paths).load();
+  let first = loader.first();
+  let mut collage_plugin = CollagePlugin::new((1024 * 3, 1024 * 2), loader)
     .with_style(CollageStyle::LayeredGrid(6, 5))
     .with_options(
       CollageOptions::new()
         .with_rotation_range(-10.0, 10.0)
         .with_scale_range(1.0, 1.5)
-        .with_background(Fill::Image(bg_image.clone()))
+        .with_background(Fill::Image(first.unwrap()))
+        // .with_background(Fill::Image(abra::Image::new_from_path(image_paths[0]).into()))
         // .with_background(Fill::Gradient(Gradient::rainbow()))
         .with_effects(
-          LayerEffectOptions::new()
+          LayerEffects::new()
             .with_stroke(
               StrokeOptions::new()
                 .with_fill(Fill::Solid(Color::white()))
-                // .with_fill(Fill::Image(bg_image.clone()))
                 .with_size(20),
             )
             .with_drop_shadow(
@@ -46,6 +48,8 @@ pub fn main() {
             ),
         ),
     );
+
+  println!("Images loaded in {:?}", load_start.elapsed());
 
   let result = collage_plugin.apply().unwrap();
   match result {

@@ -1,8 +1,8 @@
 //! The internal canvas implementation.
 
 use std::cell::Cell;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::Anchor;
 use crate::Canvas;
@@ -25,9 +25,9 @@ pub(crate) struct CanvasInner {
   /// The name of the canvas.
   pub name: String,
   /// Child canvases in the canvas.
-  canvases: Vec<Rc<RefCell<Canvas>>>,
+  canvases: Vec<Arc<Mutex<Canvas>>>,
   /// The layers in the canvas.
-  pub layers: Vec<Rc<RefCell<LayerInner>>>,
+  pub layers: Vec<Arc<Mutex<LayerInner>>>,
   /// The width of the canvas.
   pub width: Cell<u32>,
   /// The height of the canvas.
@@ -37,7 +37,7 @@ pub(crate) struct CanvasInner {
   /// The y position of the canvas within its parent.
   y: Cell<i32>,
   /// Reference to the parent canvas (if this canvas is a child).
-  parent: RefCell<Option<Rc<RefCell<CanvasInner>>>>,
+  parent: Mutex<Option<Arc<Mutex<CanvasInner>>>>,
   /// This is the final image that is created by blending all the layers.
   pub result: Box<Image>,
   /// Whether the canvas has been manually resized and needs to skip update_canvas on save.
@@ -63,7 +63,7 @@ impl CanvasInner {
       height: Cell::new(0),
       x: Cell::new(0),
       y: Cell::new(0),
-      parent: RefCell::new(None),
+      parent: Mutex::new(None),
       needs_recompose: Cell::new(true),
       anchor: None,
       rotation: Cell::new(None),
@@ -88,18 +88,18 @@ impl CanvasInner {
   }
 
   /// Adds a new layer to the canvas.
-  pub fn add_layer(&mut self, layer: LayerInner) -> Rc<RefCell<LayerInner>> {
-    let layer_rc = Rc::new(RefCell::new(layer));
+  pub fn add_layer(&mut self, layer: LayerInner) -> Arc<Mutex<LayerInner>> {
+    let layer_rc = Arc::new(Mutex::new(layer));
     self.layers.push(layer_rc.clone());
     self.needs_recompose.set(true);
     layer_rc.clone()
   }
 
   /// Adds an already-wrapped child canvas with the given options.
-  pub fn add_canvas_rc(&mut self, canvas_rc: Rc<RefCell<Canvas>>, options: Option<AddCanvasOptions>) {
+  pub fn add_canvas_rc(&mut self, canvas_rc: Arc<Mutex<Canvas>>, options: Option<AddCanvasOptions>) {
     // Set canvas size from first child canvas
     if self.width.get() == 0 && self.height.get() == 0 {
-      let canvas_ref = canvas_rc.borrow();
+      let canvas_ref = canvas_rc.lock().unwrap();
       let (width, height) = canvas_ref.dimensions();
       if width > 0 && height > 0 {
         self.set_canvas_size(width, height);
@@ -111,7 +111,7 @@ impl CanvasInner {
       let parent_width = self.width.get() as i32;
       let parent_height = self.height.get() as i32;
 
-      let child_dims = canvas_rc.borrow().dimensions::<i32>();
+      let child_dims = canvas_rc.lock().unwrap().dimensions::<i32>();
       let child_width = child_dims.0;
       let child_height = child_dims.1;
 
@@ -125,7 +125,7 @@ impl CanvasInner {
       };
 
       // Set the child canvas position and rotation using public API
-      let mut canvas_borrow = canvas_rc.borrow_mut();
+      let mut canvas_borrow = canvas_rc.lock().unwrap();
       canvas_borrow.set_position(x, y);
       if let Some(rotation) = options.as_ref().and_then(|o| o.rotation) {
         canvas_borrow.set_rotation(Some(rotation));
@@ -159,17 +159,17 @@ impl CanvasInner {
 
     // First pass: Apply anchors and recursively update child canvases
     for child_canvas_rc in self.canvases.iter() {
-      let child_canvas = child_canvas_rc.borrow();
+      let child_canvas = child_canvas_rc.lock().unwrap();
       child_canvas.apply_anchor_with_parent_dimensions(width as i32, height as i32);
       drop(child_canvas);
 
-      let child_canvas_mut = child_canvas_rc.borrow_mut();
+      let child_canvas_mut = child_canvas_rc.lock().unwrap();
       child_canvas_mut.update_canvas();
     }
 
     // Second pass: Blend child canvases
     for child_canvas_rc in self.canvases.iter() {
-      let child_canvas = child_canvas_rc.borrow();
+      let child_canvas = child_canvas_rc.lock().unwrap();
       let (child_width, child_height) = child_canvas.dimensions::<u32>();
       if child_width > 0 && child_height > 0 {
         let mut child_result = child_canvas.get_result_image();
@@ -187,7 +187,9 @@ impl CanvasInner {
     // Blend layers
     let canvas_dims = (width as i32, height as i32);
     for layer in self.layers.iter() {
-      let mut layer_ref = layer.borrow_mut();
+      let mut layer_ref = layer.lock().unwrap();
+      // Apply pending effects before rendering
+      layer_ref.apply_pending_effects();
       // Apply anchor positioning before rendering
       layer_ref.apply_anchor_with_canvas_dimensions(canvas_dims.0, canvas_dims.1);
 
@@ -232,8 +234,8 @@ impl CanvasInner {
   }
 
   /// Sets the parent canvas reference.
-  pub fn set_parent(&self, parent: Option<Rc<RefCell<CanvasInner>>>) {
-    *self.parent.borrow_mut() = parent;
+  pub fn set_parent(&self, parent: Option<Arc<Mutex<CanvasInner>>>) {
+    *self.parent.lock().unwrap() = parent;
   }
 
   /// Sets the global position of the canvas within its parent.
@@ -284,7 +286,7 @@ impl CanvasInner {
     self.update_canvas();
     let flattened_image = (*self.result).clone();
     self.layers.clear();
-    let mut flattened_layer = LayerInner::new("Flattened Layer", flattened_image);
+    let mut flattened_layer = LayerInner::new("Flattened Layer", std::sync::Arc::new(flattened_image));
     flattened_layer.set_visible(true);
     self.add_layer(flattened_layer);
   }

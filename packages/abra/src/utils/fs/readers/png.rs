@@ -6,7 +6,8 @@ use std::io::BufReader;
 /// Reads a PNG file and returns the image data
 pub fn read_png(file: &str) -> Result<FileInfo, String> {
   let file = File::open(file).map_err(|e| e.to_string())?;
-  let reader = BufReader::new(file);
+  // Larger buffer for better IO performance on large PNGs
+  let reader = BufReader::with_capacity(1 << 20, file); // 1 MiB
   let decoder = Decoder::new(reader);
   let mut reader = decoder.read_info().unwrap();
   let output_size = reader.output_buffer_size().ok_or("Failed to get buffer size")?;

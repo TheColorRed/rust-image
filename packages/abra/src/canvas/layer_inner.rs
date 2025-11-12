@@ -3,21 +3,22 @@
 use crate::{
   canvas::anchor::Anchor,
   canvas::canvas_inner::CanvasInner,
+  canvas::layer_effects::EffectsBuilder,
   canvas::origin::Origin,
   combine::blend::{self, RGBA},
   image::Image,
 };
 
-use std::cell::RefCell;
 use std::fmt::Debug;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 /// The internal layer implementation - provides the mutable reference API.
 pub(crate) struct LayerInner {
   /// The name of the layer.
   name: String,
   /// The image data of the layer.
-  image: Image,
+  image: Arc<Image>,
   /// Whether the layer is visible.
   visible: bool,
   /// The opacity of the layer.
@@ -31,7 +32,7 @@ pub(crate) struct LayerInner {
   /// A UUID for the layer.
   id: String,
   /// Reference to the canvas.
-  canvas: Rc<RefCell<CanvasInner>>,
+  canvas: Arc<Mutex<CanvasInner>>,
   /// The anchor point for positioning relative to the canvas.
   anchor: Option<Anchor>,
   /// The origin point within the layer that the anchor refers to.
@@ -41,6 +42,8 @@ pub(crate) struct LayerInner {
   anchor_dimensions: Option<(u32, u32)>,
   /// The positional offset applied when anchoring so effects like drop shadow don't shift placement.
   anchor_offset: (i32, i32),
+  /// Builder for effects to be applied during rendering.
+  effects_builder: EffectsBuilder,
 }
 
 impl Debug for LayerInner {
@@ -60,9 +63,9 @@ impl Debug for LayerInner {
 #[allow(dead_code)]
 impl LayerInner {
   /// Creates a new layer with the given name, image, and canvas
-  pub fn new(name: &str, image: Image) -> LayerInner {
+  pub fn new(name: &str, image: Arc<Image>) -> LayerInner {
     let id = uuid::Uuid::new_v4().to_string();
-    let tmp_canvas = Rc::new(RefCell::new(CanvasInner::new("Temporary")));
+    let tmp_canvas = Arc::new(Mutex::new(CanvasInner::new("Temporary")));
 
     LayerInner {
       id,
@@ -78,11 +81,12 @@ impl LayerInner {
       origin: Origin::default(),
       anchor_dimensions: None,
       anchor_offset: (0, 0),
+      effects_builder: EffectsBuilder::new(),
     }
   }
 
   /// Sets the canvas reference for the layer.
-  pub fn set_canvas(&mut self, canvas: Rc<RefCell<CanvasInner>>) {
+  pub fn set_canvas(&mut self, canvas: Arc<Mutex<CanvasInner>>) {
     self.canvas = canvas.clone();
   }
 
@@ -94,33 +98,33 @@ impl LayerInner {
   /// Sets the blend mode of the layer.
   pub fn set_blend_mode(&mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) {
     self.blend_mode = blend_mode;
-    self.canvas.borrow_mut().needs_recompose.set(true);
+    self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
   /// Sets the opacity of the layer.
   pub fn set_opacity(&mut self, opacity: f32) {
     self.opacity = opacity;
-    self.canvas.borrow_mut().needs_recompose.set(true);
+    self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
   /// Sets the visibility of the layer.
   pub fn set_visible(&mut self, visible: bool) {
     self.visible = visible;
-    self.canvas.borrow_mut().needs_recompose.set(true);
+    self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
   /// Sets the position of the layer.
   pub fn set_global_position(&mut self, x: i32, y: i32) {
     self.x = x;
     self.y = y;
-    self.canvas.borrow_mut().needs_recompose.set(true);
+    self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
   /// Sets the position of the layer relative to another layer
   pub fn set_relative_position(&mut self, x: i32, y: i32, layer: &LayerInner) {
     self.x = layer.x + x;
     self.y = layer.y + y;
-    self.canvas.borrow_mut().needs_recompose.set(true);
+    self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
   /// Sets the position of the layer to the given anchor point
@@ -226,30 +230,44 @@ impl LayerInner {
     &self.image
   }
 
-  /// Gets a mutable reference to the image
+  /// Gets a mutable reference to the image using copy-on-write semantics.
+  /// If the Arc has multiple owners, this will clone the image.
   pub fn image_mut(&mut self) -> &mut Image {
-    &mut self.image
+    Arc::make_mut(&mut self.image)
+  }
+
+  /// Returns a cloned copy of the effects builder.
+  pub(crate) fn get_effects_builder(&self) -> EffectsBuilder {
+    self.effects_builder.clone()
+  }
+
+  /// Sets the effects builder.
+  pub(crate) fn set_effects_builder(&mut self, builder: EffectsBuilder) {
+    self.effects_builder = builder;
+  }
+
+  /// Applies all queued effects to the layer's image.
+  pub fn apply_pending_effects(&mut self) {
+    self.image = self.effects_builder.apply(self.image.clone());
   }
 
   /// Sets the index of the layer within the canvas's layer stack
   pub fn set_index(&mut self, index: usize) {
-    // To avoid borrow conflicts, we need to find the current layer's index
-    // We'll use pointer comparison: find which Rc<RefCell<LayerInner>> contains this &mut self
-    // by comparing the pointer address
-    let self_ptr = self as *const LayerInner;
+    // To avoid borrow conflicts, we need to find the current layer's index by ID
+    let self_id = self.id.clone();
 
     let current_index = {
-      let canvas = self.canvas.borrow();
+      let canvas = self.canvas.lock().unwrap();
       let idx = canvas.layers.iter().enumerate().position(|(_, layer_rc)| {
-        // Compare pointers without borrowing
-        let layer_ptr = layer_rc.as_ptr();
-        self_ptr == layer_ptr
+        // Compare by ID
+        let layer = layer_rc.lock().unwrap();
+        layer.id == self_id
       });
       idx
     };
 
     if let Some(current_idx) = current_index {
-      let mut canvas = self.canvas.borrow_mut();
+      let mut canvas = self.canvas.lock().unwrap();
       // Directly manipulate layers vec
       if current_idx != index && index <= canvas.layers.len() {
         let layer = canvas.layers.remove(current_idx);
@@ -263,18 +281,18 @@ impl LayerInner {
   /// Moves the layer up one position in the stack (increases its index by 1)
   /// Does nothing if the layer is already at the top
   pub fn move_up(&mut self) {
-    let self_ptr = self as *const LayerInner;
+    let self_id = self.id.clone();
 
     let current_index = {
-      let canvas = self.canvas.borrow();
+      let canvas = self.canvas.lock().unwrap();
       canvas.layers.iter().enumerate().position(|(_, layer_rc)| {
-        let layer_ptr = layer_rc.as_ptr();
-        self_ptr == layer_ptr
+        let layer = layer_rc.lock().unwrap();
+        layer.id == self_id
       })
     };
 
     if let Some(current_idx) = current_index {
-      let len = self.canvas.borrow().layers.len();
+      let len = self.canvas.lock().unwrap().layers.len();
       if current_idx < len - 1 {
         self.set_index(current_idx + 1);
       }
@@ -284,13 +302,13 @@ impl LayerInner {
   /// Moves the layer down one position in the stack (decreases its index by 1)
   /// Does nothing if the layer is already at the bottom
   pub fn move_down(&mut self) {
-    let self_ptr = self as *const LayerInner;
+    let self_id = self.id.clone();
 
     let current_index = {
-      let canvas = self.canvas.borrow();
+      let canvas = self.canvas.lock().unwrap();
       canvas.layers.iter().enumerate().position(|(_, layer_rc)| {
-        let layer_ptr = layer_rc.as_ptr();
-        self_ptr == layer_ptr
+        let layer = layer_rc.lock().unwrap();
+        layer.id == self_id
       })
     };
 
@@ -303,18 +321,18 @@ impl LayerInner {
 
   /// Moves the layer to the top of the stack
   pub fn move_to_top(&mut self) {
-    let self_ptr = self as *const LayerInner;
+    let self_id = self.id.clone();
 
     let current_index = {
-      let canvas = self.canvas.borrow();
+      let canvas = self.canvas.lock().unwrap();
       canvas.layers.iter().enumerate().position(|(_, layer_rc)| {
-        let layer_ptr = layer_rc.as_ptr();
-        self_ptr == layer_ptr
+        let layer = layer_rc.lock().unwrap();
+        layer.id == self_id
       })
     };
 
     if let Some(current_idx) = current_index {
-      let len = self.canvas.borrow().layers.len();
+      let len = self.canvas.lock().unwrap().layers.len();
       if current_idx < len - 1 {
         self.set_index(len - 1);
       }
@@ -323,13 +341,13 @@ impl LayerInner {
 
   /// Moves the layer to the bottom of the stack
   pub fn move_to_bottom(&mut self) {
-    let self_ptr = self as *const LayerInner;
+    let self_id = self.id.clone();
 
     let current_index = {
-      let canvas = self.canvas.borrow();
+      let canvas = self.canvas.lock().unwrap();
       canvas.layers.iter().enumerate().position(|(_, layer_rc)| {
-        let layer_ptr = layer_rc.as_ptr();
-        self_ptr == layer_ptr
+        let layer = layer_rc.lock().unwrap();
+        layer.id == self_id
       })
     };
 
@@ -348,11 +366,14 @@ impl LayerInner {
   }
 
   /// Duplicates the layer within the same canvas.
-  /// This returns a Layer (the public wrapper), not the raw Rc<RefCell<LayerInner>>.
+  /// This returns a Layer (the public wrapper), not the raw Rc<Mutex<LayerInner>>.
   pub fn duplicate(&self) -> super::Layer {
-    let canvas = self.canvas.borrow_mut();
-    let layer = canvas.layers.iter().find(|layer| layer.borrow().id() == self.id());
-    let layer_ref = layer.unwrap().borrow();
+    let canvas = self.canvas.lock().unwrap();
+    let layer = canvas
+      .layers
+      .iter()
+      .find(|layer| layer.lock().unwrap().id() == self.id());
+    let layer_ref = layer.unwrap().lock().unwrap();
 
     let mut new_layer = layer_ref.clone();
     new_layer.set_name(format!("{} clone", new_layer.name()).as_str());
@@ -360,7 +381,7 @@ impl LayerInner {
     drop(layer_ref);
     drop(canvas);
 
-    let mut canvas = self.canvas.borrow_mut();
+    let mut canvas = self.canvas.lock().unwrap();
 
     let layer_rc = canvas.add_layer(new_layer);
     super::Layer::from_inner(layer_rc)
@@ -383,6 +404,7 @@ impl Clone for LayerInner {
       origin: self.origin,
       anchor_dimensions: self.anchor_dimensions,
       anchor_offset: self.anchor_offset,
+      effects_builder: self.effects_builder.clone(),
     }
   }
 }

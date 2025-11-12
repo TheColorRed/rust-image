@@ -27,12 +27,12 @@ impl CollagePlugin {
         image.transform().rotate(self.select_rotation(rotation), None);
       }
 
-      let trans_image = Image::new_from_color(cell_width, cell_height, Color::transparent());
+      let trans_image = std::sync::Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
       let canvas = Canvas::new("Cell")
         .add_layer_from_image("empty", trans_image, None)
         .add_layer_from_image(
           "image",
-          image,
+          std::sync::Arc::new(image),
           Some(
             NewLayerOptions::new()
               .with_anchor(abra::Anchor::TopCenter)

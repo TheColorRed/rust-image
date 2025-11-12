@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use abra::{
-  Canvas, Image, NewLayerOptions,
-  canvas::{LayerEffectOptions, drop_shadow, stroke},
+  Canvas, Image, LoadedImages, NewLayerOptions,
+  canvas::LayerEffects,
   color::{Color, Fill},
   draw::gradient::linear_gradient,
   geometry::{path::Path, point::Point},
@@ -28,7 +28,7 @@ pub struct CollageOptions {
   /// - If None, the background will be transparent.
   background: Fill,
   /// The effects to apply to each layer in the collage.
-  effects: Option<LayerEffectOptions>,
+  effects: Option<LayerEffects>,
 }
 
 impl CollageOptions {
@@ -61,7 +61,7 @@ impl CollageOptions {
   }
 
   /// Sets the effects to apply to each layer in the collage.
-  pub fn with_effects(mut self, effects: LayerEffectOptions) -> Self {
+  pub fn with_effects(mut self, effects: LayerEffects) -> Self {
     self.effects = Some(effects);
     self
   }
@@ -98,12 +98,13 @@ pub struct CollagePlugin {
 }
 
 impl CollagePlugin {
-  /// Creates a new CollagePlugin instance.
-  pub fn new(size: (u32, u32), images: Vec<abra::Image>) -> Self {
+  /// Creates a new CollagePlugin instance from already loaded images.
+  pub fn new<I: Into<LoadedImages>>(size: (u32, u32), images: I) -> Self {
+    let loaded = images.into();
     Self {
       size,
       style: CollageStyle::Grid(2, 2),
-      images: images.into_iter().map(Arc::new).collect(),
+      images: loaded.all(),
       options: None,
       selected_images: Vec::new(),
       rng: rand::rng(),
@@ -148,52 +149,29 @@ impl CollagePlugin {
     if let Some(options) = &self.options {
       let background = match options.background.clone() {
         Fill::Solid(color) => {
-          let bg_image = Image::new_from_color(self.size.0, self.size.1, color);
+          let bg_image = std::sync::Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
           Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
         }
         Fill::Gradient(stops) => {
           let mut bg_image = Image::new(self.size.0, self.size.1);
           let path = Path::new(vec![Point::new(0, 0), Point::new(self.size.0 as i32, 0)]);
           linear_gradient(&mut bg_image, path, stops);
-          Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
+          Canvas::new("Background Color").add_layer_from_image("background color", std::sync::Arc::new(bg_image), None)
         }
         Fill::Image(image) => {
-          let bg_image = Image::new(self.size.0, self.size.1);
+          let bg_image = std::sync::Arc::new(Image::new(self.size.0, self.size.1));
           Canvas::new("Background Color")
             .add_layer_from_image("background color", bg_image, None)
-            .add_layer_from_image("Image", image, Some(NewLayerOptions::new().with_size(abra::LayerSize::Cover(None))))
+            .add_layer_from_image(
+              "Image",
+              image.clone(),
+              Some(NewLayerOptions::new().with_size(abra::LayerSize::Cover(None))),
+            )
             .flatten()
         }
       };
       root_canvas.add_canvas(background, None);
     }
-  }
-
-  fn apply_drop_shadow(&self, layer: &abra::Layer) {
-    if let Some(options) = &self.options {
-      if let Some(effects) = &options.effects {
-        if let Some(drop_shadow_effect) = &effects.drop_shadow {
-          drop_shadow(layer.clone(), drop_shadow_effect.clone());
-        }
-      }
-    }
-  }
-
-  fn apply_stroke(&self, layer: &abra::Layer) {
-    if let Some(options) = &self.options {
-      if let Some(effects) = &options.effects {
-        if let Some(stroke_effect) = &effects.stroke {
-          stroke(layer.clone(), stroke_effect.clone());
-        }
-      }
-    }
-  }
-
-  fn apply_effects(&self, layer: &abra::Layer) {
-    // Apply drop shadow effect using the provided options
-    self.apply_drop_shadow(layer);
-    // Apply stroke effect using the provided options
-    self.apply_stroke(layer);
   }
 }
 
