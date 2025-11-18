@@ -36,57 +36,23 @@ impl ColorStop {
 #[derive(Debug)]
 /// Describes how to interpolate between colors in a gradient.
 pub struct Gradient {
+  /// The color stops in the gradient.
   stops: Vec<ColorStop>,
-}
-
-impl Display for Gradient {
-  /// Displays the gradient as a string.
-  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    let mut results = vec![];
-    for stop in self.stops.iter() {
-      results.push(format!(
-        "stop=rgba({}, {}, {}, {}) at {}",
-        stop.color.r, stop.color.g, stop.color.b, stop.color.a, stop.time
-      ));
-    }
-    write!(f, "{}", results.join("; "))
-  }
-}
-
-impl Default for Gradient {
-  /// Creates a new gradient with the default values.
-  /// The default gradient goes from black to white.
-  fn default() -> Gradient {
-    Gradient {
-      stops: vec![
-        ColorStop::new(Color::from_hex(0x000000), 0.0),
-        ColorStop::new(Color::from_hex(0xFFFFFF), 1.0),
-      ],
-    }
-  }
-}
-
-impl Clone for Gradient {
-  /// Clones the gradient.
-  fn clone(&self) -> Gradient {
-    let mut stops = Vec::new();
-    for stop in self.stops.iter() {
-      stops.push(stop.clone());
-    }
-    Gradient { stops }
-  }
+  /// The path defining the gradient direction (optional).
+  direction: Option<crate::geometry::Path>,
 }
 
 impl Gradient {
   /// Creates a new gradient with the given stops.
   pub fn new(stops: Vec<ColorStop>) -> Gradient {
-    Gradient { stops }
+    Gradient { stops, direction: None }
   }
 
   /// Creates a new gradient that goes from one color to another.
   pub fn from_to(from: Color, to: Color) -> Gradient {
     Gradient {
       stops: vec![ColorStop::new(from, 0.0), ColorStop::new(to, 1.0)],
+      direction: None,
     }
   }
 
@@ -97,6 +63,7 @@ impl Gradient {
         ColorStop::new(from, 0.0),
         ColorStop::new(Color::from_hex(0x000000), 1.0),
       ],
+      direction: None,
     }
   }
 
@@ -107,6 +74,7 @@ impl Gradient {
         ColorStop::new(from, 0.0),
         ColorStop::new(Color::from_hex(0xFFFFFF), 1.0),
       ],
+      direction: None,
     }
   }
 
@@ -117,9 +85,17 @@ impl Gradient {
     for (i, color) in colors.iter().enumerate() {
       stops.push(ColorStop::new(color.clone(), i as f32 * step));
     }
-    Gradient { stops }
+    Gradient { stops, direction: None }
   }
-
+  /// Sets the length of the gradient using a path where the first point is the start and the last point is the end.
+  pub fn set_direction(&mut self, path: crate::geometry::Path) -> &mut Self {
+    self.direction = Some(path);
+    self
+  }
+  /// Gets the length of the gradient.
+  pub fn direction(&self) -> Option<crate::geometry::Path> {
+    self.direction.clone()
+  }
   /// Creates a new rainbow gradient.
   /// This gradient goes from red to orange to yellow to green to blue to indigo to violet.
   pub fn rainbow() -> Gradient {
@@ -195,6 +171,51 @@ impl Gradient {
     for stop in self.stops.iter().rev() {
       stops.push(ColorStop::new(stop.color.clone(), max_time - stop.time));
     }
-    Gradient { stops }
+    Gradient {
+      stops,
+      direction: self.direction.clone(),
+    }
+  }
+}
+
+impl Display for Gradient {
+  /// Displays the gradient as a string.
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let mut results = vec![];
+    for stop in self.stops.iter() {
+      results.push(format!(
+        "stop=rgba({}, {}, {}, {}) at {}",
+        stop.color.r, stop.color.g, stop.color.b, stop.color.a, stop.time
+      ));
+    }
+    write!(f, "{}", results.join("; "))
+  }
+}
+
+impl Default for Gradient {
+  /// Creates a new gradient with the default values.
+  /// The default gradient goes from black to white.
+  fn default() -> Gradient {
+    Gradient {
+      stops: vec![
+        ColorStop::new(Color::from_hex(0x000000), 0.0),
+        ColorStop::new(Color::from_hex(0xFFFFFF), 1.0),
+      ],
+      direction: None,
+    }
+  }
+}
+
+impl Clone for Gradient {
+  /// Clones the gradient.
+  fn clone(&self) -> Gradient {
+    let mut stops = Vec::new();
+    for stop in self.stops.iter() {
+      stops.push(stop.clone());
+    }
+    Gradient {
+      stops,
+      direction: self.direction.clone(),
+    }
   }
 }

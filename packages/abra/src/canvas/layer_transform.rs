@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::transform::{Crop, Resize, ResizeAlgorithm};
+use crate::transform::{Crop, Resize, TransformAlgorithm};
 
 use super::layer_inner::LayerInner;
 
@@ -28,7 +28,7 @@ impl LayerTransform {
 }
 
 impl Resize for LayerTransform {
-  fn resize(&mut self, p_width: u32, p_height: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize(&mut self, p_width: u32, p_height: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self
       .layer
       .lock()
@@ -38,7 +38,7 @@ impl Resize for LayerTransform {
     self
   }
 
-  fn resize_percentage(&mut self, percentage: f32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_percentage(&mut self, percentage: f32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self
       .layer
       .lock()
@@ -48,17 +48,17 @@ impl Resize for LayerTransform {
     self
   }
 
-  fn resize_width(&mut self, width: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_width(&mut self, width: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self.layer.lock().unwrap().image_mut().resize_width(width, algorithm);
     self
   }
 
-  fn resize_height(&mut self, height: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_height(&mut self, height: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self.layer.lock().unwrap().image_mut().resize_height(height, algorithm);
     self
   }
 
-  fn resize_width_relative(&mut self, width: i32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_width_relative(&mut self, width: i32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self
       .layer
       .lock()
@@ -68,7 +68,7 @@ impl Resize for LayerTransform {
     self
   }
 
-  fn resize_height_relative(&mut self, height: i32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_height_relative(&mut self, height: i32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     self
       .layer
       .lock()

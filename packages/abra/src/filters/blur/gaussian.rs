@@ -23,7 +23,7 @@ fn gaussian_kernel_1d(radius: u32) -> Vec<f32> {
 /// Uses two passes: horizontal and vertical for O(r) complexity instead of O(r²).
 /// * `image` - A mutable reference to the image to be blurred.
 /// * `radius` - The radius of the Gaussian kernel.
-pub fn gaussian(image: &mut Image, radius: u32) {
+pub fn gaussian_blur(image: &mut Image, radius: u32) {
   if radius == 0 {
     return;
   }

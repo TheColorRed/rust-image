@@ -4,7 +4,7 @@ use abra::{
   color::Color,
   combine::blend::{self, RGBA},
   image::Image,
-  transform::{Crop, Resize, ResizeAlgorithm},
+  transform::{Crop, Resize, TransformAlgorithm},
   utils::fs::WriterOptions,
 };
 

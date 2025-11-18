@@ -28,6 +28,18 @@ impl Into<(f32, f32)> for Point {
   }
 }
 
+impl From<(i32, i32)> for Point {
+  fn from(coords: (i32, i32)) -> Point {
+    Point::new(coords.0, coords.1)
+  }
+}
+
+impl From<(f32, f32)> for Point {
+  fn from(coords: (f32, f32)) -> Point {
+    Point::new(coords.0 as i32, coords.1 as i32)
+  }
+}
+
 /// Multiply a point by a scalar
 impl Mul<f32> for Point {
   type Output = Point;

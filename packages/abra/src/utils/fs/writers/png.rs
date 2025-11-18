@@ -3,7 +3,7 @@ use crate::path::dirname;
 use crate::utils::fs::mkdirp;
 use crate::utils::fs::writer_options::WriterOptions;
 
-use png::ColorType::{Rgb, Rgba};
+use png::ColorType::Rgba;
 use png::Encoder;
 use std::fs::File;
 
@@ -15,17 +15,9 @@ pub fn write_png(file: &str, image: &Image, options: &Option<WriterOptions>) -> 
   let (width, height) = image.dimensions();
   let mut encoder = Encoder::new(file, width, height);
 
-  let (width, height) = image.dimensions::<u32>();
-  let len = image.colors.len() as u32;
-  let channels = if len == width * height * 4 { 4 } else { 3 };
+  let channels = 4; // Always use RGBA
 
-  if channels == 4 {
-    encoder.set_color(Rgba);
-  } else if channels == 3 {
-    encoder.set_color(Rgb);
-  } else {
-    return Err("Invalid image data".to_string());
-  }
+  encoder.set_color(Rgba);
   encoder.set_depth(png::BitDepth::Eight);
 
   // Set compression level based on quality (higher quality = less compression for speed)

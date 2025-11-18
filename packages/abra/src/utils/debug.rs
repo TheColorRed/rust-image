@@ -1,8 +1,8 @@
 use crate::{
-  canvas::{DropShadowOptions, StrokeOptions},
+  canvas::effects::{DropShadow, Stroke},
   color::Gradient,
-  geometry::path::Path,
-  transform::ResizeAlgorithm,
+  geometry::Path,
+  transform::TransformAlgorithm,
 };
 
 #[cfg(debug_assertions)]
@@ -46,7 +46,7 @@ pub enum DebugTransform {
   /// - `new_width`: New width after resizing
   /// - `new_height`: New height after resizing
   /// - `duration`: Time taken to perform the resize
-  Resize(ResizeAlgorithm, u32, u32, u32, u32, Duration),
+  Resize(TransformAlgorithm, u32, u32, u32, u32, Duration),
   /// Cropping information.
   /// - `old_width`: Original width of the image
   /// - `old_height`: Original height of the image
@@ -68,14 +68,14 @@ pub enum DebugTransform {
   /// - `new_width`: Width of the image after rotation
   /// - `new_height`: Height of the image after rotation
   /// - `duration`: Time taken to perform the rotation
-  Rotate(ResizeAlgorithm, f32, u32, u32, u32, u32, Duration),
+  Rotate(TransformAlgorithm, f32, u32, u32, u32, u32, Duration),
 }
 /// Enum representing different effect debug entries.
 pub enum DebugEffects {
   /// Drop shadow effect applied.
-  DropShadow(DropShadowOptions, Duration),
+  DropShadow(DropShadow, Duration),
   /// Stroke effect applied.
-  Stroke(StrokeOptions, Duration),
+  Stroke(Stroke, Duration),
 }
 /// Enum representing different filter debug entries.
 pub enum DebugFilters {
@@ -91,6 +91,16 @@ pub enum DebugDrawing {
   /// - `path`: The path along which the gradient was drawn
   /// - `duration`: Time taken to perform the drawing
   Gradient(Gradient, Path, Duration),
+  // NOTE: Stroke sizing and joins are part of geometry, not drawing. Use DebugGeometry::Stroke instead.
+}
+
+/// Enum representing geometry debug entries (stroke expansion, area math, etc).
+pub enum DebugGeometry {
+  /// Stroke geometry expansion applied.
+  /// - `path`: The original path that was stroked
+  /// - `width`: The stroke width
+  /// - `duration`: Time taken to compute the stroked outline
+  Stroke(Path, f32, Duration),
 }
 
 /// Implementations for general logging debug information.
@@ -201,6 +211,18 @@ impl DebugDrawing {
     match self {
       DebugDrawing::Gradient(gradient, path, duration) => {
         debug_println!("    Drawing::Gradient: gradient={{{}}}; path={{{}}}; time={:?}", gradient, path, duration)
+      } // Intentionally keep no Stroke entry here; stroke = geometry
+    }
+  }
+}
+
+impl DebugGeometry {
+  /// Logs the debug information to the console for the given Geometry variant.
+  #[allow(unused_variables)]
+  pub fn log(self) {
+    match self {
+      DebugGeometry::Stroke(path, width, duration) => {
+        debug_println!("    Geometry::Stroke: path={{{}}}; width={}; time={:?}", path, width, duration)
       }
     }
   }

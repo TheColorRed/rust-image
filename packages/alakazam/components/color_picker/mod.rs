@@ -1,10 +1,10 @@
 use crate::utils::as_ui_image;
 use crate::{AppWindow, ColorPanel, ColorType};
-use abra::draw::shapes::circle_stroke;
+use abra::draw::line;
 use abra::{
   color::{gradient::Gradient, Color},
   draw::gradient::linear_gradient,
-  geometry::{path::Path, point::Point},
+  geometry::{Path, Point},
   Image,
 };
 use slint::{Global, Weak};
@@ -127,7 +127,7 @@ fn color_box(images: Rc<RefCell<ColorPanelImages>>, color: Color, point: Point) 
   let (width, _) = images_ref.box_background.borrow().dimensions::<u32>();
 
   let gradient = Gradient::from_to(Color::white(), color.clone());
-  let path = Path::new(vec![Point::new(0, 0), Point::new(width as i32, 0)]);
+  let path = Path::line((0.0, 0.0), (width as f32, 0.0));
   linear_gradient(&mut images_ref.box_background.borrow_mut(), path, gradient);
 }
 
@@ -136,10 +136,10 @@ fn hue_selector(point: Point, direction: Direction) -> Image {
   let (width, height) = image.dimensions::<u32>();
 
   let hue_colors = Gradient::hue();
-  let path: Path = if direction == Direction::Horizontal {
-    Path::new(vec![Point::new(0, 0), Point::new(width as i32, 0)])
+  let path = if direction == Direction::Horizontal {
+    Path::line((0.0, 0.0), (width as f32, 0.0))
   } else {
-    Path::new(vec![Point::new(0, 0), Point::new(0, height as i32)])
+    Path::line((0.0, 0.0), (0.0, height as f32))
   };
 
   linear_gradient(&mut image, path, hue_colors);
@@ -149,7 +149,7 @@ fn hue_selector(point: Point, direction: Direction) -> Image {
 fn trans_to_black_gradient(width: u32, height: u32) -> Image {
   let mut image = Image::new(width, width);
   let gradient = Gradient::from_to(Color::transparent(), Color::black());
-  let path = Path::new(vec![Point::new(0, 0), Point::new(0, height as i32)]);
+  let path = Path::line((0.0, 0.0), (0.0, height as f32));
   linear_gradient(&mut image, path, gradient);
   image
 }
@@ -158,6 +158,26 @@ fn circle_image(radius: u32, color: Color) -> Image {
   let mut image = Image::new(radius * 2 + 2, radius * 2 + 2);
   image.clear_color(Color::transparent());
   let center = Point::new(radius as i32, radius as i32);
-  circle_stroke(&mut image, center, radius, color, 1);
+
+  // Create a circular path using multiple line segments
+  let segments = 64; // More segments = smoother circle
+  let mut path = Path::new();
+  let mut first: Option<(f32, f32)> = None;
+  for i in 0..=segments {
+    let angle = (i as f32 / segments as f32) * 2.0 * std::f32::consts::PI;
+    let x = angle.cos() * radius as f32;
+    let y = angle.sin() * radius as f32;
+    if i == 0 {
+      path.with_move_to((x, y));
+      first = Some((x, y));
+    } else {
+      path.with_line_to((x, y));
+    }
+  }
+  if let Some((fx, fy)) = first {
+    path.with_line_to((fx, fy));
+  }
+
+  line::line(&mut image, center, path, abra::color::Fill::Solid(color), 1, None, None);
   image
 }

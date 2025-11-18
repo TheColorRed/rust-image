@@ -14,7 +14,9 @@ use super::options_new_layer::NewLayerOptions;
 /// * `options` - The options to apply (if None, defaults are used)
 /// * `canvas_width` - The width of the parent canvas
 /// * `canvas_height` - The height of the parent canvas
-pub(crate) fn apply_layer_options(layer: &mut LayerInner, options: Option<&NewLayerOptions>, canvas_width: u32, canvas_height: u32) {
+pub(crate) fn apply_layer_options(
+  layer: &mut LayerInner, options: Option<&NewLayerOptions>, canvas_width: u32, canvas_height: u32,
+) {
   match options {
     Some(opts) => {
       // Apply anchor

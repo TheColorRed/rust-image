@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::transform::{Crop, Resize, ResizeAlgorithm, Rotate};
+use crate::transform::{Crop, Resize, Rotate, TransformAlgorithm};
 
 use super::canvas_inner::CanvasInner;
 
@@ -29,10 +29,14 @@ impl CanvasTransform {
 /// * `scale_y` - The scaling factor for the y-axis (if None, only scale x)
 /// * `algorithm` - The resize algorithm to use
 fn resize_all_layers(
-  canvas: &mut CanvasInner, scale_x: Option<f32>, scale_y: Option<f32>, algorithm: Option<ResizeAlgorithm>,
+  p_canvas: &mut CanvasInner, p_scale_x: impl Into<Option<f32>>, p_scale_y: impl Into<Option<f32>>,
+  p_algorithm: impl Into<Option<TransformAlgorithm>>,
 ) {
-  for i in 0..canvas.layers.len() {
-    let mut layer = canvas.layers[i].lock().unwrap();
+  let algorithm = p_algorithm.into();
+  let scale_x = p_scale_x.into();
+  let scale_y = p_scale_y.into();
+  for i in 0..p_canvas.layers.len() {
+    let mut layer = p_canvas.layers[i].lock().unwrap();
     let (old_layer_width, old_layer_height) = layer.dimensions::<u32>();
 
     let new_layer_width = if let Some(sx) = scale_x {
@@ -148,7 +152,7 @@ fn crop_all_layers(canvas: &mut CanvasInner, crop_x: u32, crop_y: u32, width: u3
 }
 
 impl Resize for CanvasTransform {
-  fn resize(&mut self, p_width: u32, p_height: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize(&mut self, p_width: u32, p_height: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     {
       let mut canvas = self.canvas.lock().unwrap();
 
@@ -178,7 +182,7 @@ impl Resize for CanvasTransform {
     self
   }
 
-  fn resize_percentage(&mut self, percentage: f32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_percentage(&mut self, percentage: f32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     let canvas = self.canvas.lock().unwrap();
     let (old_width, old_height) = (canvas.width.get(), canvas.height.get());
     drop(canvas);
@@ -189,7 +193,7 @@ impl Resize for CanvasTransform {
     self.resize(new_width, new_height, algorithm)
   }
 
-  fn resize_width(&mut self, p_width: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_width(&mut self, p_width: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     {
       let mut canvas = self.canvas.lock().unwrap();
 
@@ -208,7 +212,7 @@ impl Resize for CanvasTransform {
     self
   }
 
-  fn resize_height(&mut self, p_height: u32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_height(&mut self, p_height: u32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     {
       let mut canvas = self.canvas.lock().unwrap();
 
@@ -227,9 +231,10 @@ impl Resize for CanvasTransform {
     self
   }
 
-  fn resize_width_relative(&mut self, p_width: i32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_width_relative(&mut self, p_width: i32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     {
       let mut canvas = self.canvas.lock().unwrap();
+      let algorithm = algorithm.into();
 
       // Resize all layers
       for i in 0..canvas.layers.len() {
@@ -247,9 +252,10 @@ impl Resize for CanvasTransform {
     self
   }
 
-  fn resize_height_relative(&mut self, p_height: i32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn resize_height_relative(&mut self, p_height: i32, algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
     {
       let mut canvas = self.canvas.lock().unwrap();
+      let algorithm = algorithm.into();
 
       // Resize all layers
       for i in 0..canvas.layers.len() {
@@ -282,11 +288,35 @@ impl Crop for CanvasTransform {
 }
 
 impl Rotate for CanvasTransform {
-  fn rotate(&mut self, degrees: f32, algorithm: Option<ResizeAlgorithm>) -> &mut Self {
+  fn rotate(&mut self, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    {
+      let canvas = self.canvas.lock().unwrap();
+      let algorithm = p_algorithm.into();
+      let degrees = p_degrees.into();
+      for i in 0..canvas.layers.len() {
+        canvas.layers[i].lock().unwrap().image_mut().rotate(degrees, algorithm);
+      }
+      canvas.needs_recompose.set(true);
+    }
+    self
+  }
+
+  fn flip_horizontal(&mut self) -> &mut Self {
     {
       let canvas = self.canvas.lock().unwrap();
       for i in 0..canvas.layers.len() {
-        canvas.layers[i].lock().unwrap().image_mut().rotate(degrees, algorithm);
+        canvas.layers[i].lock().unwrap().image_mut().flip_horizontal();
+      }
+      canvas.needs_recompose.set(true);
+    }
+    self
+  }
+
+  fn flip_vertical(&mut self) -> &mut Self {
+    {
+      let canvas = self.canvas.lock().unwrap();
+      for i in 0..canvas.layers.len() {
+        canvas.layers[i].lock().unwrap().image_mut().flip_vertical();
       }
       canvas.needs_recompose.set(true);
     }

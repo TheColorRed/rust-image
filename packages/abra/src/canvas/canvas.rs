@@ -60,13 +60,13 @@ impl Canvas {
   }
 
   /// Creates a new project with the given name and a canvas from a path.
-  pub fn new_from_path(name: &str, path: &str, options: Option<NewLayerOptions>) -> Canvas {
+  pub fn new_from_path(name: &str, path: &str, options: impl Into<Option<NewLayerOptions>>) -> Canvas {
     Canvas {
       inner_canvas: Arc::new(Mutex::new(CanvasInner::new_from_path(name, path, options))),
     }
   }
   /// Saves the canvas to a file.
-  pub fn save(&self, path: &str, options: Option<WriterOptions>) {
+  pub fn save(&self, path: &str, options: impl Into<Option<WriterOptions>>) {
     let mut canvas = self.inner_canvas.lock().unwrap();
     canvas.save(path, options);
   }
@@ -89,9 +89,9 @@ impl Canvas {
 
   /// Updates the canvas by re-compositing all layers and child canvases.
   ///
-  /// This does not consume the `Canvas` wrapper; it returns a new `Canvas`
-  /// that shares the same inner `Rc<Mutex<CanvasInner>>`.
-  pub fn update_canvas(&self) -> Canvas {
+  /// Internal-only: composition is triggered automatically by `save` and `as_image`.
+  /// Returns a new `Canvas` wrapper referencing the same inner canvas.
+  pub(crate) fn update_canvas(&self) -> Canvas {
     {
       let mut canvas = self.inner_canvas.lock().unwrap();
       canvas.update_canvas();
@@ -127,7 +127,7 @@ impl Canvas {
   }
 
   /// Sets the rotation in degrees for the canvas within its parent
-  pub fn set_rotation(&mut self, degrees: Option<f32>) {
+  pub fn set_rotation(&mut self, degrees: impl Into<Option<f32>>) {
     let mut canvas = self.inner_canvas.lock().unwrap();
     canvas.set_rotation(degrees);
   }
@@ -162,13 +162,13 @@ impl Canvas {
   ///     }));
   /// project.save("output.png", None);
   /// ```
-  pub fn add_layer_from_path(self, name: &str, path: &str, options: Option<NewLayerOptions>) -> Self {
+  pub fn add_layer_from_path(self, name: &str, path: &str, options: impl Into<Option<NewLayerOptions>>) -> Self {
     let image = std::sync::Arc::new(Image::new_from_path(path));
     self.add_layer_from_image(name, image, options)
   }
 
   /// Adds a new canvas as a child canvas.
-  pub fn add_canvas(&self, canvas: Canvas, options: Option<AddCanvasOptions>) {
+  pub fn add_canvas(&self, canvas: Canvas, options: impl Into<Option<AddCanvasOptions>>) {
     let canvas_rc = Arc::new(Mutex::new(canvas));
 
     // Set the parent reference on the child canvas
@@ -203,10 +203,11 @@ impl Canvas {
   ///     .add_layer_from_image("White Layer", img, None);
   /// ```
   pub fn add_layer_from_image<I: Into<Arc<Image>>>(
-    self, name: &str, image: I, options: Option<NewLayerOptions>,
+    self, name: &str, image: I, options: impl Into<Option<NewLayerOptions>>,
   ) -> Self {
     let image_arc = image.into();
     let canvas_rc = self.inner_canvas.clone();
+    let options = options.into();
     let mut layer = LayerInner::new(name, image_arc);
     layer.set_canvas(canvas_rc);
 

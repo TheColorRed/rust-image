@@ -2,7 +2,7 @@
 
 use crate::{
   combine::blend::{self, RGBA},
-  transform::ResizeAlgorithm,
+  transform::TransformAlgorithm,
 };
 
 use super::anchor::Anchor;
@@ -14,10 +14,10 @@ pub enum LayerSize {
   Maintain,
   /// Scales the image as large as possible within its container without cropping or stretching the image.
   /// Defaults to the Auto resize algorithm.
-  Contain(Option<ResizeAlgorithm>),
+  Contain(Option<TransformAlgorithm>),
   /// Scales the image (while preserving its ratio) to the smallest possible size to fill the container (that is: both its height and width completely cover the container), leaving no empty space. If the proportions of the background differ from the element, the image is cropped either vertically or horizontally.
   /// Defaults to the Auto resize algorithm.
-  Cover(Option<ResizeAlgorithm>),
+  Cover(Option<TransformAlgorithm>),
   /// Resize the image to specific dimensions. If the size is larger than its container, it may be cropped.
   /// The width and height are specified in pixels.
   /// Defaults to the Auto resize algorithm.
@@ -26,7 +26,7 @@ pub enum LayerSize {
   /// let height = 600;
   /// Size::Specific(width, height, None);
   /// ```
-  Specific(u32, u32, Option<ResizeAlgorithm>),
+  Specific(u32, u32, Option<TransformAlgorithm>),
   /// Resize the image to a percentage of its original size.
   /// 0 to 1.0 represents 0% to 100%, values greater than 1.0 represent percentages over 100%.
   /// Defaults to the Auto resize algorithm.
@@ -34,7 +34,7 @@ pub enum LayerSize {
   /// let percentage = 0.5; // 50%
   /// Size::Percentage(percentage, None);
   /// ```
-  Percentage(f32, Option<ResizeAlgorithm>),
+  Percentage(f32, Option<TransformAlgorithm>),
 }
 
 /// Additional options for creating a new layer in a canvas.

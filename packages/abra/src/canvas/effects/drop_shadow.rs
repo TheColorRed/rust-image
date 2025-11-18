@@ -1,40 +1,118 @@
-use std::time::Instant;
-
-use super::options_drop_shadow::DropShadowOptions;
+use crate::color::{Color, Fill};
+use crate::combine::blend::{RGBA, normal};
 use crate::{
-  canvas::Layer,
-  color::{Color, Fill},
   combine::blend::{self, blend_images_at_with_opacity},
-  filters::blur::gaussian,
+  filters::blur::gaussian_blur,
   image::Image,
   utils::debug::DebugEffects,
 };
-use rayon::prelude::*;
 
-/// Applies a drop shadow effect to a layer by creating a canvas composition.
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::time::Instant;
+
+#[derive(Clone, Debug)]
+/// Options for configuring a drop shadow effect.
+pub struct DropShadow {
+  /// The color of the shadow in RGBA format.
+  pub fill: Fill,
+  /// The blend mode used to combine the shadow with the layer.
+  pub blend_mode: fn(RGBA, RGBA) -> RGBA,
+  /// The opacity of the shadow (0.0 to 1.0).
+  pub opacity: f32,
+  /// The angle of the shadow in degrees.
+  pub angle: f32,
+  /// The distance of the shadow from the object.
+  pub distance: f32,
+  /// The spread of the shadow between 0.0 and 1.0
+  pub spread: f32,
+  /// The blur radius of the shadow.
+  pub size: f32,
+}
+
+impl DropShadow {
+  /// Creates a new DropShadowOptions with default settings.
+  /// Default values:
+  /// - distance: 5.0 pixels
+  /// - angle: 45.0 degrees
+  /// - blur_radius: 5.0 pixels
+  /// - color: black with 60% opacity (0, 0, 0, 153)
+  pub fn new() -> Self {
+    DropShadow {
+      fill: Fill::Solid(Color::black()),
+      blend_mode: normal,
+      opacity: 0.35,
+      angle: 45.0,
+      distance: 5.0,
+      spread: 0.0,
+      size: 5.0,
+    }
+  }
+
+  /// Sets the distance of the shadow from the object.
+  pub fn with_distance(mut self, distance: f32) -> Self {
+    self.distance = distance;
+    self
+  }
+
+  /// Sets the angle of the shadow in degrees.
+  pub fn with_angle(mut self, angle: f32) -> Self {
+    self.angle = angle;
+    self
+  }
+
+  /// Sets the size of the shadow blur.
+  pub fn with_size(mut self, size: f32) -> Self {
+    self.size = size;
+    self
+  }
+
+  /// Sets the spread of the shadow between 0.0 and 1.0
+  pub fn with_spread(mut self, spread: f32) -> Self {
+    self.spread = spread.max(0.0).min(1.0);
+    self
+  }
+
+  /// Sets the color of the shadow in RGBA format.
+  pub fn with_fill(mut self, fill: Fill) -> Self {
+    self.fill = fill;
+    self
+  }
+
+  /// Sets the opacity of the shadow (0.0 to 1.0).
+  pub fn with_opacity(mut self, opacity: f32) -> Self {
+    self.opacity = opacity;
+    self
+  }
+
+  /// Sets the blend mode used to combine the shadow with the layer.
+  pub fn with_blend_mode(mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+    self.blend_mode = blend_mode;
+    self
+  }
+}
+
+/// Applies a drop shadow effect to an image by creating a composition with shadow and blur.
 ///
-/// Creates a new canvas with:
+/// Creates a new image with:
 /// 1. A shadow layer (colorized, blurred, and offset)
 /// 2. The original layer on top
 ///
-/// The original layer is replaced with this composed canvas result.
+/// Returns the composed image with the shadow effect applied.
 ///
 /// # Arguments
-/// * `layer` - The layer to apply the drop shadow to
+/// * `image` - The image to apply the drop shadow to
 /// * `options` - Configuration options for the drop shadow effect
-pub fn drop_shadow(layer: Layer, options: DropShadowOptions) {
+pub(crate) fn apply_drop_shadow(image: Arc<Image>, options: &DropShadow) -> Arc<Image> {
   let duration = Instant::now();
+
   // Skip if blur radius is 0 (no visible shadow)
   if options.size <= 0.0 {
-    return;
+    return image;
   }
 
-  // Get the original layer's image and dimensions
-  let layer_inner = layer.borrow();
-  let original_image = layer_inner.image().clone();
+  let original_image = image.as_ref();
   let (width, height) = original_image.dimensions::<usize>();
-  let original_position = layer_inner.position();
-  drop(layer_inner);
 
   // Create shadow by copying the original image
   let mut shadow_image = original_image.clone();
@@ -99,8 +177,7 @@ pub fn drop_shadow(layer: Layer, options: DropShadowOptions) {
   blend_images_at_with_opacity(&mut composite, &shadow_image, 0, 0, shadow_x, shadow_y, options.blend_mode, 1.0);
 
   // Blur the shadow area in the composite
-  // box_blur(&mut composite, options.size as u32);
-  gaussian(&mut composite, options.size as u32);
+  gaussian_blur(&mut composite, options.size as u32);
 
   // Reapply opacity to the blurred shadow (blur operation may have increased alpha)
   let mut composite_pixels = composite.rgba();
@@ -112,32 +189,9 @@ pub fn drop_shadow(layer: Layer, options: DropShadowOptions) {
   // Composite original at padding position
   blend_images_at_with_opacity(&mut composite, &original_image, 0, 0, padding_left, padding_top, blend::normal, 1.0);
 
-  // Update the original layer with the composite image
-  let composite_rgba = composite.rgba().to_vec();
-  let (composite_width, composite_height) = composite.dimensions::<u32>();
+  DebugEffects::DropShadow(options.clone(), duration.elapsed()).log();
 
-  let mut layer_inner = layer.borrow_mut();
-  layer_inner
-    .image_mut()
-    .set_new_pixels(composite_rgba, composite_width, composite_height);
-
-  // The origin should be set to the CENTER of the original content (0.5, 0.5 in relative coords).
-  // This ensures that when the layer is anchored, the anchor point refers to the center of the
-  // original content, not the expanded shadow composite.
-  layer_inner.set_origin(super::super::origin::Origin::Center);
-
-  // Set anchor dimensions to the ORIGINAL image dimensions so anchoring is based on the content size,
-  // not the expanded shadow composite size. The origin point will position at the center of content.
-  layer_inner.set_anchor_dimensions(width as u32, height as u32);
-  layer_inner.set_anchor_offset(-padding_left, -padding_top);
-
-  // Adjust layer position: the composite image now includes expanded padding,
-  // so we need to position it such that the original content stays in place
-  let adjusted_x = original_position.0 - padding_left;
-  let adjusted_y = original_position.1 - padding_top;
-  layer_inner.set_global_position(adjusted_x, adjusted_y);
-
-  DebugEffects::DropShadow(options, duration.elapsed()).log();
+  Arc::new(composite)
 }
 
 /// Converts an image to a single color while preserving and applying opacity to the alpha channel.

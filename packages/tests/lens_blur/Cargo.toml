@@ -1,0 +1,11 @@
+[package]
+name = "lens-blur-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { path = "../../abra" }
+
+[[bin]]
+name = "lens-blur-test"
+path = "main.rs"

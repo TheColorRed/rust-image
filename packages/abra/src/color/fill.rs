@@ -26,3 +26,27 @@ impl Display for Fill {
     }
   }
 }
+
+impl From<Gradient> for Fill {
+  fn from(gradient: Gradient) -> Self {
+    Fill::Gradient(gradient)
+  }
+}
+
+impl From<Color> for Fill {
+  fn from(color: Color) -> Self {
+    Fill::Solid(color)
+  }
+}
+
+impl From<Arc<Image>> for Fill {
+  fn from(image: Arc<Image>) -> Self {
+    Fill::Image(image)
+  }
+}
+
+impl From<Image> for Fill {
+  fn from(image: Image) -> Self {
+    Fill::Image(Arc::new(image))
+  }
+}

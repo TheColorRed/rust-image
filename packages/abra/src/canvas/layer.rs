@@ -3,7 +3,8 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::canvas::{LayerEffects, layer_inner::LayerInner};
+use crate::canvas::effects::LayerEffects;
+use crate::canvas::layer_inner::LayerInner;
 use crate::combine::blend::RGBA;
 
 pub use super::anchor::Anchor;
@@ -93,6 +94,10 @@ impl Layer {
   /// Returns the effects builder for queuing effects to be applied during rendering.
   pub fn effects(&self) -> LayerEffects {
     LayerEffects::new().with_layer(self.inner_layer.clone())
+  }
+  /// Sets all effects for the layer.
+  pub fn set_effects(&self, effects: LayerEffects) {
+    self.borrow_mut().set_effects(effects);
   }
 
   layer_method_mut!(

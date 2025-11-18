@@ -1,8 +1,15 @@
-use abra::{Canvas, Image, LayerSize, NewLayerOptions, canvas::AddCanvasOptions, color::Color, transform::Crop};
+use std::sync::Arc;
+
+use abra::{
+  Canvas, Image, LayerSize, NewLayerOptions,
+  canvas::{AddCanvasOptions, effects::LayerEffects},
+  color::Color,
+  transform::Crop,
+};
 use rand::prelude::SliceRandom;
 use rayon::prelude::*;
 
-use crate::{CollagePlugin, CollageStyle};
+use crate::{CollageOptions, CollagePlugin, CollageStyle};
 
 impl CollagePlugin {
   pub(crate) fn layered_grid_collage(&mut self) -> abra::Canvas {
@@ -45,7 +52,7 @@ impl CollagePlugin {
         );
 
         // Create canvas and apply transformations in parallel
-        let transform_image = std::sync::Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
+        let transform_image = Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
         let canvas = Canvas::new("Cell")
           .add_layer_from_image("empty", transform_image, None)
           .add_layer_from_image("image", image, Some(NewLayerOptions::new().with_size(LayerSize::Cover(None))));
@@ -67,26 +74,20 @@ impl CollagePlugin {
       })
       .collect();
 
+    let collage_effects = self
+      .options
+      .as_ref()
+      .and_then(|opts| opts.effects.clone())
+      .unwrap_or(LayerEffects::new());
+    // Apply collage-level effects to each image layer.
+    for (canvas, _) in &processed_canvases {
+      let image_layer = canvas.get_layer_by_name("image").unwrap();
+      image_layer.set_effects(collage_effects.clone());
+    }
+
     // Add all processed canvases to root canvas sequentially (Canvas::add_canvas requires mutable access)
     for (canvas, canvas_options) in processed_canvases {
-      // Queue effects on the child canvas's layers using the builder
-      if let Some(opts) = &self.options {
-        if let Some(effects) = &opts.effects {
-          for layer in canvas.layers() {
-            let builder = layer.effects();
-            let builder = if let Some(drop_shadow_effect) = &effects.drop_shadow {
-              builder.with_drop_shadow(drop_shadow_effect.clone())
-            } else {
-              builder
-            };
-            if let Some(stroke_effect) = &effects.stroke {
-              builder.with_stroke(stroke_effect.clone());
-            }
-          }
-        }
-      }
-
-      root_canvas.add_canvas(canvas, Some(canvas_options));
+      root_canvas.add_canvas(canvas, Some(canvas_options.clone()));
     }
 
     root_canvas

@@ -2,13 +2,20 @@
 
 This project uses Cargo as its build system and package manager.
 
+## Features
+
+⚠️ **No deprecations, no fallbacks, no support for legacy features** ⚠️
+
+We **MUST** remove legacy features or features that will become legacy due to updates or new features we add. This keeps the codebase clean and maintainable.
+
+This is not a public library. We can freely refactor and improve the codebase as we see fit.
+
 ## Abra
 
 Abra is an image processing library written in Rust. It provides functionality for loading, manipulating, and saving images, as well as working with layers and colors, blending, etc.
 
 The library is located in the `packages/abra` directory.
 
-We don't need to deprecate, make fallbacks, support legacy features, etc., as this isn't a public library yet. We can freely refactor and improve the codebase as we see fit.
 
 ### Mod.rs
 

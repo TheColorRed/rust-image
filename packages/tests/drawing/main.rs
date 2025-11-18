@@ -1,11 +1,5 @@
 use abra::{
-  color::Color,
-  draw::line,
-  draw::shapes,
-  geometry::{
-    path::{BezierCurve, Path, Rect},
-    point::Point,
-  },
+  geometry::{Heart, Path},
   image::Image,
 };
 
@@ -14,10 +8,15 @@ pub fn main() {
   let (width, height) = image.dimensions::<u32>();
   let start_time = std::time::Instant::now();
 
-  let mut curve = <Path as BezierCurve>::new_curve();
-  curve.add_three_point(Point::new(0, 0), Point::new(100, 100), Point::new(200, 0));
+  let heart = Heart::new();
 
-  line::curve_from(&mut image, Point::new(100, 200), curve, Color::from_rgba(255, 0, 0, 128));
+  // New API - fluent builder with Into conversions
+  // let path = Path::new()
+  //   .with_move_to((100.0, 200.0))
+  //   .with_quad_to((200.0, 300.0), (300.0, 200.0));
+
+  // Curve drawing will be updated to accept the new Path type
+  // line::curve(&mut image, path, Color::from_rgba(255, 0, 0, 128));
 
   // let r = Rect::new_rect(100, 100);
 

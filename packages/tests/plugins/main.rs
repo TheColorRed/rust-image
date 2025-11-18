@@ -1,6 +1,6 @@
 use abra::{
   ImageLoader,
-  canvas::{DropShadowOptions, LayerEffects, StrokeOptions},
+  canvas::effects::{DropShadow, LayerEffects, Stroke},
   color::{Color, Fill},
   plugin::Plugin,
 };
@@ -35,15 +35,12 @@ pub fn main() {
         // .with_background(Fill::Gradient(Gradient::rainbow()))
         .with_effects(
           LayerEffects::new()
-            .with_stroke(
-              StrokeOptions::new()
-                .with_fill(Fill::Solid(Color::white()))
-                .with_size(20),
-            )
+            .with_stroke(Stroke::new().with_fill(Fill::Solid(Color::white())).with_size(20))
             .with_drop_shadow(
-              DropShadowOptions::new()
+              DropShadow::new()
                 .with_angle(45.0)
                 .with_distance(10.0)
+                .with_opacity(0.8)
                 .with_size(20.0),
             ),
         ),

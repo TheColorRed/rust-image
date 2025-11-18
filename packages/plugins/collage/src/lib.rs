@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use abra::{
-  Canvas, Image, LoadedImages, NewLayerOptions,
-  canvas::LayerEffects,
+  Canvas, LoadedImages,
+  canvas::effects::LayerEffects,
   color::{Color, Fill},
-  draw::gradient::linear_gradient,
-  geometry::{path::Path, point::Point},
   plugin::{Plugin, PluginError, PluginResult},
 };
 use rand::prelude::{IndexedRandom, Rng};
@@ -147,30 +145,30 @@ impl CollagePlugin {
 
   fn set_background(&self, root_canvas: &Canvas) {
     if let Some(options) = &self.options {
-      let background = match options.background.clone() {
-        Fill::Solid(color) => {
-          let bg_image = std::sync::Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
-          Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
-        }
-        Fill::Gradient(stops) => {
-          let mut bg_image = Image::new(self.size.0, self.size.1);
-          let path = Path::new(vec![Point::new(0, 0), Point::new(self.size.0 as i32, 0)]);
-          linear_gradient(&mut bg_image, path, stops);
-          Canvas::new("Background Color").add_layer_from_image("background color", std::sync::Arc::new(bg_image), None)
-        }
-        Fill::Image(image) => {
-          let bg_image = std::sync::Arc::new(Image::new(self.size.0, self.size.1));
-          Canvas::new("Background Color")
-            .add_layer_from_image("background color", bg_image, None)
-            .add_layer_from_image(
-              "Image",
-              image.clone(),
-              Some(NewLayerOptions::new().with_size(abra::LayerSize::Cover(None))),
-            )
-            .flatten()
-        }
-      };
-      root_canvas.add_canvas(background, None);
+      // let background = match options.background.clone() {
+      //   Fill::Solid(color) => {
+      //     let bg_image = std::sync::Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
+      //     Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
+      //   }
+      //   Fill::Gradient(stops) => {
+      //     let mut bg_image = Image::new(self.size.0, self.size.1);
+      //     let path = Path::new(vec![Point::new(0, 0), Point::new(self.size.0 as i32, 0)]);
+      //     linear_gradient(&mut bg_image, path, stops);
+      //     Canvas::new("Background Color").add_layer_from_image("background color", std::sync::Arc::new(bg_image), None)
+      //   }
+      //   Fill::Image(image) => {
+      //     let bg_image = std::sync::Arc::new(Image::new(self.size.0, self.size.1));
+      //     Canvas::new("Background Color")
+      //       .add_layer_from_image("background color", bg_image, None)
+      //       .add_layer_from_image(
+      //         "Image",
+      //         image.clone(),
+      //         Some(NewLayerOptions::new().with_size(abra::LayerSize::Cover(None))),
+      //       )
+      //       .flatten()
+      //   }
+      // };
+      // root_canvas.add_canvas(background, None);
     }
   }
 }

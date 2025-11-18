@@ -79,7 +79,7 @@ impl CanvasInner {
   }
 
   /// Creates a new project with the given name and a canvas from the image at the given path.
-  pub fn new_from_path(name: &str, path: &str, _options: Option<NewLayerOptions>) -> CanvasInner {
+  pub fn new_from_path(name: &str, path: &str, _options: impl Into<Option<NewLayerOptions>>) -> CanvasInner {
     let image = Image::new_from_path(path);
     let (width, height) = image.dimensions();
     let mut canvas = CanvasInner::new(name);
@@ -96,7 +96,8 @@ impl CanvasInner {
   }
 
   /// Adds an already-wrapped child canvas with the given options.
-  pub fn add_canvas_rc(&mut self, canvas_rc: Arc<Mutex<Canvas>>, options: Option<AddCanvasOptions>) {
+  pub fn add_canvas_rc(&mut self, canvas_rc: Arc<Mutex<Canvas>>, options: impl Into<Option<AddCanvasOptions>>) {
+    let options = options.into();
     // Set canvas size from first child canvas
     if self.width.get() == 0 && self.height.get() == 0 {
       let canvas_ref = canvas_rc.lock().unwrap();
@@ -234,8 +235,8 @@ impl CanvasInner {
   }
 
   /// Sets the parent canvas reference.
-  pub fn set_parent(&self, parent: Option<Arc<Mutex<CanvasInner>>>) {
-    *self.parent.lock().unwrap() = parent;
+  pub fn set_parent(&self, parent: impl Into<Option<Arc<Mutex<CanvasInner>>>>) {
+    *self.parent.lock().unwrap() = parent.into();
   }
 
   /// Sets the global position of the canvas within its parent.
@@ -250,8 +251,8 @@ impl CanvasInner {
   }
 
   /// Sets the rotation in degrees for the canvas within its parent.
-  pub fn set_rotation(&mut self, degrees: Option<f32>) {
-    self.rotation.set(degrees);
+  pub fn set_rotation(&mut self, degrees: impl Into<Option<f32>>) {
+    self.rotation.set(degrees.into());
   }
 
   /// Gets the rotation in degrees for the canvas within its parent.
@@ -292,11 +293,11 @@ impl CanvasInner {
   }
 
   /// Saves the project to the given path.
-  pub fn save(&mut self, path: &str, options: Option<WriterOptions>) {
+  pub fn save(&mut self, path: &str, options: impl Into<Option<WriterOptions>>) {
     if self.needs_recompose.get() {
       self.update_canvas();
     }
-    self.result.save(path, options);
+    self.result.save(path, options.into());
   }
 
   /// Converts the entire canvas into a single Image by flattening all layers and child canvases.

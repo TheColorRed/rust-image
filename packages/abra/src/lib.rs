@@ -5,6 +5,8 @@
 
 /// Adjustments module
 pub mod adjustments;
+/// Brush module
+pub mod brush;
 /// Canvas module
 pub mod canvas;
 /// Color module

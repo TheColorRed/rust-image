@@ -2,7 +2,7 @@ use crate::image::Image;
 use rayon::prelude::*;
 
 /// Blurs an image using the average blur algorithm.
-pub fn average(image: &mut Image, radius: u32) {
+pub fn average_blur(image: &mut Image, radius: u32) {
   let kernel_size = radius * 2 + 1;
   let kernel_area = kernel_size * kernel_size;
   let kernel = vec![1.0 / kernel_area as f32; kernel_area as usize];

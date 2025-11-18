@@ -1,10 +1,7 @@
 //! The internal layer implementation.
 
 use crate::{
-  canvas::anchor::Anchor,
-  canvas::canvas_inner::CanvasInner,
-  canvas::layer_effects::EffectsBuilder,
-  canvas::origin::Origin,
+  canvas::{anchor::Anchor, canvas_inner::CanvasInner, effects::LayerEffects, origin::Origin},
   combine::blend::{self, RGBA},
   image::Image,
 };
@@ -42,8 +39,8 @@ pub(crate) struct LayerInner {
   anchor_dimensions: Option<(u32, u32)>,
   /// The positional offset applied when anchoring so effects like drop shadow don't shift placement.
   anchor_offset: (i32, i32),
-  /// Builder for effects to be applied during rendering.
-  effects_builder: EffectsBuilder,
+  /// The effects that will be applied to this layer during rendering.
+  effects: LayerEffects,
 }
 
 impl Debug for LayerInner {
@@ -81,7 +78,7 @@ impl LayerInner {
       origin: Origin::default(),
       anchor_dimensions: None,
       anchor_offset: (0, 0),
-      effects_builder: EffectsBuilder::new(),
+      effects: LayerEffects::new(),
     }
   }
 
@@ -124,6 +121,12 @@ impl LayerInner {
   pub fn set_relative_position(&mut self, x: i32, y: i32, layer: &LayerInner) {
     self.x = layer.x + x;
     self.y = layer.y + y;
+    self.canvas.lock().unwrap().needs_recompose.set(true);
+  }
+
+  /// Sets the effects configuration for this layer and marks canvas dirty.
+  pub fn set_effects(&mut self, effects: LayerEffects) {
+    self.effects = effects;
     self.canvas.lock().unwrap().needs_recompose.set(true);
   }
 
@@ -236,19 +239,10 @@ impl LayerInner {
     Arc::make_mut(&mut self.image)
   }
 
-  /// Returns a cloned copy of the effects builder.
-  pub(crate) fn get_effects_builder(&self) -> EffectsBuilder {
-    self.effects_builder.clone()
-  }
-
-  /// Sets the effects builder.
-  pub(crate) fn set_effects_builder(&mut self, builder: EffectsBuilder) {
-    self.effects_builder = builder;
-  }
-
-  /// Applies all queued effects to the layer's image.
-  pub fn apply_pending_effects(&mut self) {
-    self.image = self.effects_builder.apply(self.image.clone());
+  pub(crate) fn apply_pending_effects(&mut self) {
+    let image_arc = self.image.clone();
+    let effected_image = self.effects.apply(image_arc);
+    self.image = effected_image;
   }
 
   /// Sets the index of the layer within the canvas's layer stack
@@ -404,7 +398,7 @@ impl Clone for LayerInner {
       origin: self.origin,
       anchor_dimensions: self.anchor_dimensions,
       anchor_offset: self.anchor_offset,
-      effects_builder: self.effects_builder.clone(),
+      effects: self.effects.clone(),
     }
   }
 }
