@@ -1,7 +1,9 @@
 use crate::color::{Color, Fill};
 use crate::{
   Image,
-  geometry::{Area, LineCap, LineJoin, Path, Point},
+  brush::Brush,
+  draw::painter::Painter,
+  geometry::{Path, Point},
   utils::debug::DebugEffects,
 };
 
@@ -74,37 +76,27 @@ pub(crate) fn apply_stroke(image: Arc<Image>, options: &Stroke) -> Arc<Image> {
   let mut composite = Image::new(width, height);
   composite.set_rgba(original_image.rgba());
 
-  let start = match options.position {
-    OutlinePosition::Inside => Point::new(options.size as i32 / 2, options.size as i32 / 2),
-    OutlinePosition::Outside => Point::new(-(options.size as i32 / 2), -(options.size as i32 / 2)),
-    OutlinePosition::Center => Point::new(0, 0),
-  };
+  // Build a path that goes to each corner of the image so the stroke is drawn on
+  // the image border. Apply an offset based on `OutlinePosition` so clients can
+  // request an inside/center/outside-follow behavior.
+  let max_x = (width.saturating_sub(1)) as i32;
+  let max_y = (height.saturating_sub(1)) as i32;
 
-  let stroke_max_width = match options.position {
-    OutlinePosition::Inside => width - options.size,
-    OutlinePosition::Outside => width + options.size,
-    OutlinePosition::Center => 0,
-  };
-
-  let stroke_max_height = match options.position {
-    OutlinePosition::Inside => height - options.size,
-    OutlinePosition::Outside => height + options.size,
+  let offset = match options.position {
+    OutlinePosition::Inside => (options.size as i32) / 2,
+    OutlinePosition::Outside => -((options.size as i32) / 2),
     OutlinePosition::Center => 0,
   };
 
   let relative_path = vec![
-    Point::new(0, 0),
-    Point::new((stroke_max_width) as i32, 0),
-    Point::new((stroke_max_width) as i32, (stroke_max_height) as i32),
-    Point::new(0, (stroke_max_height) as i32),
-    Point::new(0, 0),
+    Point::new(0 + offset, 0 + offset),
+    Point::new(max_x + offset, 0 + offset),
+    Point::new(max_x + offset, max_y + offset),
+    Point::new(0 + offset, max_y + offset),
+    Point::new(0 + offset, 0 + offset),
   ];
 
-  let cap = match options.position {
-    OutlinePosition::Inside => LineCap::Square,
-    OutlinePosition::Outside => LineCap::Round,
-    OutlinePosition::Center => LineCap::Round,
-  };
+  // Cap type is intentionally ignored by the painter stroke method for now.
 
   // Respect configured opacity by adjusting fill alpha.
   let fill = match options.fill.clone() {
@@ -126,53 +118,37 @@ pub(crate) fn apply_stroke(image: Arc<Image>, options: &Stroke) -> Arc<Image> {
     }
   }
 
-  // Use the new unified stroke API: stroke path to create outline area, then fill
-  let stroke_outline = path.stroke(options.size as f32, LineJoin::Miter, cap);
-  let stroke_area: Area = stroke_outline.into();
-  let stroke_image = stroke_area.fill(fill.clone());
+  // Use the Painter to render the stroke using a brush. Build a brush based on options
+  // with a hardness of 1.0 and paint the path directly into the composite image.
+  let brush = Brush::new()
+    .with_size(options.size)
+    .with_color(fill.clone())
+    .with_hardness(1.0);
 
-  // Composite the stroke onto the composite image at the start position
-  let stroke_pixels = stroke_image.rgba();
-  let (stroke_width, stroke_height) = stroke_image.dimensions::<u32>();
-  let mut composite_pixels = composite.rgba();
-
-  for y in 0..stroke_height {
-    for x in 0..stroke_width {
-      let comp_x = (start.x() + x as i32) as u32;
-      let comp_y = (start.y() + y as i32) as u32;
-
-      if comp_x < width && comp_y < height {
-        let stroke_idx = ((y * stroke_width + x) as usize) * 4;
-        let comp_idx = ((comp_y * width + comp_x) as usize) * 4;
-
-        let src_a = stroke_pixels[stroke_idx + 3] as f32 / 255.0;
-        if src_a > 0.0 {
-          let dst_a = composite_pixels[comp_idx + 3] as f32 / 255.0;
-          let out_a = src_a + dst_a * (1.0 - src_a);
-
-          if out_a > 0.0 {
-            for c in 0..3 {
-              let src_c = stroke_pixels[stroke_idx + c] as f32;
-              let dst_c = composite_pixels[comp_idx + c] as f32;
-              let out_c = (src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a;
-              composite_pixels[comp_idx + c] = out_c.round().clamp(0.0, 255.0) as u8;
-            }
-            composite_pixels[comp_idx + 3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
-          }
-        }
-      }
+  // Build the final path from the corner points (no translation so no padding)
+  let mut translated_path = Path::new();
+  if !relative_path.is_empty() {
+    translated_path.with_move_to((relative_path[0].x() as f32, relative_path[0].y() as f32));
+    for point in relative_path.iter().skip(1) {
+      translated_path.with_line_to((point.x() as f32, point.y() as f32));
     }
   }
 
-  composite.set_rgba(composite_pixels);
+  let mut painter = Painter::new(&mut composite);
+  painter.stroke_with_brush(&translated_path, &brush);
 
   // Restore the original alpha channel to prevent dark edges at the boundary
   // This ensures the stroke only blends within the original layer's boundaries
   let original_pixels = original_image.rgba();
   let mut composite_pixels = composite.rgba();
 
+  // Preserve any added stroke alpha while avoiding lowering alpha where the
+  // original image has a higher alpha value. This allows strokes to show on
+  // the image border even if the original image has transparent corners.
   for i in (3..composite_pixels.len()).step_by(4) {
-    composite_pixels[i] = original_pixels[i];
+    let orig_a = original_pixels[i];
+    let comp_a = composite_pixels[i];
+    composite_pixels[i] = comp_a.max(orig_a);
   }
 
   composite.set_rgba(composite_pixels);
