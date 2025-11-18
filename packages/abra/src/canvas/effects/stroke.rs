@@ -109,14 +109,7 @@ pub(crate) fn apply_stroke(image: Arc<Image>, options: &Stroke) -> Arc<Image> {
     other => other,
   };
 
-  // Create path from points using the new API
-  let mut path = Path::new();
-  if !relative_path.is_empty() {
-    path.with_move_to((relative_path[0].x() as f32, relative_path[0].y() as f32));
-    for point in relative_path.iter().skip(1) {
-      path.with_line_to((point.x() as f32, point.y() as f32));
-    }
-  }
+
 
   // Use the Painter to render the stroke using a brush. Build a brush based on options
   // with a hardness of 1.0 and paint the path directly into the composite image.
