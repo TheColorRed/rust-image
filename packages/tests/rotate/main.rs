@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use abra::{adjustments::color, transform, Image};
+use abra::{Image, adjustments::color, rotate};
 
 const FILE: &str = "assets/bikini.jpg";
 const OUT_FILE: &str = "out/rotate.png";
@@ -10,7 +10,7 @@ pub fn main() {
 
   let start_time = std::time::Instant::now();
 
-  transform::rotate(&mut image, 45., None);
+  rotate(&mut image, 45., None);
   color::threshold(&mut image, 128);
 
   println!("Rotation took: {:?}", start_time.elapsed());

@@ -2,6 +2,7 @@
 members = [
   # "packages/rxrs",
   "packages/abra",
+  "packages/core/*",
   "packages/plugins/*",
   # "packages/alakazam",
   "packages/tests/*",
@@ -20,3 +21,22 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[workspace.dependencies]
+rayon = "1.11.0"
+ndarray = { version = "0.17.1", features = ["rayon"] }
+
+# Packages
+abra = { path = "./packages/abra" }
+core = { path = "./packages/core/core" }
+filters = { path = "./packages/core/filters" }
+adjustments = { path = "./packages/core/adjustments" }
+image = { path = "./packages/core/image" }
+drawing = { path = "./packages/core/drawing" }
+
+# Abra Plugins
+collage = { path = "./packages/plugins/collage" }
+
+[workspace.dependencies.uuid]
+version = "1.18.1"
+features = ["v4"]

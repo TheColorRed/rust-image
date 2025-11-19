@@ -1,10 +1,10 @@
 [package]
 name = "rotate-test"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-abra = { path = "../../abra" }
+abra = { workspace = true }
 
 [[bin]]
 name = "rotate-test"

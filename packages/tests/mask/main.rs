@@ -1,8 +1,7 @@
 use abra::{
-  color::Color,
-  geometry::{AspectRatio, Heart, Star},
-  image::Image,
-  mask::Mask,
+  Color, Image,
+  image::Mask,
+  {AspectRatio, Heart, Star},
 };
 
 const FILE: &str = "assets/skirt.png";

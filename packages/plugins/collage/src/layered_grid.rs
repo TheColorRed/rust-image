@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
 use abra::{
-  Canvas, Image, LayerSize, NewLayerOptions,
-  canvas::{AddCanvasOptions, effects::LayerEffects},
-  color::Color,
-  transform::Crop,
+  Color, Crop, Image,
+  image::{AddCanvasOptions, Canvas, LayerSize, NewLayerOptions, effects::LayerEffects},
 };
 use rand::prelude::SliceRandom;
 use rayon::prelude::*;
 
-use crate::{CollageOptions, CollagePlugin, CollageStyle};
+use crate::{CollagePlugin, CollageStyle};
 
 impl CollagePlugin {
-  pub(crate) fn layered_grid_collage(&mut self) -> abra::Canvas {
+  pub(crate) fn layered_grid_collage(&mut self) -> Canvas {
     // Get the total number of cells in the grid.
     let mut cell_count = 0;
     if let CollageStyle::LayeredGrid(columns, rows) = self.style {
@@ -22,8 +20,9 @@ impl CollagePlugin {
     let cell_width = self.size.0 / (cell_count as f32).sqrt() as u32;
     // The height of each cell in the grid.
     let cell_height = self.size.1 / (cell_count as f32).sqrt() as u32;
-    // The root canvas for the collage.
-    let root_canvas = Canvas::new("Collage");
+    // The root canvas for the collage. Create with explicit size so it doesn't
+    // automatically resize to the size of the first child canvas.
+    let root_canvas = Canvas::new_blank("Collage", self.size.0, self.size.1);
 
     self.set_background(&root_canvas);
 

@@ -75,20 +75,3 @@ fn resize_image(&mut self, p_width: u32, p_height: u32, p_algorithm: Option<Resi
   let (width, height) = self.dimensions();
 }
 ```
-
-# Documentation
-
-## Code Doc Blocks
-
-When documenting functions, parameters should be referred to by their exact names, including the `p_` prefix. This ensures clarity and consistency between the code and its documentation. Parameters should be documented in the order they appear in the function signature, and be formatted using backticks to denote code elements. Lists should use hyphens for bullet points, and the description should follow a semicolon after the parameter name.
-
-Example:
-```rust
-/// Resizes the image to the specified dimensions.
-/// - `p_width`: The new width of the image in pixels.
-/// - `p_height`: The new height of the image in pixels.
-/// - `p_algorithm`: The resizing algorithm to use. If `None`, a default algorithm will be used.
-fn resize_image(&mut self, p_width: u32, p_height: u32, p_algorithm: Option<ResizeAlgorithm>) {
-  // Function implementation
-}
-```

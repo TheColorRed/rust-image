@@ -1,5 +1,4 @@
-#![allow(unused_imports)]
-use abra::{filters::blur, image::Image};
+use abra::{Image, filters::blur};
 use std::time::Instant;
 
 const FILE: &str = "assets/bikini.jpg";

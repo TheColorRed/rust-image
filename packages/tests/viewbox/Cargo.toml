@@ -1,11 +1,11 @@
 [package]
 name = "viewbox-test"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "viewbox-test"
 path = "main.rs"
 
 [dependencies]
-abra = { path = "../../abra" }
+abra = { workspace = true }

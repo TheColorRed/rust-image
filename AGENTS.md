@@ -4,7 +4,7 @@ This project uses Cargo as its build system and package manager.
 
 ## Features
 
-⚠️ **No deprecations, no fallbacks, no support for legacy features** ⚠️
+⚠️ **No deprecations, no fallbacks, no legacy features** ⚠️
 
 We **MUST** remove legacy features or features that will become legacy due to updates or new features we add. This keeps the codebase clean and maintainable.
 
@@ -67,3 +67,48 @@ C:\Users\untun\.cargo\bin\cargo.EXE run --package <package-name> --bin <package-
 ## Documentation
 
 All documentation files are located in the `docs` directory. These files provide information about the design, architecture, and usage of the Abra library and Alakazam application. Also any API reviews and improvement tracking documents are stored here.
+
+## No Deprecations Policy
+
+This is a new project, any changes done should directly improve the codebase without adding deprecated features or fallbacks. This keeps the codebase clean and maintainable.
+
+For example, if we are adding a new feature that replaces an old one, we should remove the old feature instead of marking it as deprecated.
+
+### Example of Bad Practice
+
+This example shows a basic example of adding a new feature while keeping the old one, which is against our no deprecations policy.
+```rust
+// Bad: Adding a new feature while keeping the old one
+pub fn old_feature() {
+    // Old implementation
+}
+pub fn new_feature() {
+    // New implementation
+}
+// Usage of the features
+pub fn use_feature() {
+  if use_old {
+    old_feature();
+  } else {
+    new_feature();
+  }
+}
+```
+
+### Example of Good Practice
+
+This example shows a basic example of adding a new feature while removing the old one, which follows our no deprecations policy.
+```rust
+// Good: Removing the old feature when adding a new one
+pub fn new_feature() {
+    // New implementation
+}
+// Usage of the new feature
+pub fn use_feature() {
+    new_feature();
+}
+```
+
+## Unification of Similar Features
+
+There are features that are similar in functionality but have different implementations. These features should be analyzed and unified into a single implementation.

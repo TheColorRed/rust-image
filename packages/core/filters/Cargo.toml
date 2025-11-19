@@ -1,0 +1,12 @@
+[package]
+name = "filters"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+rayon = { workspace = true }
+core = { workspace = true }
+adjustments = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

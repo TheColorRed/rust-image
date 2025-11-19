@@ -1,9 +1,9 @@
 #![allow(unused_imports)]
 use abra::{
+  Image,
   filters::blur::{
     ApertureShape, IrisOptions, LensBlurOptions, NoiseDistribution, NoiseOptions, SpecularOptions, lens_blur,
   },
-  image::Image,
 };
 
 const FILE: &str = "assets/bikini.jpg";

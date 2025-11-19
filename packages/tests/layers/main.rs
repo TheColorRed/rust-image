@@ -1,11 +1,9 @@
 #![allow(unused_imports)]
 use abra::{
-  canvas::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
-  color::Color,
-  combine::blend::{self, RGBA},
-  image::Image,
-  transform::{Crop, Resize, TransformAlgorithm},
-  utils::fs::WriterOptions,
+  Color, Image, WriterOptions,
+  blend::{self, RGBA},
+  image::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
+  {Crop, Resize, TransformAlgorithm},
 };
 
 const BOTTOM_IMAGE: &str = "assets/aletta-ocean.jpg";

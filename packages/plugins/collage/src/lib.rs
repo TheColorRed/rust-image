@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use abra::{
-  Canvas, LoadedImages,
-  canvas::effects::LayerEffects,
-  color::{Color, Fill},
-  plugin::{Plugin, PluginError, PluginResult},
-};
+use abra::image::Canvas;
+use abra::image::effects::LayerEffects;
+use abra::plugin::{Plugin, PluginError, PluginResult};
+use abra::{Color, Fill, LoadedImages};
 use rand::prelude::{IndexedRandom, Rng};
 use rand::rngs::ThreadRng;
 
@@ -143,8 +141,8 @@ impl CollagePlugin {
     self.rng.random_range(min..=max)
   }
 
-  fn set_background(&self, root_canvas: &Canvas) {
-    if let Some(options) = &self.options {
+  fn set_background(&self, _root_canvas: &Canvas) {
+    if let Some(_options) = &self.options {
       // let background = match options.background.clone() {
       //   Fill::Solid(color) => {
       //     let bg_image = std::sync::Arc::new(Image::new_from_color(self.size.0, self.size.1, color));

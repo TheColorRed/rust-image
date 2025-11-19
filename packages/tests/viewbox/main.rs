@@ -1,6 +1,7 @@
-use abra::color::{Color, Fill, Gradient};
-use abra::geometry::{AspectRatio, LineJoin, Polygon};
-use abra::image::Image;
+use abra::Image;
+use abra::drawing::fill;
+use abra::{AspectRatio, LineJoin, Polygon};
+use abra::{Color, Fill, Gradient};
 
 fn main() {
   // Ensure output directory exists
@@ -27,15 +28,15 @@ fn main() {
 
   // Areas return from fit/stretch, which are closed shapes (no caps needed, only joins)
   let stroke_100 = heart_100.stroke(5.0, LineJoin::Round);
-  let filled_100 = stroke_100.fill(color.clone());
+  let filled_100 = fill(stroke_100, color.clone());
   image_small.set_from(&filled_100, (10, 10));
 
   let stroke_300 = heart_300.stroke(5.0, LineJoin::Miter);
-  let filled_300 = stroke_300.fill(color.clone());
+  let filled_300 = fill(stroke_300, color.clone());
   image_medium.set_from(&filled_300, (0, 0));
 
   let stroke_600 = heart_600.stroke(5.0, LineJoin::Bevel);
-  let filled_600 = stroke_600.fill(color.clone());
+  let filled_600 = fill(stroke_600, color.clone());
   image_large.set_from(&filled_600, (0, 0));
 
   // Save at different sizes
@@ -55,7 +56,7 @@ fn main() {
   let mut image_stretch = Image::new(800, 400); // Wide viewport
   let heart_stretched = heart.stretch((800.0, 400.0));
   let stroke_stretched = heart_stretched.stroke(3.0, LineJoin::Miter);
-  let filled_stretched = stroke_stretched.fill(Fill::Solid(Color::from_rgba(100, 150, 255, 255)));
+  let filled_stretched = fill(stroke_stretched, Fill::Solid(Color::from_rgba(100, 150, 255, 255)));
   image_stretch.set_from(&filled_stretched, (0, 0));
   image_stretch.save("out/heart_stretched.png", None);
 

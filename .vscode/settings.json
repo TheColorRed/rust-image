@@ -18,6 +18,7 @@
     "oneshot",
     "pointf",
     "rasterizer",
+    "rasterizing",
     "resvg",
     "rlib",
     "rngs",

@@ -1,11 +1,11 @@
 #![allow(unused_imports)]
 use abra::{
+  Image,
   adjustments::{
     brightness,
     color::{grayscale, invert, reduce_opacity, threshold},
     contrast, hue, saturation,
   },
-  image::Image,
 };
 
 const FILE: &str = "assets/bikini.jpg";

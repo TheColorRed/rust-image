@@ -1,8 +1,7 @@
 use abra::{
-  ImageLoader,
-  canvas::effects::{DropShadow, LayerEffects, Stroke},
-  color::{Color, Fill},
-  plugin::Plugin,
+  Color, Fill, ImageLoader,
+  image::effects::{LayerEffects, Stroke},
+  plugin::{Plugin, PluginResult},
 };
 use abra_collage::{CollageOptions, CollagePlugin, CollageStyle};
 
@@ -34,15 +33,13 @@ pub fn main() {
         // .with_background(Fill::Image(abra::Image::new_from_path(image_paths[0]).into()))
         // .with_background(Fill::Gradient(Gradient::rainbow()))
         .with_effects(
-          LayerEffects::new()
-            .with_stroke(Stroke::new().with_fill(Fill::Solid(Color::white())).with_size(20))
-            .with_drop_shadow(
-              DropShadow::new()
-                .with_angle(45.0)
-                .with_distance(10.0)
-                .with_opacity(0.8)
-                .with_size(20.0),
-            ),
+          LayerEffects::new().with_stroke(Stroke::new().with_fill(Fill::Solid(Color::black())).with_size(20)), // .with_drop_shadow(
+                                                                                                               //   DropShadow::new()
+                                                                                                               //     .with_angle(45.0)
+                                                                                                               //     .with_distance(10.0)
+                                                                                                               //     .with_opacity(0.8)
+                                                                                                               //     .with_size(20.0),
+                                                                                                               // ),
         ),
     );
 
@@ -50,7 +47,7 @@ pub fn main() {
 
   let result = collage_plugin.apply().unwrap();
   match result {
-    abra::plugin::PluginResult::Canvases(canvases) => {
+    PluginResult::Canvases(canvases) => {
       canvases[0].save("out/collage_result.png", None);
     }
     _ => {}

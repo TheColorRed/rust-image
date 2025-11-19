@@ -2,14 +2,14 @@ use std::time::Instant;
 
 use crate::Channels;
 use crate::color::Color;
+use crate::fs::WriterOptions;
+use crate::fs::file_info::FileInfo;
+use crate::fs::readers::svg::read_svg;
+use crate::fs::readers::{gif::read_gif, jpeg::read_jpg, png::read_png, webp::read_webp};
+use crate::fs::writers::{gif::write_gif, jpeg::write_jpg, png::write_png, webp::write_webp};
 use crate::geometry::{Area, PointF, Size};
 use crate::transform::{Crop, Resize, Rotate, TransformAlgorithm, crop};
 use crate::utils::debug::DebugInfo;
-use crate::utils::fs::WriterOptions;
-use crate::utils::fs::file_info::FileInfo;
-use crate::utils::fs::readers::svg::read_svg;
-use crate::utils::fs::readers::{gif::read_gif, jpeg::read_jpg, png::read_png, webp::read_webp};
-use crate::utils::fs::writers::{gif::write_gif, jpeg::write_jpg, png::write_png, webp::write_webp};
 use ndarray::{Array1, ArrayViewMut1, Axis};
 use rayon::prelude::*;
 
@@ -337,7 +337,7 @@ impl Image {
   pub fn rgba(&self) -> Vec<u8> {
     self.colors.to_vec()
   }
-
+  /// Gets a mutable reference to the colors of the image.
   pub fn colors(&mut self) -> &mut Array1<u8> {
     &mut self.colors
   }

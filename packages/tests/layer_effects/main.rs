@@ -1,16 +1,14 @@
 #![allow(unused_imports, dead_code)]
 use abra::{
+  Color, Image,
   adjustments::{
     brightness,
     color::{grayscale, invert, reduce_opacity, threshold},
     contrast, hue, saturation,
   },
-  canvas::effects::{DropShadow, Stroke},
-  canvas::Anchor,
-  color::Color,
-  combine::blend,
-  image::Image,
-  Canvas,
+  blend,
+  image::effects::{DropShadow, Stroke},
+  image::{Anchor, Canvas},
 };
 
 const FILE: &str = "assets/bikini.jpg";

@@ -1,7 +1,4 @@
-use abra::{
-  geometry::{Heart, Path},
-  image::Image,
-};
+use abra::{Heart, Image};
 
 pub fn main() {
   let mut image = Image::new_from_path("assets/bikini.jpg");
