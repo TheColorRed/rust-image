@@ -8,6 +8,7 @@ pub struct FileInfo {
   /// The height of the source image.
   pub height: u32,
   /// The number of channels in the source image.
+  #[allow(dead_code)]
   pub channels: Channels,
   /// The pixel data of the source image.
   pub pixels: Vec<u8>,

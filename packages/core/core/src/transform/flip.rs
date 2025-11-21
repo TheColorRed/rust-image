@@ -6,7 +6,7 @@ use rayon::prelude::*;
 /// Flip the image along the horizontal axis.
 /// * `image` - The image to flip.
 pub fn horizontal(image: &mut Image) {
-  let duration = Instant::now();
+  let _duration = Instant::now();
   let (width, height) = image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
   let old_pixels = image.rgba();
@@ -27,7 +27,7 @@ pub fn horizontal(image: &mut Image) {
 /// Flip the image along the vertical axis.
 /// * `image` - The image to flip.
 pub fn vertical(image: &mut Image) {
-  let duration = Instant::now();
+  let _duration = Instant::now();
   let (width, height) = image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
   let old_pixels = image.rgba();
