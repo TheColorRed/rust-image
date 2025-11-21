@@ -1,7 +1,7 @@
 use abra::{
   Image, Path,
   drawing::{Brush, paint_with_brush, stroke_with_brush},
-  {Color, Fill, Gradient},
+  {Color, Gradient},
 };
 
 const FILE: &str = "assets/bikini.jpg";

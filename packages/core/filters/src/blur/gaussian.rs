@@ -27,7 +27,7 @@ pub fn gaussian_blur(image: &mut Image, radius: u32) {
   if radius == 0 {
     return;
   }
-  let duration = Instant::now();
+  let _duration = Instant::now();
   let kernel = gaussian_kernel_1d(radius);
   let (width, height) = image.dimensions::<u32>();
   let width = width as i32;

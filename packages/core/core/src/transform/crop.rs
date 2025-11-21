@@ -10,10 +10,10 @@ pub trait Crop {
 
 /// Crop the image to the given dimensions.
 pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
-  let duration = Instant::now();
+  let _duration = Instant::now();
   let mut new_pixels = vec![0u8; (width * height * 4) as usize];
   let old_pixels = image.rgba();
-  let (old_width, old_height): (u32, u32) = image.dimensions();
+  let (old_width, _old_height): (u32, u32) = image.dimensions();
 
   for i in 0..(width * height) {
     let new_x = i % width;

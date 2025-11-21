@@ -918,7 +918,7 @@ pub(crate) fn get_resize_algorithm(
 /// - `p_height`: The target height.
 /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
 pub fn resize(p_image: &mut Image, p_width: u32, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let start = Instant::now();
+  let _start = Instant::now();
   let (old_width, old_height) = p_image.dimensions::<u32>();
 
   let resolved_algo = get_resize_algorithm(p_algorithm.into(), old_width, old_height, p_width, p_height);

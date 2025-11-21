@@ -35,7 +35,7 @@ impl Path {
   pub fn stroke(&self, p_width: f32, _p_join: LineJoin, p_cap: LineCap) -> Path {
     use std::f32::consts::PI;
 
-    let start = Instant::now();
+    let _start = Instant::now();
     let half_width = p_width / 2.0;
     // Use a lower flatten tolerance to produce smoother joins and arcs.
     // More points reduce polygon stair-casing when approximating curves.

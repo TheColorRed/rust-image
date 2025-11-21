@@ -6,7 +6,7 @@ pub fn main() {
   let size = (255, 250);
   let mut image = Image::new(size.0, size.1);
 
-  let mut gradient_color = Gradient::rainbow();
+  let gradient_color = Gradient::rainbow();
   gradient_color.with_direction(Path::line((0, 0), (0, size.1)));
 
   let mut fill_image = Image::new_from_path("assets/nude/gravure-idol-black-hair-chest.jpg");

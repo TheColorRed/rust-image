@@ -100,7 +100,7 @@ impl<'a> Rasterizer<'a> {
   /// rasterizer.rasterize(&mut image);
   /// ```
   pub fn rasterize(&self, p_image: &mut Image) {
-    let start = std::time::Instant::now();
+    let _start = std::time::Instant::now();
     let mut pixels = p_image.rgba();
     let (width, height) = p_image.dimensions::<u32>();
     let total_samples = self.sample_grid.total_samples() as f32;
