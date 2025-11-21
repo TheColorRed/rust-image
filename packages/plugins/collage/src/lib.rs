@@ -1,7 +1,17 @@
 use std::sync::Arc;
 
-use abra::image::Canvas;
-use abra::image::effects::LayerEffects;
+use abra::Area;
+use abra::Image;
+use abra::canvas::Canvas;
+use abra::canvas::LayerEffects;
+use abra::canvas::LayerSize;
+use abra::canvas::NewLayerOptions;
+use abra::drawing::Brush;
+use abra::drawing::fill_area_with_brush;
+// Note: `paint_with_brush`, `shader_from_fill` and `stroke_with_brush` were
+// previously imported but are not used directly in this file. Remove them to
+// avoid unused import warnings. Use `fill_area_with_brush` which is consumed
+// in `CollagePlugin::set_background` above.
 use abra::plugin::{Plugin, PluginError, PluginResult};
 use abra::{Color, Fill, LoadedImages};
 use rand::prelude::{IndexedRandom, Rng};
@@ -9,7 +19,9 @@ use rand::rngs::ThreadRng;
 
 mod grid;
 mod layered_grid;
+mod random;
 
+#[derive(Clone)]
 pub struct CollageOptions {
   /// Rotation range for images in the collage.
   /// - Positive values rotate clockwise.
@@ -39,20 +51,20 @@ impl CollageOptions {
   }
 
   /// Sets the rotation range for images in the collage.
-  pub fn with_rotation_range(mut self, min: f32, max: f32) -> Self {
-    self.rotation = (min, max);
+  pub fn with_rotation_range(mut self, min: impl Into<f64>, max: impl Into<f64>) -> Self {
+    self.rotation = (min.into() as f32, max.into() as f32);
     self
   }
 
   /// Sets the scale range for images in the collage.
-  pub fn with_scale_range(mut self, min: f32, max: f32) -> Self {
-    self.scale = (min, max);
+  pub fn with_scale_range(mut self, min: impl Into<f64>, max: impl Into<f64>) -> Self {
+    self.scale = (min.into() as f32, max.into() as f32);
     self
   }
 
   /// Sets the background color for the collage.
-  pub fn with_background(mut self, background: Fill) -> Self {
-    self.background = background;
+  pub fn with_background(mut self, background: impl Into<Fill>) -> Self {
+    self.background = background.into();
     self
   }
 
@@ -75,6 +87,9 @@ pub enum CollageStyle {
   /// - columns: Number of columns in the grid.
   /// - rows: Number of rows in the grid.
   LayeredGrid(u32, u32),
+  /// A random collage where images are placed at random positions.
+  /// - `count`: Number of images to include in the random collage.
+  Random(u32),
 }
 
 /// A plugin that creates collages from multiple images.
@@ -136,37 +151,39 @@ impl CollagePlugin {
     self.images[selected_index].clone()
   }
 
-  fn select_rotation(&mut self, rotation: (f32, f32)) -> f32 {
-    let (min, max) = rotation;
+  fn select_range(&mut self, range: (f32, f32)) -> f32 {
+    let (min, max) = range;
     self.rng.random_range(min..=max)
   }
 
-  fn set_background(&self, _root_canvas: &Canvas) {
-    if let Some(_options) = &self.options {
-      // let background = match options.background.clone() {
-      //   Fill::Solid(color) => {
-      //     let bg_image = std::sync::Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
-      //     Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
-      //   }
-      //   Fill::Gradient(stops) => {
-      //     let mut bg_image = Image::new(self.size.0, self.size.1);
-      //     let path = Path::new(vec![Point::new(0, 0), Point::new(self.size.0 as i32, 0)]);
-      //     linear_gradient(&mut bg_image, path, stops);
-      //     Canvas::new("Background Color").add_layer_from_image("background color", std::sync::Arc::new(bg_image), None)
-      //   }
-      //   Fill::Image(image) => {
-      //     let bg_image = std::sync::Arc::new(Image::new(self.size.0, self.size.1));
-      //     Canvas::new("Background Color")
-      //       .add_layer_from_image("background color", bg_image, None)
-      //       .add_layer_from_image(
-      //         "Image",
-      //         image.clone(),
-      //         Some(NewLayerOptions::new().with_size(abra::LayerSize::Cover(None))),
-      //       )
-      //       .flatten()
-      //   }
-      // };
-      // root_canvas.add_canvas(background, None);
+  fn set_background(&self, root_canvas: &Canvas) {
+    if let Some(options) = &self.options {
+      let background = match options.background.clone() {
+        Fill::Solid(color) => {
+          let bg_image = Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
+          Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
+        }
+        Fill::Gradient(gradient) => {
+          let mut bg_image = Image::new(self.size.0, self.size.1);
+          let brush = Brush::new().with_color(gradient.clone());
+          let area = Area::new_from_image(&bg_image);
+          fill_area_with_brush(&mut bg_image, &area, &brush);
+
+          Canvas::new("Background Color").add_layer_from_image("background color", Arc::new(bg_image), None)
+        }
+        Fill::Image(image) => {
+          let bg_image = Arc::new(Image::new(self.size.0, self.size.1));
+          Canvas::new("Background Color")
+            .add_layer_from_image("background color", bg_image, None)
+            .add_layer_from_image(
+              "Image",
+              image.clone(),
+              Some(NewLayerOptions::new().with_size(LayerSize::Cover(None))),
+            )
+            .flatten()
+        }
+      };
+      root_canvas.add_canvas(background, None);
     }
   }
 }
@@ -189,6 +206,10 @@ impl Plugin for CollagePlugin {
       }
       CollageStyle::LayeredGrid(_columns, _rows) => {
         let collage_result = self.layered_grid_collage();
+        Ok(PluginResult::Canvases(vec![collage_result]))
+      }
+      CollageStyle::Random(_count) => {
+        let collage_result = self.random_collage();
         Ok(PluginResult::Canvases(vec![collage_result]))
       }
     };

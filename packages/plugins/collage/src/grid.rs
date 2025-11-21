@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use abra::{
   Color, Image, Rotate,
-  image::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
+  canvas::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
 };
 
 use crate::{CollagePlugin, CollageStyle};
@@ -31,7 +31,7 @@ impl CollagePlugin {
 
       // Rotate the image if the option.rotation is set
       if let Some(rotation) = self.options.as_ref().and_then(|opts| Some(opts.rotation)) {
-        image.rotate(self.select_rotation(rotation), None);
+        image.rotate(self.select_range(rotation), None);
       }
 
       let trans_image = Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));

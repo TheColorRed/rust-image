@@ -2,28 +2,24 @@ use crate::fs::mkdirp;
 use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
 use crate::image::Image;
-use jpeg::ColorType::Rgba;
-use jpeg_encoder as jpeg;
-use std::fs::File;
+use std::fs::write;
+use turbojpeg::PixelFormat::RGB;
+use turbojpeg::compress;
 
 /// Writes the image data to a JPEG file
-pub fn write_jpg(file: &str, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
-  let dir = dirname(file);
+pub fn write_jpg(file: impl Into<String>, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
+  let file = file.into();
+  let dir = dirname(file.as_str());
   mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
-  let file = File::create(file).map_err(|e| e.to_string())?;
-  let (width, height) = image.dimensions::<u32>();
+  // File::create(file.as_str()).map_err(|e| e.to_string())?;
   let quality = match options {
     Some(o) => o.quality,
     None => 100,
   };
   println!("JPEG Quality set to {}", quality);
 
-  let encoder = jpeg::Encoder::new(file, quality);
-  let pixels = image.rgba();
-
-  encoder
-    .encode(&pixels, width as u16, height as u16, Rgba)
-    .expect("error encoding jpeg");
-
-  Ok(())
+  let (width, height) = image.dimensions::<u32>();
+  let image = turbojpeg::Image::mandelbrot(width as usize, height as usize, RGB);
+  let jpeg_data = compress(image.as_deref(), quality as i32, turbojpeg::Subsamp::Sub2x2).map_err(|e| e.to_string())?;
+  write(file.as_str(), &jpeg_data).map_err(|e| e.to_string())
 }

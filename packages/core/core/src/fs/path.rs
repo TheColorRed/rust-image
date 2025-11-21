@@ -6,10 +6,10 @@ pub fn dirname(path: &str) -> String {
   parts.join(&sep)
 }
 
-/// Returns the base name of a path.
-pub fn basename(path: &str) -> String {
-  let sep = std::path::MAIN_SEPARATOR.to_string();
+// /// Returns the base name of a path.
+// pub fn basename(path: &str) -> String {
+//   let sep = std::path::MAIN_SEPARATOR.to_string();
 
-  let parts = path.split(&sep).collect::<Vec<&str>>();
-  parts[parts.len() - 1].to_string()
-}
+//   let parts = path.split(&sep).collect::<Vec<&str>>();
+//   parts[parts.len() - 1].to_string()
+// }

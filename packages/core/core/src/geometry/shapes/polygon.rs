@@ -24,16 +24,16 @@ impl Polygon {
       let y = radius * angle_rad.sin() + radius;
 
       if i == 0 {
-        path.with_move_to((x, y));
+        path.move_to((x, y));
         first = Some((x, y));
       } else {
-        path.with_line_to((x, y));
+        path.line_to((x, y));
       }
     }
 
     // Explicitly close by returning to the first point
     if let Some((fx, fy)) = first {
-      path.with_line_to((fx, fy));
+      path.line_to((fx, fy));
     }
 
     path

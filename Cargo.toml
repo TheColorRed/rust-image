@@ -5,13 +5,13 @@ members = [
   "packages/core/*",
   "packages/plugins/*",
   # "packages/alakazam",
-  "packages/tests/*",
+  "tests/*",
 ]
 default-members = [
   # "packages/rxrs",
   # "packages/abra",
   # "packages/alakazam",
-  "packages/tests/*",
+  "tests/*",
 ]
 
 resolver = "2"
@@ -24,15 +24,17 @@ opt-level = 3
 
 [workspace.dependencies]
 rayon = "1.11.0"
+rand = "0.9.2"
 ndarray = { version = "0.17.1", features = ["rayon"] }
 
 # Packages
 abra = { path = "./packages/abra" }
-core = { path = "./packages/core/core" }
-filters = { path = "./packages/core/filters" }
 adjustments = { path = "./packages/core/adjustments" }
-image = { path = "./packages/core/image" }
+canvas = { path = "./packages/core/canvas" }
+core = { path = "./packages/core/core" }
 drawing = { path = "./packages/core/drawing" }
+filters = { path = "./packages/core/filters" }
+mask = { path = "./packages/core/mask" }
 
 # Abra Plugins
 collage = { path = "./packages/plugins/collage" }

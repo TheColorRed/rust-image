@@ -1,6 +1,6 @@
-use core::{Area, Fill, Image, PointF};
+use core::{Area, Fill, Image, Path, PointF};
 
-use crate::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill};
+use crate::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill_with_path};
 
 /// Fills the area with the specified fill style.
 /// - `p_area`: The area to fill.
@@ -30,8 +30,11 @@ pub fn fill(p_area: impl Into<Area>, p_fill: impl Into<Fill>) -> Image {
   // Build coverage mask
   let coverage = PolygonCoverage::new(flattened);
 
-  // Build shader from fill
-  let shader = shader_from_fill(&fill);
+  // Build shader from fill. If the gradient has no explicit direction, use the
+  // area bounding box to create a horizontal gradient path so the gradient
+  // is visible across the area.
+  let fallback_path = Some(Path::line((min_x, min_y), (max_x, min_y)));
+  let shader = shader_from_fill_with_path(fill.clone(), fallback_path);
 
   // Use source-over compositing
   let compositor = SourceOverCompositor;

@@ -6,7 +6,8 @@
 pub mod plugin;
 
 pub use adjustments;
+pub use canvas;
 pub use core::*;
 pub use drawing;
 pub use filters;
-pub use image;
+pub use mask;

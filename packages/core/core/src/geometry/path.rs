@@ -87,12 +87,22 @@ impl Path {
     self
   }
 
-  /// Sets the starting point of the path (move to).
-  /// Returns the starting point of the path.
+  /// Gets the starting point of the path.
   pub fn start(&self) -> PointF {
     self.start
   }
-
+  /// Gets the ending point of the path.
+  pub fn end(&self) -> PointF {
+    if let Some(last_segment) = self.segments.last() {
+      match last_segment {
+        Segment::Line { to } => *to,
+        Segment::Quadratic { to, .. } => *to,
+        Segment::Cubic { to, .. } => *to,
+      }
+    } else {
+      self.start
+    }
+  }
   /// Returns the segments of the path.
   pub fn segments(&self) -> &[Segment] {
     &self.segments

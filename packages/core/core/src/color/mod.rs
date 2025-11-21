@@ -2,6 +2,7 @@
 
 /// Color representation and manipulation
 mod color;
+mod colors_list;
 /// Fill modes for colors and gradients
 mod fill;
 /// Tools for creating gradients

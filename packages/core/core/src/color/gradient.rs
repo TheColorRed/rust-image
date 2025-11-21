@@ -88,7 +88,7 @@ impl Gradient {
     Gradient { stops, direction: None }
   }
   /// Sets the length of the gradient using a path where the first point is the start and the last point is the end.
-  pub fn set_direction(&mut self, path: crate::geometry::Path) -> &mut Self {
+  pub fn with_direction(mut self, path: crate::geometry::Path) -> Self {
     self.direction = Some(path);
     self
   }

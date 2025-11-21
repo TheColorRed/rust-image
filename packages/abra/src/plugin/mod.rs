@@ -1,5 +1,5 @@
+use canvas::Canvas;
 use core::Image;
-use image::Canvas;
 
 /// Trait that all plugins must implement.
 pub trait Plugin {

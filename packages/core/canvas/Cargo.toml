@@ -1,17 +1,15 @@
 [package]
-name = "abra"
+name = "canvas"
 version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 core = { workspace = true }
-canvas = { workspace = true }
-drawing = { workspace = true }
-adjustments = { workspace = true }
 filters = { workspace = true }
-mask = { workspace = true }
+drawing = { workspace = true }
 
 rayon = { workspace = true }
+uuid = { workspace = true }
 
 [lib]
 crate-type = ["dylib"]

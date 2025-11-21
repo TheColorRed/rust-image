@@ -65,13 +65,34 @@ pub trait Shader: Sync {
 /// ```ignore
 /// let shader = shader_from_fill(&Fill::Solid(Color::from_rgba(255,255,255,255)));
 /// ```
-pub fn shader_from_fill(p_fill: &Fill) -> Box<dyn Shader + Send + Sync> {
-  match p_fill {
-    Fill::Solid(color) => Box::new(SolidShader::new(*color)),
+pub fn shader_from_fill(p_fill: impl Into<Fill>) -> Box<dyn Shader + Send + Sync> {
+  match p_fill.into() {
+    Fill::Solid(color) => Box::new(SolidShader::new(color)),
     Fill::Gradient(gradient) => {
       let path = gradient.direction().unwrap_or_else(|| Path::new());
       Box::new(LinearGradientShader::new(path, gradient.clone()))
     }
-    Fill::Image(image) => Box::new(ImageShader::new((**image).clone(), 0.0, 0.0)),
+    Fill::Image(image) => Box::new(ImageShader::new((*image).clone(), 0.0, 0.0)),
+  }
+}
+
+/// Creates a shader from a Fill variant with the provided fallback path to be used when
+/// the fill has no explicit gradient direction. The fallback path is only used when
+/// the gradient has no direction.
+pub fn shader_from_fill_with_path(
+  p_fill: impl Into<Fill>, fallback_path: Option<Path>,
+) -> Box<dyn Shader + Send + Sync> {
+  match p_fill.into() {
+    Fill::Solid(color) => Box::new(SolidShader::new(color)),
+    Fill::Gradient(gradient) => {
+      let path = gradient
+        .direction()
+        .unwrap_or_else(|| fallback_path.unwrap_or_else(|| Path::new()));
+      let gradient_clone = gradient.clone();
+      // Ensure gradient has a direction so gradient::get_color uses path parameterization
+      gradient_clone.with_direction(path.clone());
+      Box::new(LinearGradientShader::new(path, gradient.clone()))
+    }
+    Fill::Image(image) => Box::new(ImageShader::new((*image).clone(), 0.0, 0.0)),
   }
 }

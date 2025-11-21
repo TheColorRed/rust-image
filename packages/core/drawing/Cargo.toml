@@ -8,4 +8,4 @@ core = { workspace = true }
 rayon = { workspace = true }
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["dylib"]

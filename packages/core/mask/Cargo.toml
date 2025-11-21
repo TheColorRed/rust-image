@@ -1,13 +1,12 @@
 [package]
-name = "collage"
+name = "mask"
 version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-abra = { workspace = true }
 rayon = { workspace = true }
-rand = { workspace = true }
+core = { workspace = true }
+drawing = { workspace = true }
 
 [lib]
-name = "abra_collage"
 crate-type = ["dylib"]

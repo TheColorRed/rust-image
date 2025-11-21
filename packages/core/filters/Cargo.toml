@@ -9,4 +9,4 @@ core = { workspace = true }
 adjustments = { workspace = true }
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["dylib"]

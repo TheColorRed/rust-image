@@ -134,6 +134,7 @@ impl Image {
     self.height = info.height;
     self.set_new_pixels(info.pixels, info.width, info.height);
     self.color_len = self.width as i32 * self.height as i32;
+    println!("Opened image: {} ({}x{}) in {:?}", file, self.width, self.height, start.elapsed());
     // DebugInfo::ImageOpened(file.to_string(), self.width, self.height, start.elapsed()).log();
   }
 
@@ -164,11 +165,11 @@ impl Image {
   /// Get the dimensions of the image and return it as a tuple of type `T`.
   pub fn dimensions<T>(&self) -> (T, T)
   where
-    T: TryFrom<u32>,
-    <T as TryFrom<u32>>::Error: std::fmt::Debug,
+    T: TryFrom<u64>,
+    <T as TryFrom<u64>>::Error: std::fmt::Debug,
   {
-    let width = T::try_from(self.width).unwrap();
-    let height = T::try_from(self.height).unwrap();
+    let width = T::try_from(self.width as u64).unwrap();
+    let height = T::try_from(self.height as u64).unwrap();
     (width, height)
   }
 

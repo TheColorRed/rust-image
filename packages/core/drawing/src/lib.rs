@@ -22,6 +22,7 @@ mod core {
   pub mod shader;
 }
 mod shaders {
+  pub mod brush_dabs_shader;
   pub mod brush_shader;
   pub mod image_shader;
   pub mod linear_gradient_shader;
@@ -39,5 +40,5 @@ pub use core::coverage::{CoverageMask, PolygonCoverage};
 pub use core::painter::*;
 pub use core::rasterize::Rasterizer;
 pub use core::sampling::SampleGrid;
-pub use core::shader::{Shader, shader_from_fill};
+pub use core::shader::{Shader, shader_from_fill, shader_from_fill_with_path};
 pub use fill::fill;

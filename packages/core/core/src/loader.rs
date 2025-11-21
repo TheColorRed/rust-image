@@ -1,6 +1,7 @@
 //! Parallel image loading utilities using Rayon.
 
 use crate::Image;
+use globwalk::glob;
 use rayon::{ThreadPoolBuilder, prelude::*};
 use std::sync::Arc;
 
@@ -25,6 +26,10 @@ pub enum ImageLoader<'a> {
   FromPaths(Vec<&'a str>),
   /// Load images from existing `Image` instances.
   FromImages(Vec<Image>),
+  /// Load images from a list of glob patterns.
+  FromGlob(Vec<&'a str>),
+  /// Load images from a list of folders.
+  FromFolders(Vec<&'a str>, bool),
 }
 
 impl<'a> ImageLoader<'a> {
@@ -34,14 +39,27 @@ impl<'a> ImageLoader<'a> {
   /// let loader = ImageLoader::FromPaths(paths).load();
   /// ```
   pub fn load(self) -> LoadedImages {
-    match self {
+    let loaded_images = match self {
       ImageLoader::FromPaths(paths) => LoadedImages {
         images: load_images_parallel(paths),
       },
       ImageLoader::FromImages(images) => LoadedImages {
         images: images.into_iter().map(|img| Arc::new(img)).collect(),
       },
-    }
+      ImageLoader::FromFolders(folders, recursive) => {
+        let all_paths = get_paths_from_folders(folders, recursive);
+        println!("Found {} images in folders.", all_paths.len());
+        let images = load_images_parallel(all_paths.clone());
+        LoadedImages { images }
+      }
+      ImageLoader::FromGlob(patterns) => {
+        let all_paths = get_paths_from_glob(patterns);
+        println!("Found {} images from glob patterns.", all_paths.len());
+        let images = load_images_parallel(all_paths.clone());
+        LoadedImages { images }
+      }
+    };
+    loaded_images
   }
 
   /// Load images synchronously (non-parallel).
@@ -52,15 +70,24 @@ impl<'a> ImageLoader<'a> {
   pub fn load_sync(self) -> LoadedImages {
     match self {
       ImageLoader::FromPaths(paths) => {
-        let images = paths
-          .into_iter()
-          .map(|path| Arc::new(Image::new_from_path(path)))
-          .collect();
+        let images = load_images_sync(paths);
         LoadedImages { images }
       }
       ImageLoader::FromImages(images) => LoadedImages {
         images: images.into_iter().map(|img| Arc::new(img)).collect(),
       },
+      ImageLoader::FromGlob(patterns) => {
+        let all_paths = get_paths_from_glob(patterns);
+        println!("Loaded {} images from glob patterns.", all_paths.len());
+        let images = load_images_sync(all_paths);
+        LoadedImages { images }
+      }
+      ImageLoader::FromFolders(folders, recursive) => {
+        let all_paths = get_paths_from_folders(folders, recursive);
+        println!("Loaded {} images from folders.", all_paths.len());
+        let images = load_images_sync(all_paths);
+        LoadedImages { images }
+      }
     }
   }
 }
@@ -164,8 +191,8 @@ impl LoadedImages {
   ///   // Use the image
   /// }
   /// ```
-  pub fn at(self, index: usize) -> Option<Arc<Image>> {
-    self.images.get(index).cloned()
+  pub fn at(&self, index: impl Into<u32>) -> Option<Arc<Image>> {
+    self.images.get(index.into() as usize).cloned()
   }
 
   /// Gets all loaded images.
@@ -202,26 +229,82 @@ impl LoadedImages {
 /// let paths = vec!["path/to/image1.png", "path/to/image2.jpg"];
 /// let images = load_images_parallel(paths);
 /// ```
-pub fn load_images_parallel(paths: Vec<&str>) -> Vec<Arc<Image>> {
+pub fn load_images_parallel(paths: Vec<impl Into<String>>) -> Vec<Arc<Image>> {
   // Limit concurrency to avoid I/O thrash and decoder contention.
   // Empirically, 2-4 threads tends to be faster for mixed HDD/SSD workloads and single-threaded decoders.
   let threads = paths.len().clamp(1, 4);
   load_images_parallel_with_threads(paths, threads)
 }
+/// Loads multiple images synchronously from file paths.
+/// - `paths` - A vector of file paths to load images from
+/// ```ignore
+/// let paths = vec!["path/to/image1.png", "path/to/image2.jpg"];
+/// let images = load_images_sync(paths);
+/// ```
+pub fn load_images_sync(paths: Vec<impl Into<String>>) -> Vec<Arc<Image>> {
+  paths
+    .into_iter()
+    .map(|path| Arc::new(Image::new_from_path(path.into())))
+    .collect()
+}
 
 /// Loads multiple images in parallel with a bounded number of threads.
 /// This often outperforms unbounded parallelism for file I/O heavy workloads on HDDs/SSDs
 /// and when decoders are single-threaded.
-pub fn load_images_parallel_with_threads(paths: Vec<&str>, threads: usize) -> Vec<Arc<Image>> {
+pub fn load_images_parallel_with_threads(paths: Vec<impl Into<String>>, threads: usize) -> Vec<Arc<Image>> {
   let pool = ThreadPoolBuilder::new()
     .num_threads(threads.clamp(1, 4))
     .build()
     .expect("Failed to build rayon thread pool for image loading");
 
+  let paths: Vec<String> = paths.into_iter().map(|p| p.into()).collect();
   pool.install(|| {
     paths
       .into_par_iter()
       .map(|path| Arc::new(Image::new_from_path(path)))
       .collect()
   })
+}
+
+fn get_paths_from_folders(folders: Vec<impl Into<String>>, recursive: bool) -> Vec<String> {
+  let mut all_paths = vec![];
+  for folder in folders {
+    if let Ok(entries) = std::fs::read_dir(folder.into()) {
+      for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+          let extension = path.extension().unwrap_or_default().to_str().unwrap_or("");
+          let is_supported = is_supported_image_extension(extension);
+          if let Some(path_str) = path.to_str()
+            && is_supported
+          {
+            all_paths.push(path_str.to_string());
+          }
+        } else if recursive && path.is_dir() {
+          let subfolder = path.to_str().unwrap_or("");
+          let sub_paths = get_paths_from_folders(vec![subfolder], true);
+          all_paths.extend(sub_paths);
+        }
+      }
+    }
+  }
+  all_paths
+}
+
+fn get_paths_from_glob(patterns: Vec<impl Into<String>>) -> Vec<String> {
+  let mut all_paths = vec![];
+  for pattern in patterns {
+    let pattern = pattern.into();
+    for entry in glob(pattern.as_str()).expect("Failed to read glob pattern") {
+      match entry {
+        Ok(path) => all_paths.push(path.path().to_str().unwrap().to_string()),
+        Err(e) => println!("Error reading path: {:?}", e),
+      }
+    }
+  }
+  all_paths
+}
+pub fn is_supported_image_extension(extension: impl Into<String>) -> bool {
+  let ext = extension.into().to_lowercase();
+  matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg")
 }
