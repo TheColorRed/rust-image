@@ -590,7 +590,7 @@ fn rotate_internal(
 /// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
 pub fn rotate(p_image: &mut Image, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
   let degrees = p_degrees.into() as f32;
-  let (resolved_algorithm, old_width, old_height, new_width, new_height, duration) =
+  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
     rotate_internal(p_image, degrees, p_algorithm);
   // DebugTransform::Rotate(resolved_algorithm, degrees, old_width, old_height, new_width, new_height, duration).log();
 }
@@ -599,7 +599,7 @@ pub fn rotate(p_image: &mut Image, p_degrees: impl Into<f64>, p_algorithm: impl 
 /// * `image` - The image to rotate.
 /// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
 pub fn rotate_90(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (resolved_algorithm, old_width, old_height, new_width, new_height, duration) =
+  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
     rotate_internal(p_image, 90.0, p_algorithm);
   // DebugTransform::Rotate(resolved_algorithm, 90.0, old_width, old_height, new_width, new_height, duration).log();
 }
@@ -608,7 +608,7 @@ pub fn rotate_90(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlg
 /// * `image` - The image to rotate.
 /// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
 pub fn rotate_90_ccw(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (resolved_algorithm, old_width, old_height, new_width, new_height, duration) =
+  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
     rotate_internal(p_image, -90.0, p_algorithm);
   // DebugTransform::Rotate(resolved_algorithm, -90.0, old_width, old_height, new_width, new_height, duration).log();
 }
@@ -617,7 +617,7 @@ pub fn rotate_90_ccw(p_image: &mut Image, p_algorithm: impl Into<Option<Transfor
 /// * `image` - The image to rotate.
 /// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
 pub fn rotate_180(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (resolved_algorithm, old_width, old_height, new_width, new_height, duration) =
+  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
     rotate_internal(p_image, 180.0, p_algorithm);
   // DebugTransform::Rotate(resolved_algorithm, 180.0, old_width, old_height, new_width, new_height, duration).log();
 }

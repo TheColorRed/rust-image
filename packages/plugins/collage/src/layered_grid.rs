@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use abra::{
-  Color, Crop, Image,
+  Color, Image,
   canvas::{AddCanvasOptions, Canvas, LayerEffects, LayerSize, NewLayerOptions},
 };
 use rand::{Rng, prelude::SliceRandom};

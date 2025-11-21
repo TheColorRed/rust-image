@@ -145,7 +145,7 @@ impl Image {
       panic!("Attempting to save an image with zero width or height");
     }
 
-    let start = Instant::now();
+    let _start = Instant::now();
     let options = options.into();
     let file = file.into();
     if file.ends_with(".jpg") || file.ends_with(".jpeg") {

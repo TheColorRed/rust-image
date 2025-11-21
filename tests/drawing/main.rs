@@ -1,11 +1,11 @@
 use abra::{Heart, Image};
 
 pub fn main() {
-  let mut image = Image::new_from_path("assets/bikini.jpg");
-  let (width, height) = image.dimensions::<u32>();
+  let image = Image::new_from_path("assets/bikini.jpg");
+  let (_width, _height) = image.dimensions::<u32>();
   let start_time = std::time::Instant::now();
 
-  let heart = Heart::new();
+  let _heart = Heart::new();
 
   // New API - fluent builder with Into conversions
   // let path = Path::new()

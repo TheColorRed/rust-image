@@ -4,7 +4,7 @@ use core::Image;
 
 // TODO: Implement the glowing_edges filter to look a little more like Photoshop's glowing edges filter.
 /// Applies the glowing edges filter to the image.
-pub fn glowing_edges(image: &mut Image, edge_width: u32, edge_brightness: u32, _smoothness: u32) {
+pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, _smoothness: u32) {
   // Step 1: Convert to grayscale
   let mut clone = image.clone();
   grayscale(&mut clone);
@@ -18,7 +18,7 @@ pub fn glowing_edges(image: &mut Image, edge_width: u32, edge_brightness: u32, _
   }
 
   // Step 4: Adjust edge brightness
-  let mut pixels = clone.empty_pixel_vec();
+  let pixels = clone.empty_pixel_vec();
   // pixels.par_chunks_mut(4).enumerate().for_each(|(i, pixel)| {
   //   let edge_pixel_r = clone.r[i] as f32;
   //   let edge_pixel_g = clone.g[i] as f32;

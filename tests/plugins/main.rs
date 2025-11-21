@@ -6,7 +6,7 @@ use abra::{
 use abra_collage::{CollageOptions, CollagePlugin, CollageStyle};
 
 pub fn main() {
-  let image_paths = vec![
+  let _image_paths = vec![
     "assets/bikini.jpg",
     "assets/aletta-ocean.jpg",
     "assets/nude/krasivaya.jpg",
