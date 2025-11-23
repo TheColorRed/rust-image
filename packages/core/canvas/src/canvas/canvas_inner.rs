@@ -167,8 +167,8 @@ impl CanvasInner {
       let channels = Channels::RGBA;
       let mut img = Image::new(width, height);
       match channels {
-        Channels::RGBA => img.set_rgba(empty_pixels),
-        Channels::RGB => img.set_rgb(empty_pixels),
+        Channels::RGBA => img.set_rgba_owned(empty_pixels),
+          Channels::RGB => img.set_rgb_owned(empty_pixels),
       }
       img
     };

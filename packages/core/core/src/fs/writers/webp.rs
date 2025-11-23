@@ -13,7 +13,7 @@ pub fn write_webp(file: &str, img: &Image) -> Result<(), String> {
   let file = File::create(file).map_err(|e| e.to_string())?;
   let writer = BufWriter::new(file);
   let encoder = webp::WebPEncoder::new(writer);
-  let pixels = img.rgba_slice();
+  let pixels = img.rgba();
   let (width, height) = img.dimensions();
 
   encoder

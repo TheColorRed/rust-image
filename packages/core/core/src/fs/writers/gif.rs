@@ -19,7 +19,7 @@ pub fn write_gif(file: &str, image: &Image, options: &Option<WriterOptions>) -> 
   encoder.set_repeat(Repeat::Infinite).map_err(|e| e.to_string())?;
 
   // Get the RGBA pixel data
-  let rgba_pixels = image.rgba_slice();
+  let rgba_pixels = image.rgba();
 
   // Convert RGBA to indexed color (palette-based)
   let (indexed_pixels, palette) = rgba_to_indexed(&rgba_pixels)?;

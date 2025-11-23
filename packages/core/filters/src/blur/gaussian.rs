@@ -146,7 +146,7 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
       let rect_w = (rect_max_x - rect_min_x) as usize;
       let rect_h = (rect_max_y - rect_min_y) as usize;
       // Extract a rectangular slice of the image pixels covering the processing region (no cloning full image).
-      let rgba = p_image.rgba_slice();
+      let rgba = p_image.rgba();
       let row_stride = (image_w * 4) as usize;
       let mut pixels: Vec<u8> = Vec::with_capacity(rect_w * rect_h * 4);
       for ry in rect_min_y..rect_max_y {
@@ -167,7 +167,7 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
       )
     }
     None => {
-      (Cow::Borrowed(p_image.rgba_slice()), 0, 0, image_w as i32, image_h as i32, 0, 0, image_w as i32, image_h as i32)
+      (Cow::Borrowed(p_image.rgba()), 0, 0, image_w as i32, image_h as i32, 0, 0, image_w as i32, image_h as i32)
     }
   };
   let pixels: Cow<[u8]> = pixels_cow;
@@ -198,26 +198,28 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
 
     // Apply separable gaussian on the small image (no area), this is faster because of far fewer pixels.
     let blurred_small =
-      separable_gaussian_blur_pixels(tmp_img.rgba_slice(), down_w as usize, down_h as usize, new_radius);
-    tmp_img.set_rgba(blurred_small);
+      separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
+    tmp_img.set_rgba_owned(blurred_small);
 
     // Upscale back to original processing size
     tmp_img.resize(width as u32, height as u32, None);
-    tmp_img.rgba()
+    tmp_img.into_rgba_vec()
   } else {
     separable_gaussian_blur_pixels(&pixels, width, height, p_radius)
   };
 
   // Write back result: if we processed a sub-area, write back only masked pixels (area/feather) into destination.
   if area_min_x == 0 && area_min_y == 0 && area_w == image_w && area_h == image_h && feather_amount == 0 {
-    p_image.set_rgba(vertical);
+    p_image.set_rgba_owned(vertical);
   } else if area_min_x == 0 && area_min_y == 0 && area_w == image_w && area_h == image_h && feather_amount > 0 {
     // Feather on full image is equivalent to full blur for now.
-    p_image.set_rgba(vertical);
+    p_image.set_rgba_owned(vertical);
   } else {
     // area existing: we wrote proc_min_x/proc_min_y as processing offsets; proc_w/proc_h is the area bounds (not kernel expanded)
     // Convert vertical to per-pixel and blend into p_image only for area mask.
-    let mut rgba = p_image.rgba();
+    // Snapshot original read-only slice and allocate an output buffer
+    let orig = p_image.rgba();
+    let mut out = orig.to_vec();
     let _row_stride = (image_w * 4) as usize;
     let feather = feather_amount as f32;
 
@@ -258,9 +260,9 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
     // mask_count removed
     // mask_count debug removed
     // mask_count debug removed
-    let out_pixels = &vertical;
+    let blurred_rect = &vertical;
     // out_pixels now contains vertically blurred rectangle (rect_min_x..rect_max_x, rect_min_y..rect_max_y)
-    rgba
+    out
       .par_chunks_mut((image_w * 4) as usize)
       .enumerate()
       .for_each(|(row_y, row)| {
@@ -281,14 +283,15 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
           if global_x >= image_w as usize || global_y >= image_h as usize {
             continue;
           }
-          let br = out_pixels[out_idx] as f32;
-          let bg = out_pixels[out_idx + 1] as f32;
-          let bb = out_pixels[out_idx + 2] as f32;
-          let ba = out_pixels[out_idx + 3] as f32;
-          let or = row[global_x * 4] as f32;
-          let og = row[global_x * 4 + 1] as f32;
-          let ob = row[global_x * 4 + 2] as f32;
-          let oa = row[global_x * 4 + 3] as f32;
+          let br = blurred_rect[out_idx] as f32;
+          let bg = blurred_rect[out_idx + 1] as f32;
+          let bb = blurred_rect[out_idx + 2] as f32;
+          let ba = blurred_rect[out_idx + 3] as f32;
+          let orig_index = (global_y as usize * image_w as usize + global_x as usize) * 4;
+          let or = orig[orig_index] as f32;
+          let og = orig[orig_index + 1] as f32;
+          let ob = orig[orig_index + 2] as f32;
+          let oa = orig[orig_index + 3] as f32;
           let fr = (br * alpha + or * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
           let fg = (bg * alpha + og * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
           let fb = (bb * alpha + ob * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
@@ -299,7 +302,8 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, options: impl Into<Opti
           row[global_x * 4 + 3] = fa;
         }
       });
-    p_image.set_rgba(rgba);
+    // Write back the mutated `out` into the image at the end
+    p_image.set_rgba_owned(out);
   }
   println!("Gaussian blur took: {:?}", start.elapsed());
   // DebugFilters::GaussianBlur(radius as f32, duration.elapsed()).log();
@@ -323,7 +327,7 @@ mod tests {
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
     // Snapshot original values
-    let orig = img.rgba();
+    let orig = img.to_rgba_vec();
 
     // Apply blur to center 4x4 area (white pixel should spread)
     gaussian_blur(&mut img, 2, ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0))));
@@ -371,7 +375,7 @@ mod tests {
       }
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
-    let pixels = img.rgba();
+    let pixels = img.to_rgba_vec();
     let out = super::separable_gaussian_blur_pixels(&pixels, 8, 8, 2);
     // Ensure center changed
     let idx = ((2 * 8 + 2) * 4) as usize;
@@ -387,7 +391,7 @@ mod tests {
       }
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
-    let pixels = img.rgba();
+    let pixels = img.to_rgba_vec();
     let kernel = super::gaussian_kernel_1d(2);
     let width = 8usize;
     let y = 3usize;
@@ -430,7 +434,7 @@ mod tests {
       }
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
-    let pixels = img.rgba();
+    let pixels = img.to_rgba_vec();
     let kernel = super::gaussian_kernel_1d(2);
     let width = 8usize;
     let height = 8usize;

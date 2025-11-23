@@ -13,7 +13,7 @@ pub fn box_blur(image: &mut Image, radius: u32) {
   let height = height as i32;
   let kernel_radius = radius as i32;
 
-  let src = image.rgba_slice();
+  let src = image.rgba();
   let mut current = src.to_vec(); // working buffer for reading
   let mut tmp = vec![0u8; current.len()];
 
@@ -86,5 +86,5 @@ pub fn box_blur(image: &mut Image, radius: u32) {
     }
   }
 
-  image.set_rgba(tmp);
+  image.set_rgba_owned(tmp);
 }

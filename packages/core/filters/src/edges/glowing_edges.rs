@@ -33,7 +33,7 @@ pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, 
   //   pixel[2] = brightness_b.min(255.0) as u8;
   //   pixel[3] = 255;
   // });
-  clone.set_rgba(pixels);
+  clone.set_rgba_owned(pixels);
 
   // Step 5: Apply Gaussian blur to smooth the edges
   blur(&mut clone);

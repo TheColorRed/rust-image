@@ -551,7 +551,7 @@ fn apply_rotation(p_image: &mut Image, p_degrees: f32, p_width: u32, p_height: u
   let dest_center_x = p_width as f32 / 2.0;
   let dest_center_y = p_height as f32 / 2.0;
 
-  let src_pixels = p_image.rgba_slice();
+  let src_pixels = p_image.rgba();
   let mut pixels = vec![0; p_width as usize * p_height as usize * 4];
 
   pixels.par_chunks_mut(4).enumerate().for_each(|(index, pixel)| {
@@ -565,7 +565,7 @@ fn apply_rotation(p_image: &mut Image, p_degrees: f32, p_width: u32, p_height: u
     pixel.copy_from_slice(&sample);
   });
 
-  p_image.set_new_pixels(pixels, p_width, p_height);
+  p_image.set_new_pixels(&pixels, p_width, p_height);
 }
 
 fn rotate_internal(

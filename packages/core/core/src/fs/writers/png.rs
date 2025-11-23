@@ -38,7 +38,7 @@ pub fn write_png(file: &str, image: &Image, options: &Option<WriterOptions>) -> 
 
   let mut writer = encoder.write_header().unwrap();
   if channels == 4 {
-    let pixels = image.rgba_slice();
+    let pixels = image.rgba();
     writer.write_image_data(pixels).unwrap();
   } else {
     let pixels = image.rgb();

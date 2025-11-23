@@ -12,7 +12,7 @@ pub trait Crop {
 pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
   let _duration = Instant::now();
   let mut new_pixels = vec![0u8; (width * height * 4) as usize];
-  let old_pixels = image.rgba_slice();
+  let old_pixels = image.rgba();
   let (old_width, _old_height): (u32, u32) = image.dimensions();
 
   for i in 0..(width * height) {
@@ -25,6 +25,6 @@ pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
     new_pixels[new_index..new_index + 4].copy_from_slice(&old_pixels[old_index * 4..old_index * 4 + 4]);
   }
 
-  image.set_new_pixels(new_pixels, width, height);
+  image.set_new_pixels(&new_pixels, width, height);
   // DebugTransform::Crop(old_width, old_height, width, height, duration.elapsed()).log();
 }

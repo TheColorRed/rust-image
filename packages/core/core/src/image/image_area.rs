@@ -37,7 +37,7 @@ impl Image {
 
     // Work only on the vertical slice that intersects the area.
     // Obtain a slice of the underlying colors buffer to avoid cloning the whole image.
-    let rgba = self.rgba_slice();
+    let rgba = self.rgba();
     let rows_slice = &rgba[start_byte..end_byte];
 
     // Iterate rows in parallel, producing per-row buffers, then append.
@@ -78,7 +78,7 @@ impl Image {
   pub fn get_selective_rgba(&self, p_area: Option<&Area>) -> Vec<u8> {
     match p_area {
       Some(a) => self.get_rgba_in_area(a),
-      None => self.rgba_slice().to_vec(),
+      None => self.to_rgba_vec(),
     }
   }
 }

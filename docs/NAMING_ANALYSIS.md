@@ -43,8 +43,8 @@ The library uses **multiple inconsistent patterns** for getters:
 - `Color::luminance()` - Returns `f32` ✅ Good (no redundant get_)
 
 **Pattern C: `as_` prefix**
-- `Image::as_ref()` - Returns `&Image` (redundant - just deref)
-- `Image::as_ref_mut()` - Returns `&mut Image` (redundant - just deref)
+- `Image::as_ref()` - Removed/redundant — prefer dereferencing or `Arc::as_ref()` where applicable
+- `Image::as_ref_mut()` - Removed/redundant — prefer direct mutable reference
 
 ### 1.2 Setter Methods
 Setters are highly consistent with `set_` prefix:
@@ -72,10 +72,9 @@ Setters are highly consistent with `set_` prefix:
 - `RcLayersHandler::set_layer_position(index, x, y)` - Will be renamed to `set_layer_global_position()` for clarity
 - `Image::set_rgba(data)`
 - `Image::set_rgb(data)`
-- `Image::set_colors(colors)`
-- `Image::set_channel(channel, pixels)`
 - `Image::set_new_pixels(data, width, height)`
 - `Image::set_pixel(x, y, pixel)`
+// NOTE: `Image::set_colors` and `Image::set_channel` removed — prefer `set_rgba_owned/set_rgba` and `mut_channel`
 
 ---
 
