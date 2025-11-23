@@ -1,9 +1,7 @@
 use abra::{
   Area, Heart, Image,
-  filters::{
-    blur::{self, FocusBlurOptions},
-    options::FilterOptions,
-  },
+  filters::blur::{self, FocusBlurOptions},
+  options::ApplyOptions,
 };
 use std::time::Instant;
 
@@ -17,7 +15,7 @@ fn main() {
   // blur::focus_blur(&mut image, FocusBlurOptions::new());
   let area = Heart::new().fit((500, 500)).with_feather(5);
   // let area = Area::rect((100, 100), (200, 200));
-  let options = FilterOptions::new().with_area(area.clone());
+  let options = ApplyOptions::new().with_area(area.clone());
   blur::gaussian_blur(&mut image, 25, options);
   // blur::gaussian_blur(&mut image, 25, Area::rect((100, 100), (200, 200)).with_feather(30));
   image.save("out/focus-blur.png", None);
