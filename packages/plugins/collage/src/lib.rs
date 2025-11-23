@@ -1,3 +1,5 @@
+use core::ops::Deref;
+use core::ops::DerefMut;
 use std::sync::Arc;
 
 use abra::Area;
@@ -199,27 +201,27 @@ impl Plugin for CollagePlugin {
 
   fn apply(&mut self) -> Result<PluginResult, PluginError> {
     let start = std::time::Instant::now();
-    let result: Result<PluginResult, PluginError> = match &self.style {
+    let mut plugin_result = PluginResult::new();
+    match &self.style {
       CollageStyle::Grid(_columns, _rows) => {
         let collage_result = self.grid_collage();
-        Ok(PluginResult::Canvases(vec![collage_result]))
+        plugin_result.add_canvas(collage_result);
       }
       CollageStyle::LayeredGrid(_columns, _rows) => {
         let collage_result = self.layered_grid_collage();
-        Ok(PluginResult::Canvases(vec![collage_result]))
+        plugin_result.add_canvas(collage_result);
       }
       CollageStyle::Random(_count) => {
         let collage_result = self.random_collage();
-        Ok(PluginResult::Canvases(vec![collage_result]))
+        plugin_result.add_canvas(collage_result);
       }
     };
 
-    if let Ok(res) = result {
-      println!("CollagePlugin created in {:?}", start.elapsed());
-      return Ok(res);
+    if plugin_result.is_empty() {
+      return Err(PluginError::execution_failed("CollagePlugin produced no canvases"));
     }
 
-    // Plugin logic to create a collage would go here.
-    Err(PluginError::ExecutionFailed("Not implemented".to_string()))
+    println!("CollagePlugin created in {:?}", start.elapsed());
+    Ok(plugin_result)
   }
 }

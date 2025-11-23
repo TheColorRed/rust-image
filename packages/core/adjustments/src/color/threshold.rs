@@ -6,7 +6,7 @@ use rayon::prelude::*;
 /// * `threshold` - The threshold value a value between 0 and 255.
 pub fn threshold(image: &mut Image, threshold: u8) {
   let threshold = threshold.clamp(0, 255);
-  let mut pixels = image.rgba();
+  let pixels = image.colors().as_slice_mut().expect("Image colors must be contiguous");
 
   pixels.par_chunks_mut(4).for_each(|pixel| {
     let avg = (pixel[0] as f32 + pixel[1] as f32 + pixel[2] as f32) / 3.0;
@@ -22,5 +22,5 @@ pub fn threshold(image: &mut Image, threshold: u8) {
     }
   });
 
-  image.set_rgba(pixels);
+  // pixels already mutated in place on the image; no need to set back.
 }

@@ -1,8 +1,8 @@
 use std::{fs::File, io::BufWriter};
 
+use crate::Image;
 use crate::fs::mkdirp;
 use crate::fs::path::dirname;
-use crate::image::Image;
 use image_webp as webp;
 use webp::ColorType::Rgba8;
 
@@ -13,11 +13,11 @@ pub fn write_webp(file: &str, img: &Image) -> Result<(), String> {
   let file = File::create(file).map_err(|e| e.to_string())?;
   let writer = BufWriter::new(file);
   let encoder = webp::WebPEncoder::new(writer);
-  let pixels = img.rgba();
+  let pixels = img.rgba_slice();
   let (width, height) = img.dimensions();
 
   encoder
-    .encode(&pixels, width, height, Rgba8)
+    .encode(pixels, width, height, Rgba8)
     .expect("error encoding webp");
 
   Ok(())

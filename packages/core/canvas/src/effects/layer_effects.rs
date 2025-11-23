@@ -41,11 +41,6 @@ impl LayerEffects {
     self
   }
 
-  #[allow(dead_code)]
-  pub(crate) fn apply(&self, image: Arc<Image>) -> Arc<Image> {
-    self.apply_with_offset(image).image
-  }
-
   pub(crate) fn apply_with_offset(&self, image: Arc<Image>) -> EffectResult {
     let original_dimensions = image.dimensions::<u32>();
     let mut result_image = image.clone();

@@ -1,5 +1,7 @@
 use core::ops::{Add, Div, Mul, Sub};
 
+use crate::FromF32;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// A point in 2D space with floating-point coordinates.
 /// Used for precise geometric calculations before rasterization.
@@ -17,6 +19,11 @@ impl Size {
       width: width.into() as f32,
       height: height.into() as f32,
     }
+  }
+
+  /// Converts the Size to a tuple of (width, height).
+  pub fn to_tuple<S: FromF32>(&self) -> (S, S) {
+    (S::from_f32(self.width), S::from_f32(self.height))
   }
 }
 

@@ -1,4 +1,4 @@
-use core::{blend, Area, Color, Image, PointF, Size};
+use core::{Area, Color, Image, PointF, Size, blend};
 
 use drawing::fill;
 
@@ -52,6 +52,8 @@ impl IntoOptionalPointF for (f64, f64) {
 /// A color of white (`255`) in the mask represents fully opaque areas,
 /// a black color (`0`) represents fully transparent areas, and gray values in between
 /// represent varying levels of transparency.
+
+#[derive(Clone, Debug)]
 pub struct Mask {
   /// The image representation of the mask.
   image_mask: Image,
@@ -90,88 +92,209 @@ impl Mask {
     &self.image_mask
   }
 
+  /// Apply the mask to an image by adjusting the image's alpha channel.
+  ///
+  /// The mask is interpreted as a grayscale image where:
+  /// - 255 (white) -> alpha 255 (fully opaque / visible)
+  /// - 0 (black) -> alpha 0 (fully transparent / hidden)
+  ///
+  /// The mask size must match the image size. If you need positioning, use `Image::set_from` or a temporary canvas.
+  pub fn apply_to_image(&self, p_image: &mut Image) {
+    let mask_bytes = self.image().rgba();
+    let mut out = p_image.rgba();
+    apply_mask_to_pixels_rgba(&mut out, &mask_bytes);
+    p_image.set_rgba(out);
+  }
+
   fn to_color(&self, color: Color) -> Color {
     let c = ((color.r as u16 + color.g as u16 + color.b as u16) / 3) as u8;
     Color::from_rgba(c, c, c, color.a)
   }
 }
 
-// use rayon::prelude::*;
+/// Converts a grayscale mask value to an alpha value where:
+/// - 255 (white) => 255 alpha (fully opaque/visible)
+/// - 0 (black) => 0 alpha (fully transparent/hidden)
+/// - 127 (gray) => ~127 alpha (~50% opacity)
+pub fn mask_value_to_alpha(p_value: u8) -> u8 {
+  p_value
+}
 
-// use crate::Image;
+/// Computes a grayscale mask value from an RGBA pixel using a standard
+/// luma approximation and ignores the input alpha channel.
+#[inline]
+fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
+  // ITU-R BT.601 luma transform (approximation with integer math)
+  // gray = 0.299 R + 0.587 G + 0.114 B
+  let r = p_rgba[0] as u32;
+  let g = p_rgba[1] as u32;
+  let b = p_rgba[2] as u32;
+  (((299 * r + 587 * g + 114 * b) + 500) / 1000) as u8
+}
 
-// /// Converts a grayscale mask value to an alpha value where:
-// /// - 255 (white) => 0 alpha (fully transparent)
-// /// - 0 (black) => 255 alpha (fully opaque)
-// /// - 127 (gray) => ~128 alpha (~50% opaque)
-// pub fn mask_value_to_alpha(p_value: u8) -> u8 {
-//   255u8.saturating_sub(p_value)
-// }
+/// Applies a mask to an image by setting the image's alpha channel from the provided mask data.
+///
+/// Semantics:
+/// - White (255) in the mask becomes fully opaque (alpha 255)
+/// - Black (0) in the mask becomes fully transparent (alpha 0)
+/// - Gray values map linearly between 0 and 255
+///
+/// Mask input may be one of:
+/// - Grayscale: length = width * height
+/// - RGBA: length = width * height * 4 (converted to grayscale)
+pub fn apply_mask_to_image(p_image: &mut Image, p_mask: &[u8]) {
+  let (width, height) = p_image.dimensions::<usize>();
+  let px_count = width * height;
 
-// /// Computes a grayscale mask value from an RGBA pixel using a standard
-// /// luma approximation and ignores the input alpha channel.
-// #[inline]
-// fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
-//   // ITU-R BT.601 luma transform (approximation with integer math)
-//   // gray = 0.299 R + 0.587 G + 0.114 B
-//   let r = p_rgba[0] as u16;
-//   let g = p_rgba[1] as u16;
-//   let b = p_rgba[2] as u16;
-//   (((299 * r + 587 * g + 114 * b) + 500) / 1000) as u8
-// }
+  let mask_gray: Vec<u8> = match p_mask.len() {
+    len if len == px_count => p_mask.to_vec(),
+    len if len == px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
+    other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
+  };
 
-// /// Applies a mask to an image by setting the image's alpha channel from the provided mask data.
-// ///
-// /// Semantics:
-// /// - White (255) in the mask becomes fully transparent (alpha 0)
-// /// - Black (0) in the mask becomes fully opaque (alpha 255)
-// /// - Gray values in-between map linearly (e.g. 127 ~ 50% transparency)
-// ///
-// /// Mask input may be one of:
-// /// - Grayscale: length = width * height
-// /// - RGBA: length = width * height * 4 (converted to grayscale)
-// pub fn apply_mask_to_image(p_image: &mut Image, p_mask: &[u8]) {
-//   let (width, height) = p_image.dimensions::<usize>();
-//   let px_count = width * height;
+  let alphas: Vec<u8> = mask_gray.into_iter().map(mask_value_to_alpha).collect();
 
-//   let mask_gray: Vec<u8> = match p_mask.len() {
-//     len if len == px_count => p_mask.to_vec(),
-//     len if len == px_count * 4 => p_mask.par_chunks(4).map(|px| rgba_to_gray(px)).collect(),
-//     other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
-//   };
+  // Write alphas into the image buffer
+  let colors = p_image.rgba();
+  let mut out: Vec<u8> = Vec::with_capacity(px_count * 4);
+  for (rgba, a) in colors.chunks(4).zip(alphas.iter()) {
+    out.push(rgba[0]);
+    out.push(rgba[1]);
+    out.push(rgba[2]);
+    out.push(*a);
+  }
 
-//   let alphas: Vec<u8> = mask_gray.into_par_iter().map(mask_value_to_alpha).collect();
+  p_image.set_rgba(out);
+}
 
-//   // Write alphas into the image buffer
-//   let colors = p_image.colors.to_vec();
-//   let mut out: Vec<u8> = Vec::with_capacity(px_count * 4);
-//   out.par_extend(
-//     colors
-//       .par_chunks(4)
-//       .zip(alphas.par_iter())
-//       .flat_map_iter(|(rgba, &a)| [rgba[0], rgba[1], rgba[2], a]),
-//   );
-//   p_image.set_rgba(out);
-// }
+/// Applies a mask directly to an RGBA pixel slice by setting its alpha channel.
+///
+/// See `apply_mask_to_image` for mask semantics and accepted formats.
+pub fn apply_mask_to_pixels_rgba(p_pixels: &mut [u8], p_mask: &[u8]) {
+  assert!(p_pixels.len() % 4 == 0, "pixels must be RGBA (len divisible by 4)");
+  let px_count = p_pixels.len() / 4;
 
-// /// Applies a mask directly to an RGBA pixel slice by setting its alpha channel.
-// ///
-// /// See `apply_mask_to_image` for mask semantics and accepted formats.
-// pub fn apply_mask_to_pixels_rgba(p_pixels: &mut [u8], p_mask: &[u8]) {
-//   assert!(p_pixels.len() % 4 == 0, "pixels must be RGBA (len divisible by 4)");
-//   let px_count = p_pixels.len() / 4;
+  let mask_gray: Vec<u8> = match p_mask.len() {
+    len if len == px_count => p_mask.to_vec(),
+    len if len == px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
+    other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
+  };
 
-//   let mask_gray: Vec<u8> = match p_mask.len() {
-//     len if len == px_count => p_mask.to_vec(),
-//     len if len == px_count * 4 => p_mask.par_chunks(4).map(|px| rgba_to_gray(px)).collect(),
-//     other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
-//   };
+  // Apply in-place
+  for (rgba, &m) in p_pixels.chunks_mut(4).zip(mask_gray.iter()) {
+    rgba[3] = mask_value_to_alpha(m);
+  }
+}
 
-//   // Apply in-place
-//   p_pixels
-//     .par_chunks_mut(4)
-//     .zip(mask_gray.par_iter())
-//     .for_each(|(rgba, &m)| {
-//       rgba[3] = mask_value_to_alpha(m);
-//     });
-// }
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use core::{Area, Color, Image};
+
+  #[test]
+  fn test_apply_mask_to_pixels_rgba() {
+    // Two pixels: RGBA (red, green)
+    let mut pixels: Vec<u8> = vec![255, 0, 0, 255, 0, 255, 0, 255];
+    // mask: first pixel black (transparent), second pixel white (opaque)
+    let mask: Vec<u8> = vec![0, 255];
+    apply_mask_to_pixels_rgba(&mut pixels, &mask);
+    assert_eq!(pixels[3], 0);
+    assert_eq!(pixels[7], 255);
+  }
+
+  #[test]
+  fn test_apply_mask_to_image_using_mask_struct() {
+    let mut img = Image::new_from_color(2, 1, Color::from_rgba(255, 0, 0, 255));
+    // create a mask image with first pixel black, second white
+    let mut mask_img = Image::new_from_color(2, 1, Color::from_rgba(255, 255, 255, 255));
+    // set first pixel to black on mask
+    mask_img.set_pixel(0, 0, (0, 0, 0, 255));
+    let mask = Mask { image_mask: mask_img };
+    mask.apply_to_image(&mut img);
+    let rgba = img.rgba();
+    assert_eq!(rgba[3], 0);
+    assert_eq!(rgba[7], 255);
+  }
+
+  #[test]
+  fn draw_area_respects_feathering() {
+    let img = Image::new_from_color(10, 10, Color::from_rgba(255, 255, 255, 255));
+    let mut mask = Mask::new_from_image(&img);
+    let area = Area::rect((1.0, 1.0), (8.0, 8.0)).with_feather(2);
+    mask.draw_area(&area, Color::black(), None);
+    // center should be black (0) - fully drawn area
+    let center_alpha = mask.image().get_pixel(5, 5).unwrap().0; // grayscale value in mask image
+    assert_eq!(center_alpha, 0);
+    // ensure we have at least one partially transparent pixel within the area (alpha not strictly 0 or 255)
+    let mut found_partial = false;
+    let min_x = 1usize;
+    let min_y = 1usize;
+    let max_x = 8usize;
+    let max_y = 8usize;
+    for y in min_y..=max_y {
+      for x in min_x..=max_x {
+        let alpha = mask.image().get_pixel(x as u32, y as u32).unwrap().0;
+        if alpha > 0 && alpha < 255 {
+          found_partial = true;
+          break;
+        }
+      }
+      if found_partial {
+        break;
+      }
+    }
+    assert!(found_partial, "Expected to find partial-coverage pixels for feathered area");
+  }
+
+  #[test]
+  fn draw_star_area_offset_is_correct() {
+    use core::{AspectRatio, Star};
+    let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
+    let mut mask = Mask::new_from_image(&img);
+    // Create a star area sized to half the image and not positioned explicitly
+    let area = Star::new().fit_with_aspect(img.size() / 2, AspectRatio::meet());
+    mask.draw_area(&area, Color::black(), None);
+    // compute topmost row with non-white pixel
+    let mut topmost: Option<u32> = None;
+    for y in 0..200u32 {
+      for x in 0..200u32 {
+        if mask.image().get_pixel(x, y).unwrap().0 != 255 {
+          topmost = Some(y);
+          break;
+        }
+      }
+      if topmost.is_some() {
+        break;
+      }
+    }
+    assert!(topmost.is_some());
+    // If shape is anchored to 0, expect topmost to be 0
+    assert_eq!(topmost.unwrap(), 0);
+  }
+
+  #[test]
+  fn draw_star_area_offset_with_position() {
+    use core::{AspectRatio, Star};
+    let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
+    let mut mask = Mask::new_from_image(&img);
+    let area = Star::new().fit_with_aspect(img.size() / 2, AspectRatio::meet());
+    // Draw with an explicit offset
+    mask.draw_area(&area, Color::black(), (10.0, 20.0));
+    // compute topmost row with non-white pixel
+    let mut topmost: Option<u32> = None;
+    for y in 0..200u32 {
+      for x in 0..200u32 {
+        if mask.image().get_pixel(x, y).unwrap().0 != 255 {
+          topmost = Some(y);
+          break;
+        }
+      }
+      if topmost.is_some() {
+        break;
+      }
+    }
+    assert!(topmost.is_some());
+    // Expect topmost to be 20 due to the offset provided earlier
+    assert_eq!(topmost.unwrap(), 20);
+  }
+}

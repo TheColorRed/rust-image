@@ -8,7 +8,7 @@ use rayon::prelude::*;
 pub fn apply_kernel(image: &mut Image, kernel: &[f32]) {
   let (width, height) = image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
-  let old_pixels = image.rgba();
+  let old_pixels = image.rgba_slice();
 
   new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
     let x = i as u32 % width;

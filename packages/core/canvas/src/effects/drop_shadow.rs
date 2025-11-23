@@ -105,7 +105,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 
   // Extract alpha channel from original (or create one if the image has no alpha)
   // This will be used to create the shadow shape
-  let shadow_pixels = shadow_image.rgba();
+  let shadow_pixels = shadow_image.rgba_slice();
   let alpha_channel: Vec<u8> = shadow_pixels
     .chunks(4)
     .map(|pixel| {
@@ -119,13 +119,14 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   colorize_image(&mut shadow_image, options.fill.clone(), options.opacity);
 
   // Apply the alpha channel to create the shadow shape
-  let mut shadow_pixels = shadow_image.rgba();
-  for (i, &alpha) in alpha_channel.iter().enumerate() {
-    if i * 4 + 3 < shadow_pixels.len() {
-      shadow_pixels[i * 4 + 3] = alpha;
+  // Write the alpha channel back into the shadow image using a mutable slice
+  if let Some(mut shadow_pixels_mut) = shadow_image.colors().as_slice_mut() {
+    for (i, &alpha) in alpha_channel.iter().enumerate() {
+      if i * 4 + 3 < shadow_pixels_mut.len() {
+        shadow_pixels_mut[i * 4 + 3] = alpha;
+      }
     }
   }
-  shadow_image.set_rgba(shadow_pixels);
 
   // Apply spread if needed (spread expands or contracts the shadow)
   if options.spread > 0.0 {
@@ -163,14 +164,14 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   blend_images_at_with_opacity(&mut composite, &shadow_image, 0, 0, shadow_x, shadow_y, options.blend_mode, 1.0);
 
   // Blur the shadow area in the composite
-  gaussian_blur(&mut composite, options.size as u32);
+  gaussian_blur(&mut composite, options.size as u32, None);
 
   // Reapply opacity to the blurred shadow (blur operation may have increased alpha)
-  let mut composite_pixels = composite.rgba();
-  for chunk in composite_pixels.chunks_mut(4) {
-    chunk[3] = ((chunk[3] as f32) * options.opacity) as u8;
+  if let Some(mut composite_pixels) = composite.colors().as_slice_mut() {
+    for chunk in composite_pixels.chunks_mut(4) {
+      chunk[3] = ((chunk[3] as f32) * options.opacity) as u8;
+    }
   }
-  composite.set_rgba(composite_pixels);
 
   // Composite original at padding position
   blend_images_at_with_opacity(&mut composite, &original_image, 0, 0, padding_left, padding_top, blend::normal, 1.0);
@@ -182,7 +183,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 
 /// Converts an image to a single color while preserving and applying opacity to the alpha channel.
 fn colorize_image(image: &mut Image, fill: impl Into<Fill>, opacity: impl Into<f64>) {
-  let pixels = image.rgba();
+  let pixels = image.rgba_slice();
 
   let fill = fill.into();
   let opacity = opacity.into();
@@ -211,7 +212,8 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
   let (width, height) = image.dimensions::<u32>();
   let width = width as usize;
   let height = height as usize;
-  let pixels = image.rgba().to_vec();
+  let src = image.rgba_slice();
+  let mut pixels = src.to_vec();
 
   // Spread > 0.5 means dilate (expand), < 0.5 means erode (contract)
   // Strength is based on distance from 0.5, clamped to reasonable values

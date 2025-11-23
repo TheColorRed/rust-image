@@ -25,6 +25,7 @@ mod shaders {
   pub mod brush_dabs_shader;
   pub mod brush_shader;
   pub mod image_shader;
+  pub mod fill_feather_shader;
   pub mod linear_gradient_shader;
   pub mod solid_shader;
   pub mod stroke_brush_shader;

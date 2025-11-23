@@ -205,8 +205,8 @@ pub fn lens_blur(image: &mut Image, p_options: LensBlurOptions) {
     .map(|i| iris_sample_offset(i, samples, &p_options.iris))
     .collect();
 
-  // Snapshot source pixels once
-  let src = image.rgba();
+  // Snapshot source pixels once (borrow slice to avoid copying)
+  let src = image.rgba_slice();
   let (w, h) = (width as usize, height as usize);
 
   let mut out = vec![0u8; w * h * 4];

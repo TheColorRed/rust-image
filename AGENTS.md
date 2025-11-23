@@ -74,6 +74,8 @@ This is a new project, any changes done should directly improve the codebase wit
 
 For example, if we are adding a new feature that replaces an old one, we should remove the old feature instead of marking it as deprecated.
 
+We do not care if a change is a large code modification if it is better in the long run. Minimal changes are the worst possible approach as they lead to code rot and technical debt. **DO NOT BE AFRAID TO MAKE LARGE CHANGES IF THEY IMPROVE THE CODEBASE.**
+
 ### Example of Bad Practice
 
 This example shows a basic example of adding a new feature while keeping the old one, which is against our no deprecations policy.
@@ -112,3 +114,13 @@ pub fn use_feature() {
 ## Unification of Similar Features
 
 There are features that are similar in functionality but have different implementations. These features should be analyzed and unified into a single implementation.
+
+For every new and existing feature we need to think about how this can be implemented so that when we expand upon it we don't write redundant code.
+
+## Edition 2024
+
+This project uses Rust Edition 2024. All new code should follow the conventions and features of this edition.
+
+## no_mangle Attribute
+
+When exposing functions to FFI, we use the `#[unsafe(no_mangle)]` in the 2024 edition, as opposed to `#[no_mangle]` in previous editions. This is to ensure that the function names are not mangled by the Rust compiler, allowing them to be called from other programming languages.

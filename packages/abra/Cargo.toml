@@ -2,6 +2,7 @@
 name = "abra"
 version = "1.0.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 core = { workspace = true }
@@ -10,8 +11,13 @@ drawing = { workspace = true }
 adjustments = { workspace = true }
 filters = { workspace = true }
 mask = { workspace = true }
+options = { workspace = true }
 
 rayon = { workspace = true }
 
+[build-dependencies]
+regex = "1.9"
+
+
 [lib]
-crate-type = ["dylib"]
+crate-type = ["cdylib", "rlib"]

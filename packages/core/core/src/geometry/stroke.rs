@@ -311,7 +311,7 @@ impl Area {
       }
       stroke_path.line_to(outer_points[0]);
     }
-    Area { path: stroke_path }
+    stroke_path.into()
   }
 }
 

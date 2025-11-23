@@ -101,8 +101,8 @@ impl<'a> Rasterizer<'a> {
   /// ```
   pub fn rasterize(&self, p_image: &mut Image) {
     let _start = std::time::Instant::now();
-    let mut pixels = p_image.rgba();
     let (width, height) = p_image.dimensions::<u32>();
+    let pixels = p_image.colors().as_slice_mut().expect("Image colors must be contiguous");
     let total_samples = self.sample_grid.total_samples() as f32;
     // Determine bounds from coverage (if available) so we only iterate pixels that may be affected.
     let (min_x_f, min_y_f, max_x_f, max_y_f) = match self.coverage.bounds() {
@@ -169,7 +169,7 @@ impl<'a> Rasterizer<'a> {
         }
       });
 
-    p_image.set_rgba(pixels);
+    // pixels mutated in-place on `p_image`, no need to call set_rgba
     // DebugDrawing::Rasterization(start.elapsed()).log();
   }
 }
