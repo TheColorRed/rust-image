@@ -20,6 +20,38 @@ This file explains *how an automated agent* (or a developer using an agent) shou
 
 ---
 
+## Design Principles & Long-term Approach 💡
+These principles guide decisions for long-lived code in the workspace. Agents must favor options that produce the best long-term outcome, even if that requires large refactors.
+- Long-term-first: Always prefer the implementation that is clean, maintainable, and future-proof — not a temporary or drop-in change.
+- Large refactors are encouraged: If a task requires a substantial refactor to produce a durable, correct and clean solution, do the refactor (and update call sites/tests accordingly). Do not hedge with temporary fixes.
+- Speed first: Optimize for runtime performance; prefer algorithmic improvements, efficient data structures, and reduced allocations for image-processing features.
+- Usability & single source-of-truth: Make one authoritative implementation for each capability (for example, prefer `packages/abra`/`packages/core`/`drawing` to provide the single canonical implementation for a feature). Avoid multiple implementations doing the same thing.
+- Observe the No Deprecations Policy — replace, migrate or remove rather than leaving legacy code around.
+
+### Performance & Usability (core priorities)
+These are non-negotiable priorities for this workspace. When designing or changing features, prioritize:
+- Speed: Prefer algorithmic improvements over micro-optimizations that complicate code. Minimize allocations and copies; use efficient data structures and algorithms for image-processing-heavy code.
+- Usability: Choose a single authoritative implementation for each capability. The `drawing` crate or `packages/abra` may serve as the canonical implementation for a feature; avoid duplicating logic in multiple places.
+- Predictability and API clarity: Use stable, simple, and explicit names for public API items. Prefer a single consistent naming and behavior across the workspace.
+
+Commands & checks for performance and duplication:
+```bash
+# Run benchmarks (if you use criterion/benches):
+cargo bench --package <package>
+
+# Quick runtime measure (local builds, iterations):
+cargo run --release --bin <example> # measure with external timer
+
+# Find duplicate implementations / call sites:
+rg "fn <function_name>\b" || true
+git grep -n "<function_name>\b" || true
+```
+
+If you find duplicate implementations, consolidate into the authoritative implementation and update call sites. Add a benchmark and tests to validate performance and correctness after the change.
+
+
+---
+
 ## Agent Responsibilities 🎯
 Agents operating on this repo must:
 - Respect the project's policies (no deprecations, aggressive refactoring allowed with adequate tests).
@@ -27,6 +59,8 @@ Agents operating on this repo must:
 - Keep changes focused, atomic, and well-tested. If a change affects many files, include a short change plan and tests.
  - Do not be concerned about preserving backward compatibility. Breaking changes to public APIs and FFI are allowed and expected — update call sites and tests accordingly.
 - Provide clear commit messages and PR descriptions with the rationale for changes.
+- Prefer the long-term solution: select the design or implementation that will scale better and remain maintainable. If a big refactor is needed, do the refactor.
+- Optimize for performance and usability: provide microbenchmarks or benchmarks when making performance-related changes, and update the authoritative implementation as the 'source of truth'.
 - Run the `Run` task in local builds for GUI verification when making UI changes (see Run Tasks section).
 
 ---
@@ -82,12 +116,8 @@ cargo test
 ```
 
 - Run a specific test file or test function:
-```bash
-cargo test --package <package> --test <name>
-cargo test --lib <function_name>
 ```
 
----
 
 ## Code/Project Patterns (Repo rules & helpful links) 📚
 - `packages/abra` is the core library. `apps/alakazam` is the GUI app built on Abra.
@@ -99,11 +129,6 @@ cargo test --lib <function_name>
 
 ## Policies & Constraints ⚖️
 
-### No Deprecations Policy — (detailed)
-We follow a strict **No Deprecations** policy: do not keep old code paths, deprecated branches or legacy fallbacks in the codebase. Instead, whenever a feature or an API is replaced, the old implementation should be removed (or migrated) as part of the change. This keeps the codebase clean and maintainable and reduces complexity.
-
-Why:
-- Avoids accumulation of dead code paths and technical debt.
 - Makes refactors and code health improvements straightforward for future contributors.
 - Forces agents and developers to be explicit about breaking changes and call-site updates.
 
@@ -114,11 +139,11 @@ Scope and exceptions:
 
 Required steps for agents making a change:
 1. Discover usages: search the repository for all use sites of the old API (e.g., `rg 'old_function_name'` or `git grep -- 'old_function_name'`).
-2. Add test coverage: add a test that shows the earlier behavior — then implement the new behavior and update tests.
-3. Implement new feature or refactoring and update all call sites.
+2. Add test coverage: add a test that shows the earlier behavior — then implement the new behavior and update tests. Add benchmarks when making changes that affect performance.
+3. Implement new feature or refactoring and update all call sites. Prefer a single authoritative implementation (the ‘source of truth’) for a capability. If multiple implementations exist, consolidate them.
 4. Remove all references to the old API and delete the old implementation.
 5. Update docs and examples where applicable; add a short change summary in the PR description (optional — helpful for reviewers).
-6. Run a full workspace build & tests and adjust fixups for any dependent modules.
+6. Run a full workspace build & tests and adjust fixups for any dependent modules. Run benchmarks and performance checks where relevant.
 
 - Migration & Replacement Flow (optional):
 - Optionally create a short plan in the PR description titled "Change Plan" or "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan. This is useful for reviewer context but not required.
@@ -126,133 +151,83 @@ Required steps for agents making a change:
 - Run automated search and replace across the repo only where safe. Add a human review of the find/replace commits in PRs.
 - Add a short note to the `docs/` directory or your package's README if this change affects public usage.
 
+---
+
+## PR Checklist for Agents (automated checks & human review items) ✅
+Before creating a PR, ensure the following items are addressed (mark as N/A if not applicable):
+
+1. Summary: Short explanation of what changed and why; include the decision rationale for choosing the long-term solution.
+2. Test suite: Add new tests or update existing ones to cover the change. Run `cargo test`.
+2a. Benchmarks / perf checks (optional): If the change touches performance-critical code, include benchmarks or microbenchmarks and report before/after results (e.g., `cargo bench`, criterion, or other tools).
+3. Build: Run `cargo build --release` and ensure no errors.
+4. Linting: `cargo fmt` and `cargo clippy --all-targets`.
+5. Documentation updates: If behavior or API changes, update `docs` and doc comments.
+5a. Identify source-of-truth: If the change adds or modifies an implementation, state the authoritative implementation and consolidate duplicates if found.
+6. Modularity: Avoid large monolithic commits; prefer smaller logical commits with clear messages.
+7. No outdated code paths: Remove legacy code instead of leaving dead code paths.
+8. CI-friendly: Ensure PRs trigger CI checks and respond to any automated feedback.
+9. Breaking change tag: Optional — include if you want to signal the PR contains breaking changes; coordination with maintainers is optional.
+
+If any item cannot be completed, note the reason in the PR and ask for a human reviewer.
+
+
 Bad and Good code practice examples
 ```rust
-// Bad: Adding a new feature while keeping the old one
-pub fn old_feature() { /* Old implementation */ }
-pub fn new_feature() { /* New implementation */ }
 // Usage of the features
 pub fn use_feature() {
   if use_old {
     old_feature();
   } else {
-    new_feature();
   }
-}
 ```
 
-```rust
-// Good: Removing the old feature when adding a new one
-pub fn new_feature() { /* New implementation */ }
 // Usage of the new feature
-pub fn use_feature() { new_feature(); }
 ```
 
-Agent enforcement checks you should run locally in a change that replaces functionality:
 - `git grep -n "old_feature\(|old_feature\b" || true` — confirm no references remain.
 - `cargo test --workspace` — tests must pass.
 - `cargo build --workspace --release` — build to ensure no hidden failures.
 
 ### Aggressive Refactoring
-Aggressive refactoring is encouraged, since we prefer active cleanup and cohesion over keeping legacy paths. When doing large refactors, break them into smaller PRs where possible, add tests for each step, and use the Migration & Replacement Flow above.
-
-### When to ask for human review
-- Optional: If the change affects the public API and may impact downstream consumers, tagging maintainers for awareness is optional — add context in the PR description, but this is not required by the policy.
-- If the change impacts public APIs or FFI, tagging maintainers is optional; state the change in the PR description and write tests as appropriate.
-- If the change makes cross-cutting changes across the workspace in multiple packages, notify maintainers and ensure tests and examples are updated.
 
 ### FFI/Bindings Surface
 - When modifying FFI boundaries, ensure the FFI contracts are clearly described; coordinating with bindings authors (example: `bindings/javascript/`) is optional. Agents may change FFI boundaries without preserving backward compatibility, but they should update `bindings/` packages and document changes if those bindings exist.
 
 ---
-
----
-
-## PR Checklist for Agents (automated checks & human review items) ✅
-Every PR created by an automated agent should include:
-1. Summary: Short explanation of what changed and why.
-2. Test suite: Add new tests or update existing ones to cover the change. Run `cargo test`.
-3. Build: Run `cargo build --release` and ensure no errors.
-4. Linting (optional but recommended): `cargo fmt` and `cargo clippy --all-targets`.
-5. Documentation updates: If behavior or API changes, update docs in `docs` and doc comments.
-6. Modularity: Avoid very large monolithic commits; prefer smaller logical commits with clear messages.
-7. No outdated code paths: Remove legacy code instead of leaving dead code paths.
-8. CI-friendly: If the repo uses more checks (like GitHub Actions), confirm those steps run in PRs.
-
-Additional items for changes that remove or replace existing APIs or behavior (enforced by the No Deprecations Policy):
-- Change Plan (optional): Add a `Change Plan` or `Migration Plan` section in the PR description (see Migration & Replacement Flow) describing the change and how to update invocation sites; this is optional and provided for reviewer context.
-- Call sites: List all changed call sites in the PR description and include a brief note about each update.
-- Usage grep: Add the exact command run to verify no references remain; e.g., `git grep -n "old_feature\(|old_feature\b"` or `rg 'old_feature' || true`.
-- Docs: Update `docs/` and inline doc comments to document the new API and any change steps or notes; migration steps are optional and only required when you want to provide guidance for external readers.
-- Breaking change tag: Optional — you may mark the PR as a **breaking change** to signal to other maintainers or review automation, but this is not required by policy.
-
-If the agent cannot perform 2–5, note the reasons in the PR and ask for a human reviewer.
-
----
-
 ## Error Handling & Escalation (When the agent is blocked) 🚨
 - If a build fails due to unknown reasons, gather logs and create a short issue or open a draft PR with the failure attached.
-- If the change requires a design decision (API or UX), add a detailed comment to the PR and request human review.
-- For UI/UX changes, record a screenshot or short recording of the change and add to PR description.
 
----
 
 ## Example Workflows (typical agent tasks) 🔄
-- Bug fix flow:
-  1. Reproduce the bug locally.
-  2. Add a failing test that reproduces the bug.
-  3. Implement the fix and run tests locally.
-  4. Update docs if needed, create PR, and request a human reviewer for edge-case validation.
 
-- Refactor flow (aggressive):
   1. Add tests around existing behavior.
   2. Apply refactor and update call sites/tests.
   3. Run all tests and clippy/fmt; verify.
-  4. Create PR with explanation of why the change improves the system.
+  4. Run benchmarks and performance checks for performance-sensitive changes and consolidate duplicate implementations into the authoritative (source-of-truth) implementation.
 
----
-
-## Agent Safety & Security Notes 🔒
 - Do not run any untrusted external scripts or install packages outside this repo without explicit permission.
 - Avoid committing secrets or credentials. If any secrets are required for testing, use `env` injection in CI or local variables; never commit them.
 
----
-
-## Useful Links & Files 🔗
 - Project README: see root `README.md` (if present)
 - Coding patterns and naming: `.github/instructions/` directory (naming-conventions and patterns).
 - App: `apps/alakazam`
-- Library: `packages/abra`
 - Test programs: `packages/tests`.
 
 ---
-
 ## Helpful Extras for Automated Agents ✨
 If you are an agent that can run actions or tools, add these to your local checks or CI steps:
 - `cargo test --workspace --all-features`
 - `cargo fmt --all -- --check` (to detect formatting changes)
 - `cargo clippy --all-targets --all-features -- -D warnings` (if you need stricter checks)
-
----
-
 ## FAQ (short answers for common agent questions) ❓
 - Q: Can I make large changes? A: Yes — but include tests, docs, and run a full test suite. Keep PRs well-documented.
-- Q: Where do I ask for help? A: Open a PR and add maintainers as reviewers, or open an issue describing the problem.
-
----
-
 If you want me (an agent) to include automation that enforces parts of this document, tell me which checks to add to the CI and I can prepare a draft PR.
 
 ----
 
-_Generated and tailored for agent consumption. Keep this doc concise and update it as the workflow evolves._
 
 ---
-
-## Working with this project (high-level summary)
 This project uses Cargo as its build system and package manager, and targets the Rust 2024 edition.
-
-Key project facts:
 - `packages/abra` is the core image processing library.
 - `apps/alakazam` is a GUI application built on top of Abra.
 - `packages/tests` contains small example and test programs.
