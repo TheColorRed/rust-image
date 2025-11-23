@@ -108,7 +108,7 @@ Why:
 Scope and exceptions:
 - Applies to any code under workspaces in this repository (core libraries, apps, tests).
 - *Public APIs and FFI surfaces*: if a change may affect downstream users outside this repo, follow the migration coordination process (see "Migration & Replacement Flow" below) — we still prefer removing the old code but may require additional communication.
-- Occasionally, temporary transitional or compatibility helpers may be accepted with a clear migration plan and expiration date, but these must be removed in the same PR or a very short follow-up (no more than one PR cycle) and must be documented in the PR description.
+- No temporary transitional or compatibility helpers: temporary shims, compatibility wrappers, or transitional helpers are not permitted. Agents must update call sites directly or coordinate a staged migration that is approved by maintainers when full in-place removal is not possible.
 
 Required steps for agents making a change:
 1. Discover usages: search the repository for all use sites of the old API (e.g., `rg 'old_function_name'` or `git grep -- 'old_function_name'`).
@@ -120,6 +120,7 @@ Required steps for agents making a change:
 
 Migration & Replacement Flow (recommended):
 - Create a short plan in the PR description titled "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan.
+- Update all call sites in the same change when possible. If a staged migration is required, coordinate in the PR description with maintainers and include a clear migration plan and timeline — but do not introduce temporary transitional helpers into the codebase.
 - Run automated search and replace across the repo only where safe. Add a human review of the find/replace commits in PRs.
 - Add a short note to the `docs/` directory or your package's README if this change affects public usage.
 
