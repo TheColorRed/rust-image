@@ -17,6 +17,14 @@ This file explains *how an automated agent* (or a developer using an agent) shou
 - Follow the **No Deprecations Policy** — remove legacy code rather than keep it behind feature flags.
  - When refactoring, update all call sites and add/adjust tests.
  - This is NOT a public library: you are NOT required to preserve backward compatibility (including public APIs or FFI). Breaking changes are allowed and expected; you do not need to perform migrations for downstream consumers.
+ - Status: ALPHA — The library is in active alpha development. APIs, FFI and behavior are unstable and may change frequently. Agents should expect, document, and be comfortable making breaking changes.
+
+---
+
+## Alpha stage: what agents should expect
+- Frequent changes: The API surface may change frequently; expect breakages across versions.
+- No backward compatibility promise: Agents are not required to preserve old APIs across PRs.
+- Use PR descriptions to help reviewers and maintainers understand the long-term design intent.
 
 ---
 
@@ -27,6 +35,12 @@ These principles guide decisions for long-lived code in the workspace. Agents mu
 - Speed first: Optimize for runtime performance; prefer algorithmic improvements, efficient data structures, and reduced allocations for image-processing features.
 - Usability & single source-of-truth: Make one authoritative implementation for each capability (for example, prefer `packages/abra`/`packages/core`/`drawing` to provide the single canonical implementation for a feature). Avoid multiple implementations doing the same thing.
 - Observe the No Deprecations Policy — replace, migrate or remove rather than leaving legacy code around.
+
+### Version & Stability — Alpha
+This project is in the ALPHA stage. Treat the workspace as an evolving, experimental implementation. Key notes:
+- APIs and FFI are unstable and may change at any time.
+- Backward compatibility is not a requirement — design and code for best long-term architecture rather than short-lived compatibility.
+- Use per-PR notes to describe any behavior, API, or FFI changes.
 
 ### Performance & Usability (core priorities)
 These are non-negotiable priorities for this workspace. When designing or changing features, prioritize:
@@ -59,6 +73,7 @@ Agents operating on this repo must:
 - Keep changes focused, atomic, and well-tested. If a change affects many files, include a short change plan and tests.
  - Do not be concerned about preserving backward compatibility. Breaking changes to public APIs and FFI are allowed and expected — update call sites and tests accordingly.
 - Provide clear commit messages and PR descriptions with the rationale for changes.
+- In your PR description, mention the alpha status and any expectations about future change or removal of the API/FFI.
 - Prefer the long-term solution: select the design or implementation that will scale better and remain maintainable. If a big refactor is needed, do the refactor.
 - Optimize for performance and usability: provide microbenchmarks or benchmarks when making performance-related changes, and update the authoritative implementation as the 'source of truth'.
 - Run the `Run` task in local builds for GUI verification when making UI changes (see Run Tasks section).
