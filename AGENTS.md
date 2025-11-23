@@ -24,7 +24,8 @@ This file explains *how an automated agent* (or a developer using an agent) shou
 Agents operating on this repo must:
 - Respect the project's policies (no deprecations, aggressive refactoring allowed with adequate tests).
 - Run the right tools and commands to verify changes (build/test/lint etc.).
-- Keep changes focused, atomic, and well-tested. If a change affects many files, include a migration plan and tests.
+- Keep changes focused, atomic, and well-tested. If a change affects many files, include a short change plan and tests.
+ - Do not be concerned about preserving backward compatibility. Breaking changes to public APIs and FFI are allowed and expected — update call sites and tests accordingly.
 - Provide clear commit messages and PR descriptions with the rationale for changes.
 - Run the `Run` task in local builds for GUI verification when making UI changes (see Run Tasks section).
 
@@ -104,25 +105,24 @@ We follow a strict **No Deprecations** policy: do not keep old code paths, depre
 Why:
 - Avoids accumulation of dead code paths and technical debt.
 - Makes refactors and code health improvements straightforward for future contributors.
-- Forces agents and developers to be explicit about migration and breakages.
+- Forces agents and developers to be explicit about breaking changes and call-site updates.
 
 Scope and exceptions:
 - Applies to any code under workspaces in this repository (core libraries, apps, tests).
-- Public APIs and FFI surfaces are not guaranteed to be stable: this repo is a private/internal implementation and breaking changes are acceptable. Agents may update or remove FFI/public APIs without preserving backwards compatibility and are not required to coordinate migrations.
- - Public APIs and FFI surfaces are not guaranteed to be stable: this repo is an internal implementation and a breaking change is acceptable regardless of FFI or public API impact. Agents may update or remove FFI/public APIs without preserving backwards compatibility.
- - No temporary transitional or compatibility helpers: temporary shims, compatibility wrappers, or transitional helpers are not permitted. Agents must update call sites directly or coordinate a staged plan with maintainers if they still feel coordination is needed (coordination is optional, not required for compatibility reasons).
+ - Public APIs and FFI surfaces are not guaranteed to be stable: this repo is a private/internal implementation and breaking changes are acceptable. Agents may update or remove FFI/ public APIs without preserving backwards compatibility; coordination with maintainers is optional and not required.
+ - No temporary transitional or compatibility helpers: temporary shims, compatibility wrappers, or transitional helpers are not permitted. Agents must update call sites directly; coordination with maintainers is optional and not required.
 
 Required steps for agents making a change:
 1. Discover usages: search the repository for all use sites of the old API (e.g., `rg 'old_function_name'` or `git grep -- 'old_function_name'`).
 2. Add test coverage: add a test that shows the earlier behavior — then implement the new behavior and update tests.
 3. Implement new feature or refactoring and update all call sites.
 4. Remove all references to the old API and delete the old implementation.
-5. Update docs and examples where applicable; add a short migration guide in the PR description.
+5. Update docs and examples where applicable; add a short change summary in the PR description (optional — helpful for reviewers).
 6. Run a full workspace build & tests and adjust fixups for any dependent modules.
 
 - Migration & Replacement Flow (optional):
-- Optionally create a short plan in the PR description titled "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan. This is useful for reviewer context but not required.
-- Update all call sites in the same change when possible. If a staged migration is required, coordinate in the PR description with maintainers and include a clear migration plan and timeline — but do not introduce temporary transitional helpers into the codebase.
+- Optionally create a short plan in the PR description titled "Change Plan" or "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan. This is useful for reviewer context but not required.
+- Update all call sites in the same change when possible. If a staged plan is required, optionally include a clear plan and timeline in the PR description — but do not introduce temporary transitional helpers into the codebase.
 - Run automated search and replace across the repo only where safe. Add a human review of the find/replace commits in PRs.
 - Add a short note to the `docs/` directory or your package's README if this change affects public usage.
 
@@ -180,10 +180,10 @@ Every PR created by an automated agent should include:
 8. CI-friendly: If the repo uses more checks (like GitHub Actions), confirm those steps run in PRs.
 
 Additional items for changes that remove or replace existing APIs or behavior (enforced by the No Deprecations Policy):
-- Migration Plan: Add a `Migration Plan` section in the PR description (see Migration & Replacement Flow) describing the change and how to update invocation sites.
+- Change Plan (optional): Add a `Change Plan` or `Migration Plan` section in the PR description (see Migration & Replacement Flow) describing the change and how to update invocation sites; this is optional and provided for reviewer context.
 - Call sites: List all changed call sites in the PR description and include a brief note about each update.
 - Usage grep: Add the exact command run to verify no references remain; e.g., `git grep -n "old_feature\(|old_feature\b"` or `rg 'old_feature' || true`.
-- Docs: Update `docs/` and inline doc comments to document the new API and migration steps.
+- Docs: Update `docs/` and inline doc comments to document the new API and any change steps or notes; migration steps are optional and only required when you want to provide guidance for external readers.
 - Breaking change tag: Optional — you may mark the PR as a **breaking change** to signal to other maintainers or review automation, but this is not required by policy.
 
 If the agent cannot perform 2–5, note the reasons in the PR and ask for a human reviewer.
