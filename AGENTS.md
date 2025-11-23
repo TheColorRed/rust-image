@@ -15,7 +15,8 @@ This file explains *how an automated agent* (or a developer using an agent) shou
 - Use Cargo to build, test, and run examples. The workspace uses Rust 2024 edition.
 - Always run `cargo test` and `cargo build` (and optional linters) before opening a PR.
 - Follow the **No Deprecations Policy** — remove legacy code rather than keep it behind feature flags.
-- When refactoring, update all call sites and add/adjust tests.
+ - When refactoring, update all call sites and add/adjust tests.
+ - This is NOT a public library: you are NOT required to preserve backward compatibility (including public APIs or FFI). Breaking changes are allowed and expected; you do not need to perform migrations for downstream consumers.
 
 ---
 
@@ -107,8 +108,9 @@ Why:
 
 Scope and exceptions:
 - Applies to any code under workspaces in this repository (core libraries, apps, tests).
-- *Public APIs and FFI surfaces*: if a change may affect downstream users outside this repo, follow the migration coordination process (see "Migration & Replacement Flow" below) — we still prefer removing the old code but may require additional communication.
-- No temporary transitional or compatibility helpers: temporary shims, compatibility wrappers, or transitional helpers are not permitted. Agents must update call sites directly or coordinate a staged migration that is approved by maintainers when full in-place removal is not possible.
+- Public APIs and FFI surfaces are not guaranteed to be stable: this repo is a private/internal implementation and breaking changes are acceptable. Agents may update or remove FFI/public APIs without preserving backwards compatibility and are not required to coordinate migrations.
+ - Public APIs and FFI surfaces are not guaranteed to be stable: this repo is an internal implementation and a breaking change is acceptable regardless of FFI or public API impact. Agents may update or remove FFI/public APIs without preserving backwards compatibility.
+ - No temporary transitional or compatibility helpers: temporary shims, compatibility wrappers, or transitional helpers are not permitted. Agents must update call sites directly or coordinate a staged plan with maintainers if they still feel coordination is needed (coordination is optional, not required for compatibility reasons).
 
 Required steps for agents making a change:
 1. Discover usages: search the repository for all use sites of the old API (e.g., `rg 'old_function_name'` or `git grep -- 'old_function_name'`).
@@ -118,8 +120,8 @@ Required steps for agents making a change:
 5. Update docs and examples where applicable; add a short migration guide in the PR description.
 6. Run a full workspace build & tests and adjust fixups for any dependent modules.
 
-Migration & Replacement Flow (recommended):
-- Create a short plan in the PR description titled "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan.
+- Migration & Replacement Flow (optional):
+- Optionally create a short plan in the PR description titled "Migration Plan" including: Motivation, Affected Modules & Call Sites, Tests Added/Updated, Breaking Behavior, and Rollback Plan. This is useful for reviewer context but not required.
 - Update all call sites in the same change when possible. If a staged migration is required, coordinate in the PR description with maintainers and include a clear migration plan and timeline — but do not introduce temporary transitional helpers into the codebase.
 - Run automated search and replace across the repo only where safe. Add a human review of the find/replace commits in PRs.
 - Add a short note to the `docs/` directory or your package's README if this change affects public usage.
@@ -155,11 +157,12 @@ Agent enforcement checks you should run locally in a change that replaces functi
 Aggressive refactoring is encouraged, since we prefer active cleanup and cohesion over keeping legacy paths. When doing large refactors, break them into smaller PRs where possible, add tests for each step, and use the Migration & Replacement Flow above.
 
 ### When to ask for human review
-- If the change affects the public API and may impact downstream consumers, tag maintainers and request human review.
+- Optional: If the change affects the public API and may impact downstream consumers, tagging maintainers for awareness is optional — add context in the PR description, but this is not required by the policy.
+- If the change impacts public APIs or FFI, tagging maintainers is optional; state the change in the PR description and write tests as appropriate.
 - If the change makes cross-cutting changes across the workspace in multiple packages, notify maintainers and ensure tests and examples are updated.
 
 ### FFI/Bindings Surface
-- When modifying FFI boundaries, ensure the FFI contracts are clearly described and coordinate with bindings authors (example: `bindings/javascript/`), especially if those bindings are consumed externally.
+- When modifying FFI boundaries, ensure the FFI contracts are clearly described; coordinating with bindings authors (example: `bindings/javascript/`) is optional. Agents may change FFI boundaries without preserving backward compatibility, but they should update `bindings/` packages and document changes if those bindings exist.
 
 ---
 
@@ -181,7 +184,7 @@ Additional items for changes that remove or replace existing APIs or behavior (e
 - Call sites: List all changed call sites in the PR description and include a brief note about each update.
 - Usage grep: Add the exact command run to verify no references remain; e.g., `git grep -n "old_feature\(|old_feature\b"` or `rg 'old_feature' || true`.
 - Docs: Update `docs/` and inline doc comments to document the new API and migration steps.
-- Breaking change tag: If this is a public or FFI change that may break downstream users, mark the PR as a **breaking change** and coordinate with maintainers.
+- Breaking change tag: Optional — you may mark the PR as a **breaking change** to signal to other maintainers or review automation, but this is not required by policy.
 
 If the agent cannot perform 2–5, note the reasons in the PR and ask for a human reviewer.
 
