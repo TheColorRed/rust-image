@@ -48,7 +48,7 @@ impl Shader for ImageShader {
     }
 
     let idx = ((sample_y * self.width + sample_x) as usize) * 4;
-    let pixels = self.image.rgba_slice();
+    let pixels = self.image.rgba();
     (pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3])
   }
 }

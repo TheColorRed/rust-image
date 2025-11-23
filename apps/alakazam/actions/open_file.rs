@@ -28,8 +28,8 @@ pub fn open_file_dialog() -> Option<Vec<ImageDataLoaded>> {
             let channels = Channels::RGBA;
             let mut img = Image::new(width, height);
             match channels {
-              Channels::RGBA => img.set_rgba(pixels),
-              Channels::RGB => img.set_rgb(pixels),
+              Channels::RGBA => img.set_rgba_owned(pixels),
+              Channels::RGB => img.set_rgb(&pixels),
             }
             // img.set_rgba(pixels);
             img

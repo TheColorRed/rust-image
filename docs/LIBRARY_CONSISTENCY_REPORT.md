@@ -102,8 +102,7 @@ pub fn get_pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8, u8)>
 // Setters (intentionally use "set_" even for bulk operations)
 pub fn set_rgba(&mut self, data: Vec<u8>)
 pub fn set_rgb(&mut self, data: Vec<u8>)
-pub fn set_colors(&mut self, colors: Vec<u8>)
-pub fn set_channel(&mut self, channel: Channel, data: Vec<u8>)
+// Removed: set_colors and set_channel — prefer set_rgba/set_rgba_owned and mut_channel respectively
 pub fn set_new_pixels(&mut self, data: Vec<u8>, width: u32, height: u32)
 pub fn set_pixel(&mut self, x: u32, y: u32, pixel: (u8, u8, u8, u8))
 
@@ -114,7 +113,7 @@ pub fn clear(&mut self)
 pub fn clear_color(&mut self, color: Color)
 pub fn copy_channel_data(&mut self, src: &Image)
 pub fn empty_pixel_vec(&self) -> Vec<u8>
-pub fn empty_rgb_pixel_vec(&self) -> Vec<u8>
+// Removed: empty_rgb_pixel_vec — callers can construct an RGB-sized buffer using `vec![0; width*height*3]` when required
 ```
 
 **Rationale:** Consistent use of `set_` for all mutations. Property getters like `width()` and `height()` use standard Rust convention (no prefix) as private fields with public accessor methods.

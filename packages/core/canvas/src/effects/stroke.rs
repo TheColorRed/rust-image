@@ -76,7 +76,7 @@ pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image
   let (width, height) = original_image.dimensions::<u32>();
 
   let mut composite = Image::new(width, height);
-  composite.set_rgba(original_image.rgba());
+  composite.copy_channel_data(original_image);
 
   let max_x = (width.saturating_sub(1)) as i32;
   let max_y = (height.saturating_sub(1)) as i32;

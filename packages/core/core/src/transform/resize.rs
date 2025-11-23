@@ -43,7 +43,7 @@ pub trait Resize {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_bilinear(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -141,7 +141,7 @@ fn resize_bilinear(p_image: &mut Image, p_width: u32, p_height: u32) {
     chunk.copy_from_slice(&result);
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Resize using bicubic interpolation.
@@ -151,7 +151,7 @@ fn resize_bilinear(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_bicubic(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -248,7 +248,7 @@ fn resize_bicubic(p_image: &mut Image, p_width: u32, p_height: u32) {
     chunk.copy_from_slice(&result);
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Resize using Lanczos resampling.
@@ -258,7 +258,7 @@ fn resize_bicubic(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_lanczos(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -359,7 +359,7 @@ fn resize_lanczos(p_image: &mut Image, p_width: u32, p_height: u32) {
     chunk.copy_from_slice(&result);
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Resize using Edge Direct NEDI algorithm.
@@ -369,7 +369,7 @@ fn resize_lanczos(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -638,7 +638,7 @@ fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
     chunk.copy_from_slice(&result);
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Resize using Edge Direct EDI algorithm.
@@ -648,7 +648,7 @@ fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -821,7 +821,7 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
     chunk.copy_from_slice(&result);
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Resize using nearest neighbor interpolation.
@@ -831,7 +831,7 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_nearest_neighbor(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba_slice();
+  let old_pixels = p_image.rgba();
   // Use checked multiplication to avoid overflow when multiplying large dimensions
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
@@ -855,7 +855,7 @@ fn resize_nearest_neighbor(p_image: &mut Image, p_width: u32, p_height: u32) {
     }
   });
 
-  p_image.set_new_pixels(new_pixels, p_width, p_height);
+  p_image.set_new_pixels(&new_pixels, p_width, p_height);
 }
 
 /// Internal function to perform the actual resizing based on the selected algorithm.

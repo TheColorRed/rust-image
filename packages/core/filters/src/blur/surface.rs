@@ -18,7 +18,7 @@ pub fn surface_blur(image: &mut Image, radius: u32, threshold: u8) {
     return;
   }
 
-  let src = image.rgba_slice();
+  let src = image.rgba();
   let (w, h) = (width as usize, height as usize);
   let mut out = vec![0u8; w * h * 4];
 
@@ -81,5 +81,5 @@ pub fn surface_blur(image: &mut Image, radius: u32, threshold: u8) {
     }
   });
 
-  image.set_rgba(out);
+  image.set_rgba_owned(out);
 }

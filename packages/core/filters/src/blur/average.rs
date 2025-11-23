@@ -7,10 +7,11 @@ pub fn average_blur(image: &mut Image, radius: u32) {
   let kernel_area = kernel_size * kernel_size;
   let kernel = vec![1.0 / kernel_area as f32; kernel_area as usize];
   let (width, height) = image.dimensions();
-  let mut pixels = image.rgba();
+  let src = image.rgba();
+  let mut out = image.empty_pixel_vec();
 
-  pixels.par_chunks_mut(4).enumerate().for_each(|(y, pixel)| {
-    for x in 0..width {
+  out.par_chunks_mut((width as usize) * 4).enumerate().for_each(|(y, row_out)| {
+    for x in 0..width as usize {
       let mut r = 0.0;
       let mut g = 0.0;
       let mut b = 0.0;
@@ -24,21 +25,23 @@ pub fn average_blur(image: &mut Image, radius: u32) {
             continue;
           }
 
-          let index = (ny * width as usize + nx as usize) as usize;
-          let weight = kernel[(dy * kernel_size + dx) as usize];
+                let index = (ny * width as usize + nx as usize) as usize * 4;
+                let weight = kernel[(dy * kernel_size + dx) as usize];
 
-          r += pixel[index] as f32 * weight;
-          g += pixel[index + 1] as f32 * weight;
-          b += pixel[index + 2] as f32 * weight;
+                r += src[index] as f32 * weight;
+                g += src[index + 1] as f32 * weight;
+                b += src[index + 2] as f32 * weight;
         }
       }
 
-      let index = x as usize * 3;
-      pixel[index] = r as u8;
-      pixel[index + 1] = g as u8;
-      pixel[index + 2] = b as u8;
+      let out_index = x * 4;
+      row_out[out_index] = r as u8;
+      row_out[out_index + 1] = g as u8;
+      row_out[out_index + 2] = b as u8;
+      // preserve alpha from source
+      let alpha_index = (y * width as usize + x) * 4;
+      row_out[out_index + 3] = src[alpha_index + 3];
     }
   });
-
-  image.set_rgba(pixels);
+  image.set_rgba_owned(out);
 }

@@ -41,7 +41,7 @@ pub fn blend_images_at(
     chunk[3] = color.3;
   });
 
-  bottom_image.set_rgba(pixels);
+  bottom_image.set_rgba_owned(pixels);
 }
 
 /// Combines two images using the given blend mode.
@@ -133,7 +133,7 @@ pub fn blend_images_at_with_opacity(
     chunk[3] = color.3;
   });
 
-  bottom_image.set_rgba(pixels);
+  bottom_image.set_rgba_owned(pixels);
 }
 
 /// Edits or paints each pixel to make it the result color.

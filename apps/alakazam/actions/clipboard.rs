@@ -20,7 +20,7 @@ pub fn on_paste(p_app: Weak<AppWindow>, p_projects: &Arc<Mutex<Vec<AppProject>>>
     let img = clipboard.get_image().expect("Failed to get image from clipboard");
     let mut image = Image::new(img.width as u32, img.height as u32);
     let active_project = app_state.get_active_project() as i32;
-    image.set_rgba(img.bytes.to_vec());
+    image.set_rgba_owned(img.bytes.to_vec());
     let app = p_app.upgrade().unwrap();
     if active_project > -1 {
       let mut projects_mut = projects.lock().unwrap();

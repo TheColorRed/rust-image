@@ -105,7 +105,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 
   // Extract alpha channel from original (or create one if the image has no alpha)
   // This will be used to create the shadow shape
-  let shadow_pixels = shadow_image.rgba_slice();
+  let shadow_pixels = shadow_image.rgba();
   let alpha_channel: Vec<u8> = shadow_pixels
     .chunks(4)
     .map(|pixel| {
@@ -158,7 +158,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   // Create an expanded image to contain shadow offset
   let mut composite = Image::new(canvas_width, canvas_height);
   let empty_pixels = vec![0u8; (canvas_width * canvas_height * 4) as usize];
-  composite.set_rgba(empty_pixels);
+  composite.set_rgba_owned(empty_pixels);
 
   // Composite shadow at offset position with the configured blend mode and opacity
   blend_images_at_with_opacity(&mut composite, &shadow_image, 0, 0, shadow_x, shadow_y, options.blend_mode, 1.0);
@@ -183,7 +183,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 
 /// Converts an image to a single color while preserving and applying opacity to the alpha channel.
 fn colorize_image(image: &mut Image, fill: impl Into<Fill>, opacity: impl Into<f64>) {
-  let pixels = image.rgba_slice();
+  let pixels = image.rgba();
 
   let fill = fill.into();
   let opacity = opacity.into();
@@ -202,7 +202,7 @@ fn colorize_image(image: &mut Image, fill: impl Into<Fill>, opacity: impl Into<f
     })
     .collect();
 
-  image.set_rgba(colorized);
+  image.set_rgba_owned(colorized);
 }
 
 /// Applies spread to the shadow by dilating or eroding the alpha channel.
@@ -212,7 +212,7 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
   let (width, height) = image.dimensions::<u32>();
   let width = width as usize;
   let height = height as usize;
-  let src = image.rgba_slice();
+  let src = image.rgba();
   let mut pixels = src.to_vec();
 
   // Spread > 0.5 means dilate (expand), < 0.5 means erode (contract)
@@ -248,7 +248,7 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
         }
       }
     }
-    image.set_rgba(result);
+    image.set_rgba_owned(result);
   } else if spread < 0.5 {
     // Erode: contract opaque regions
     let mut result = pixels.clone();
@@ -278,6 +278,6 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
         }
       }
     }
-    image.set_rgba(result);
+    image.set_rgba_owned(result);
   }
 }

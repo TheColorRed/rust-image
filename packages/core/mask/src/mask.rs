@@ -68,6 +68,19 @@ impl Mask {
     Mask { image_mask: image }
   }
 
+  /// Create a mask by consuming an Image.
+  pub fn from_image(img: Image) -> Mask {
+    Mask { image_mask: img }
+  }
+}
+
+impl From<Image> for Mask {
+  fn from(img: Image) -> Mask {
+    Mask::from_image(img)
+  }
+}
+
+impl Mask {
   /// Draws a filled area onto the mask with the specified color.
   /// - `p_area`: The Area to draw.
   /// - `p_color`: The Color to use for the area.
@@ -101,9 +114,9 @@ impl Mask {
   /// The mask size must match the image size. If you need positioning, use `Image::set_from` or a temporary canvas.
   pub fn apply_to_image(&self, p_image: &mut Image) {
     let mask_bytes = self.image().rgba();
-    let mut out = p_image.rgba();
-    apply_mask_to_pixels_rgba(&mut out, &mask_bytes);
-    p_image.set_rgba(out);
+    if let Some(pixels) = p_image.colors().as_slice_mut() {
+      apply_mask_to_pixels_rgba(pixels, &mask_bytes);
+    }
   }
 
   fn to_color(&self, color: Color) -> Color {
@@ -155,16 +168,12 @@ pub fn apply_mask_to_image(p_image: &mut Image, p_mask: &[u8]) {
   let alphas: Vec<u8> = mask_gray.into_iter().map(mask_value_to_alpha).collect();
 
   // Write alphas into the image buffer
-  let colors = p_image.rgba();
-  let mut out: Vec<u8> = Vec::with_capacity(px_count * 4);
-  for (rgba, a) in colors.chunks(4).zip(alphas.iter()) {
-    out.push(rgba[0]);
-    out.push(rgba[1]);
-    out.push(rgba[2]);
-    out.push(*a);
+  if let Some(pixels) = p_image.colors().as_slice_mut() {
+    // Write alphas directly into the image buffer
+    for (rgba, &a) in pixels.chunks_mut(4).zip(alphas.iter()) {
+      rgba[3] = a;
+    }
   }
-
-  p_image.set_rgba(out);
 }
 
 /// Applies a mask directly to an RGBA pixel slice by setting its alpha channel.
@@ -192,6 +201,30 @@ mod tests {
   use core::{Area, Color, Image};
 
   #[test]
+  fn mask_clone_shares_buffer_and_cow_on_draw() {
+    let img = Image::new_from_color(20, 20, Color::from_rgba(255, 255, 255, 255));
+    let mut mask = Mask::from(img);
+    let ptr1 = mask.image().rgba().as_ptr();
+    let mask_clone = mask.clone();
+    let ptr2 = mask_clone.image().rgba().as_ptr();
+    assert_eq!(ptr1, ptr2, "Mask clones should share underlying Image buffer");
+
+    // Mutate the original mask - should trigger copy-on-write in Image
+    let area = Area::rect((1.0, 1.0), (2.0, 2.0));
+    mask.draw_area(&area, Color::black(), None);
+    assert_ne!(
+      mask.image().rgba().as_ptr(),
+      ptr2,
+      "Mutation should have caused the original mask's image to COW"
+    );
+    assert_eq!(
+      mask_clone.image().rgba().as_ptr(),
+      ptr2,
+      "Clone's buffer pointer should still be same after original mutated"
+    );
+  }
+
+  #[test]
   fn test_apply_mask_to_pixels_rgba() {
     // Two pixels: RGBA (red, green)
     let mut pixels: Vec<u8> = vec![255, 0, 0, 255, 0, 255, 0, 255];
@@ -209,11 +242,24 @@ mod tests {
     let mut mask_img = Image::new_from_color(2, 1, Color::from_rgba(255, 255, 255, 255));
     // set first pixel to black on mask
     mask_img.set_pixel(0, 0, (0, 0, 0, 255));
-    let mask = Mask { image_mask: mask_img };
+    let mask = Mask::from(mask_img);
     mask.apply_to_image(&mut img);
-    let rgba = img.rgba();
+    let rgba = img.to_rgba_vec();
     assert_eq!(rgba[3], 0);
     assert_eq!(rgba[7], 255);
+  }
+
+  #[test]
+  fn apply_to_image_does_not_copy_mask() {
+    let mut img = Image::new_from_color(2, 1, Color::from_rgba(255, 0, 0, 255));
+    let mut mask_img = Image::new_from_color(2, 1, Color::from_rgba(255, 255, 255, 255));
+    // set first pixel to black on mask
+    mask_img.set_pixel(0, 0, (0, 0, 0, 255));
+    let mask = Mask::from(mask_img);
+    let before_ptr = mask.image().rgba().as_ptr();
+    mask.apply_to_image(&mut img);
+    let after_ptr = mask.image().rgba().as_ptr();
+    assert_eq!(before_ptr, after_ptr, "apply_to_image should not mutate or clone the mask's internal buffer");
   }
 
   #[test]

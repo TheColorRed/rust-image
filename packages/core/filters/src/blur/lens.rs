@@ -206,7 +206,7 @@ pub fn lens_blur(image: &mut Image, p_options: LensBlurOptions) {
     .collect();
 
   // Snapshot source pixels once (borrow slice to avoid copying)
-  let src = image.rgba_slice();
+  let src = image.rgba();
   let (w, h) = (width as usize, height as usize);
 
   let mut out = vec![0u8; w * h * 4];
@@ -289,5 +289,5 @@ pub fn lens_blur(image: &mut Image, p_options: LensBlurOptions) {
     dst_px[3] = a as u8;
   });
 
-  image.set_rgba(out);
+  image.set_rgba_owned(out);
 }

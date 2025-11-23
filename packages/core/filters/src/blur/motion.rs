@@ -24,7 +24,7 @@ pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
   let half = (samples as f32 - 1.0) * 0.5; // center the kernel so blur is symmetric
 
   // Snapshot source pixels once (borrow slice to avoid copying full buffer)
-  let src = image.rgba_slice();
+  let src = image.rgba();
   let (w, h) = (width as usize, height as usize);
   let mut out = vec![0u8; w * h * 4];
 
@@ -89,5 +89,5 @@ pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
     dst_px[3] = (acc_a * inv).clamp(0.0, 255.0) as u8;
   });
 
-  image.set_rgba(out);
+  image.set_rgba_owned(out);
 }

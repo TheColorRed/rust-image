@@ -11,6 +11,7 @@ use crate::fs::writers::{gif::write_gif, jpeg::write_jpg, png::write_png, webp::
 use crate::geometry::{Area, PointF, Size};
 use crate::transform::{Crop, Resize, Rotate, TransformAlgorithm, crop};
 use ndarray::{Array1, ArrayViewMut1, Axis};
+use std::sync::Arc;
 use rayon::prelude::*;
 
 #[derive(Debug)]
@@ -30,7 +31,7 @@ pub struct Image {
   color_len: i32,
   /// The colors of the image.
   /// The colors are stored in a 3D array where the first dimension is the width, the second dimension is the height, and the third dimension is the RGBA channels.
-  colors: Array1<u8>,
+  colors: Arc<Array1<u8>>,
   /// The level of anti-aliasing. Default is 4.
   pub anti_aliasing_level: u32,
 }
@@ -42,7 +43,7 @@ impl Image {
   pub fn new(width: impl TryInto<u32>, height: impl TryInto<u32>) -> Image {
     let width = width.try_into().ok().unwrap_or(0);
     let height = height.try_into().ok().unwrap_or(0);
-    let colors = Array1::zeros(width as usize * height as usize * 4);
+    let colors = Arc::new(Array1::zeros(width as usize * height as usize * 4));
     Image {
       width,
       height,
@@ -56,8 +57,8 @@ impl Image {
   pub fn new_from_pixels(width: u32, height: u32, pixels: Vec<u8>, channels: Channels) -> Image {
     let mut img = Image::new(width, height);
     match channels {
-      Channels::RGBA => img.set_rgba(pixels),
-      Channels::RGB => img.set_rgb(pixels),
+      Channels::RGBA => img.set_rgba_owned(pixels),
+      Channels::RGB => img.set_rgb(&pixels),
     }
     // img.set_rgba(pixels);
     img
@@ -86,16 +87,9 @@ impl Image {
     vec![0; (self.width * self.height) as usize * 4]
   }
 
-  /// Get an empty RGB pixel buffer that is the sames size as the image.
-  pub fn empty_rgb_pixel_vec(&self) -> Vec<u8> {
-    vec![0; (self.width * self.height) as usize * 3]
-  }
+  // NOTE: `empty_rgb_pixel_vec` removed — if needed, callers can create a small buffer with RGB length via `vec![0; width*height*3]`
 
-  /// Sets the image to be fully transparent by setting all channels to zero.
-  pub fn clear(&mut self) {
-    let size = (self.width * self.height) as usize;
-    self.colors = Array1::zeros(size * 4);
-  }
+  // NOTE: `clear()` removed — prefer `clear_color(Color::transparent())` for explicit intent
 
   /// Clears the current image and fills it with a specific color.
   pub fn clear_color(&mut self, color: Color) {
@@ -107,12 +101,13 @@ impl Image {
       pixels.push(color.b);
       pixels.push(color.a);
     }
-    self.colors = Array1::from_shape_vec(size * 4, pixels).unwrap();
+    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(size * 4, pixels).unwrap();
   }
 
   /// Copies the channel data from another image and sets it to this image.
   /// - `src`: The source image to get the channel data from.
   pub fn copy_channel_data(&mut self, src: &Image) {
+    // Clone Arc pointer to the source underlying data and copy across
     self.colors = src.colors.clone();
   }
 
@@ -138,7 +133,7 @@ impl Image {
 
     self.width = info.width;
     self.height = info.height;
-    self.set_new_pixels(info.pixels, info.width, info.height);
+    self.set_new_pixels(&info.pixels, info.width, info.height);
     self.color_len = self.width as i32 * self.height as i32;
     println!("Opened image: {} ({}x{}) in {:?}", file, self.width, self.height, start.elapsed());
     // DebugInfo::ImageOpened(file.to_string(), self.width, self.height, start.elapsed()).log();
@@ -187,14 +182,19 @@ impl Image {
   }
 
   /// Set the pixels of the image from a vector into their respective channels.
-  /// - `pixels`: The pixels of the image.
-  pub fn set_rgba(&mut self, data: Vec<u8>) {
-    self.colors = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data).unwrap();
+  /// - `pixels`: The pixels of the image as a slice; the data will be copied into the image's internal buffer.
+  pub fn set_rgba(&mut self, data: &[u8]) {
+    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data.to_vec()).unwrap();
+  }
+
+  /// Set the pixels of the image by consuming an owned Vec. This method takes ownership and avoids an extra copy.
+  pub fn set_rgba_owned(&mut self, data: Vec<u8>) {
+    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data).unwrap();
   }
 
   /// Set the pixels of the image from a vector into their respective channels.
   /// - `pixels`: The pixels of the image.
-  pub fn set_rgb(&mut self, data: Vec<u8>) {
+  pub fn set_rgb(&mut self, data: &[u8]) {
     let (width, height) = self.dimensions::<usize>();
     if data.len() != width * height * 3 {
       panic!("Trying to set {} pixels into an image with {} pixels.", data.len(), self.width * self.height * 3);
@@ -208,32 +208,29 @@ impl Image {
       .flat_map_iter(|(rgb, a)| [rgb[0], rgb[1], rgb[2], a[3]])
       .collect();
 
-    self.colors = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
+    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
   }
 
-  /// Set the colors of the image.
-  pub fn set_colors(&mut self, colors: Array1<u8>) {
-    self.set_rgba(colors.to_vec());
+  /// Set the pixels of the image by consuming an owned Vec of RGB pixels.
+  /// This converts to RGBA and avoids an extra copy of the input RGB Vec.
+  pub fn set_rgb_owned(&mut self, data: Vec<u8>) {
+    let (width, height) = self.dimensions::<usize>();
+    if data.len() != width * height * 3 {
+      panic!("Trying to set {} pixels into an image with {} pixels.", data.len(), self.width * self.height * 3);
+    }
+    let current = self.colors.to_vec();
+    let new_data: Vec<u8> = data
+      .par_chunks(3)
+      .zip(current.par_chunks(4))
+      .flat_map_iter(|(rgb, a)| [rgb[0], rgb[1], rgb[2], a[3]])
+      .collect();
+    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
   }
 
-  /// Set the pixels of the image from a vector into their respective channels.
-  /// - `channel`: The channel that the pixels belong to.
-  /// - `pixels`: The pixels for the channel.
-  pub fn set_channel(&mut self, channel: impl Into<String>, pixels: Vec<u8>) {
-    let channel = channel.into();
-    let mut current = self.colors.to_vec();
-    current
-      .par_chunks_mut(4)
-      .enumerate()
-      .for_each(|(i, chunk)| match channel.as_str() {
-        "r" => chunk[0] = pixels[i],
-        "g" => chunk[1] = pixels[i],
-        "b" => chunk[2] = pixels[i],
-        "a" => chunk[3] = pixels[i],
-        _ => (),
-      });
-    self.colors = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, current).unwrap();
-  }
+  // NOTE: `set_colors` removed — use `set_rgba_owned` or `set_rgba` for preferred semantics
+
+  // NOTE: `set_channel` removed — channel-specific mutation can be done with `mut_channel` or via
+  // iterating `colors` as needed by callers.
 
   /// Set the pixels of the image from another image into their respective channels at a specific position.
   /// - `src`: The source image to get the pixels from.
@@ -261,7 +258,7 @@ impl Image {
   /// - `pixels`: The pixels of the image. Either as an RGBA or RGB vector.
   /// - `width`: The width of the image.
   /// - `height`: The height of the image.
-  pub fn set_new_pixels(&mut self, data: Vec<u8>, width: u32, height: u32) {
+  pub fn set_new_pixels(&mut self, data: &[u8], width: u32, height: u32) {
     let is_rgba = data.len() == width as usize * height as usize * 4;
     let is_rgb = data.len() == width as usize * height as usize * 3;
     #[rustfmt::skip]
@@ -277,34 +274,17 @@ impl Image {
     self.width = width;
     self.height = height;
     // fill with 255
-    self.colors = Array1::zeros(width as usize * height as usize * 4);
-    let mut pixels = data.clone();
+    *Arc::make_mut(&mut self.colors) = Array1::zeros(width as usize * height as usize * 4);
+    let mut pixels = data.to_vec();
     if channels == 3 {
       pixels = pixels.par_chunks(3).flat_map(|p| vec![p[0], p[1], p[2], 255]).collect();
     }
-    self.set_rgba(pixels);
+    self.set_rgba(&pixels);
   }
 
-  /// Checks if the image or image data is in RGBA format.
-  /// - `data`: Optional image data to check. If None, checks the image itself.
-  pub fn is_rgba(&self, data: impl Into<Option<Vec<u8>>>) -> bool {
-    if let Some(pixels) = data.into() {
-      pixels.len() == (self.width * self.height * 4) as usize
-    } else {
-      println!("len: {}", self.colors.len());
-      self.colors.len() == (self.width * self.height * 4) as usize
-    }
-  }
+  // NOTE: `is_rgba` removed — callers can check buffer lengths directly if needed.
 
-  /// Checks if the image or image data is in RGB format.
-  /// - `data`: Optional image data to check. If None, checks the image itself.
-  pub fn is_rgb(&self, data: impl Into<Option<Vec<u8>>>) -> bool {
-    if let Some(pixels) = data.into() {
-      pixels.len() == (self.width * self.height * 3) as usize
-    } else {
-      self.colors.len() == (self.width * self.height * 3) as usize
-    }
-  }
+  // NOTE: `is_rgb` removed — callers can check buffer lengths directly if needed.
 
   /// Get the pixel at a specific location.
   /// - `x`: The x coordinate.
@@ -323,81 +303,47 @@ impl Image {
   /// - `pixel`: The pixel to set.
   pub fn set_pixel(&mut self, x: u32, y: u32, pixel: (u8, u8, u8, u8)) {
     let index = (y * self.width + x) as usize * 4;
-    self.colors[index] = pixel.0;
-    self.colors[index + 1] = pixel.1;
-    self.colors[index + 2] = pixel.2;
-    self.colors[index + 3] = pixel.3;
+    let arr = Arc::make_mut(&mut self.colors);
+    arr[index] = pixel.0;
+    arr[index + 1] = pixel.1;
+    arr[index + 2] = pixel.2;
+    arr[index + 3] = pixel.3;
   }
 
-  /// Get a reference to the image.
-  pub fn as_ref(&self) -> &Image {
-    self
+  // NOTE: `as_ref` and `as_ref_mut` removed; dereferencing already yields the inner reference.
+
+  /// Gets a borrowed slice of the rgba colors of the image.
+  /// Prefer this for read-only access to avoid unnecessary copies.
+  pub fn rgba(&self) -> &[u8] {
+    self.colors.as_slice().expect("Image colors must be contiguous")
   }
 
-  /// Get a mutable reference to the image.
-  pub fn as_ref_mut(&mut self) -> &mut Image {
-    self
-  }
-
-  /// Gets the rgba colors of the image.
-  /// Shortcut for `join_channels("rgba")`
-  pub fn rgba(&self) -> Vec<u8> {
+  /// Get an owned rgba vector of the image. This performs a clone operation.
+  pub fn to_rgba_vec(&self) -> Vec<u8> {
     self.colors.to_vec()
   }
 
-  /// Get a slice reference to the underlying RGBA colors buffer without cloning.
-  /// This avoids an allocation when merely reading pixel bytes.
-  pub fn rgba_slice(&self) -> &[u8] {
-    self.colors.as_slice().expect("Image colors must be contiguous")
+  /// Consume the image and return the underlying rgba Vec<u8> when possible.
+  /// If the underlying buffer is shared, it will clone.
+  pub fn into_rgba_vec(self) -> Vec<u8> {
+    match Arc::try_unwrap(self.colors) {
+      Ok(arr) => arr.to_vec(),
+      Err(arc) => arc.to_vec(),
+    }
+  }
+
+  /// For tests: return a raw pointer to the underlying buffer for pointer comparison
+  #[cfg(test)]
+  pub fn buffer_ptr(&self) -> *const u8 {
+    self.colors.as_slice().expect("Image colors must be contiguous").as_ptr()
   }
   /// Gets a mutable reference to the colors of the image.
   pub fn colors(&mut self) -> &mut Array1<u8> {
-    &mut self.colors
+    Arc::make_mut(&mut self.colors)
   }
 
-  /// Gets the red channel of the image.
-  pub fn red(&self) -> Vec<u8> {
-    self
-      .colors
-      .axis_chunks_iter(Axis(0), 4)
-      .into_par_iter()
-      .map(|row| row.iter().take(1).copied().collect::<Vec<_>>())
-      .flatten()
-      .collect()
-  }
-
-  /// Gets the green channel of the image.
-  pub fn green(&self) -> Vec<u8> {
-    self
-      .colors
-      .axis_chunks_iter(Axis(0), 4)
-      .into_par_iter()
-      .map(|row| row.iter().skip(1).take(1).copied().collect::<Vec<_>>())
-      .flatten()
-      .collect()
-  }
-
-  /// Gets the blue channel of the image.
-  pub fn blue(&self) -> Vec<u8> {
-    self
-      .colors
-      .axis_chunks_iter(Axis(0), 4)
-      .into_par_iter()
-      .map(|row| row.iter().skip(2).take(1).copied().collect::<Vec<_>>())
-      .flatten()
-      .collect()
-  }
-
-  /// Gets the alpha channel of the image.
-  pub fn alpha(&self) -> Vec<u8> {
-    self
-      .colors
-      .axis_chunks_iter(Axis(0), 4)
-      .into_par_iter()
-      .map(|row| row.iter().skip(3).take(1).copied().collect::<Vec<_>>())
-      .flatten()
-      .collect()
-  }
+  // NOTE: `red`, `green`, `blue`, `alpha` removed — channel extraction can be performed by callers using
+  // `rgba()` (or `rgb()`) and iterating over the buffer as needed.
 
   /// Gets the rgb colors of the image without the alpha channel.
   /// Shortcut for `join_channels("rgb")`
@@ -417,8 +363,7 @@ impl Image {
   where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
   {
-    self
-      .colors
+    Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
       .for_each(|row| {
@@ -427,19 +372,7 @@ impl Image {
       });
   }
 
-  /// Iterate over the channels of the image to apply a function on each channel including the alpha channel.
-  /// The callback takes a pixel channel value and should return a new value for that channel.
-  /// ```ignore
-  /// let image = Image::new_from_path("input.png");
-  /// // Invert all channels of the image including alpha.
-  /// image.mut_channels_rgba(|value| 255 - value);
-  /// ```
-  pub fn mut_channels_rgba<F>(&mut self, callback: F)
-  where
-    F: Fn(u8) -> u8 + Send + Sync,
-  {
-    self.colors.par_map_inplace(|x| *x = callback(*x));
-  }
+  // NOTE: `mut_channels_rgba` removed — callers can use `mut_channels_rgb` and adjust alpha explicitly if needed.
 
   /// Iterate over the channels of the image to apply a function on each channel except the alpha channel.
   /// The callback takes a pixel channel value and should return a new value for that channel.
@@ -452,8 +385,7 @@ impl Image {
   where
     F: Fn(u8) -> u8 + Send + Sync,
   {
-    self
-      .colors
+    Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
       .for_each(|mut row| {
@@ -474,8 +406,7 @@ impl Image {
     F: Fn(u8) -> u8 + Send + Sync,
   {
     let channel = p_channel.into();
-    self
-      .colors
+    Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
       .for_each(|mut row| match channel.as_str() {
@@ -499,34 +430,14 @@ impl Image {
       });
   }
 
-  /// Iterate over the pixels of the image to apply a function on each pixel.
-  /// The callback takes an index and a pixel as an ArrayViewMut1 and should modify the pixel in place.
-  pub fn mut_pixels_with_position<F>(&mut self, callback: F)
-  where
-    F: Fn(usize, usize, ArrayViewMut1<u8>) + Send + Sync,
-  {
-    // Flatten the array to a 1D array and then iterate in parallel chunks
-    self
-      .colors
-      .as_slice_mut()
-      .unwrap()
-      .par_chunks_mut(self.width as usize * 4)
-      .enumerate()
-      .for_each(|(y, row)| {
-        row
-          .chunks_mut(4)
-          .enumerate()
-          .for_each(|(x, pixel)| callback(x, y, ArrayViewMut1::from_shape(4, pixel).unwrap()));
-      });
-  }
+  // NOTE: `mut_pixels_with_position` removed — use `mut_pixels` and capture positions separately when needed.
 
   /// Iterate over the pixels of the image to apply a function on each pixel.
   pub fn mut_pixels<F>(&mut self, callback: F)
   where
     F: Fn(ArrayViewMut1<u8>) + Send + Sync,
   {
-    self
-      .colors
+    Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
       .for_each(|pixel| callback(pixel));
@@ -547,6 +458,28 @@ impl Clone for Image {
       colors: self.colors.clone(),
       anti_aliasing_level: self.anti_aliasing_level,
     }
+  }
+}
+
+#[cfg(test)]
+mod image_tests {
+  use super::*;
+  use crate::color::Color;
+
+  #[test]
+  fn clone_shares_buffer_and_cow_on_write() {
+    let mut img = Image::new_from_color(10, 10, Color::from_rgba(255, 0, 0, 255));
+    // initial pointer
+    let ptr1 = img.rgba().as_ptr();
+    let img_clone = img.clone();
+    let ptr2 = img_clone.rgba().as_ptr();
+    assert_eq!(ptr1, ptr2, "Cloned image should share buffer pointer (Arc semantics)");
+
+    // mutate original image - should trigger clone-on-write
+    img.set_pixel(0, 0, (0, 255, 0, 255));
+    let ptr_after = img.rgba().as_ptr();
+    assert_ne!(ptr_after, ptr2, "After mutation, original's buffer pointer should differ from clone's to reflect COW");
+    assert_eq!(ptr2, img_clone.buffer_ptr(), "Clone's buffer pointer should be unchanged after original mutated");
   }
 }
 
