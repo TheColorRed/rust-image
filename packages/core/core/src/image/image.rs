@@ -11,8 +11,8 @@ use crate::fs::writers::{gif::write_gif, jpeg::write_jpg, png::write_png, webp::
 use crate::geometry::{Area, PointF, Size};
 use crate::transform::{Crop, Resize, Rotate, TransformAlgorithm, crop};
 use ndarray::{Array1, ArrayViewMut1, Axis};
-use std::sync::Arc;
 use rayon::prelude::*;
+use std::sync::Arc;
 
 #[derive(Debug)]
 /// An image representation with width, height, and RGBA color data.
@@ -86,10 +86,6 @@ impl Image {
   pub fn empty_pixel_vec(&self) -> Vec<u8> {
     vec![0; (self.width * self.height) as usize * 4]
   }
-
-  // NOTE: `empty_rgb_pixel_vec` removed — if needed, callers can create a small buffer with RGB length via `vec![0; width*height*3]`
-
-  // NOTE: `clear()` removed — prefer `clear_color(Color::transparent())` for explicit intent
 
   /// Clears the current image and fills it with a specific color.
   pub fn clear_color(&mut self, color: Color) {
@@ -184,12 +180,14 @@ impl Image {
   /// Set the pixels of the image from a vector into their respective channels.
   /// - `pixels`: The pixels of the image as a slice; the data will be copied into the image's internal buffer.
   pub fn set_rgba(&mut self, data: &[u8]) {
-    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data.to_vec()).unwrap();
+    *Arc::make_mut(&mut self.colors) =
+      Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data.to_vec()).unwrap();
   }
 
   /// Set the pixels of the image by consuming an owned Vec. This method takes ownership and avoids an extra copy.
   pub fn set_rgba_owned(&mut self, data: Vec<u8>) {
-    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data).unwrap();
+    *Arc::make_mut(&mut self.colors) =
+      Array1::from_shape_vec(self.width as usize * self.height as usize * 4, data).unwrap();
   }
 
   /// Set the pixels of the image from a vector into their respective channels.
@@ -208,7 +206,8 @@ impl Image {
       .flat_map_iter(|(rgb, a)| [rgb[0], rgb[1], rgb[2], a[3]])
       .collect();
 
-    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
+    *Arc::make_mut(&mut self.colors) =
+      Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
   }
 
   /// Set the pixels of the image by consuming an owned Vec of RGB pixels.
@@ -224,13 +223,9 @@ impl Image {
       .zip(current.par_chunks(4))
       .flat_map_iter(|(rgb, a)| [rgb[0], rgb[1], rgb[2], a[3]])
       .collect();
-    *Arc::make_mut(&mut self.colors) = Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
+    *Arc::make_mut(&mut self.colors) =
+      Array1::from_shape_vec(self.width as usize * self.height as usize * 4, new_data).unwrap();
   }
-
-  // NOTE: `set_colors` removed — use `set_rgba_owned` or `set_rgba` for preferred semantics
-
-  // NOTE: `set_channel` removed — channel-specific mutation can be done with `mut_channel` or via
-  // iterating `colors` as needed by callers.
 
   /// Set the pixels of the image from another image into their respective channels at a specific position.
   /// - `src`: The source image to get the pixels from.
@@ -282,10 +277,6 @@ impl Image {
     self.set_rgba(&pixels);
   }
 
-  // NOTE: `is_rgba` removed — callers can check buffer lengths directly if needed.
-
-  // NOTE: `is_rgb` removed — callers can check buffer lengths directly if needed.
-
   /// Get the pixel at a specific location.
   /// - `x`: The x coordinate.
   /// - `y`: The y coordinate.
@@ -310,8 +301,6 @@ impl Image {
     arr[index + 3] = pixel.3;
   }
 
-  // NOTE: `as_ref` and `as_ref_mut` removed; dereferencing already yields the inner reference.
-
   /// Gets a borrowed slice of the rgba colors of the image.
   /// Prefer this for read-only access to avoid unnecessary copies.
   pub fn rgba(&self) -> &[u8] {
@@ -335,15 +324,16 @@ impl Image {
   /// For tests: return a raw pointer to the underlying buffer for pointer comparison
   #[cfg(test)]
   pub fn buffer_ptr(&self) -> *const u8 {
-    self.colors.as_slice().expect("Image colors must be contiguous").as_ptr()
+    self
+      .colors
+      .as_slice()
+      .expect("Image colors must be contiguous")
+      .as_ptr()
   }
   /// Gets a mutable reference to the colors of the image.
   pub fn colors(&mut self) -> &mut Array1<u8> {
     Arc::make_mut(&mut self.colors)
   }
-
-  // NOTE: `red`, `green`, `blue`, `alpha` removed — channel extraction can be performed by callers using
-  // `rgba()` (or `rgb()`) and iterating over the buffer as needed.
 
   /// Gets the rgb colors of the image without the alpha channel.
   /// Shortcut for `join_channels("rgb")`
@@ -371,8 +361,6 @@ impl Image {
         // row.axis_iter_mut(Axis(0)).into_par_iter().for_each(|pixel| callback(pixel));
       });
   }
-
-  // NOTE: `mut_channels_rgba` removed — callers can use `mut_channels_rgb` and adjust alpha explicitly if needed.
 
   /// Iterate over the channels of the image to apply a function on each channel except the alpha channel.
   /// The callback takes a pixel channel value and should return a new value for that channel.
@@ -429,8 +417,6 @@ impl Image {
         _ => (),
       });
   }
-
-  // NOTE: `mut_pixels_with_position` removed — use `mut_pixels` and capture positions separately when needed.
 
   /// Iterate over the pixels of the image to apply a function on each pixel.
   pub fn mut_pixels<F>(&mut self, callback: F)

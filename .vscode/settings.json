@@ -6,6 +6,7 @@
     "bincode",
     "bresenham",
     "cdylib",
+    "clippy",
     "finalizer",
     "finalizers",
     "fract",

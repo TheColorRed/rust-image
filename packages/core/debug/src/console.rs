@@ -1,14 +1,10 @@
-// use crate::{
-//   canvas::effects::{DropShadow, Stroke},
-//   color::Gradient,
-//   geometry::Path,
-//   transform::TransformAlgorithm,
-// };
-
 // #[cfg(debug_assertions)]
 // use crate::combine::blend::blend_mode_name;
 
+use core::{Gradient, Path, TransformAlgorithm, blend::blend_mode_name};
 use std::time::Duration;
+
+use canvas::{DropShadow, Stroke};
 
 #[cfg(debug_assertions)]
 macro_rules! debug_println {

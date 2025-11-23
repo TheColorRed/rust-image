@@ -1,3 +1,3 @@
-mod options;
+mod apply_options;
 
-pub use options::ApplyOptions;
+pub use apply_options::ApplyOptions;
