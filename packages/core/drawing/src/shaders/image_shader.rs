@@ -1,5 +1,6 @@
 use crate::Shader;
 use core::Image;
+use std::sync::Arc;
 
 /// A shader that samples RGBA from a source `Image` at integer coordinates.
 ///
@@ -7,7 +8,7 @@ use core::Image;
 /// nearest pixel coordinate before indexing into the image buffer. If the
 /// sample lies outside the image bounds the shader returns *(0,0,0,0)*.
 pub(crate) struct ImageShader {
-  pixels: Vec<u8>,
+  image: Arc<Image>,
   width: i32,
   height: i32,
   offset_x: f32,
@@ -25,11 +26,10 @@ impl ImageShader {
   /// ```ignore
   /// let shader = ImageShader::new(image.clone(), 5.0, 3.0);
   /// ```
-  pub fn new(p_image: Image, p_offset_x: f32, p_offset_y: f32) -> Self {
+  pub fn new(p_image: Arc<Image>, p_offset_x: f32, p_offset_y: f32) -> Self {
     let (width, height) = p_image.dimensions::<i32>();
-    let pixels = p_image.rgba();
     ImageShader {
-      pixels,
+      image: p_image,
       width,
       height,
       offset_x: p_offset_x,
@@ -48,6 +48,7 @@ impl Shader for ImageShader {
     }
 
     let idx = ((sample_y * self.width + sample_x) as usize) * 4;
-    (self.pixels[idx], self.pixels[idx + 1], self.pixels[idx + 2], self.pixels[idx + 3])
+    let pixels = self.image.rgba_slice();
+    (pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3])
   }
 }

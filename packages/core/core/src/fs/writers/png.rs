@@ -1,7 +1,7 @@
 use crate::fs::mkdirp;
 use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
-use crate::image::Image;
+use crate::Image;
 
 use png::ColorType::Rgba;
 use png::Encoder;
@@ -36,10 +36,14 @@ pub fn write_png(file: &str, image: &Image, options: &Option<WriterOptions>) -> 
     println!("PNG Compression level set to Balanced");
   }
 
-  let pixels = if channels == 4 { image.rgba() } else { image.rgb() };
-
   let mut writer = encoder.write_header().unwrap();
-  writer.write_image_data(&pixels).unwrap();
+  if channels == 4 {
+    let pixels = image.rgba_slice();
+    writer.write_image_data(pixels).unwrap();
+  } else {
+    let pixels = image.rgb();
+    writer.write_image_data(&pixels).unwrap();
+  }
 
   Ok(())
 }

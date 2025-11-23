@@ -72,7 +72,7 @@ pub fn shader_from_fill(p_fill: impl Into<Fill>) -> Box<dyn Shader + Send + Sync
       let path = gradient.direction().unwrap_or_else(|| Path::new());
       Box::new(LinearGradientShader::new(path, gradient.clone()))
     }
-    Fill::Image(image) => Box::new(ImageShader::new((*image).clone(), 0.0, 0.0)),
+    Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
   }
 }
 
@@ -93,6 +93,6 @@ pub fn shader_from_fill_with_path(
       gradient_clone.with_direction(path.clone());
       Box::new(LinearGradientShader::new(path, gradient.clone()))
     }
-    Fill::Image(image) => Box::new(ImageShader::new((*image).clone(), 0.0, 0.0)),
+    Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
   }
 }

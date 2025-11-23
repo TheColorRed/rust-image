@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::image::Image;
+use crate::Image;
 use rayon::prelude::*;
 
 /// Flip the image along the horizontal axis.
@@ -9,7 +9,7 @@ pub fn horizontal(image: &mut Image) {
   let _duration = Instant::now();
   let (width, height) = image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
-  let old_pixels = image.rgba();
+  let old_pixels = image.rgba_slice();
 
   new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
     let x = i as u32 % width;
@@ -30,7 +30,7 @@ pub fn vertical(image: &mut Image) {
   let _duration = Instant::now();
   let (width, height) = image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
-  let old_pixels = image.rgba();
+  let old_pixels = image.rgba_slice();
 
   new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
     let x = i as u32 % width;

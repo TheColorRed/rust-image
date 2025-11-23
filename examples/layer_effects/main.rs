@@ -1,13 +1,6 @@
-#![allow(unused_imports, dead_code)]
 use abra::{
   Color, Image,
-  adjustments::{
-    brightness,
-    color::{grayscale, invert, reduce_opacity, threshold},
-    contrast, hue, saturation,
-  },
-  blend,
-  canvas::{Anchor, Canvas},
+  canvas::Canvas,
   canvas::{DropShadow, Stroke},
 };
 

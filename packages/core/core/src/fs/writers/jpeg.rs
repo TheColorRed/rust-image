@@ -1,7 +1,7 @@
+use crate::Image;
 use crate::fs::mkdirp;
 use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
-use crate::image::Image;
 use std::fs::write;
 use turbojpeg::PixelFormat::RGB;
 use turbojpeg::compress;

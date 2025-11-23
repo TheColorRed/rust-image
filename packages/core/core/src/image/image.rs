@@ -14,7 +14,13 @@ use ndarray::{Array1, ArrayViewMut1, Axis};
 use rayon::prelude::*;
 
 #[derive(Debug)]
-/// An image.
+/// An image representation with width, height, and RGBA color data.
+/// An image is the primary data structure used throughout the library for
+/// storing and manipulating pixel data.
+/// ```ignore
+/// let image = Image::new_from_path("input.png");
+/// image.save("output.jpg", None);
+/// ```
 pub struct Image {
   /// The width of the image.
   width: u32,
@@ -337,6 +343,12 @@ impl Image {
   /// Shortcut for `join_channels("rgba")`
   pub fn rgba(&self) -> Vec<u8> {
     self.colors.to_vec()
+  }
+
+  /// Get a slice reference to the underlying RGBA colors buffer without cloning.
+  /// This avoids an allocation when merely reading pixel bytes.
+  pub fn rgba_slice(&self) -> &[u8] {
+    self.colors.as_slice().expect("Image colors must be contiguous")
   }
   /// Gets a mutable reference to the colors of the image.
   pub fn colors(&mut self) -> &mut Array1<u8> {

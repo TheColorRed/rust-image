@@ -5,13 +5,13 @@ members = [
   "packages/core/*",
   "packages/plugins/*",
   # "packages/alakazam",
-  "tests/*",
+  "examples/*",
 ]
 default-members = [
   # "packages/rxrs",
   # "packages/abra",
   # "packages/alakazam",
-  "tests/*",
+  "examples/*",
 ]
 
 resolver = "2"
@@ -35,6 +35,7 @@ core = { path = "./packages/core/core" }
 drawing = { path = "./packages/core/drawing" }
 filters = { path = "./packages/core/filters" }
 mask = { path = "./packages/core/mask" }
+options = { path = "./packages/core/options" }
 
 # Abra Plugins
 collage = { path = "./packages/plugins/collage" }

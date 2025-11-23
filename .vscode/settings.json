@@ -10,15 +10,18 @@
     "finalizers",
     "fract",
     "hwnd",
+    "idents",
     "inplace",
     "luma",
     "mkdirp",
+    "napi",
     "ndarray",
     "NEDI",
     "oneshot",
     "pointf",
     "rasterizer",
     "rasterizing",
+    "repr",
     "resvg",
     "rlib",
     "rngs",
@@ -44,6 +47,7 @@
   "slint.includePaths": [
     "packages/app/ui"
   ],
+  "search.useIgnoreFiles": false,
   "svg.preview.background": "editor",
   "editor.semanticTokenColorCustomizations": {
       "enabled": true,

@@ -12,7 +12,9 @@ dependencies = [
  "drawing",
  "filters",
  "mask",
+ "options",
  "rayon",
+ "regex",
 ]
 
 [[package]]
@@ -286,6 +288,8 @@ version = "1.0.0"
 dependencies = [
  "adjustments",
  "core",
+ "mask",
+ "options",
  "rayon",
 ]
 
@@ -481,13 +485,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lens-blur-test"
-version = "1.0.0"
-dependencies = [
- "abra",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -604,6 +601,16 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "options"
+version = "1.0.0"
+dependencies = [
+ "core",
+ "drawing",
+ "mask",
+ "rayon",
+]
 
 [[package]]
 name = "pico-args"
@@ -796,6 +803,18 @@ name = "rect-test"
 version = "1.0.0"
 dependencies = [
  "abra",
+]
+
+[[package]]
+name = "regex"
+version = "1.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843bc0191f75f3e22651ae5f1e72939ab2f72a4bc30fa80a066bd66edefc24d4"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -1013,6 +1032,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tilt-shift"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "rayon",
 ]
 
 [[package]]

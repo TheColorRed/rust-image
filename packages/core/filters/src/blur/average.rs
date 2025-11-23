@@ -28,8 +28,8 @@ pub fn average_blur(image: &mut Image, radius: u32) {
           let weight = kernel[(dy * kernel_size + dx) as usize];
 
           r += pixel[index] as f32 * weight;
-          g += pixel[index] as f32 * weight;
-          b += pixel[index] as f32 * weight;
+          g += pixel[index + 1] as f32 * weight;
+          b += pixel[index + 2] as f32 * weight;
         }
       }
 

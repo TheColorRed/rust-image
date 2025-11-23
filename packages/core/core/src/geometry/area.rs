@@ -3,7 +3,7 @@ use core::{
   ops::{Add, Sub},
 };
 
-use crate::{AspectRatio, Image, Path, Point, PointF, Segment, Size, ViewBox};
+use crate::{AspectRatio, FromF32, Image, Path, Point, PointF, Segment, Size, ViewBox};
 // use crate::{
 //   Image,
 // };
@@ -15,6 +15,7 @@ use crate::{AspectRatio, Image, Path, Point, PointF, Segment, Size, ViewBox};
 pub struct Area {
   /// The underlying path outline that defines this closed area.
   pub path: Path,
+  feather: u32,
 }
 
 impl Area {
@@ -40,7 +41,7 @@ impl Area {
       .line_to((origin.x + size.width, origin.y))
       .line_to((origin.x + size.width, origin.y + size.height))
       .line_to((origin.x, origin.y + size.height));
-    Area { path }
+    Area { path, feather: 0 }
   }
   /// Creates a circular area.
   /// - `p_center`: The center point of the circle.
@@ -72,7 +73,18 @@ impl Area {
       .cubic_to((center.x - ox, center.y + ry), (center.x - rx, center.y + oy), (center.x - rx, center.y))
       .cubic_to((center.x - rx, center.y - oy), (center.x - ox, center.y - ry), (center.x, center.y - ry));
 
-    Area { path }
+    Area { path, feather: 0 }
+  }
+  /// Sets the feather amount for the area edges.
+  /// - `p_feather`: The feather radius in pixels.
+  pub fn with_feather(mut self, p_feather: u32) -> Self {
+    self.feather = p_feather;
+    self
+  }
+
+  /// Gets the feather amount for this Area.
+  pub fn feather(&self) -> u32 {
+    self.feather
   }
   /// Determines if a point is inside the area using the ray-casting algorithm.
   /// - `p_point`: The point to test.
@@ -161,9 +173,10 @@ impl Area {
   pub fn length(&self) -> f32 {
     self.path.length()
   }
-  /// Gets the bounding box of the area's outline as (min_x, min_y, max_x, max_y).
-  pub fn bounds(&self) -> (f32, f32, f32, f32) {
-    self.path.bounds()
+  /// Gets the bounding box of the area's outline as (`min_x`, `min_y`, `max_x`, `max_y`).
+  pub fn bounds<S: FromF32>(&self) -> (S, S, S, S) {
+    let (min_x, min_y, max_x, max_y) = self.path.bounds();
+    (S::from_f32(min_x), S::from_f32(min_y), S::from_f32(max_x), S::from_f32(max_y))
   }
   /// Converts the area's path to a list of integer points (for raster operations).
   /// - `p_tolerance`: The tolerance for flattening curves to points.
@@ -233,7 +246,10 @@ impl Display for Area {
 
 impl Default for Area {
   fn default() -> Self {
-    Area { path: Path::default() }
+    Area {
+      path: Path::default(),
+      feather: 0,
+    }
   }
 }
 
@@ -245,7 +261,7 @@ impl Into<Path> for Area {
 
 impl From<Path> for Area {
   fn from(path: Path) -> Self {
-    Area { path }
+    Area { path, feather: 0 }
   }
 }
 
@@ -262,6 +278,7 @@ impl Sub<Area> for Area {
   fn sub(self, _rhs: Area) -> Self::Output {
     Area {
       path: self.path.clone(),
+      feather: self.feather,
     }
   }
 }
@@ -274,6 +291,7 @@ impl<T: Into<f32>> Sub<T> for Area {
     println!("Subtraction {}", rhs);
     Area {
       path: self.path.clone(),
+      feather: self.feather,
     }
   }
 }
@@ -284,6 +302,7 @@ impl Add<Area> for Area {
   fn add(self, _rhs: Area) -> Self::Output {
     Area {
       path: self.path.clone(),
+      feather: self.feather,
     }
   }
 }
@@ -294,6 +313,7 @@ impl Add<f32> for Area {
   fn add(self, _rhs: f32) -> Self::Output {
     Area {
       path: self.path.clone(),
+      feather: self.feather,
     }
   }
 }

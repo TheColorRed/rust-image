@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::image::Image;
+use crate::Image;
 use crate::transform::TransformAlgorithm;
 // use crate::utils::debug::DebugTransform;
 use rayon::prelude::*;
@@ -43,7 +43,7 @@ pub trait Resize {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_bilinear(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -151,7 +151,7 @@ fn resize_bilinear(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_bicubic(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -258,7 +258,7 @@ fn resize_bicubic(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_lanczos(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -369,7 +369,7 @@ fn resize_lanczos(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -648,7 +648,7 @@ fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
@@ -831,7 +831,7 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_width`: The target width.
 /// - `p_height`: The target height.
 fn resize_nearest_neighbor(p_image: &mut Image, p_width: u32, p_height: u32) {
-  let old_pixels = p_image.rgba();
+  let old_pixels = p_image.rgba_slice();
   // Use checked multiplication to avoid overflow when multiplying large dimensions
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)

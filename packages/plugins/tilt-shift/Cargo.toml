@@ -1,11 +1,11 @@
 [package]
-name = "lens-blur-test"
+name = "tilt-shift"
 version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 abra = { workspace = true }
+rayon = { workspace = true }
 
-[[bin]]
-name = "lens-blur-test"
-path = "main.rs"
+[lib]
+crate-type = ["dylib"]

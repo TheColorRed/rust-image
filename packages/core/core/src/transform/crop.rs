@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::image::Image;
+use crate::Image;
 
 /// Trait for cropping functionality.
 pub trait Crop {
@@ -12,7 +12,7 @@ pub trait Crop {
 pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
   let _duration = Instant::now();
   let mut new_pixels = vec![0u8; (width * height * 4) as usize];
-  let old_pixels = image.rgba();
+  let old_pixels = image.rgba_slice();
   let (old_width, _old_height): (u32, u32) = image.dimensions();
 
   for i in 0..(width * height) {

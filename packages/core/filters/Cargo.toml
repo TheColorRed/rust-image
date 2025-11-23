@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 rayon = { workspace = true }
 core = { workspace = true }
+mask = { workspace = true }
+options = { workspace = true }
 adjustments = { workspace = true }
 
 [lib]

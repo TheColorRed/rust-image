@@ -59,7 +59,6 @@ impl Debug for LayerInner {
   }
 }
 
-#[allow(dead_code)]
 impl LayerInner {
   /// Creates a new layer with the given name, image, and canvas
   pub fn new(name: &str, image: Arc<Image>) -> LayerInner {

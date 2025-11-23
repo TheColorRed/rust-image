@@ -1,7 +1,7 @@
 use crate::fs::mkdirp;
 use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
-use crate::image::Image;
+use crate::Image;
 use gif::{Encoder, Frame, Repeat};
 use std::fs::File;
 
@@ -19,7 +19,7 @@ pub fn write_gif(file: &str, image: &Image, options: &Option<WriterOptions>) -> 
   encoder.set_repeat(Repeat::Infinite).map_err(|e| e.to_string())?;
 
   // Get the RGBA pixel data
-  let rgba_pixels = image.rgba();
+  let rgba_pixels = image.rgba_slice();
 
   // Convert RGBA to indexed color (palette-based)
   let (indexed_pixels, palette) = rgba_to_indexed(&rgba_pixels)?;
