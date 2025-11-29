@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use core::{Crop, Resize, TransformAlgorithm};
+use abra_core::{Crop, Resize, TransformAlgorithm};
 
 use super::layer_inner::LayerInner;
 

@@ -1,4 +1,5 @@
-use core::Image;
+use abra_core::Image;
+use options::Options;
 
 use crate::blur::{LensBlurOptions, gaussian_blur, lens_blur};
 
@@ -38,6 +39,7 @@ macro_rules! positive_with_fn {
   };
 }
 
+#[allow(unused)]
 pub struct FocusGeometry {
   center_x: f32,
   center_y: f32,
@@ -48,6 +50,7 @@ pub struct FocusGeometry {
   rotation: f32,
 }
 
+#[allow(unused)]
 impl FocusGeometry {
   pub fn new() -> Self {
     Self {
@@ -70,6 +73,7 @@ impl FocusGeometry {
   clamp_with_fn!(with_rotation, rotation, -180.0, 180.0);
 }
 
+#[allow(unused)]
 pub struct FocusBlurOptions {
   /// Focus geometry configuration.
   geometry: Option<FocusGeometry>,
@@ -89,16 +93,22 @@ impl FocusBlurOptions {
   }
 }
 
-pub fn focus_blur(image: &mut Image, options: impl Into<Option<FocusBlurOptions>>) {
-  let options = options.into().unwrap_or_else(FocusBlurOptions::new);
+/// Applies a focus blur to an image.
+/// - `p_image`: The image to be blurred.
+/// - `p_settings`: Settings for the focus blur.
+/// - `p_options`: Additional options for applying the blur.
+pub fn focus_blur(
+  p_image: &mut Image, p_settings: impl Into<Option<FocusBlurOptions>>, p_apply_options: impl Into<Options>,
+) {
+  let options = p_settings.into().unwrap_or_else(FocusBlurOptions::new);
   match options.blur_type.unwrap_or(BlurType::Gaussian(25)) {
     BlurType::Gaussian(radius) => {
       println!("Applying Gaussian Blur with radius: {}", radius);
-      gaussian_blur(image, radius, None);
+      gaussian_blur(p_image, radius, None);
     }
     BlurType::Lens(options) => {
       println!("Applying Lens Blur with options.");
-      lens_blur(image, options);
+      lens_blur(p_image, options, p_apply_options);
     }
   };
 }

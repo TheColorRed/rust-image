@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 use rayon::prelude::*;
 
 /// Apply a threshold to an image where all pixels above the threshold are set to white and all pixels below are set to black.

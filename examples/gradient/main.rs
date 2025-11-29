@@ -1,4 +1,6 @@
-use abra::{Gradient, Heart, Image, Path, Resize, TransformAlgorithm, drawing::fill};
+use abra::abra_core::Heart;
+use abra::drawing::prelude::*;
+use abra::prelude::*;
 
 const OUT_FILE: &str = "out/gradient.png";
 
@@ -13,7 +15,7 @@ pub fn main() {
   fill_image.resize_width(size.0, TransformAlgorithm::EdgeDirectNEDI);
 
   let area = Heart::new().fit(size);
-  let filled_image = fill(area.clone(), fill_image);
+  let filled_image = fill(area.clone(), &fill_image);
 
   // let filled_image = area.fill(Color::from_rgba(255, 0, 0, 255));
   let (width, height) = filled_image.dimensions::<i32>();

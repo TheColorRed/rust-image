@@ -4,7 +4,7 @@ use crate::{
   Image,
   brush::Brush,
   color::Fill,
-  draw::core::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill},
+  draw::abra_core::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill},
   geometry::{Area, LineCap, LineJoin, Path, PointF},
 };
 
@@ -92,8 +92,8 @@ impl<'a> Painter<'a> {
     // Wrap inner shader with BrushShader to apply alpha falloff based on hardness
     let inner_shader = shader_from_fill(fill);
     let max_distance = size / 2.0;
-    let shader: Box<dyn crate::draw::core::Shader + Send + Sync> =
-      Box::new(crate::draw::core::BrushShader::new(inner_shader, x, y, max_distance, brush.hardness()));
+    let shader: Box<dyn crate::draw::abra_core::Shader + Send + Sync> =
+      Box::new(crate::draw::abra_core::BrushShader::new(inner_shader, x, y, max_distance, brush.hardness()));
     let compositor = SourceOverCompositor;
     let sample_grid = SampleGrid::from_aa_level(2);
     let rasterizer = Rasterizer::new(&coverage, shader.as_ref(), &compositor, sample_grid);
@@ -126,8 +126,8 @@ impl<'a> Painter<'a> {
     let inner_shader = shader_from_fill(brush.color());
     // Path stroke shading falloff radius is (width / 2)
     let max_distance = width / 2.0;
-    let shader: Box<dyn crate::draw::core::Shader + Send + Sync> =
-      Box::new(crate::draw::core::StrokeBrushShader::new(inner_shader, path.clone(), max_distance, brush.hardness()));
+    let shader: Box<dyn crate::draw::abra_core::Shader + Send + Sync> =
+      Box::new(crate::draw::abra_core::StrokeBrushShader::new(inner_shader, path.clone(), max_distance, brush.hardness()));
 
     let compositor = SourceOverCompositor;
     let sample_grid = SampleGrid::from_aa_level(2);

@@ -1,13 +1,14 @@
 //! The Canvas public API struct.
 
+use abra_core::image::image_ext::CoreImageFsExt;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use crate::canvas::AddCanvasOptions;
 use crate::canvas::Origin;
 
-use core::Image;
-use core::WriterOptions;
+use abra_core::Image;
+use abra_core::WriterOptions;
 
 use super::canvas_inner::CanvasInner;
 use super::canvas_transform::CanvasTransform;
@@ -164,7 +165,7 @@ impl Canvas {
   /// project.save("output.png", None);
   /// ```
   pub fn add_layer_from_path(self, name: &str, path: &str, options: impl Into<Option<NewLayerOptions>>) -> Self {
-    let image = std::sync::Arc::new(Image::new_from_path(path));
+    let image = Arc::new(Image::new_from_path(path));
     self.add_layer_from_image(name, image, options)
   }
 
@@ -303,13 +304,13 @@ impl Canvas {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(&self, blend_mode: fn(core::blend::RGBA, core::blend::RGBA) -> core::blend::RGBA) {
+  pub fn set_blend_mode(&self, blend_mode: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA) {
     let mut canvas = self.inner_canvas.lock().unwrap();
     canvas.set_blend_mode(blend_mode);
   }
 
   /// Gets the blend mode used when compositing this canvas into a parent.
-  pub fn blend_mode(&self) -> fn(core::blend::RGBA, core::blend::RGBA) -> core::blend::RGBA {
+  pub fn blend_mode(&self) -> fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA {
     let canvas = self.inner_canvas.lock().unwrap();
     canvas.blend_mode()
   }

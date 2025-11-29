@@ -1,9 +1,8 @@
 use crate::{CollagePlugin, CollageStyle};
 
-use abra::{
-  Color, Image, PointF,
-  canvas::{AddCanvasOptions, Canvas, LayerEffects, LayerSize, NewLayerOptions},
-};
+use abra::canvas::prelude::*;
+use abra::prelude::*;
+
 use rand::Rng;
 use rayon::prelude::*;
 

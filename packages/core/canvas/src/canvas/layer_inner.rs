@@ -1,8 +1,8 @@
 //! The internal layer implementation.
 
-use core::Image;
-use core::blend;
-use core::blend::RGBA;
+use abra_core::Image;
+use abra_core::blend;
+use abra_core::blend::RGBA;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -394,7 +394,7 @@ impl LayerInner {
 mod tests {
   use super::*;
   use crate::effects::DropShadow;
-  use core::Image;
+  use abra_core::Image;
   use std::sync::Arc;
 
   #[test]

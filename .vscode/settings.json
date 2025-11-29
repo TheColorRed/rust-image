@@ -20,6 +20,7 @@
     "NEDI",
     "oneshot",
     "pointf",
+    "posterize",
     "rasterizer",
     "rasterizing",
     "repr",
@@ -32,6 +33,7 @@
     "skia",
     "slint",
     "sobel",
+    "srgb",
     "Strokable",
     "struct",
     "Supersampling",
@@ -48,6 +50,12 @@
   "slint.includePaths": [
     "packages/app/ui"
   ],
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "**/*.code-search": true,
+    "target": true
+  },
   "search.useIgnoreFiles": false,
   "svg.preview.background": "editor",
   "editor.semanticTokenColorCustomizations": {

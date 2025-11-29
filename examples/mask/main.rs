@@ -1,4 +1,6 @@
-use abra::{AspectRatio, Color, Heart, Image, Star, mask::Mask};
+use abra::abra_core::{Heart, Star};
+use abra::mask::prelude::*;
+use abra::prelude::*;
 
 const FILE: &str = "assets/skirt.png";
 

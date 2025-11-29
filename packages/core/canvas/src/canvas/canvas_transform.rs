@@ -1,9 +1,9 @@
 //! Transform operations for canvases.
 
-use core::Crop;
-use core::Resize;
-use core::Rotate;
-use core::TransformAlgorithm;
+use abra_core::Crop;
+use abra_core::Resize;
+use abra_core::Rotate;
+use abra_core::TransformAlgorithm;
 use std::sync::Arc;
 use std::sync::Mutex;
 

@@ -1,14 +1,11 @@
+use options::Options;
 use rayon::prelude::*;
 
-use core::Image;
+use abra_core::Image;
 
-/// Applies a surface blur to an image.
-///
-/// - `radius`: size of the square neighborhood in pixels (>= 1)
-/// - `threshold`: inclusive difference threshold [1..=255].
-///   Neighboring pixels whose per-channel absolute difference from the center
-///   exceeds this threshold are excluded from the average.
-pub fn surface_blur(image: &mut Image, radius: u32, threshold: u8) {
+use crate::apply_filter;
+
+fn apply_surface_blur(image: &mut Image, radius: u32, threshold: u8) {
   if radius == 0 {
     return;
   }
@@ -82,4 +79,12 @@ pub fn surface_blur(image: &mut Image, radius: u32, threshold: u8) {
   });
 
   image.set_rgba_owned(out);
+}
+/// Applies a surface blur to an image.
+/// - `p_image`: The image to be blurred.
+/// - `p_radius`: The radius of the surface blur.
+/// - `p_threshold`: The threshold for the surface blur.
+/// - `p_apply_options`: Additional options for applying the blur.
+pub fn surface_blur(image: &mut Image, p_radius: u32, p_threshold: u8, p_apply_options: impl Into<Options>) {
+  apply_filter!(apply_surface_blur, image, p_apply_options, p_radius as i32, p_radius, p_threshold);
 }

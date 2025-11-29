@@ -1,27 +1,20 @@
-use core::ops::Deref;
-use core::ops::DerefMut;
 use std::sync::Arc;
 
-use abra::Area;
-use abra::Image;
-use abra::canvas::Canvas;
-use abra::canvas::LayerEffects;
-use abra::canvas::LayerSize;
-use abra::canvas::NewLayerOptions;
-use abra::drawing::Brush;
-use abra::drawing::fill_area_with_brush;
-// Note: `paint_with_brush`, `shader_from_fill` and `stroke_with_brush` were
-// previously imported but are not used directly in this file. Remove them to
-// avoid unused import warnings. Use `fill_area_with_brush` which is consumed
-// in `CollagePlugin::set_background` above.
+use abra::canvas::prelude::*;
+use abra::drawing::prelude::*;
 use abra::plugin::{Plugin, PluginError, PluginResult};
-use abra::{Color, Fill, LoadedImages};
+use abra::prelude::*;
+
 use rand::prelude::{IndexedRandom, Rng};
 use rand::rngs::ThreadRng;
 
 mod grid;
 mod layered_grid;
 mod random;
+
+pub mod prelude {
+  pub use super::{CollageOptions, CollagePlugin, CollageStyle};
+}
 
 #[derive(Clone)]
 pub struct CollageOptions {
@@ -101,7 +94,7 @@ pub struct CollagePlugin {
   /// The style of the collage.
   style: CollageStyle,
   /// The images to include in the collage.
-  images: Vec<Arc<abra::Image>>,
+  images: Vec<Arc<Image>>,
   /// Options for generating the collage.
   options: Option<CollageOptions>,
   /// Indices of images already selected to avoid duplicates.
@@ -137,7 +130,7 @@ impl CollagePlugin {
   /// Selects a random image from the provided images.
   /// Ensures no duplicates until all images have been used.
   /// If there are more images than cells in the collage, not all images will be used.
-  fn select_random_image(&mut self) -> Arc<abra::Image> {
+  fn select_random_image(&mut self) -> Arc<Image> {
     let available_indices: Vec<usize> = (0..self.images.len())
       .filter(|i| !self.selected_images.contains(i))
       .collect();

@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 
 // TODO: Fix hue adjustment
 /// Adjust the hue of an image where 0.0 is no change, -180.0 is -180 degrees, and 180.0 is 180 degrees.

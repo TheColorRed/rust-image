@@ -1,4 +1,4 @@
-use core::{Color, Image};
+use abra_core::{Color, Image};
 
 constructor_ffi!(abra_image_new, Image, Image::new, width: u32, height: u32);
 

@@ -1,7 +1,5 @@
-use abra::Image;
-use abra::drawing::fill;
-use abra::{AspectRatio, LineJoin, Polygon};
-use abra::{Color, Fill, Gradient};
+use abra::drawing::prelude::*;
+use abra::prelude::*;
 
 fn main() {
   // Ensure output directory exists

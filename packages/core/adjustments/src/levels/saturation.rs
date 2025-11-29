@@ -1,9 +1,13 @@
-use core::Image;
+use abra_core::Image;
+
+use options::Options;
+
+use crate::apply_adjustment;
 
 /// Adjust the saturation of an image where 0.0 is grayscale and 100.0 is maximum saturation.
 /// - `image` - The image to adjust.
 /// - `value` - The value to adjust the saturation by. The range is [-100, 100] where 0 means no change.
-pub fn saturation(image: &mut Image, value: i32) {
+fn apply_saturation(image: &mut Image, value: i32) {
   let value = (value as f32).clamp(-100.0, 100.0);
   let value = (value / 100.0) + 1.0; // Scale value to range [0, 2] where 1.0 means no change
 
@@ -15,4 +19,8 @@ pub fn saturation(image: &mut Image, value: i32) {
     pixel[2] = (gray + (b as f32 - gray) * value).round() as u8;
     pixel[3] = a;
   });
+}
+
+pub fn saturation(image: &mut Image, amount: i32, p_apply_options: impl Into<Options>) {
+  apply_adjustment!(apply_saturation, image, p_apply_options, 0, amount);
 }

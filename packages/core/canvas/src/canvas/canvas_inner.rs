@@ -1,11 +1,12 @@
 //! The internal canvas implementation.
 
-use core::Channels;
-use core::Image;
-use core::Rotate;
-use core::WriterOptions;
-// no direct `core::blend` name use; imports here are filtered as needed
-use core::blend::blend_images_at_with_opacity;
+use abra_core::Channels;
+use abra_core::Image;
+use abra_core::Rotate;
+use abra_core::WriterOptions;
+use abra_core::image::image_ext::*;
+// no direct `abra_core::blend` name use; imports here are filtered as needed
+use abra_core::blend::blend_images_at_with_opacity;
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -49,7 +50,7 @@ pub(crate) struct CanvasInner {
   rotation: Cell<Option<f32>>,
   /// The blend mode to use when compositing this canvas into its parent.
   /// This mirrors LayerInner::blend_mode, but for a canvas group.
-  pub blend_mode: fn(core::blend::RGBA, core::blend::RGBA) -> core::blend::RGBA,
+  pub blend_mode: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA,
   /// When true, this canvas passes children through to the parent, rather than treating
   /// the canvas as a single flattened composite.
   pub pass_through: bool,
@@ -78,7 +79,7 @@ impl CanvasInner {
       needs_recompose: Cell::new(true),
       anchor: None,
       rotation: Cell::new(None),
-      blend_mode: core::blend::normal,
+      blend_mode: abra_core::blend::normal,
       pass_through: false,
       opacity: Cell::new(1.0),
       origin: Origin::default(),
@@ -168,7 +169,7 @@ impl CanvasInner {
       let mut img = Image::new(width, height);
       match channels {
         Channels::RGBA => img.set_rgba_owned(empty_pixels),
-          Channels::RGB => img.set_rgb_owned(empty_pixels),
+        Channels::RGB => img.set_rgb_owned(empty_pixels),
       }
       img
     };
@@ -306,13 +307,13 @@ impl CanvasInner {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(&mut self, blend: fn(core::blend::RGBA, core::blend::RGBA) -> core::blend::RGBA) {
+  pub fn set_blend_mode(&mut self, blend: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA) {
     self.blend_mode = blend;
     self.needs_recompose.set(true);
   }
 
   /// Gets the blend mode used for compositing this canvas.
-  pub fn blend_mode(&self) -> fn(core::blend::RGBA, core::blend::RGBA) -> core::blend::RGBA {
+  pub fn blend_mode(&self) -> fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA {
     self.blend_mode
   }
 

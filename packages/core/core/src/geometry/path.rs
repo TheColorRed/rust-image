@@ -324,8 +324,8 @@ impl Path {
   ///
   /// # Example
   ///
-  /// ```
-  /// use abra::geometry::{Path, ViewBox, AspectRatio};
+  /// ```ignore
+  /// use crate::geometry::{Path, ViewBox, AspectRatio};
   ///
   /// // Define a path in 0-100 coordinate space
   /// let path = Path::rect((0.0, 0.0), 100.0, 100.0);

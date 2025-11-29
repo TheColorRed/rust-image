@@ -1,10 +1,11 @@
-use core::{Area, Color, Fill};
+use abra_core::{Area, Color, Fill};
 
 /// A brush represents a drawing tool with a specific size.
 /// It encapsulates properties such as size, shape (area), and fill color.
 /// Brushes can be used for painting, drawing, and other graphical operations.
 /// ```
-/// use abra::{brush::Brush, color::Color, color::Fill, geometry::Area};
+/// use drawing::Brush;
+/// use abra_core::{Color, Fill, Area};
 /// let brush = Brush::new()
 ///   .with_size(10)
 ///   .with_area(Area::circle((0.0, 0.0), 5.0))

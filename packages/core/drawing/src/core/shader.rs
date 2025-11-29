@@ -23,14 +23,14 @@
 //!
 //! Example
 //! ```ignore
-//! use abra::draw::core::shader_from_fill;
+//! use abra::draw::abra_core::shader_from_fill;
 //! let fill = abra::color::Fill::Solid(abra::color::Color::from_rgba(255, 0, 0, 255));
 //! let shader = shader_from_fill(&fill); // Box<dyn Shader>
 //! let (r, g, b, a) = shader.shade(12.5, 30.25);
 //! ```
 
-use core::Fill;
-use core::Path;
+use abra_core::Fill;
+use abra_core::Path;
 
 use crate::shaders::image_shader::ImageShader;
 use crate::shaders::linear_gradient_shader::LinearGradientShader;

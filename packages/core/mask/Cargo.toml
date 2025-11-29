@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 rayon = { workspace = true }
-core = { workspace = true }
+abra_core = { workspace = true }
 drawing = { workspace = true }
 
 [lib]

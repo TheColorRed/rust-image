@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 
 /// Converts an image to grayscale
 pub fn grayscale(image: &mut Image) {

@@ -1,5 +1,5 @@
 use crate::kernel::apply_kernel;
-use core::Image;
+use abra_core::Image;
 
 /// Applies the Sobel filter to the image in the horizontal direction.
 pub fn sobel_horizontal(image: &mut Image) {

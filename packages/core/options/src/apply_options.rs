@@ -6,8 +6,11 @@
 //!   white = full effect, grayscale = partial effect).
 //! - `Area`: restricts the operation to a particular region (optionally feathered).
 
-use core::Area;
+use abra_core::Area;
+use abra_core::image::apply_area::ApplyContext;
 use mask::Mask;
+
+pub type Options = Option<ApplyOptions>;
 
 /// Options for applying an effect (filter, adjustment, etc.) to an image.
 /// ```ignore
@@ -48,6 +51,13 @@ impl ApplyOptions {
   pub fn new() -> Self {
     Self::default()
   }
+  /// Gets the context representation of the options for use by core image helpers.
+  pub fn ctx(&self) -> ApplyContext<'_> {
+    ApplyContext {
+      area: self.area.as_ref(),
+      mask_image: self.mask.as_ref().map(|m| m.image().rgba()),
+    }
+  }
   /// Sets a mask to be used by the filter.
   /// - `p_mask`: The `Mask` to apply; Black = no effect, White = full effect, grayscale = partial effect.
   pub fn with_mask(mut self, p_mask: impl Into<Mask>) -> Self {
@@ -68,4 +78,13 @@ impl ApplyOptions {
   pub fn area(&self) -> Option<&Area> {
     self.area.as_ref()
   }
+}
+
+/// Convert an optional ApplyOptions into the lightweight core ApplyContext used by core helpers.
+/// This helper lives in the `options` crate to avoid a circular dependency (core -> options -> core).
+pub fn get_ctx<'a>(opts: Option<&'a ApplyOptions>) -> Option<ApplyContext<'a>> {
+  opts.map(|o| ApplyContext {
+    area: o.area(),
+    mask_image: o.mask().map(|m| m.image().rgba()),
+  })
 }

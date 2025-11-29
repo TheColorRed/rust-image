@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 use std::sync::{Arc, Mutex};
 
 use crate::{

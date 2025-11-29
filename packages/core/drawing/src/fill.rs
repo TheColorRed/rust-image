@@ -1,7 +1,7 @@
-use core::{Area, Fill, Image, Path, PointF};
+use abra_core::{Area, Fill, Image, Path, PointF};
 
-use crate::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill_with_path};
 use crate::shaders::fill_feather_shader::FillFeatherShader;
+use crate::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill_with_path};
 
 /// Fills the area with the specified fill style.
 /// - `p_area`: The area to fill.
@@ -21,7 +21,12 @@ pub fn fill(p_area: impl Into<Area>, p_fill: impl Into<Fill>) -> Image {
 
   // Flatten the path and translate to image-local coordinates
   let tolerance = 0.5;
-  let flattened: Vec<PointF> = area.path.flatten(tolerance).iter().map(|p| PointF::new(p.x - min_x, p.y - min_y)).collect();
+  let flattened: Vec<PointF> = area
+    .path
+    .flatten(tolerance)
+    .iter()
+    .map(|p| PointF::new(p.x - min_x, p.y - min_y))
+    .collect();
 
   // Build coverage mask
   let coverage = PolygonCoverage::new(flattened.clone());
@@ -53,13 +58,14 @@ pub fn fill(p_area: impl Into<Area>, p_fill: impl Into<Fill>) -> Image {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use core::{Area, Color};
+  use abra_core::{Area, Color};
 
   #[test]
   fn fill_with_feather_sets_alpha_near_edge() {
     // 20x20 image, rectangle area with feather 4.
     let area = Area::rect((2.0, 2.0), (16.0, 16.0)).with_feather(4);
-    let img = fill(area, Color::from_rgba(0, 0, 0, 255));
+    let color = Color::from_rgba(0, 0, 0, 255);
+    let img = fill(area, color);
     // Check center pixel alpha (should be fully opaque)
     let (w, h) = img.dimensions::<u32>();
     let cx = w / 2;

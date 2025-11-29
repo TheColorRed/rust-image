@@ -1,4 +1,5 @@
-use abra::{Image, blend};
+use abra::abra_core::blend;
+use abra::prelude::*;
 
 const OVERLAY_FILE: &str = "assets/bikini.jpg";
 const BASE_FILE: &str = "assets/34KK-breasts.webp";

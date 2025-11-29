@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 
 /// Inverts the colors of an image
 pub fn invert(image: &mut Image) {

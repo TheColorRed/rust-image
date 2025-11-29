@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::Image;
+use abra_core::Image;
 use std::sync::Arc;
 
 /// A shader that samples RGBA from a source `Image` at integer coordinates.

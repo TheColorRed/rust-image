@@ -1,8 +1,5 @@
-use abra::{
-  Color, Image,
-  canvas::Canvas,
-  canvas::{DropShadow, Stroke},
-};
+use abra::canvas::prelude::*;
+use abra::prelude::*;
 
 const FILE: &str = "assets/bikini.jpg";
 const OUT_FILE: &str = "out/layer-effects.png";

@@ -1,0 +1,13 @@
+[package]
+name = "primitives"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ndarray = { workspace = true, features = ["rayon"] }
+rayon = { workspace = true }
+
+[lib]
+name = "primitives"
+path = "src/lib.rs"
+crate-type = ["dylib"]

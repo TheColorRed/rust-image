@@ -1,8 +1,5 @@
-use abra::{
-  Image, Path,
-  drawing::{Brush, paint_with_brush, stroke_with_brush},
-  {Color, Gradient},
-};
+use abra::drawing::prelude::*;
+use abra::prelude::*;
 
 const FILE: &str = "assets/bikini.jpg";
 

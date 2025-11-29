@@ -1,24 +1,24 @@
-use crate::kernel::apply_kernel;
-use core::Image;
-// rayon is not used directly here; processing is delegated to `apply_kernel`, which performs parallelism when appropriate.
-use core::image::apply_area::apply_processing;
-use options::ApplyOptions;
+use options::Options;
+
+use crate::{apply_filter, kernel::apply_kernel};
+use abra_core::Image;
+
+fn apply_smooth(image: &mut Image) {
+  let kernel = [0.0; 9].iter().map(|_| 1.0 / 9.0).collect::<Vec<f32>>();
+  apply_kernel(image, kernel.as_slice());
+}
 
 /// Smooths the image using a 3x3 box blur kernel.
-/// This version supports `ApplyOptions` to restrict and feather the operation.
-pub fn smooth(image: &mut Image, options: impl Into<Option<ApplyOptions>>) {
-  let options = options.into(); // Ensure options variable is used
-  apply_processing(image, options.as_ref(), 1, |img| {
-    let kernel = [0.0; 9].iter().map(|_| 1.0 / 9.0).collect::<Vec<f32>>();
-    apply_kernel(img, kernel.as_slice());
-  });
+/// This version supports `Options` to restrict and feather the operation.
+pub fn smooth(image: &mut Image, options: impl Into<Options>) {
+  apply_filter!(apply_smooth, image, options, 1);
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use core::{Area, Image};
-  use options::ApplyOptions;
+  use abra_core::{Area, Image};
+  use options::{ApplyOptions, Options};
 
   #[test]
   fn smooth_area_writes_back_only_area() {

@@ -1,16 +1,24 @@
 //! This implements methods related to image areas.
 
-use crate::{Area, Image};
-
+use crate::Area;
+use primitives::Image as PrimitiveImage;
 use rayon::prelude::*;
 
-impl Image {
+/// Extension trait adding area-related helpers to `primitives::Image`.
+pub trait ImageAreaExt {
+  fn get_rgba_in_area(&self, p_area: &Area) -> Vec<u8>;
+  fn get_selective_rgba(&self, p_area: Option<&Area>) -> Vec<u8>;
+}
+
+impl ImageAreaExt for PrimitiveImage {
   /// Retrieves RGBA pixel data within the specified area.
   /// Note: Areas can be any shape; this function extracts pixels within that shape.
   /// - `p_area`: The area from which to retrieve pixel data.
-  pub fn get_rgba_in_area(&self, p_area: &Area) -> Vec<u8> {
+  fn get_rgba_in_area(&self, p_area: &Area) -> Vec<u8> {
     let (mut min_x, mut min_y, mut max_x, mut max_y) = p_area.bounds::<i32>();
-    let (width, height) = self.size().to_tuple::<i32>();
+    let (w_u32, h_u32) = self.dimensions::<u32>();
+    let width = w_u32 as i32;
+    let height = h_u32 as i32;
 
     // Clamp bounds to image size to avoid unnecessary checks in the inner loop.
     if min_x < 0 {
@@ -75,7 +83,7 @@ impl Image {
   /// Gets the pixels of the image. If an area is provided, only pixels within that area are returned.
   /// If no area is provided, the entire image's pixels are returned.
   /// - `p_area`: Optional area to restrict pixel retrieval.
-  pub fn get_selective_rgba(&self, p_area: Option<&Area>) -> Vec<u8> {
+  fn get_selective_rgba(&self, p_area: Option<&Area>) -> Vec<u8> {
     match p_area {
       Some(a) => self.get_rgba_in_area(a),
       None => self.to_rgba_vec(),
@@ -85,6 +93,7 @@ impl Image {
 
 #[cfg(test)]
 mod tests {
+  use crate::image::image_ext::image_area::*;
   use crate::{Area, Image};
 
   #[test]

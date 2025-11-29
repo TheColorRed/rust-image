@@ -1,7 +1,4 @@
-use crate::{
-  Image,
-  color::{color::Color, gradient::Gradient},
-};
+use crate::{Color, Gradient, Image};
 
 use std::fmt::Display;
 use std::sync::Arc;
@@ -48,5 +45,11 @@ impl From<Arc<Image>> for Fill {
 impl From<Image> for Fill {
   fn from(image: Image) -> Self {
     Fill::Image(Arc::new(image))
+  }
+}
+
+impl From<&Image> for Fill {
+  fn from(image: &Image) -> Self {
+    Fill::Image(Arc::new(image.clone()))
   }
 }

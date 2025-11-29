@@ -26,16 +26,27 @@ opt-level = 3
 rayon = "1.11.0"
 rand = "0.9.2"
 ndarray = { version = "0.17.1", features = ["rayon"] }
+wgpu = { version = "27.0.1" }
+pollster = { version = "0.4.0" }
+bytemuck = { version = "1.17" }
+futures = { version = "0.3.31" }
+anyhow = { version = "1.0" }
+saphyr = { version = "0.0.6" }
+ctor = { version = "0.6.1" }
+paste = { version = "1.0.14" }
 
 # Packages
 abra = { path = "./packages/abra" }
 adjustments = { path = "./packages/core/adjustments" }
 canvas = { path = "./packages/core/canvas" }
-core = { path = "./packages/core/core" }
+abra_core = { path = "./packages/core/core" }
 drawing = { path = "./packages/core/drawing" }
 filters = { path = "./packages/core/filters" }
 mask = { path = "./packages/core/mask" }
 options = { path = "./packages/core/options" }
+
+gpu = { path = "./packages/core/gpu" }
+gpu_integration = { path = "./packages/core/gpu_integration" }
 
 # Abra Plugins
 collage = { path = "./packages/plugins/collage" }

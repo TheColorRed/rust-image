@@ -1,4 +1,4 @@
-use core::Color;
+use abra_core::Color;
 
 pub fn test() {
   Color::mean(vec![0u8, 255, 128].as_slice());

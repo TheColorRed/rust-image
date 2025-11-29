@@ -1,6 +1,8 @@
 #![allow(unused_imports)]
 
-use abra::{Image, adjustments::color, rotate};
+use abra::adjustments::prelude::*;
+use abra::prelude::*;
+use abra::transform::prelude::*;
 
 const FILE: &str = "assets/bikini.jpg";
 const OUT_FILE: &str = "out/rotate.png";

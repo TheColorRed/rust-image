@@ -1,6 +1,6 @@
 use crate::{blur::blur, kernel::apply_kernel, sobel::sobel_horizontal};
+use abra_core::Image;
 use adjustments::color::grayscale;
-use core::Image;
 
 // TODO: Implement the glowing_edges filter to look a little more like Photoshop's glowing edges filter.
 /// Applies the glowing edges filter to the image.
@@ -36,7 +36,7 @@ pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, 
   clone.set_rgba_owned(pixels);
 
   // Step 5: Apply Gaussian blur to smooth the edges
-  blur(&mut clone);
+  blur(&mut clone, None);
 
   // image.set_pixels(clone.rgba().to_vec());
 

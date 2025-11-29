@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 
 /// Reduces the opacity of an image by a factor of `opacity`.
 /// The opacity is a value between 0.0 and 1.0.

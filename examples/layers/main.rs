@@ -1,10 +1,7 @@
 #![allow(unused_imports)]
-use abra::{
-  Color, Image, WriterOptions,
-  blend::{self, RGBA},
-  canvas::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
-  {Crop, Resize, TransformAlgorithm},
-};
+use abra::abra_core::blend;
+use abra::canvas::prelude::*;
+use abra::prelude::*;
 
 const BOTTOM_IMAGE: &str = "assets/aletta-ocean.jpg";
 // const BOTTOM_IMAGE: &str = "assets/boobs.webp";

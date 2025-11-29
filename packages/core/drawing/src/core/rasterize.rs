@@ -20,7 +20,7 @@
 //!
 //! Example
 //! ```ignore
-//! use abra::draw::core::{Rasterizer, FullCoverage, SampleGrid, SourceOverCompositor, SolidShader};
+//! use abra::draw::abra_core::{Rasterizer, FullCoverage, SampleGrid, SourceOverCompositor, SolidShader};
 //! let grid = SampleGrid::from_aa_level(2);
 //! // Coverage and shader are usually created by calling into the public API.
 //! let coverage = FullCoverage;
@@ -32,7 +32,7 @@
 
 use rayon::prelude::*;
 
-use core::Image;
+use abra_core::Image;
 
 use crate::{Compositor, CoverageMask, SampleGrid, Shader};
 

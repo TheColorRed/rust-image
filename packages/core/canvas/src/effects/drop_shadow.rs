@@ -1,5 +1,5 @@
-use core::blend::{self, RGBA, blend_images_at_with_opacity, normal};
-use core::{Color, Fill, Image};
+use abra_core::blend::{self, RGBA, blend_images_at_with_opacity, normal};
+use abra_core::{Color, Fill, Image};
 
 use filters::blur::gaussian_blur;
 use rayon::prelude::*;
@@ -120,7 +120,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 
   // Apply the alpha channel to create the shadow shape
   // Write the alpha channel back into the shadow image using a mutable slice
-  if let Some(mut shadow_pixels_mut) = shadow_image.colors().as_slice_mut() {
+  if let Some(shadow_pixels_mut) = shadow_image.colors().as_slice_mut() {
     for (i, &alpha) in alpha_channel.iter().enumerate() {
       if i * 4 + 3 < shadow_pixels_mut.len() {
         shadow_pixels_mut[i * 4 + 3] = alpha;
@@ -167,7 +167,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   gaussian_blur(&mut composite, options.size as u32, None);
 
   // Reapply opacity to the blurred shadow (blur operation may have increased alpha)
-  if let Some(mut composite_pixels) = composite.colors().as_slice_mut() {
+  if let Some(composite_pixels) = composite.colors().as_slice_mut() {
     for chunk in composite_pixels.chunks_mut(4) {
       chunk[3] = ((chunk[3] as f32) * options.opacity) as u8;
     }
@@ -213,7 +213,7 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
   let width = width as usize;
   let height = height as usize;
   let src = image.rgba();
-  let mut pixels = src.to_vec();
+  let pixels = src.to_vec();
 
   // Spread > 0.5 means dilate (expand), < 0.5 means erode (contract)
   // Strength is based on distance from 0.5, clamped to reasonable values

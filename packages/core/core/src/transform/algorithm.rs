@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use std::fmt::Display;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// Algorithms for transforming images such as resizing or rotating.

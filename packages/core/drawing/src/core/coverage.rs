@@ -24,7 +24,7 @@
 //! let bounds = poly.bounds().unwrap();
 //! ```
 
-use core::PointF;
+use abra_core::PointF;
 
 /// A trait representing a geometric coverage test for sample points.
 ///

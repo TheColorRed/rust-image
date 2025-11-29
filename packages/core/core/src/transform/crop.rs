@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::Image;
+use primitives::Image as PrimitiveImage;
 
 /// Trait for cropping functionality.
 pub trait Crop {
@@ -27,4 +28,11 @@ pub fn crop(image: &mut Image, x: u32, y: u32, width: u32, height: u32) {
 
   image.set_new_pixels(&new_pixels, width, height);
   // DebugTransform::Crop(old_width, old_height, width, height, duration.elapsed()).log();
+}
+
+impl Crop for PrimitiveImage {
+  fn crop(&mut self, x: u32, y: u32, width: u32, height: u32) -> &mut Self {
+    crate::transform::crop(self, x, y, width, height);
+    self
+  }
 }
