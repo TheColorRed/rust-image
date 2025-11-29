@@ -16,7 +16,7 @@ fn main() {
   color::auto_tone(&mut image, None);
   color::auto_color(&mut image, None);
   levels::photo_filter_preset(&mut image, FilterType::WarmingDark, 0.25, None);
-  smooth::smooth(&mut image, None);
+  smooth::smooth_skin(&mut image, 0.5, None);
   // levels::saturation(&mut image, 150, None);
   image.save("out/focus-blur.png", None);
 }
