@@ -1,5 +1,5 @@
 use canvas::{Canvas, Layer};
-use core::Image;
+use abra_core::Image;
 
 // TODO: Expand plugins to different types (filters, effects, generators, etc.)
 // These types will each have their own entry points and context structures.

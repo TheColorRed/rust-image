@@ -1,6 +1,8 @@
+use abra_core::Image;
+use options::Options;
 use rayon::prelude::*;
 
-use core::Image;
+use crate::apply_filter;
 
 #[derive(Clone, Copy, Debug)]
 /// The aperture shape for the lens blur iris (number of blades)
@@ -193,7 +195,7 @@ fn add_noise(rgb: &mut [f32; 3], x: u32, y: u32, c: u32, opt: &NoiseOptions) {
 /// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
 /// - `image`: target image buffer
 /// - `p_options`: lens blur configuration
-pub fn lens_blur(image: &mut Image, p_options: LensBlurOptions) {
+fn apply_lens_blur(image: &mut Image, p_options: LensBlurOptions) {
   let samples = p_options.samples.max(1);
   let (width, height) = image.dimensions::<u32>();
   if p_options.iris.radius == 0 || width == 0 || height == 0 {
@@ -290,4 +292,11 @@ pub fn lens_blur(image: &mut Image, p_options: LensBlurOptions) {
   });
 
   image.set_rgba_owned(out);
+}
+/// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
+/// - `p_image`: target image buffer
+/// - `p_options`: lens blur configuration
+/// - `p_apply_options`: additional options for applying the blur
+pub fn lens_blur(p_image: &mut Image, p_options: LensBlurOptions, p_apply_options: impl Into<Options>) {
+  apply_filter!(apply_lens_blur, p_image, p_apply_options, 1, p_options);
 }

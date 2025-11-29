@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 use rayon::prelude::*;
 
 /// Posterizes an image to a specified number of levels.

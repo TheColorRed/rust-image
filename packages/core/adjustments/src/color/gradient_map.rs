@@ -1,4 +1,4 @@
-use core::{Gradient, Image};
+use abra_core::{Gradient, Image};
 
 /// Apply a gradient map to an image. This will map the colors of the image to the colors of the gradient.
 /// Darker colors will be mapped to the first color in the gradient, and lighter colors will be mapped to the last color in the gradient.

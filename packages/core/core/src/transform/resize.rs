@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::Image;
 use crate::transform::TransformAlgorithm;
 // use crate::utils::debug::DebugTransform;
+use primitives::Image as PrimitiveImage;
 use rayon::prelude::*;
 
 /// Trait for resizing functionality.
@@ -992,4 +993,38 @@ pub fn resize_percentage(p_image: &mut Image, p_percentage: f32, p_algorithm: im
   let new_width = ((old_width as f32 * p_percentage).max(1.0)) as u32;
   let new_height = ((old_height as f32 * p_percentage).max(1.0)) as u32;
   resize(p_image, new_width, new_height, p_algorithm);
+}
+
+// Implement Resize trait for primitives::Image so external code that expects
+// `abra_core::Image` (a re-export of primitives::Image) can call `.resize(...)`.
+impl Resize for PrimitiveImage {
+  fn resize(&mut self, p_width: u32, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::resize(self, p_width, p_height, p_algorithm);
+    self
+  }
+
+  fn resize_percentage(&mut self, percentage: f32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::resize_percentage(self, percentage, p_algorithm);
+    self
+  }
+
+  fn resize_width(&mut self, p_width: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::width(self, p_width, p_algorithm);
+    self
+  }
+
+  fn resize_height(&mut self, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::height(self, p_height, p_algorithm);
+    self
+  }
+
+  fn resize_width_relative(&mut self, p_width: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::width_relative(self, p_width, p_algorithm);
+    self
+  }
+
+  fn resize_height_relative(&mut self, p_height: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::height_relative(self, p_height, p_algorithm);
+    self
+  }
 }

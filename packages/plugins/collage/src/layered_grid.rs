@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use abra::{
-  Color, Image,
-  canvas::{AddCanvasOptions, Canvas, LayerEffects, LayerSize, NewLayerOptions},
-};
+use abra::canvas::prelude::*;
+use abra::prelude::*;
+
 use rand::{Rng, prelude::SliceRandom};
 use rayon::prelude::*;
 
@@ -64,7 +63,7 @@ impl CollagePlugin {
             "image",
             image,
             NewLayerOptions::new()
-              .with_anchor(abra::canvas::Anchor::Center)
+              .with_anchor(Anchor::Center)
               .with_size(LayerSize::Cover(None)),
           );
 

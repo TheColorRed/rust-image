@@ -1,9 +1,6 @@
-use abra::{
-  Color, Fill, Gradient, ImageLoader, Path,
-  canvas::{DropShadow, LayerEffects, Stroke},
-  plugin::{Plugin, PluginResult},
-};
-use abra_collage::{CollageOptions, CollagePlugin, CollageStyle};
+use abra::canvas::prelude::*;
+use abra::prelude::*;
+use abra_collage::prelude::*;
 
 pub fn main() {
   let _image_paths = vec![
@@ -60,10 +57,7 @@ pub fn main() {
   println!("Images loaded in {:?}", load_start.elapsed());
 
   let result = collage_plugin.apply().unwrap();
-  match result {
-    PluginResult::Canvases(canvases) => {
-      canvases[0].save("out/collage_result.png", None);
-    }
-    _ => {}
+  if let Some(canvas) = result.canvas_at(0) {
+    canvas.save("out/collage_result.png", None);
   }
 }

@@ -1,6 +1,6 @@
 //! Options for creating a new layer in a canvas.
 
-use core::{
+use abra_core::{
   TransformAlgorithm,
   blend::{self, RGBA},
 };

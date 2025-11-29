@@ -1,4 +1,5 @@
-use abra::{Heart, Image};
+use abra::abra_core::Heart;
+use abra::prelude::*;
 
 pub fn main() {
   let image = Image::new_from_path("assets/bikini.jpg");

@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-core = { workspace = true }
+abra_core = { workspace = true }
 filters = { workspace = true }
 drawing = { workspace = true }
 

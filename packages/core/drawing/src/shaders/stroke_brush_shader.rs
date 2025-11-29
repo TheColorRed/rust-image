@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::{Path, PointF};
+use abra_core::{Path, PointF};
 
 /// Stroke brush shader: applies hardness-based falloff relative to a path centerline.
 ///

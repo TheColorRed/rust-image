@@ -1,4 +1,4 @@
-use core::{
+use std::{
   fmt::Display,
   ops::{Add, Sub},
 };
@@ -262,6 +262,12 @@ impl Into<Path> for Area {
 impl From<Path> for Area {
   fn from(path: Path) -> Self {
     Area { path, feather: 0 }
+  }
+}
+
+impl From<&Area> for Area {
+  fn from(area: &Area) -> Self {
+    area.clone()
   }
 }
 

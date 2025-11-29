@@ -1,16 +1,18 @@
+use abra_core::Image;
+use options::Options;
 use rayon::prelude::*;
 
-use core::Image;
+use crate::apply_filter;
 
 /// Applies a directional motion blur to an image.
 /// - `image`: target image buffer
 /// - `p_angle_degrees`: direction of motion in degrees (0 = +X/right)
 /// - `p_distance`: length of the blur in pixels (>= 1)
-pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
+fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
   if p_distance == 0 {
     return;
   }
-  let (width, height) = image.dimensions::<u32>();
+  let (width, height) = img.dimensions::<u32>();
   if width == 0 || height == 0 {
     return;
   }
@@ -24,7 +26,7 @@ pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
   let half = (samples as f32 - 1.0) * 0.5; // center the kernel so blur is symmetric
 
   // Snapshot source pixels once (borrow slice to avoid copying full buffer)
-  let src = image.rgba();
+  let src = img.rgba();
   let (w, h) = (width as usize, height as usize);
   let mut out = vec![0u8; w * h * 4];
 
@@ -61,7 +63,9 @@ pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
         let i11 = ((y1 as usize) * w + x1 as usize) * 4;
 
         #[inline]
-        fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+        fn lerp(a: f32, b: f32, t: f32) -> f32 {
+          a + (b - a) * t
+        }
 
         let r0 = lerp(src[i00] as f32, src[i10] as f32, tx);
         let g0 = lerp(src[i00 + 1] as f32, src[i10 + 1] as f32, tx);
@@ -89,5 +93,14 @@ pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32) {
     dst_px[3] = (acc_a * inv).clamp(0.0, 255.0) as u8;
   });
 
-  image.set_rgba_owned(out);
+  img.set_rgba_owned(out);
+}
+
+/// Applies a motion blur to an image.
+/// - `p_image`: The image to be blurred.
+/// - `p_angle_degrees`: The angle of the motion blur in degrees.
+/// - `p_distance`: The distance of the motion blur in pixels.
+/// - `p_apply_options`: Additional options for applying the blur.
+pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32, p_apply_options: impl Into<Options>) {
+  apply_filter!(apply_motion_blur, image, p_apply_options, 1, p_angle_degrees, p_distance);
 }

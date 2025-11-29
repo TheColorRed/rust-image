@@ -1,29 +1,39 @@
-mod color;
+pub mod color;
 // mod debug;
 mod combine;
 mod fs;
-mod geometry;
+pub mod geometry;
 pub mod image;
 mod loader;
-mod transform;
+pub mod settings;
+pub mod transform;
 
 pub use color::*;
+pub use settings::Settings;
 pub use transform::*;
 // pub use debug::*;
 pub use combine::*;
 pub use fs::WriterOptions;
+// Re-export selected I/O helpers so other crates (e.g., abra wrapper) can access them
+pub use fs::file_info::FileInfo;
+// Explicitly export reader and writer functions to avoid ambiguous glob re-exports.
+pub use fs::readers::gif::read_gif;
+pub use fs::readers::jpeg::read_jpg;
+pub use fs::readers::png::read_png;
+pub use fs::readers::svg::read_svg;
+pub use fs::readers::webp::read_webp;
+pub use fs::writers::gif::write_gif;
+pub use fs::writers::jpeg::write_jpg;
+pub use fs::writers::png::write_png;
+pub use fs::writers::webp::write_webp;
 pub use geometry::*;
-pub use image::image::*;
+// `image` module content moved to `primitives` crate and re-exported below.
 pub use loader::*;
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-/// The number of channels in an image
-pub enum Channels {
-  /// A three channel image (RGB)
-  RGB = 3,
-  /// A four channel image (RGBA)
-  RGBA = 4,
-}
+// Re-export primitives Image for workspace users. This replaces the core-defined Image type
+// so consumers can continue to use `use abra_core::Image;` with the new primitives implementation.
+pub use primitives::Channels;
+pub use primitives::Color;
+pub use primitives::Image;
 
 // lib.rs or geometry/mod.rs (a public crate-local trait)
 pub trait FromF32 {
@@ -66,12 +76,12 @@ impl FromF32 for u32 {
 /// }
 /// ```
 #[macro_export]
-macro_rules! pick {
+macro_rules! if_pick {
   ($cond:expr => $val:expr, $( $rest:tt )* ) => {
     if $cond {
       $val
     } else {
-      $crate::pick!( $( $rest )* )
+      $crate::if_pick!( $( $rest )* )
     }
   };
   (else => $val:expr) => {

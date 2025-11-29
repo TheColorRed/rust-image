@@ -1,7 +1,7 @@
 // #[cfg(debug_assertions)]
 // use crate::combine::blend::blend_mode_name;
 
-use core::{Gradient, Path, TransformAlgorithm, blend::blend_mode_name};
+use abra_core::{Gradient, Path, TransformAlgorithm, blend::blend_mode_name};
 use std::time::Duration;
 
 use canvas::{DropShadow, Stroke};

@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::{Gradient, Path};
+use abra_core::{Gradient, Path};
 
 /// Linear gradient shader that maps a parameter t along a `Path` to a color.
 ///

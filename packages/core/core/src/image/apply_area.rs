@@ -8,9 +8,20 @@
 //! - Blend processed pixel buffers back into the destination image using the computed mask.
 //!
 //! This module should be considered the canonical implementation for area/feather/mask handling.
+use crate::Channels;
+use crate::Image;
+use crate::Settings;
 use crate::geometry::Area;
-use crate::{Channels, Image};
+use crate::image::gpu_registry::get_gpu_provider;
 use rayon::prelude::*;
+// use std::borrow::Cow; // already imported above
+
+/// Lightweight structure representing the primitives core needs from ApplyOptions
+/// without depending on the options crate.
+pub struct ApplyContext<'a> {
+  pub area: Option<&'a Area>,
+  pub mask_image: Option<&'a [u8]>,
+}
 use std::borrow::Cow;
 
 /// Result structure containing a prepared (potentially owned) pixel buffer and the processing rects.
@@ -71,7 +82,7 @@ impl<'a> PreparedArea<'a> {
 /// - `image`: the source image
 /// - `area`: the optional area to process; if `None` we return a borrowed slice of the full image
 /// - `kernel_padding`: padding in pixels to ensure neighbor pixels for convolution are included
-pub fn prepare_area_pixels<'a>(image: &'a Image, area: Option<&Area>, kernel_padding: i32) -> PreparedArea<'a> {
+fn prepare_area_pixels<'a>(image: &'a Image, area: Option<&Area>, kernel_padding: i32) -> PreparedArea<'a> {
   let (image_w, image_h) = image.dimensions::<u32>();
   let image_w = image_w as i32;
   let image_h = image_h as i32;
@@ -159,7 +170,7 @@ pub fn prepare_area_pixels<'a>(image: &'a Image, area: Option<&Area>, kernel_pad
 /// - `prepared`: prepared area metadata
 /// - `area`: optional area (may be None). If None, mask is all ones.
 /// - `mask_image`: optional RGBA mask image bytes (full image size RGBA bytes). If provided it will be sampled and combined multiplicatively.
-pub fn compute_area_mask(prepared: &PreparedAreaMeta, area: Option<&Area>, mask_image: Option<&[u8]>) -> Vec<f32> {
+fn compute_area_mask(prepared: &PreparedAreaMeta, area: Option<&Area>, mask_image: Option<&[u8]>) -> Vec<f32> {
   let width = prepared.rect_w as usize;
   let height = prepared.rect_h as usize;
   let rect_min_x = prepared.rect_min_x as i32;
@@ -221,7 +232,7 @@ pub fn compute_area_mask(prepared: &PreparedAreaMeta, area: Option<&Area>, mask_
 
 /// Blend processed pixels (of size prepared.rect_w * prepared.rect_h) back into the original image
 /// using the provided `mask` (0..1 floats) and writing into the image alpha correctly.
-pub fn blend_area_pixels(image: &mut Image, processed: &[u8], prepared_meta: &PreparedAreaMeta, mask: &[f32]) {
+fn blend_area_pixels(image: &mut Image, processed: &[u8], prepared_meta: &PreparedAreaMeta, mask: &[f32]) {
   let (image_w, _) = image.dimensions::<usize>();
   let row_stride = (image_w * 4) as usize;
   let rect_w = prepared_meta.rect_w as usize;
@@ -278,7 +289,7 @@ pub fn blend_area_pixels(image: &mut Image, processed: &[u8], prepared_meta: &Pr
 /// using the prepared rect meta. This function takes ownership of `processed` and will perform
 /// a fast-path replacement if the entire image was processed; otherwise it computes a mask
 /// (area feather + optional mask image) and blends the processed buffer into place.
-pub fn apply_processed_pixels_to_image(
+fn apply_processed_pixels_to_image(
   image: &mut Image, processed: Vec<u8>, prepared: &PreparedAreaMeta, area: Option<&Area>, mask_image: Option<&[u8]>,
 ) {
   let (image_w, image_h) = image.dimensions::<usize>();
@@ -298,43 +309,74 @@ pub fn apply_processed_pixels_to_image(
   }
 }
 
-/// Convenience wrapper to run a processor over the prepared area pixel buffer
-/// and then apply the processed pixels back to the destination image.
-/// - `p_image`: the destination image to modify.
-/// - `p_options`: optional `ApplyOptions` containing area and mask info.
-/// - `p_kernel_padding`: padding around the kernel for processing.
-/// - `p_processor`: closure that processes the prepared image area.
-pub fn apply_processing<F>(
-  p_image: &mut Image, p_options: Option<&ApplyOptions>, p_kernel_padding: impl Into<i32>, p_processor: F,
+/// Run processing on a prepared area of an image, handling area/mask/feathering/etc.
+/// Once processing is complete, the processed pixels are blended back into the original image.
+/// - `p_image`: The destination image to modify.
+/// - `p_options`: Optional `ApplyOptions` containing area and mask info.
+/// - `p_kernel_padding`: Padding around the kernel for processing.
+/// - `p_processor`: Closure that processes the prepared image area.
+pub fn process_image<F>(
+  p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_kernel_padding: impl Into<i32>, p_processor: F,
 ) where
   F: FnOnce(&mut Image),
 {
-  let area = p_options.as_ref().and_then(|o| o.area());
-  let mask: Option<&[u8]> = p_options.as_ref().and_then(|o| o.mask().map(|m| m.image().rgba()));
+  let start = std::time::Instant::now();
+  // No auto-init here; provider should be registered by an integration crate (e.g., gpu_integration)
+  // If a provider is present it will be used, otherwise CPU fallback.
+  let area = p_ctx.as_ref().and_then(|c| c.area);
+  let mask: Option<&[u8]> = p_ctx.as_ref().and_then(|c| c.mask_image);
   let kernel_padding = p_kernel_padding.into();
   // Prepare a sub-area for processing
   let prepared = prepare_area_pixels(p_image, area, kernel_padding);
   if prepared.area_w == 0 || prepared.area_h == 0 {
     return;
   }
+  let meta = prepared.meta();
+
+  let is_gpu_enabled = Settings::gpu_enabled();
+  // If a GPU provider is registered and wants to process this area, try it first.
+  if is_gpu_enabled && let Some(provider) = get_gpu_provider() {
+    if (provider.should_process)(&meta) {
+      match (provider.process)(&meta, prepared.pixels.as_ref()) {
+        Ok(processed) => {
+          println!("Processing using the GPU");
+          apply_processed_pixels_to_image(p_image, processed, &meta, area, mask);
+          println!("GPU processing took {:?}", start.elapsed());
+          return;
+        }
+        Err(_) => {
+          // Fall back to CPU processing below. We purposely ignore the error
+          // to keep GPU integration optional and non-fatal for callers.
+        }
+      }
+    }
+  }
+
+  println!("Processing using the CPU");
+  // CPU fallback: create tmp_img and run p_processor
   let width = prepared.rect_w as usize;
   let height = prepared.rect_h as usize;
   let pixels = prepared.pixels.as_ref();
   let mut tmp_img = Image::new_from_pixels(width as u32, height as u32, pixels.to_vec(), Channels::RGBA);
-  // Run processor on the prepared pixels (mutably)
   p_processor(&mut tmp_img);
-  // Apply result back to destination using the helper (handles fast-path), using metadata for blending
-  let meta = prepared.meta();
   apply_processed_pixels_to_image(p_image, tmp_img.into_rgba_vec(), &meta, area, mask);
+  println!("CPU processing took {:?}", start.elapsed());
 }
+
+/// Convert an optional `ApplyOptions` into the lightweight `ApplyContext` used internally
+/// by apply helpers. This keeps the `options` crate optional for callers and avoids a circular dependency.
+// Note: conversion from `ApplyOptions` to `ApplyContext` is provided by the `options` crate
+// via `options::to_core_ctx` to avoid a circular dependency (core -> options -> core).
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::Image;
-  use crate::color::Color;
   use crate::geometry::Area;
+  use crate::image::gpu_registry::{clear_gpu_provider, register_gpu_provider};
+  use primitives::Color;
   use std::borrow::Cow;
+  use std::sync::Arc;
 
   #[test]
   fn prepare_area_pixels_full_image_borrowed() {
@@ -383,5 +425,64 @@ mod tests {
     assert_eq!(img.rgba()[idx], 255);
     assert_eq!(img.rgba()[idx + 1], 255);
     assert_eq!(img.rgba()[idx + 2], 255);
+  }
+
+  #[test]
+  fn process_image_uses_gpu_provider() {
+    let mut img = Image::new_from_color(8, 8, Color::from_rgba(0, 0, 0, 255));
+    // Provider will return an all-white processed buffer for full image
+    let provider = Arc::new(crate::image::gpu_registry::GpuCallback {
+      should_process: Arc::new(|_meta| true),
+      process: Arc::new(|meta, _pixels| {
+        let w = meta.rect_w as usize;
+        let h = meta.rect_h as usize;
+        Ok(vec![255u8; w * h * 4])
+      }),
+    });
+    register_gpu_provider(provider);
+    // CPU processor would leave black image; GPU should override to white
+    process_image(&mut img, None, 0, |_tmp| {});
+    // Verify first pixel white
+    assert_eq!(img.rgba()[0], 255);
+    clear_gpu_provider();
+  }
+
+  #[test]
+  fn process_image_falls_back_on_gpu_error() {
+    let mut img = Image::new_from_color(8, 8, Color::from_rgba(0, 0, 0, 255));
+    // Provider returns error
+    let provider = Arc::new(crate::image::gpu_registry::GpuCallback {
+      should_process: Arc::new(|_meta| true),
+      process: Arc::new(|_meta, _pixels| Err("gpu error".to_string())),
+    });
+    register_gpu_provider(provider);
+    // CPU processor sets first pixel to 100
+    process_image(&mut img, None, 0, |tmp| {
+      let mut rgba = tmp.rgba().to_vec();
+      rgba[0] = 100;
+      tmp.set_rgba_owned(rgba);
+    });
+    // CPU fallback expected
+    assert_eq!(img.rgba()[0], 100);
+    clear_gpu_provider();
+  }
+
+  #[test]
+  fn process_image_respects_should_process() {
+    let mut img = Image::new_from_color(8, 8, Color::from_rgba(0, 0, 0, 255));
+    // Provider set to not process small areas
+    let provider = Arc::new(crate::image::gpu_registry::GpuCallback {
+      should_process: Arc::new(|_meta| false),
+      process: Arc::new(|_meta, _pixels| Ok(vec![0u8; (_meta.rect_w as usize) * (_meta.rect_h as usize) * 4])),
+    });
+    register_gpu_provider(provider);
+    // CPU processor sets first pixel to 50
+    process_image(&mut img, None, 0, |tmp| {
+      let mut rgba = tmp.rgba().to_vec();
+      rgba[0] = 50;
+      tmp.set_rgba_owned(rgba);
+    });
+    assert_eq!(img.rgba()[0], 50);
+    clear_gpu_provider();
   }
 }

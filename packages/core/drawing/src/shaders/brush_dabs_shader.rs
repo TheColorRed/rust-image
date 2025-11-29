@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::PointF;
+use abra_core::PointF;
 
 /// A shader that paints multiple brush dabs in a single pass.
 ///

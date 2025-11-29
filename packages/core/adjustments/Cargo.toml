@@ -7,5 +7,10 @@ edition = "2024"
 crate-type = ["dylib"]
 
 [dependencies]
-core = { workspace = true }
+abra_core = { workspace = true }
+options = { workspace = true }
 rayon = { workspace = true }
+
+[dev-dependencies]
+gpu = { path = "../gpu" }
+primitives = { path = "../primitives" }

@@ -1,4 +1,4 @@
-use core::{Area, Image, LineCap, LineJoin, Path, PointF};
+use abra_core::{Area, Image, LineCap, LineJoin, Path, PointF};
 
 use crate::{
   CoverageMask, PolygonCoverage, Rasterizer, SampleGrid, Shader, SourceOverCompositor,

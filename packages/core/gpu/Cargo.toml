@@ -1,0 +1,21 @@
+[package]
+name = "gpu"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+wgpu = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
+abra_core = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = []
+
+[dev-dependencies]
+env_logger = "0.11"

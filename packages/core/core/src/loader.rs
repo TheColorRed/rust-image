@@ -1,6 +1,6 @@
 //! Parallel image loading utilities using Rayon.
 
-use crate::Image;
+use crate::{Image, image::image_ext::*};
 use globwalk::glob;
 use rayon::{ThreadPoolBuilder, prelude::*};
 use std::sync::Arc;

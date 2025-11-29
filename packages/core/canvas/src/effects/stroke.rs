@@ -1,4 +1,4 @@
-use core::{Color, Fill, Image, Path, Point};
+use abra_core::{Color, Fill, Image, Path, Point};
 
 use std::sync::Arc;
 use std::time::Instant;

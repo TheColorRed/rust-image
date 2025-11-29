@@ -1,36 +1,26 @@
-#![allow(unused_imports, unused_variables, unused_mut)]
-use core::image::apply_area::{
-  apply_processed_pixels_to_image, blend_area_pixels, compute_area_mask, prepare_area_pixels,
-};
-use core::{Image, Resize};
-use options::ApplyOptions;
+use abra_core::Image;
+use options::Options;
 use rayon::prelude::*;
 
-/// Applies a box blur to an image.
-pub fn box_blur(image: &mut Image, radius: u32, options: impl Into<Option<ApplyOptions>>) {
+use crate::apply_filter;
+
+fn apply_box_blur(image: &mut Image, radius: u32) {
   if radius == 0 {
     return;
   }
 
   let (width, height) = image.dimensions::<u32>();
-  let width = width as i32;
-  let height = height as i32;
+  let width = width as usize;
+  let height = height as usize;
   let kernel_radius = radius as i32;
 
-  let options = options.into();
-  let area = options.as_ref().and_then(|o| o.area());
-  let prepared = prepare_area_pixels(image, area, radius as i32);
-  if prepared.area_w == 0 || prepared.area_h == 0 {
-    return;
-  }
-  let src = prepared.pixels.as_ref();
-  let width = prepared.rect_w as usize;
-  let height = prepared.rect_h as usize;
+  let src = image.rgba();
   let mut current = src.to_vec(); // working buffer for reading
   let mut tmp = vec![0u8; current.len()];
+  let row_stride = width * 4;
 
-  // Horizontal pass: read from current, write to tmp
-  for y in 0..height {
+  // Horizontal pass: read from current, write to tmp (per-row parallel)
+  tmp.par_chunks_mut(row_stride).enumerate().for_each(|(y, row_out)| {
     for x in 0..width {
       let mut r_sum = 0.0;
       let mut g_sum = 0.0;
@@ -51,23 +41,23 @@ pub fn box_blur(image: &mut Image, radius: u32, options: impl Into<Option<ApplyO
       }
 
       if count > 0 {
-        let idx_out = ((y as usize) * (width as usize) + x as usize) * 4;
-        if idx_out + 3 < tmp.len() {
-          tmp[idx_out] = (r_sum / count as f32) as u8;
-          tmp[idx_out + 1] = (g_sum / count as f32) as u8;
-          tmp[idx_out + 2] = (b_sum / count as f32) as u8;
-          tmp[idx_out + 3] = (a_sum / count as f32) as u8;
+        let idx_out = x * 4;
+        if idx_out + 3 < row_out.len() {
+          row_out[idx_out] = (r_sum / count as f32) as u8;
+          row_out[idx_out + 1] = (g_sum / count as f32) as u8;
+          row_out[idx_out + 2] = (b_sum / count as f32) as u8;
+          row_out[idx_out + 3] = (a_sum / count as f32) as u8;
         }
       }
     }
-  }
+  });
 
   // swap: tmp (horizontal result) becomes current, reuse tmp as destination for vertical pass
   std::mem::swap(&mut current, &mut tmp);
 
-  // Vertical pass: read from current, write to tmp
-  for x in 0..width {
-    for y in 0..height {
+  // Vertical pass: read from current, write to tmp (per-row parallel)
+  tmp.par_chunks_mut(row_stride).enumerate().for_each(|(y, row_out)| {
+    for x in 0..width {
       let mut r_sum = 0.0;
       let mut g_sum = 0.0;
       let mut b_sum = 0.0;
@@ -87,38 +77,34 @@ pub fn box_blur(image: &mut Image, radius: u32, options: impl Into<Option<ApplyO
       }
 
       if count > 0 {
-        let idx_out = ((y as usize) * (width as usize) + x as usize) * 4;
-        if idx_out + 3 < tmp.len() {
-          tmp[idx_out] = (r_sum / count as f32) as u8;
-          tmp[idx_out + 1] = (g_sum / count as f32) as u8;
-          tmp[idx_out + 2] = (b_sum / count as f32) as u8;
-          tmp[idx_out + 3] = (a_sum / count as f32) as u8;
+        let idx_out = x * 4;
+        if idx_out + 3 < row_out.len() {
+          row_out[idx_out] = (r_sum / count as f32) as u8;
+          row_out[idx_out + 1] = (g_sum / count as f32) as u8;
+          row_out[idx_out + 2] = (b_sum / count as f32) as u8;
+          row_out[idx_out + 3] = (a_sum / count as f32) as u8;
         }
       }
     }
-  }
+  });
 
-  // Write back, blend if area/mask/feather present
-  let full_image_processed = prepared.area_min_x == 0
-    && prepared.area_min_y == 0
-    && prepared.area_w == image.dimensions::<u32>().0 as i32
-    && prepared.area_h == image.dimensions::<u32>().1 as i32
-    && options.as_ref().and_then(|o| o.mask()).is_none();
+  // Write back the processed result
+  image.set_rgba_owned(tmp);
+}
 
-  if full_image_processed {
-    image.set_rgba_owned(tmp);
-  } else {
-    let mask_img_bytes: Option<&[u8]> = options.as_ref().and_then(|o| o.mask().map(|m| m.image().rgba()));
-    let meta = prepared.meta();
-    apply_processed_pixels_to_image(image, tmp, &meta, area, mask_img_bytes);
-  }
+/// Applies a box blur to an image.
+/// - `p_image`: The image to be blurred.
+/// - `p_radius`: The radius of the box blur.
+/// - `p_options`: Additional options for applying the blur.
+pub fn box_blur(p_image: &mut Image, p_radius: u32, p_apply_options: impl Into<Options>) {
+  apply_filter!(apply_box_blur, p_image, p_apply_options, p_radius as i32, p_radius);
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use core::Area;
-  use core::Image;
+  use abra_core::Area;
+  use abra_core::Image;
   use options::ApplyOptions;
 
   #[test]

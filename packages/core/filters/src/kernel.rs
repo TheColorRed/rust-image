@@ -1,4 +1,4 @@
-use core::Image;
+use abra_core::Image;
 use rayon::prelude::*;
 
 /// Applies a kernel to an image.

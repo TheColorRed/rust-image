@@ -1,4 +1,4 @@
-use core::{Area, Color, Image, PointF, Size, blend};
+use abra_core::{Area, Color, Image, PointF, blend};
 
 use drawing::fill;
 
@@ -63,8 +63,8 @@ impl Mask {
   /// Creates a new empty Mask from an existing Image.
   /// - `p_image`: The Image to create the mask from.
   pub fn new_from_image(p_src_image: &Image) -> Mask {
-    let Size { width, height } = p_src_image.size();
-    let image = Image::new_from_color(width as u32, height as u32, Color::from_rgba(255, 255, 255, 255));
+    let (width, height) = p_src_image.dimensions::<u32>();
+    let image = Image::new_from_color(width, height, Color::from_rgba(255, 255, 255, 255));
     Mask { image_mask: image }
   }
 
@@ -88,7 +88,7 @@ impl Mask {
   pub fn draw_area(&mut self, p_area: &Area, p_color: Color, p_at: impl IntoOptionalPointF) {
     let color = self.to_color(p_color);
     let position = p_at.into_optional_point_f().unwrap_or(PointF::new(0, 0));
-    let filled_image = fill(p_area.clone(), color);
+    let filled_image = fill(p_area, color);
     blend::blend_images_at(
       &mut self.image_mask,
       &filled_image,
@@ -198,7 +198,7 @@ pub fn apply_mask_to_pixels_rgba(p_pixels: &mut [u8], p_mask: &[u8]) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use core::{Area, Color, Image};
+  use abra_core::{Area, Color, Image};
 
   #[test]
   fn mask_clone_shares_buffer_and_cow_on_draw() {
@@ -212,11 +212,7 @@ mod tests {
     // Mutate the original mask - should trigger copy-on-write in Image
     let area = Area::rect((1.0, 1.0), (2.0, 2.0));
     mask.draw_area(&area, Color::black(), None);
-    assert_ne!(
-      mask.image().rgba().as_ptr(),
-      ptr2,
-      "Mutation should have caused the original mask's image to COW"
-    );
+    assert_ne!(mask.image().rgba().as_ptr(), ptr2, "Mutation should have caused the original mask's image to COW");
     assert_eq!(
       mask_clone.image().rgba().as_ptr(),
       ptr2,
@@ -294,7 +290,8 @@ mod tests {
 
   #[test]
   fn draw_star_area_offset_is_correct() {
-    use core::{AspectRatio, Star};
+    use abra_core::image::image_ext::*;
+    use abra_core::{AspectRatio, Star};
     let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
     let mut mask = Mask::new_from_image(&img);
     // Create a star area sized to half the image and not positioned explicitly
@@ -320,7 +317,8 @@ mod tests {
 
   #[test]
   fn draw_star_area_offset_with_position() {
-    use core::{AspectRatio, Star};
+    use abra_core::image::image_ext::*;
+    use abra_core::{AspectRatio, Star};
     let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
     let mut mask = Mask::new_from_image(&img);
     let area = Star::new().fit_with_aspect(img.size() / 2, AspectRatio::meet());

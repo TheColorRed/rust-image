@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::Color;
+use abra_core::Color;
 
 /// A shader that returns a single constant color for any sample location.
 ///

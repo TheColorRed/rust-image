@@ -1,5 +1,5 @@
 use crate::Shader;
-use core::PointF;
+use abra_core::PointF;
 
 /// Fill feather shader: wraps an inner shader and modulates its alpha based on
 /// the distance to the path boundary. The shader computes the closest point on

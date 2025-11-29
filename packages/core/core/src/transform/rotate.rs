@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::Image;
+use primitives::Image as PrimitiveImage;
 
 use rayon::prelude::*;
 
@@ -257,6 +258,24 @@ fn sample_lanczos(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_
   }
   out[3] = (acc_a * 255.0).clamp(0.0, 255.0).round() as u8;
   out
+}
+
+// Implement Rotate trait for primitives::Image so the methods are available on re-exported abra_core::Image.
+impl Rotate for PrimitiveImage {
+  fn rotate(&mut self, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> &mut Self {
+    crate::transform::rotate(self, p_degrees, p_algorithm);
+    self
+  }
+
+  fn flip_horizontal(&mut self) -> &mut Self {
+    crate::transform::horizontal(self);
+    self
+  }
+
+  fn flip_vertical(&mut self) -> &mut Self {
+    crate::transform::vertical(self);
+    self
+  }
 }
 
 fn sample_edge_direct_nedi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {

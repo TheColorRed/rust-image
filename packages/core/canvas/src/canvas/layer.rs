@@ -1,12 +1,12 @@
 //! The Layer public API struct.
 
-use core::Image;
+use abra_core::Image;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::canvas::layer_inner::LayerInner;
 use crate::effects::LayerEffects;
-use core::blend::RGBA;
+use abra_core::blend::RGBA;
 
 pub use super::anchor::Anchor;
 pub use super::layer_transform::LayerTransform;

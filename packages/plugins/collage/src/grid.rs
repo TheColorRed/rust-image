@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use abra::{
-  Color, Image, Rotate,
-  canvas::{AddCanvasOptions, Anchor, Canvas, LayerSize, NewLayerOptions},
-};
+use abra::canvas::prelude::*;
+use abra::prelude::*;
 
 use crate::{CollagePlugin, CollageStyle};
 
