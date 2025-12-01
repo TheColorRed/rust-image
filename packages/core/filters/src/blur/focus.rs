@@ -1,4 +1,4 @@
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 use options::Options;
 
 use crate::blur::{LensBlurOptions, gaussian_blur, lens_blur};
@@ -97,18 +97,21 @@ impl FocusBlurOptions {
 /// - `p_image`: The image to be blurred.
 /// - `p_settings`: Settings for the focus blur.
 /// - `p_options`: Additional options for applying the blur.
-pub fn focus_blur(
-  p_image: &mut Image, p_settings: impl Into<Option<FocusBlurOptions>>, p_apply_options: impl Into<Options>,
+pub fn focus_blur<'a>(
+  p_image: impl Into<ImageRef<'a>>, p_settings: impl Into<Option<FocusBlurOptions>>,
+  p_apply_options: impl Into<Options>,
 ) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
   let options = p_settings.into().unwrap_or_else(FocusBlurOptions::new);
   match options.blur_type.unwrap_or(BlurType::Gaussian(25)) {
     BlurType::Gaussian(radius) => {
       println!("Applying Gaussian Blur with radius: {}", radius);
-      gaussian_blur(p_image, radius, None);
+      gaussian_blur(image, radius, None);
     }
     BlurType::Lens(options) => {
       println!("Applying Lens Blur with options.");
-      lens_blur(p_image, options, p_apply_options);
+      lens_blur(image, options, p_apply_options);
     }
   };
 }

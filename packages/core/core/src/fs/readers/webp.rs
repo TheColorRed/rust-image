@@ -6,7 +6,8 @@ use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a WebP file and returns the image data
-pub fn read_webp(file: &str) -> Result<FileInfo, String> {
+pub fn read_webp(file: impl Into<String>) -> Result<FileInfo, String> {
+  let file = file.into();
   let file = File::open(file).map_err(|e| e.to_string())?;
   // Larger buffer for better IO performance
   let reader = BufReader::with_capacity(1 << 20, file); // 1 MiB

@@ -1,7 +1,7 @@
 use options::Options;
 
 use crate::{apply_filter, kernel::apply_kernel};
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 
 /// Sharpen an image
 fn apply_sharpen(image: &mut Image) {
@@ -14,6 +14,8 @@ fn apply_sharpen(image: &mut Image) {
   apply_kernel(image, kernel.as_slice());
 }
 
-pub fn sharpen(image: &mut Image, p_apply_options: impl Into<Options>) {
+pub fn sharpen<'a>(p_image: impl Into<ImageRef<'a>>, p_apply_options: impl Into<Options>) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
   apply_filter!(apply_sharpen, image, p_apply_options, 1);
 }

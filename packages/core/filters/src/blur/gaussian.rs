@@ -1,4 +1,5 @@
 use abra_core::if_pick;
+use abra_core::image::image_ext::ImageRef;
 use abra_core::{Channels, Image, Resize};
 
 use rayon::prelude::*;
@@ -106,14 +107,17 @@ fn separable_gaussian_blur_pixels(pixels: &[u8], width: usize, height: usize, p_
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the Gaussian kernel.
 /// - `p_options`: Additional options for applying the blur.
-pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, p_apply_options: impl Into<Options>) {
+pub fn gaussian_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: u32, p_apply_options: impl Into<Options>) {
   if p_radius == 0 {
     return;
   }
+
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
   let start = std::time::Instant::now();
   let _duration = Instant::now();
   let kernel_radius = p_radius as i32;
-  let (image_w, image_h) = p_image.dimensions::<u32>();
+  let (image_w, image_h) = image.dimensions::<u32>();
   let image_w = image_w as i32;
   let image_h = image_h as i32;
   let options = p_apply_options.into();
@@ -132,7 +136,7 @@ pub fn gaussian_blur(p_image: &mut Image, p_radius: u32, p_apply_options: impl I
     .unwrap_or(false);
 
   // Let apply_processing prepare the pixels and handle area/feather/mask+blending.
-  process_image(p_image, ctx, kernel_radius, |img| {
+  process_image(image, ctx, kernel_radius, |img| {
     let pixels = img.to_rgba_vec();
     let (width, height) = img.dimensions::<u32>();
 

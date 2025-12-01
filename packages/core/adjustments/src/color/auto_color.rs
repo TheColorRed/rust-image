@@ -1,4 +1,4 @@
-use abra_core::{Histogram, Image, lab_to_rgb, rgb_to_lab};
+use abra_core::{Histogram, Image, image::image_ext::ImageRef, lab_to_rgb, rgb_to_lab};
 use options::Options;
 
 use rayon::prelude::*;
@@ -121,8 +121,10 @@ fn apply_auto_color(p_image: &mut Image) {
 /// levels stretching and color neutralization.
 /// - `p_image`: The image to adjust.
 /// - `p_options`: Options to apply the adjustment.
-pub fn auto_color(p_image: &mut Image, p_options: impl Into<Options>) {
-  apply_adjustment!(apply_auto_color, p_image, p_options, 1);
+pub fn auto_color<'a>(p_image: impl Into<ImageRef<'a>>, p_options: impl Into<Options>) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_adjustment!(apply_auto_color, image, p_options, 1);
 }
 
 #[cfg(test)]

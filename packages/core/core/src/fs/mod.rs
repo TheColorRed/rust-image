@@ -33,8 +33,9 @@ use std::{fs, path::Path};
 pub use writer_options::WriterOptions;
 
 /// Creates a directory and all its parent directories if they do not exist.
-pub fn mkdirp(path: &str) -> Result<(), String> {
-  let path = Path::new(path);
+pub fn mkdirp(path: impl Into<String>) -> Result<(), String> {
+  let path = path.into();
+  let path = Path::new(path.as_str());
   if path.exists() {
     return Ok(());
   }

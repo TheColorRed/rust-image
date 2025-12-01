@@ -64,7 +64,8 @@ pub(crate) struct CanvasInner {
 
 impl CanvasInner {
   /// Creates a new canvas with the given name and an empty canvas of a size of 0x0.
-  pub fn new(name: &str) -> CanvasInner {
+  pub fn new(name: impl Into<String>) -> CanvasInner {
+    let name = name.into();
     CanvasInner {
       id: uuid::Uuid::new_v4().to_string(),
       name: name.to_string(),
@@ -88,17 +89,22 @@ impl CanvasInner {
   }
 
   /// Creates a new project with the given name and a blank canvas with the given dimensions.
-  pub fn new_blank(name: &str, width: u32, height: u32) -> CanvasInner {
-    let mut canvas = CanvasInner::new(name);
+  pub fn new_blank(name: impl Into<String>, width: u32, height: u32) -> CanvasInner {
+    let mut canvas = CanvasInner::new(&name.into());
     canvas.set_canvas_size(width, height);
     canvas
   }
 
   /// Creates a new project with the given name and a canvas from the image at the given path.
-  pub fn new_from_path(name: &str, path: &str, _options: impl Into<Option<NewLayerOptions>>) -> CanvasInner {
-    let image = Image::new_from_path(path);
+  /// The image is loaded from the path and used as the initial canvas content.
+  pub fn new_from_path(
+    p_name: impl Into<String>, p_path: impl Into<String>, _options: impl Into<Option<NewLayerOptions>>,
+  ) -> CanvasInner {
+    let name = p_name.into();
+    let image = Image::new_from_path(p_path);
     let (width, height) = image.dimensions();
-    let mut canvas = CanvasInner::new(name);
+    let mut canvas = CanvasInner::new(&name);
+    canvas.add_layer(LayerInner::new(&name, Arc::new(image)));
     canvas.set_canvas_size(width, height);
     canvas
   }
@@ -307,7 +313,9 @@ impl CanvasInner {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(&mut self, blend: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA) {
+  pub fn set_blend_mode(
+    &mut self, blend: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA,
+  ) {
     self.blend_mode = blend;
     self.needs_recompose.set(true);
   }
@@ -372,7 +380,7 @@ impl CanvasInner {
   }
 
   /// Saves the project to the given path.
-  pub fn save(&mut self, path: &str, options: impl Into<Option<WriterOptions>>) {
+  pub fn save(&mut self, path: impl Into<String>, options: impl Into<Option<WriterOptions>>) {
     let start = std::time::Instant::now();
     if self.needs_recompose.get() {
       self.update_canvas();

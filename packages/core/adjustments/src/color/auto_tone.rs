@@ -1,4 +1,4 @@
-use abra_core::{Histogram, Image};
+use abra_core::{Histogram, Image, image::image_ext::ImageRef};
 use options::Options;
 
 use rayon::prelude::*;
@@ -44,8 +44,10 @@ pub fn apply_auto_tone(p_image: &mut Image) {
   p_image.set_rgba(&out);
 }
 
-pub fn auto_tone(p_image: &mut Image, p_options: impl Into<Options>) {
-  apply_adjustment!(apply_auto_tone, p_image, p_options, 1);
+pub fn auto_tone<'a>(p_image: impl Into<ImageRef<'a>>, p_options: impl Into<Options>) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_adjustment!(apply_auto_tone, image, p_options, 1);
 }
 
 #[cfg(test)]

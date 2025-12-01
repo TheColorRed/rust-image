@@ -48,29 +48,31 @@ pub struct Canvas {
 
 impl Canvas {
   /// Creates a new project with the given name and an empty canvas of a size of 0x0.
-  pub fn new(name: &str) -> Canvas {
+  pub fn new(p_name: impl Into<String>) -> Canvas {
     Canvas {
-      inner_canvas: Arc::new(Mutex::new(CanvasInner::new(name))),
+      inner_canvas: Arc::new(Mutex::new(CanvasInner::new(p_name))),
     }
   }
 
   /// Creates a new canvas with the given name and a blank canvas of the given size.
-  pub fn new_blank(name: &str, width: u32, height: u32) -> Canvas {
+  pub fn new_blank(p_name: impl Into<String>, p_width: u32, p_height: u32) -> Canvas {
     Canvas {
-      inner_canvas: Arc::new(Mutex::new(CanvasInner::new_blank(name, width, height))),
+      inner_canvas: Arc::new(Mutex::new(CanvasInner::new_blank(p_name, p_width, p_height))),
     }
   }
 
   /// Creates a new project with the given name and a canvas from a path.
-  pub fn new_from_path(name: &str, path: &str, options: impl Into<Option<NewLayerOptions>>) -> Canvas {
+  pub fn new_from_path(
+    p_name: impl Into<String>, p_path: impl Into<String>, options: impl Into<Option<NewLayerOptions>>,
+  ) -> Canvas {
     Canvas {
-      inner_canvas: Arc::new(Mutex::new(CanvasInner::new_from_path(name, path, options))),
+      inner_canvas: Arc::new(Mutex::new(CanvasInner::new_from_path(p_name, p_path, options))),
     }
   }
   /// Saves the canvas to a file.
-  pub fn save(&self, path: &str, options: impl Into<Option<WriterOptions>>) {
+  pub fn save(&self, p_path: impl Into<String>, p_options: impl Into<Option<WriterOptions>>) {
     let mut canvas = self.inner_canvas.lock().unwrap();
-    canvas.save(path, options);
+    canvas.save(p_path, p_options);
   }
 
   /// Converts the entire canvas into a single Image by flattening all layers and child canvases.
@@ -164,9 +166,11 @@ impl Canvas {
   ///     }));
   /// project.save("output.png", None);
   /// ```
-  pub fn add_layer_from_path(self, name: &str, path: &str, options: impl Into<Option<NewLayerOptions>>) -> Self {
-    let image = Arc::new(Image::new_from_path(path));
-    self.add_layer_from_image(name, image, options)
+  pub fn add_layer_from_path(
+    self, p_name: impl Into<String>, p_path: impl Into<String>, p_options: impl Into<Option<NewLayerOptions>>,
+  ) -> Self {
+    let image = Arc::new(Image::new_from_path(p_path));
+    self.add_layer_from_image(p_name, image, p_options)
   }
 
   /// Adds a new canvas as a child canvas.
@@ -210,12 +214,12 @@ impl Canvas {
   ///     .add_layer_from_image("White Layer", img, None);
   /// ```
   pub fn add_layer_from_image<I: Into<Arc<Image>>>(
-    self, name: &str, image: I, options: impl Into<Option<NewLayerOptions>>,
+    self, p_name: impl Into<String>, image: I, p_options: impl Into<Option<NewLayerOptions>>,
   ) -> Self {
     let image_arc = image.into();
     let canvas_rc = self.inner_canvas.clone();
-    let options = options.into();
-    let mut layer = LayerInner::new(name, image_arc);
+    let options = p_options.into();
+    let mut layer = LayerInner::new(p_name.into(), image_arc);
     layer.set_canvas(canvas_rc);
 
     let layer_rc = Arc::new(Mutex::new(layer));
@@ -266,7 +270,8 @@ impl Canvas {
 
   /// Gets a layer by its name.
   /// Returns the first layer with the matching name, or None if not found.
-  pub fn get_layer_by_name(&self, name: &str) -> Option<Layer> {
+  pub fn get_layer_by_name(&self, name: impl Into<String>) -> Option<Layer> {
+    let name = name.into();
     let canvas = self.inner_canvas.lock().unwrap();
     canvas
       .layers
@@ -304,7 +309,9 @@ impl Canvas {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(&self, blend_mode: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA) {
+  pub fn set_blend_mode(
+    &self, blend_mode: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA,
+  ) {
     let mut canvas = self.inner_canvas.lock().unwrap();
     canvas.set_blend_mode(blend_mode);
   }

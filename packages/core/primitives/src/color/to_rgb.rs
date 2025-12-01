@@ -13,7 +13,7 @@ fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     fx.powi(3)
   } else {
     // reverse of f = (k * t + 16) / 116 => t = (116 * f - 16) / k
-    ((116.0 * fx - 16.0) / K)
+    (116.0 * fx - 16.0) / K
   } * XN;
   let y = if l > (903.3 * 0.008856) {
     ((l + 16.0) / 116.0).powi(3)
@@ -24,7 +24,7 @@ fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     fz.powi(3)
   } else {
     // reverse of f = (k * t + 16) / 116 => t = (116 * f - 16) / k
-    ((116.0 * fz - 16.0) / K)
+    (116.0 * fz - 16.0) / K
   } * ZN;
 
   // XYZ to linear RGB

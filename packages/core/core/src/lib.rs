@@ -31,6 +31,7 @@ pub use geometry::*;
 pub use loader::*;
 // Re-export primitives Image for workspace users. This replaces the core-defined Image type
 // so consumers can continue to use `use abra_core::Image;` with the new primitives implementation.
+pub use image::image_ext::ImageRef;
 pub use primitives::Channels;
 pub use primitives::Color;
 pub use primitives::Image;

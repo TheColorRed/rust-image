@@ -1,7 +1,7 @@
 use options::Options;
 
 use crate::{apply_filter, kernel::apply_kernel};
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 
 fn apply_smooth(image: &mut Image) {
   let kernel = [0.0; 9].iter().map(|_| 1.0 / 9.0).collect::<Vec<f32>>();
@@ -10,7 +10,9 @@ fn apply_smooth(image: &mut Image) {
 
 /// Smooths the image using a 3x3 box blur kernel.
 /// This version supports `Options` to restrict and feather the operation.
-pub fn smooth(image: &mut Image, options: impl Into<Options>) {
+pub fn smooth<'a>(image: impl Into<ImageRef<'a>>, options: impl Into<Options>) {
+  let mut image_ref: ImageRef = image.into();
+  let image = &mut image_ref as &mut Image;
   apply_filter!(apply_smooth, image, options, 1);
 }
 

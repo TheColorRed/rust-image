@@ -7,6 +7,10 @@ applyTo: '**'
 
 This document outlines recommended patterns for writing new code or updating existing code in the project. Adhering to these patterns helps maintain consistency, readability, and maintainability across the codebase.
 
+## 3rd Party Crates
+
+- Rayon: Use rayon for parallel processing where applicable to improve performance on large datasets.
+
 ## Builder
 
 The code uses the Builder pattern for constructing complex objects. This pattern allows for step-by-step construction and is particularly useful for objects with many optional parameters.

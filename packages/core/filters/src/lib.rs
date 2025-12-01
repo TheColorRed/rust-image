@@ -2,6 +2,7 @@
 
 pub mod blur;
 pub mod edges;
+pub mod noise;
 pub mod sharpen;
 pub mod smooth;
 pub mod sobel;

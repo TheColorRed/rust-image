@@ -1,15 +1,16 @@
+use crate::Image;
 use crate::fs::mkdirp;
 use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
-use crate::Image;
 
 use png::ColorType::Rgba;
 use png::Encoder;
 use std::fs::File;
 
 /// Writes the image data to a PNG file
-pub fn write_png(file: &str, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
-  let dir = dirname(file);
+pub fn write_png(file: impl Into<String>, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
+  let file = file.into();
+  let dir = dirname(&file);
   mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
   let file = File::create(file).map_err(|e| e.to_string())?;
   let (width, height) = image.dimensions();

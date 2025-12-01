@@ -1,4 +1,4 @@
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 use options::Options;
 use rayon::prelude::*;
 
@@ -56,6 +56,8 @@ fn apply_average_blur(image: &mut Image, radius: u32) {
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the average blur.
 /// - `p_options`: Additional options for applying the blur.
-pub fn average_blur(p_image: &mut Image, p_radius: u32, p_apply_options: impl Into<Options>) {
-  apply_filter!(apply_average_blur, p_image, p_apply_options, p_radius as i32, p_radius);
+pub fn average_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: u32, p_apply_options: impl Into<Options>) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_filter!(apply_average_blur, image, p_apply_options, p_radius as i32, p_radius);
 }

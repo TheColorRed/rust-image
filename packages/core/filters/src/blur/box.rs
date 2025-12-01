@@ -1,4 +1,4 @@
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 use options::Options;
 use rayon::prelude::*;
 
@@ -96,8 +96,11 @@ fn apply_box_blur(image: &mut Image, radius: u32) {
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the box blur.
 /// - `p_options`: Additional options for applying the blur.
-pub fn box_blur(p_image: &mut Image, p_radius: u32, p_apply_options: impl Into<Options>) {
-  apply_filter!(apply_box_blur, p_image, p_apply_options, p_radius as i32, p_radius);
+pub fn box_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: impl Into<f64>, p_apply_options: impl Into<Options>) {
+  let p_radius = p_radius.into().max(0.0) as u32;
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_filter!(apply_box_blur, image, p_apply_options, p_radius as i32, p_radius);
 }
 
 #[cfg(test)]
