@@ -61,13 +61,13 @@ impl Debug for LayerInner {
 
 impl LayerInner {
   /// Creates a new layer with the given name, image, and canvas
-  pub fn new(name: &str, image: Arc<Image>) -> LayerInner {
+  pub fn new(name: impl Into<String>, image: Arc<Image>) -> LayerInner {
     let id = uuid::Uuid::new_v4().to_string();
     let tmp_canvas = Arc::new(Mutex::new(CanvasInner::new("Temporary")));
 
     LayerInner {
       id,
-      name: name.to_string(),
+      name: name.into(),
       image,
       visible: true,
       opacity: 1.0,
@@ -210,8 +210,8 @@ impl LayerInner {
   }
 
   /// Sets the name of the layer
-  pub fn set_name(&mut self, name: &str) {
-    self.name = name.to_string();
+  pub fn set_name(&mut self, name: impl Into<String>) {
+    self.name = name.into();
   }
 
   /// Gets the opacity of the layer

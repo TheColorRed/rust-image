@@ -1,4 +1,4 @@
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 use options::Options;
 use rayon::prelude::*;
 
@@ -195,9 +195,9 @@ fn add_noise(rgb: &mut [f32; 3], x: u32, y: u32, c: u32, opt: &NoiseOptions) {
 /// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
 /// - `image`: target image buffer
 /// - `p_options`: lens blur configuration
-fn apply_lens_blur(image: &mut Image, p_options: LensBlurOptions) {
+fn apply_lens_blur(p_image: &mut Image, p_options: LensBlurOptions) {
   let samples = p_options.samples.max(1);
-  let (width, height) = image.dimensions::<u32>();
+  let (width, height) = p_image.dimensions::<u32>();
   if p_options.iris.radius == 0 || width == 0 || height == 0 {
     return;
   }
@@ -208,7 +208,7 @@ fn apply_lens_blur(image: &mut Image, p_options: LensBlurOptions) {
     .collect();
 
   // Snapshot source pixels once (borrow slice to avoid copying)
-  let src = image.rgba();
+  let src = p_image.rgba();
   let (w, h) = (width as usize, height as usize);
 
   let mut out = vec![0u8; w * h * 4];
@@ -291,12 +291,16 @@ fn apply_lens_blur(image: &mut Image, p_options: LensBlurOptions) {
     dst_px[3] = a as u8;
   });
 
-  image.set_rgba_owned(out);
+  p_image.set_rgba_owned(out);
 }
 /// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
 /// - `p_image`: target image buffer
 /// - `p_options`: lens blur configuration
 /// - `p_apply_options`: additional options for applying the blur
-pub fn lens_blur(p_image: &mut Image, p_options: LensBlurOptions, p_apply_options: impl Into<Options>) {
-  apply_filter!(apply_lens_blur, p_image, p_apply_options, 1, p_options);
+pub fn lens_blur<'a>(
+  p_image: impl Into<ImageRef<'a>>, p_options: LensBlurOptions, p_apply_options: impl Into<Options>,
+) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_filter!(apply_lens_blur, image, p_apply_options, 1, p_options);
 }

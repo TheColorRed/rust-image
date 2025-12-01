@@ -1,12 +1,16 @@
 //! The Layer public API struct.
 
 use abra_core::Image;
+use abra_core::image::image_ext::GuardedOwner;
+use abra_core::image::image_ext::WithImageMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::canvas::layer_inner::LayerInner;
 use crate::effects::LayerEffects;
 use abra_core::blend::RGBA;
+use abra_core::image::image_ext::ImageRef;
+use std::sync::MutexGuard;
 
 pub use super::anchor::Anchor;
 pub use super::layer_transform::LayerTransform;
@@ -22,7 +26,7 @@ pub struct Layer {
 
 impl Layer {
   /// Creates a new layer with the given name and image.
-  pub fn new(name: &str, image: Arc<Image>) -> Self {
+  pub fn new(name: impl Into<String>, image: Arc<Image>) -> Self {
     Layer {
       inner_layer: Arc::new(Mutex::new(LayerInner::new(name, image))),
     }
@@ -75,8 +79,6 @@ macro_rules! layer_method_mut {
 }
 
 impl Layer {
-  // Convenience methods that forward directly to layer without explicit borrows
-
   layer_method_mut!(
     /// Sets the blend mode of the layer.
     set_blend_mode(blend_mode: fn(RGBA, RGBA) -> RGBA)
@@ -136,7 +138,7 @@ impl Layer {
 
   layer_method_mut!(
     /// Sets the name of the layer.
-    set_name(name: &str)
+    set_name(name: impl Into<String>)
   );
 
   layer_method_imm_scalar!(
@@ -199,6 +201,9 @@ impl Layer {
     /// Gets the UUID of the layer.
     id() -> String
   );
+
+  // NOTE: No convenience `despeckle` here: prefer callers to use `image_mut` or
+  // convert the `Layer` into a `MutexGuard` and operate on the `Image`.
 }
 
 impl Clone for Layer {
@@ -206,5 +211,45 @@ impl Clone for Layer {
     Layer {
       inner_layer: self.inner_layer.clone(),
     }
+  }
+}
+
+/// Convert a `&mut Layer` into a `MutexGuard<'_, LayerInner>` so callers can
+/// access the interior `Image` safely for as long as they need it.
+impl<'a> From<&'a mut Layer> for MutexGuard<'a, LayerInner> {
+  fn from(layer: &'a mut Layer) -> Self {
+    layer.borrow_mut()
+  }
+}
+
+/// Internal owner wrapper to keep track of the layer guard and satisfy the orphan
+/// rules (we implement `core::GuardedOwner` for this local type so it can be
+/// stored inside `ImageRef` trait object.
+/// Internal owner wrapper to keep track of the layer guard and satisfy the orphan
+/// rules (we implement `core::GuardedOwner` for this local type so it can be
+/// stored inside `ImageRef` trait object).
+///
+/// The field is intentionally unused beyond being stored — we don't need to call
+/// methods on the guard. The purpose is to *hold* the MutexGuard (keep the lock)
+/// for as long as the `LayerGuardOwner` is alive, preventing the lock from being
+/// dropped while the `ImageRef` exists. The underscore prefix avoids an "unused
+/// field" lint/warning while making the intent clear.
+struct LayerGuardOwner<'a> {
+  _guard: MutexGuard<'a, LayerInner>,
+}
+
+impl<'a> GuardedOwner for LayerGuardOwner<'a> {}
+
+/// Convert a `&mut Layer` into an `ImageRef` that owns the guard for as long as the ImageRef
+/// is alive. This allows filters to take `impl Into<ImageRef>` and do `let mut image = p_image.into();`.
+impl<'a> From<&'a mut Layer> for ImageRef<'a> {
+  fn from(layer: &'a mut Layer) -> Self {
+    // Acquire the guard from the layer (this keeps the mutex locked)
+    let mut guard = layer.borrow_mut();
+    // Get raw pointer to the image
+    let ptr = guard.image_mut() as *mut Image;
+    // Box the guard and erase the type via GuardedOwner trait object so ImageRef can own it
+    let owner: Option<Box<dyn GuardedOwner + 'a>> = Some(Box::new(LayerGuardOwner { _guard: guard }));
+    ImageRef::new(ptr, owner)
   }
 }

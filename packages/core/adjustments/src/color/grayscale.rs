@@ -1,7 +1,9 @@
-use abra_core::Image;
+use abra_core::{Image, ImageRef};
 
 /// Converts an image to grayscale
-pub fn grayscale(image: &mut Image) {
+pub fn grayscale<'a>(image: impl Into<ImageRef<'a>>) {
+  let mut image_ref: ImageRef = image.into();
+  let image = &mut image_ref as &mut Image;
   image.mut_pixels(|mut pixel| {
     let r = pixel[0] as f32;
     let g = pixel[1] as f32;

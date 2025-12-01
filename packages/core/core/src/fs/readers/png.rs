@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a PNG file and returns the image data
-pub fn read_png(file: &str) -> Result<FileInfo, String> {
-  let file = File::open(file).map_err(|e| e.to_string())?;
+pub fn read_png(file: impl Into<String>) -> Result<FileInfo, String> {
+  let file = File::open(file.into()).map_err(|e| e.to_string())?;
   // Larger buffer for better IO performance on large PNGs
   let reader = BufReader::with_capacity(1 << 20, file); // 1 MiB
   let decoder = Decoder::new(reader);

@@ -1,8 +1,10 @@
-use abra_core::{Gradient, Image};
+use abra_core::{Gradient, Image, ImageRef};
 
 /// Apply a gradient map to an image. This will map the colors of the image to the colors of the gradient.
 /// Darker colors will be mapped to the first color in the gradient, and lighter colors will be mapped to the last color in the gradient.
-pub fn gradient_map(image: &mut Image, gradient: Gradient) {
+pub fn gradient_map<'a>(image: impl Into<ImageRef<'a>>, gradient: Gradient) {
+  let mut image_ref: ImageRef = image.into();
+  let image = &mut image_ref as &mut Image;
   image.mut_pixels(|mut pixel| {
     let r = pixel[0] as f32;
     let g = pixel[1] as f32;

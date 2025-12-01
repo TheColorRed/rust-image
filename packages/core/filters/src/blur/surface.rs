@@ -1,7 +1,7 @@
 use options::Options;
 use rayon::prelude::*;
 
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 
 use crate::apply_filter;
 
@@ -85,6 +85,10 @@ fn apply_surface_blur(image: &mut Image, radius: u32, threshold: u8) {
 /// - `p_radius`: The radius of the surface blur.
 /// - `p_threshold`: The threshold for the surface blur.
 /// - `p_apply_options`: Additional options for applying the blur.
-pub fn surface_blur(image: &mut Image, p_radius: u32, p_threshold: u8, p_apply_options: impl Into<Options>) {
+pub fn surface_blur<'a>(
+  p_image: impl Into<ImageRef<'a>>, p_radius: u32, p_threshold: u8, p_apply_options: impl Into<Options>,
+) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
   apply_filter!(apply_surface_blur, image, p_apply_options, p_radius as i32, p_radius, p_threshold);
 }

@@ -7,7 +7,9 @@ use crate::Channels;
 use crate::fs::file_info::FileInfo;
 
 /// Reads an SVG file and returns the image data
-pub fn read_svg(file: &str) -> Result<FileInfo, String> {
+pub fn read_svg(file: impl Into<String>) -> Result<FileInfo, String> {
+  let file = file.into();
+  let file = file.as_str();
   let tree = {
     let mut opt = Options::default();
     // Get file's absolute directory.

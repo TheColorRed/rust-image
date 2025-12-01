@@ -4,7 +4,8 @@ use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a GIF file and returns the first frame's image data
-pub fn read_gif(file: &str) -> Result<FileInfo, String> {
+pub fn read_gif(file: impl Into<String>) -> Result<FileInfo, String> {
+  let file = file.into();
   let file = File::open(file).map_err(|e| e.to_string())?;
   let decoder = DecodeOptions::new();
   // Wrap in a buffered reader to reduce syscalls

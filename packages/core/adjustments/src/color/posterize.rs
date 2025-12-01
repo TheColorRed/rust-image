@@ -1,8 +1,10 @@
-use abra_core::Image;
+use abra_core::{Image, ImageRef};
 use rayon::prelude::*;
 
 /// Posterizes an image to a specified number of levels.
-pub fn posterize(image: &mut Image, levels: u8) {
+pub fn posterize<'a>(image: impl Into<ImageRef<'a>>, levels: u8) {
+  let mut image_ref: ImageRef = image.into();
+  let image = &mut image_ref as &mut Image;
   let levels = (levels as f32).clamp(2.0, 255.0);
   let pixels = image.colors().as_slice_mut().expect("Image colors must be contiguous");
 

@@ -135,8 +135,11 @@ pub fn mask_value_to_alpha(p_value: u8) -> u8 {
 
 /// Computes a grayscale mask value from an RGBA pixel using a standard
 /// luma approximation and ignores the input alpha channel.
+/// Computes grayscale (luma) from an RGBA pixel using the ITU-R BT.601
+/// approximation. Exposed publicly so other crates can reuse the
+/// standard luma transform to avoid duplicated code.
 #[inline]
-fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
+pub fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
   // ITU-R BT.601 luma transform (approximation with integer math)
   // gray = 0.299 R + 0.587 G + 0.114 B
   let r = p_rgba[0] as u32;

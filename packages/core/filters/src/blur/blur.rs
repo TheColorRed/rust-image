@@ -1,7 +1,7 @@
 use options::Options;
 
 use crate::{apply_filter, kernel::apply_kernel};
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 
 /// Blurs an image using the blur algorithm.
 fn apply_blur(image: &mut Image) {
@@ -17,6 +17,8 @@ fn apply_blur(image: &mut Image) {
 /// Applies a blur to to an image.
 /// - `p_image`: The image to be blurred.
 /// - `p_options`: Additional options for applying the blur.
-pub fn blur(p_image: &mut Image, p_apply_options: impl Into<Options>) {
-  apply_filter!(apply_blur, p_image, p_apply_options, 1);
+pub fn blur<'a>(p_image: impl Into<ImageRef<'a>>, p_apply_options: impl Into<Options>) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
+  apply_filter!(apply_blur, image, p_apply_options, 1);
 }

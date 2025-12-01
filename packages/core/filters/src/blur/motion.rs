@@ -1,4 +1,4 @@
-use abra_core::Image;
+use abra_core::{Image, image::image_ext::ImageRef};
 use options::Options;
 use rayon::prelude::*;
 
@@ -101,6 +101,10 @@ fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
 /// - `p_angle_degrees`: The angle of the motion blur in degrees.
 /// - `p_distance`: The distance of the motion blur in pixels.
 /// - `p_apply_options`: Additional options for applying the blur.
-pub fn motion_blur(image: &mut Image, p_angle_degrees: f32, p_distance: u32, p_apply_options: impl Into<Options>) {
+pub fn motion_blur<'a>(
+  p_image: impl Into<ImageRef<'a>>, p_angle_degrees: f32, p_distance: u32, p_apply_options: impl Into<Options>,
+) {
+  let mut image_ref: ImageRef = p_image.into();
+  let image = &mut image_ref as &mut Image;
   apply_filter!(apply_motion_blur, image, p_apply_options, 1, p_angle_degrees, p_distance);
 }
