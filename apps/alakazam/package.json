@@ -1,0 +1,73 @@
+{
+  "name": "alakazam",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server/main.ts",
+  "nodemonConfig": {
+    "watch": [
+      "dist/server",
+      "bindings/tmp/alakazam.node"
+    ],
+    "ext": "js",
+    "exec": "mv bindings/tmp/alakazam.node bindings/alakazam.node & mv bindings/tmp/index.d.ts bindings/index.d.ts & electron ./dist/server/main.js",
+    "exitcrash": true
+  },
+  "scripts": {
+    "start": "webpack --config webpack.config.mjs && tsc -p src/server && electron .",
+    "build": "webpack --config webpack.config.mjs && tsc -p src/server",
+    "nodemon": "cross-env NODE_ENV=development nodemon",
+    "dev": "rm -rf ./dist/server & concurrently --kill-others \"webpack serve --config webpack.config.mjs --mode development --config-name renderer\" \"webpack --config webpack.config.mjs --mode development --watch --config-name preload\" \"tsc -p src/server -w\" \"wait-on ./dist/server/main.js ./dist/server/preload.js && npm run nodemon\""
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.1.0",
+    "@fortawesome/react-fontawesome": "^3.1.1",
+    "@fortawesome/sharp-light-svg-icons": "^7.1.0",
+    "@fortawesome/sharp-solid-svg-icons": "^7.1.0",
+    "@fortawesome/sharp-duotone-light-svg-icons": "^7.1.0",
+    "@tailwindcss/postcss": "^4.1.17",
+    "alakazam-bindings": "1.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron": "^39.2.5",
+    "pako": "^2.1.0",
+    "postcss": "^8.5.6",
+    "postcss-loader": "^8.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "rxjs": "^7.8.2",
+    "tailwind-merge": "^3.4.0",
+    "tailwindcss": "^4.1.17",
+    "use-debounce": "^10.0.6"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.6.2",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "babel-loader": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "css-loader": "^7.1.2",
+    "electron-devtools-installer": "^4.0.0",
+    "html-webpack-plugin": "^5.6.5",
+    "nodemon": "^3.1.11",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "react-refresh": "^0.18.0",
+    "style-loader": "^4.0.0",
+    "ts-node": "^10.9.2",
+    "ts-patch": "^3.3.0",
+    "tsc-alias": "^1.8.16",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-transform-paths": "^3.5.5",
+    "vitest": "^4.0.15",
+    "wait-on": "^9.0.3",
+    "webpack": "^5.103.0",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  }
+}

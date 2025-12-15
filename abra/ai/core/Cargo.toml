@@ -1,0 +1,20 @@
+[package]
+name = "abra-ai-core"
+version = "1.0.0"
+edition = "2024"
+description = "Lightweight AI model loading for Abra"
+
+[dependencies]
+abra-core = { workspace = true }
+ndarray = { workspace = true }
+saphyr = { workspace = true }
+
+# Optional ONNX Runtime support
+ort = { workspace = true, optional = true }
+
+[features]
+default = []
+onnx = ["ort"]
+
+[lib]
+crate-type = ["rlib"]

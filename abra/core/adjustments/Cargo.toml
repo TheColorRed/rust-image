@@ -1,0 +1,16 @@
+[package]
+name = "adjustments"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["dylib", "rlib"]
+
+[dependencies]
+abra-core = { workspace = true }
+options = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+gpu = { path = "../gpu" }
+primitives = { path = "../primitives" }

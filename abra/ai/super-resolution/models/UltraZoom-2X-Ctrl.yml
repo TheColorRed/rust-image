@@ -1,0 +1,26 @@
+# UltraZoom 2X Controllable Enhancement Model
+#
+# Purpose: 2x upscaling with controllable deblur/denoise/deartifact
+# Scale: 2x
+# Size: ~7.8 MB (very lightweight)
+
+name: UltraZoom-2X-Ctrl
+description: 2x upscale with controllable enhancement
+scale_factor: 2.0
+tile_size: 128
+tile_overlap: 16
+
+# Control input configuration
+control:
+  size: 3
+  defaults: [0.5, 0.5, 0.5]
+  parameters:
+    - name: deblur
+      description: Gaussian blur removal strength
+      index: 0
+    - name: denoise
+      description: Gaussian noise removal strength
+      index: 1
+    - name: deartifact
+      description: JPEG artifact removal strength
+      index: 2

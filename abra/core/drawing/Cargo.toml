@@ -1,0 +1,11 @@
+[package]
+name = "drawing"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra-core = { workspace = true }
+rayon = { workspace = true }
+
+[lib]
+crate-type = ["dylib", "rlib"]

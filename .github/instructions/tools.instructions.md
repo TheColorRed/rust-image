@@ -20,3 +20,7 @@ When working with this repository it will often be necessary to lookup documenta
 7. Find best practices for coding in a specific language.
 8. Discover new libraries or tools that can help with your project.
 9. Get tutorials or guides on specific topics.
+
+## Python
+
+Python 3.12 is installed in using a virtual environment within the directory `.venv`. You can use that to run and install python modules.

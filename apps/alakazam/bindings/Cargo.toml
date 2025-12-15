@@ -1,0 +1,16 @@
+[package]
+name = "alakazam"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+napi = { version = "3.6.1", default-features = false, features = ["napi4"] }
+napi-derive = "3.4.0"
+abra = { workspace = true, features = [] }
+
+[lib]
+name = "alakazam"
+crate-type = ["cdylib"]
+
+[build-dependencies]
+napi-build = "2"

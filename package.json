@@ -1,0 +1,12 @@
+{
+  "name": "image-editor",
+  "scripts": {
+    "start": "npm run start -w apps/alakazam",
+    "dev": "npm run build-bindings && npm run dev -w apps/alakazam --if-present",
+    "build-bindings": "cd apps/alakazam/bindings && napi build --output-dir tmp"
+  },
+  "workspaces": [
+    "apps/alakazam",
+    "apps/alakazam/bindings"
+  ]
+}

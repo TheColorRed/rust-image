@@ -1,0 +1,13 @@
+[package]
+name = "blur-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+# abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-super-resolution = { workspace = true }
+
+[[bin]]
+name = "blur-test"
+path = "main.rs"

@@ -1,0 +1,15 @@
+[package]
+name = "canvas"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra-core = { workspace = true }
+filters = { workspace = true }
+drawing = { workspace = true }
+
+rayon = { workspace = true }
+uuid = { workspace = true }
+
+[lib]
+crate-type = ["dylib", "rlib"]

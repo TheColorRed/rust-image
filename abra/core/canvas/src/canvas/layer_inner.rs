@@ -1,0 +1,447 @@
+//! The internal layer implementation.
+
+use abra_core::Image;
+use abra_core::blend;
+use abra_core::blend::RGBA;
+use std::fmt::Debug;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use crate::Anchor;
+use crate::Origin;
+use crate::canvas::canvas_inner::CanvasInner;
+use crate::effects::LayerEffects;
+
+/// The internal layer implementation - provides the mutable reference API.
+pub struct LayerInner {
+  /// The name of the layer.
+  name: String,
+  /// The image data of the layer.
+  image: Arc<Image>,
+  /// Whether the layer is visible.
+  visible: bool,
+  /// The opacity of the layer.
+  opacity: f32,
+  /// The blend mode of the layer.
+  blend_mode: fn(RGBA, RGBA) -> RGBA,
+  /// The x position of the image within the layer.
+  x: i32,
+  /// The y position of the image within the layer.
+  y: i32,
+  /// A UUID for the layer.
+  id: String,
+  /// Reference to the canvas.
+  canvas: Arc<Mutex<CanvasInner>>,
+  /// The anchor point for positioning relative to the canvas.
+  anchor: Option<Anchor>,
+  /// The origin point within the layer that the anchor refers to.
+  origin: Origin,
+  /// The dimensions to use for anchoring calculations, separate from image dimensions.
+  /// Used when effects like drop shadow expand the image beyond content bounds.
+  anchor_dimensions: Option<(u32, u32)>,
+  /// The positional offset applied when anchoring so effects like drop shadow don't shift placement.
+  anchor_offset: (i32, i32),
+  /// The effects that will be applied to this layer during rendering.
+  effects: LayerEffects,
+  /// The type of adjustment layer, if this is an adjustment layer.
+  adjustment_layer_type: Option<crate::AdjustmentLayerType>,
+}
+
+impl Debug for LayerInner {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("LayerInner")
+      .field("id", &self.id())
+      .field("name", &self.name)
+      .field("dimensions", &self.image.dimensions::<u32>())
+      .field("visible", &self.visible)
+      .field("opacity", &self.opacity)
+      .field("blend_mode", &"function pointer")
+      .field("position", &self.position())
+      .finish()
+  }
+}
+
+impl Default for LayerInner {
+  fn default() -> Self {
+    LayerInner {
+      id: uuid::Uuid::new_v4().to_string(),
+      name: "Layer".to_string(),
+      image: Arc::new(Image::new(1, 1)),
+      visible: true,
+      opacity: 1.0,
+      blend_mode: blend::normal,
+      x: 0,
+      y: 0,
+      canvas: Arc::new(Mutex::new(CanvasInner::new("Temporary"))),
+      anchor: None,
+      origin: Origin::default(),
+      anchor_dimensions: None,
+      anchor_offset: (0, 0),
+      effects: LayerEffects::new(),
+      adjustment_layer_type: None,
+    }
+  }
+}
+
+impl LayerInner {
+  /// Creates a new layer with the given name, image, and canvas
+  pub fn new(name: impl Into<String>, image: Arc<Image>) -> LayerInner {
+    LayerInner {
+      name: name.into(),
+      image,
+      ..Default::default()
+    }
+  }
+
+  pub fn new_adjustment_layer(name: impl Into<String>, layer_type: crate::AdjustmentLayerType) -> LayerInner {
+    let image = Arc::new(Image::new_from_color(1, 1, abra_core::Color::transparent()));
+    LayerInner {
+      name: name.into(),
+      image,
+      adjustment_layer_type: Some(layer_type),
+      ..Default::default()
+    }
+  }
+
+  /// Sets the canvas reference for the layer.
+  pub(crate) fn set_canvas(&mut self, canvas: Arc<Mutex<CanvasInner>>) {
+    self.canvas = canvas.clone();
+  }
+
+  /// Gets the UUID of the layer.
+  pub fn id(&self) -> &str {
+    &self.id
+  }
+
+  /// Marks the layer's canvas as needing to recompose.
+  pub fn mark_dirty(&mut self) {
+    self.canvas.lock().unwrap().mark_dirty();
+  }
+
+  /// Sets the blend mode of the layer.
+  pub fn set_blend_mode(&mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) {
+    self.blend_mode = blend_mode;
+    self.mark_dirty();
+  }
+
+  /// Sets the opacity of the layer.
+  pub fn set_opacity(&mut self, opacity: f32) {
+    self.opacity = opacity;
+    self.mark_dirty();
+  }
+
+  /// Sets the visibility of the layer.
+  pub fn set_visible(&mut self, visible: bool) {
+    self.visible = visible;
+    self.mark_dirty();
+  }
+
+  /// Sets the position of the layer.
+  pub fn set_global_position(&mut self, x: i32, y: i32) {
+    self.x = x;
+    self.y = y;
+    self.mark_dirty();
+  }
+
+  /// Sets the anchor point for the layer.
+  pub fn set_anchor(&mut self, anchor: Option<Anchor>) {
+    self.anchor = anchor;
+    self.mark_dirty();
+  }
+
+  /// Sets the position of the layer relative to another layer
+  pub fn set_relative_position(&mut self, x: i32, y: i32, layer: &LayerInner) {
+    self.x = layer.x + x;
+    self.y = layer.y + y;
+    self.mark_dirty();
+  }
+
+  /// Sets the effects configuration for this layer and marks canvas dirty.
+  pub fn set_effects(&mut self, effects: LayerEffects) {
+    self.effects = effects;
+    self.mark_dirty();
+  }
+
+  /// Sets the position of the layer to the given anchor point
+  /// The anchor is stored and will be applied during render time (update_canvas)
+  pub fn anchor_to_canvas(&mut self, anchor: Anchor) {
+    self.anchor = Some(anchor);
+  }
+
+  /// Checks if the layer has an anchor set.
+  pub fn has_anchor(&self) -> bool {
+    self.anchor.is_some()
+  }
+
+  /// Sets the origin point within the layer for anchor positioning.
+  pub fn set_origin(&mut self, origin: Origin) {
+    self.origin = origin;
+  }
+
+  /// Gets the current origin point for anchor positioning.
+  pub fn origin(&self) -> Origin {
+    self.origin
+  }
+
+  /// Sets the positional offset used when applying anchor placement.
+  pub fn set_anchor_offset(&mut self, p_x: i32, p_y: i32) {
+    self.anchor_offset = (p_x, p_y);
+  }
+
+  /// Clears the positional offset used during anchor placement.
+  pub fn clear_anchor_offset(&mut self) {
+    self.anchor_offset = (0, 0);
+  }
+
+  /// Gets the anchor dimensions if set, otherwise returns image dimensions.
+  pub fn anchor_dimensions(&self) -> (u32, u32) {
+    self.anchor_dimensions.unwrap_or_else(|| self.image.dimensions::<u32>())
+  }
+
+  /// Sets the anchor dimensions to use for anchoring calculations.
+  pub fn set_anchor_dimensions(&mut self, width: u32, height: u32) {
+    self.anchor_dimensions = Some((width, height));
+  }
+
+  /// Clears the anchor dimensions, reverting to using image dimensions for anchoring.
+  pub fn clear_anchor_dimensions(&mut self) {
+    self.anchor_dimensions = None;
+  }
+
+  /// Applies the stored anchor to position the layer, given canvas dimensions
+  /// This version directly updates x and y to avoid nested borrows of the canvas
+  pub fn apply_anchor_with_canvas_dimensions(&mut self, canvas_width: i32, canvas_height: i32) {
+    if let Some(anchor) = self.anchor {
+      let (self_width, self_height) = self.anchor_dimensions();
+      let (x, y) = anchor.calculate_position(canvas_width, canvas_height, self_width as i32, self_height as i32);
+      // Position the layer directly at the calculated anchor position
+      // The anchor calculation already handles proper centering/positioning
+      self.x = x + self.anchor_offset.0;
+      self.y = y + self.anchor_offset.1;
+    }
+  }
+
+  /// Gets the dimensions of the layer
+  pub fn dimensions<T>(&self) -> (T, T)
+  where
+    T: TryFrom<u64>,
+    <T as TryFrom<u64>>::Error: std::fmt::Debug,
+  {
+    self.image.dimensions::<T>()
+  }
+
+  /// Gets the position of the image within the layer
+  pub fn position(&self) -> (i32, i32) {
+    (self.x, self.y)
+  }
+
+  /// Gets the name of the layer
+  pub fn name(&self) -> &str {
+    &self.name
+  }
+
+  /// Sets the name of the layer
+  pub fn set_name(&mut self, name: impl Into<String>) {
+    self.name = name.into();
+  }
+
+  /// Gets the opacity of the layer
+  pub fn opacity(&self) -> f32 {
+    self.opacity
+  }
+
+  /// Gets the blend mode of the layer
+  pub fn blend_mode(&self) -> fn(RGBA, RGBA) -> RGBA {
+    self.blend_mode
+  }
+
+  /// Gets whether the layer is visible
+  pub fn is_visible(&self) -> bool {
+    self.visible
+  }
+
+  /// Gets a reference to the image
+  pub fn image(&self) -> &Image {
+    &self.image
+  }
+
+  /// Gets a mutable reference to the image using copy-on-write semantics.
+  /// If the Arc has multiple owners, this will clone the image.
+  pub fn image_mut(&mut self) -> &mut Image {
+    Arc::make_mut(&mut self.image)
+  }
+
+  /// Applies any pending effects to the layer's image, updating anchor dimensions and offset as needed.
+  pub fn apply_pending_effects(&mut self) {
+    let image_arc = self.image.clone();
+    // Use the new apply_with_offset to get both the new image and padding offset
+    let result = self.effects.apply_with_offset(image_arc);
+    // Record anchor dimensions (content dims prior to padding) and set anchor offset
+    let (orig_w, orig_h) = result.content_dimensions;
+    self.set_anchor_dimensions(orig_w, orig_h);
+    // offset is padding left/top; the anchor offset must be negative padding to keep content in place
+    let (pad_left, pad_top) = result.offset;
+    self.set_anchor_offset(-pad_left, -pad_top);
+    self.image = result.image;
+  }
+
+  /// Sets the index of the layer within the canvas's layer stack
+  pub fn set_index(&mut self, index: usize) {
+    // To avoid borrow conflicts, we need to find the current layer's index by ID
+    let current_index = self.current_index();
+
+    if let Some(current_idx) = current_index {
+      let mut canvas = self.canvas.lock().unwrap();
+      // Directly manipulate layers vec
+      if current_idx != index && index <= canvas.layers.len() {
+        let layer = canvas.layers.remove(current_idx);
+        canvas.layers.insert(index, layer);
+      }
+      // Mark canvas as needing recomposition since layer order changed
+      canvas.mark_dirty();
+    }
+  }
+
+  /// Gets the current index of this layer in the canvas's layer stack
+  pub fn current_index(&self) -> Option<usize> {
+    let canvas = self.canvas.lock().unwrap();
+    canvas.layers.iter().enumerate().find_map(|(i, layer_rc)| {
+      if let Ok(layer) = layer_rc.try_lock() {
+        if layer.id == self.id { Some(i) } else { None }
+      } else {
+        // If can't lock, assume it's self
+        Some(i)
+      }
+    })
+  }
+
+  pub fn adjustment_type(&self) -> Option<crate::AdjustmentLayerType> {
+    self.adjustment_layer_type.clone()
+  }
+
+  /// Moves the layer up one position in the stack (increases its index by 1)
+  /// Does nothing if the layer is already at the top
+  pub fn move_up(&mut self) {
+    let current_index = self.current_index();
+
+    if let Some(current_idx) = current_index {
+      let len = self.canvas.lock().unwrap().layers.len();
+      if current_idx < len - 1 {
+        self.set_index(current_idx + 1);
+      }
+    }
+  }
+
+  /// Moves the layer down one position in the stack (decreases its index by 1)
+  /// Does nothing if the layer is already at the bottom
+  pub fn move_down(&mut self) {
+    let current_index = self.current_index();
+
+    if let Some(current_idx) = current_index {
+      if current_idx > 0 {
+        self.set_index(current_idx - 1);
+      }
+    }
+  }
+
+  /// Moves the layer to the top of the stack
+  pub fn move_to_top(&mut self) {
+    let current_index = self.current_index();
+
+    if let Some(current_idx) = current_index {
+      let len = self.canvas.lock().unwrap().layers.len();
+      if current_idx < len - 1 {
+        self.set_index(len - 1);
+      }
+    }
+  }
+
+  /// Moves the layer to the bottom of the stack
+  pub fn move_to_bottom(&mut self) {
+    let current_index = self.current_index();
+
+    if let Some(current_idx) = current_index {
+      if current_idx > 0 {
+        self.set_index(0);
+      }
+    }
+  }
+
+  /// Sets the position of the layer without triggering a recompose.
+  /// This is used internally when resizing/cropping the canvas.
+  pub fn set_position_internal(&mut self, x: i32, y: i32) {
+    self.x = x;
+    self.y = y;
+  }
+
+  /// Duplicates the layer within the same canvas.
+  /// This returns a Layer (the public wrapper), not the raw Rc<Mutex<LayerInner>>.
+  pub fn duplicate(&self) -> super::Layer {
+    let canvas = self.canvas.lock().unwrap();
+    let layer = canvas
+      .layers
+      .iter()
+      .find(|layer| layer.lock().unwrap().id() == self.id());
+    let layer_ref = layer.unwrap().lock().unwrap();
+
+    let mut new_layer = layer_ref.clone();
+    new_layer.set_name(format!("{} clone", new_layer.name()).as_str());
+
+    drop(layer_ref);
+    drop(canvas);
+
+    let mut canvas = self.canvas.lock().unwrap();
+
+    let layer_rc = canvas.add_layer(new_layer);
+    super::Layer::from_inner(layer_rc)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::effects::DropShadow;
+  use abra_core::Image;
+  use std::sync::Arc;
+
+  #[test]
+  fn apply_pending_sets_anchor_offset_for_drop_shadow() {
+    let img = Arc::new(Image::new(1, 1));
+    let mut layer = LayerInner::new("test", img.clone());
+    let shadow = DropShadow::new().with_distance(2.0).with_size(3.0);
+    layer.set_effects(LayerEffects::new().with_drop_shadow(shadow.clone()));
+
+    // Compute expected padding following the same logic as apply_drop_shadow_with_offset
+    let angle_rad = shadow.angle.to_radians();
+    let offset_x = (shadow.distance * angle_rad.cos()).round() as i32;
+    let offset_y = (shadow.distance * angle_rad.sin()).round() as i32;
+    let blur_padding = shadow.size as i32;
+    let pad_left = (-offset_x).max(0) + blur_padding;
+    let pad_top = (-offset_y).max(0) + blur_padding;
+    layer.apply_pending_effects();
+    assert_eq!(layer.anchor_dimensions(), (1, 1));
+    assert_eq!(layer.anchor_offset, (-pad_left, -pad_top));
+  }
+}
+
+impl Clone for LayerInner {
+  fn clone(&self) -> Self {
+    LayerInner {
+      id: uuid::Uuid::new_v4().to_string(),
+      name: self.name.clone(),
+      image: self.image.clone(),
+      blend_mode: self.blend_mode,
+      opacity: self.opacity,
+      visible: self.visible,
+      x: self.x,
+      y: self.y,
+      canvas: self.canvas.clone(),
+      anchor: self.anchor,
+      origin: self.origin,
+      anchor_dimensions: self.anchor_dimensions,
+      anchor_offset: self.anchor_offset,
+      effects: self.effects.clone(),
+      adjustment_layer_type: self.adjustment_layer_type.clone(),
+    }
+  }
+}

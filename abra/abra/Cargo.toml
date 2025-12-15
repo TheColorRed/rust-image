@@ -1,0 +1,30 @@
+[package]
+name = "abra"
+version = "1.0.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+abra-core = { workspace = true }
+canvas = { workspace = true }
+drawing = { workspace = true }
+adjustments = { workspace = true }
+filters = { workspace = true }
+mask = { workspace = true }
+options = { workspace = true }
+gpu_integration = { workspace = true, optional = true }
+
+rayon = { workspace = true }
+ndarray = { workspace = true }
+ctor = { workspace = true }
+
+[build-dependencies]
+regex = "1.9"
+
+[features]
+gpu = ["gpu_integration"]
+
+[lib]
+# dylib: for FFI/C consumers
+# rlib: for Rust consumers (like nodejs bindings) to link statically
+crate-type = ["rlib"]

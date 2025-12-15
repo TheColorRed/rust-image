@@ -10,9 +10,11 @@
     "finalizer",
     "finalizers",
     "fract",
+    "globwalk",
     "hwnd",
     "idents",
     "inplace",
+    "kadabra",
     "luma",
     "mkdirp",
     "napi",
@@ -29,6 +31,7 @@
     "rlib",
     "rngs",
     "rxrs",
+    "saphyr",
     "serde",
     "simd",
     "skia",
@@ -48,26 +51,26 @@
     "winit",
     "workgroups"
   ],
-  "slint.includePaths": [
-    "packages/app/ui"
-  ],
+  "slint.includePaths": ["packages/app/ui"],
   "search.exclude": {
     "**/node_modules": true,
     "**/bower_components": true,
     "**/*.code-search": true,
-    "target": true
+    "target": true,
+    "**/*.js": true,
+    ".venv*": true
   },
   "search.useIgnoreFiles": false,
   "svg.preview.background": "editor",
   "editor.semanticTokenColorCustomizations": {
-      "enabled": true,
-      "rules": {
-          "*.mutable": {
-              "italic": true,
-              "bold": true,
-              "underline": false,
-          },
+    "enabled": true,
+    "rules": {
+      "*.mutable": {
+        "italic": true,
+        "bold": true,
+        "underline": false
       }
+    }
   },
   "chat.tools.terminal.autoApprove": {
     "/.+/": true,
@@ -88,4 +91,8 @@
     "source.organizeLinkDefinitions": "always",
     "source.sortImports": "always"
   },
+  // "rust-analyzer.checkOnSave": false,
+  "rust-analyzer.diagnostics.experimental.enable": true,
+  "rust-analyzer.procMacro.enable": false,
+  "typescript.experimental.useTsgo": false
 }

@@ -1,0 +1,12 @@
+[package]
+name = "mask"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+rayon = { workspace = true }
+abra-core = { workspace = true }
+drawing = { workspace = true }
+
+[lib]
+crate-type = ["dylib", "rlib"]

@@ -1,17 +1,19 @@
 [workspace]
 members = [
   # "packages/rxrs",
-  "packages/abra",
-  "packages/core/*",
-  "packages/plugins/*",
-  # "packages/alakazam",
-  "examples/*",
+  "abra/abra",
+  "abra/core/*",
+  "abra/ai/core",
+  "abra/ai/super-resolution",
+  "abra/plugins/*",
+  "apps/examples/*",
+  "apps/alakazam/bindings",
 ]
 default-members = [
   # "packages/rxrs",
   # "packages/abra",
   # "packages/alakazam",
-  "examples/*",
+  "apps/examples/*",
 ]
 
 resolver = "2"
@@ -25,6 +27,8 @@ opt-level = 3
 [workspace.dependencies]
 rayon = "1.11.0"
 rand = "0.9.2"
+tensorflow = { version = "0.21.0" }
+burn = { version = "0.19.1" }
 ndarray = { version = "0.17.1", features = ["rayon"] }
 wgpu = { version = "27.0.1" }
 pollster = { version = "0.4.0" }
@@ -34,23 +38,29 @@ anyhow = { version = "1.0" }
 saphyr = { version = "0.0.6" }
 ctor = { version = "0.6.1" }
 paste = { version = "1.0.14" }
+once_cell = { version = "1.21" }
+ort = { version = "2.0.0-rc.10" }
 
 # Packages
-abra = { path = "./packages/abra" }
-adjustments = { path = "./packages/core/adjustments" }
-canvas = { path = "./packages/core/canvas" }
-abra_core = { path = "./packages/core/core" }
-drawing = { path = "./packages/core/drawing" }
-filters = { path = "./packages/core/filters" }
-mask = { path = "./packages/core/mask" }
-options = { path = "./packages/core/options" }
+abra = { path = "./abra/abra" }
+adjustments = { path = "./abra/core/adjustments" }
+canvas = { path = "./abra/core/canvas" }
+abra-core = { path = "./abra/core/core" }
+drawing = { path = "./abra/core/drawing" }
+filters = { path = "./abra/core/filters" }
+mask = { path = "./abra/core/mask" }
+options = { path = "./abra/core/options" }
+primitives = { path = "./abra/core/primitives" }
 
-gpu = { path = "./packages/core/gpu" }
-gpu_integration = { path = "./packages/core/gpu_integration" }
+gpu = { path = "./abra/core/gpu" }
+gpu_integration = { path = "./abra/core/gpu_integration" }
 
 # Abra Plugins
-collage = { path = "./packages/plugins/collage" }
+collage = { path = "./abra/plugins/collage" }
 
+# Abra AI Packages
+abra-ai-core = { path = "./abra/ai/core" }
+abra-super-resolution = { path = "./abra/ai/super-resolution" }
 [workspace.dependencies.uuid]
-version = "1.18.1"
+version = "1.19.0"
 features = ["v4"]

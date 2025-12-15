@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../dist/server",
+    "noEmit": false,
+    "moduleResolution": "node",
+    "module": "esnext",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "plugins": [{ "transform": "typescript-transform-paths" }]
+  },
+  "include": ["**/*.ts", "../../bindings/index.d.ts", "../global.d.ts"],
+  "exclude": ["preload.ts"]
+}
