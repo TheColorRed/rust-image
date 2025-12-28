@@ -2,11 +2,16 @@
   "name": "image-editor",
   "scripts": {
     "start": "npm run start -w apps/alakazam",
-    "dev": "npm run build-bindings && npm run dev -w apps/alakazam --if-present",
-    "build-bindings": "cd apps/alakazam/bindings && napi build --output-dir tmp"
+    "dev": "npm run build-bindings && node ./apps/alakazam/scripts/move-bindings.mjs && npm run dev -w apps/alakazam --if-present",
+    "build-bindings": "npm run build -w packages/node --if-present && node ./apps/alakazam/scripts/write-bindings-ready.mjs"
   },
   "workspaces": [
     "apps/alakazam",
-    "apps/alakazam/bindings"
-  ]
+    "packages/node/*"
+  ],
+  "devDependencies": {
+    "anser": "^2.3.5",
+    "error-stack-parser": "^2.1.4",
+    "html-entities": "^2.6.0"
+  }
 }

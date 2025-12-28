@@ -1,14 +1,16 @@
 # SCUNet-GAN Image Restoration Model
-# 
+#
 # Purpose: Removes artifacts, noise, and blur from images
 # Scale: 1x (same size output)
 # Paper: https://arxiv.org/abs/2203.13278
 
 name: SCUNet-GAN
 description: Image restoration - removes artifacts, noise, and blur
-scale_factor: 1.0
-tile_size: 256
-tile_overlap: 64
+source: https://huggingface.co/deepghs/image_restoration
+params:
+  scale_factor: 1.0
+  tile_size: 256
+  tile_overlap: 32
 
 # Control input configuration (null = no control input)
 control: null

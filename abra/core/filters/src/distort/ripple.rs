@@ -2,12 +2,14 @@ use crate::common::*;
 use abra_core::transform::*;
 use rayon::prelude::*;
 
+#[derive(Clone)]
 pub enum RippleSize {
   Small,
   Medium,
   Large,
 }
 
+#[derive(Clone)]
 pub enum RippleShape {
   /// Circular ripple pattern radiating from the center.
   Circular,
@@ -156,5 +158,5 @@ pub fn ripple<'a>(
   let mut image_ref: ImageRef = p_image.into();
   let image = &mut image_ref as &mut Image;
   let p_amount = p_amount.clamp(-1.0, 1.0);
-  apply_filter!(apply_ripple, image, p_apply_options, 1, p_amount, p_size, p_shape);
+  apply_filter!(apply_ripple, image, p_apply_options, 1, p_amount, p_size.clone(), p_shape.clone());
 }

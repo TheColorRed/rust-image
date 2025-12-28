@@ -309,26 +309,10 @@ pub fn color_burn(a: RGBA, b: RGBA) -> RGBA {
 /// Looks at the color information in each channel and darkens the base color to reflect the blend color by decreasing the brightness.
 /// Blending with white produces no change.
 pub fn linear_burn(a: RGBA, b: RGBA) -> RGBA {
-  let red = if b.0 == 0 {
-    0.0
-  } else {
-    255.0 - ((255.0 - a.0 as f32) * 255.0 / b.0 as f32)
-  };
-  let green = if b.1 == 0 {
-    0.0
-  } else {
-    255.0 - ((255.0 - a.1 as f32) * 255.0 / b.1 as f32)
-  };
-  let blue = if b.2 == 0 {
-    0.0
-  } else {
-    255.0 - ((255.0 - a.2 as f32) * 255.0 / b.2 as f32)
-  };
-  let alpha = if b.3 == 0 {
-    0.0
-  } else {
-    255.0 - ((255.0 - a.3 as f32) * 255.0 / b.3 as f32)
-  };
+  let red = (a.0 as i32 + b.0 as i32 - 255).max(0);
+  let green = (a.1 as i32 + b.1 as i32 - 255).max(0);
+  let blue = (a.2 as i32 + b.2 as i32 - 255).max(0);
+  let alpha = (a.3 as i32 + b.3 as i32 - 255).max(0);
   (red as u8, green as u8, blue as u8, alpha as u8)
 }
 

@@ -7,7 +7,7 @@ use adjustments::color::grayscale;
 pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, _smoothness: u32) {
   // Step 1: Convert to grayscale
   let mut clone = image.clone();
-  grayscale(&mut clone);
+  grayscale(&mut clone, None);
 
   // Step 2: Apply Sobel filter to detect edges
   sobel_horizontal(&mut clone);

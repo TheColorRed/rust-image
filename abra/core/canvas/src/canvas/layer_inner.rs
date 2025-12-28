@@ -118,6 +118,11 @@ impl LayerInner {
     self.canvas.lock().unwrap().mark_dirty();
   }
 
+  /// Gets the anchor point of the layer.
+  pub fn anchor(&self) -> Option<Anchor> {
+    self.anchor
+  }
+
   /// Sets the blend mode of the layer.
   pub fn set_blend_mode(&mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) {
     self.blend_mode = blend_mode;

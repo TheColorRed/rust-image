@@ -15,7 +15,8 @@ use crate::{AspectRatio, FromF32, Image, Path, Point, PointF, Segment, Size, Vie
 pub struct Area {
   /// The underlying path outline that defines this closed area.
   pub path: Path,
-  feather: u32,
+  /// The feather amount for the area edges.
+  pub feather: u32,
 }
 
 impl Area {
@@ -75,13 +76,24 @@ impl Area {
 
     Area { path, feather: 0 }
   }
+  /// Creates an area from a list of points.
+  /// - `p_points`: The list of points defining the area.
+  pub fn from_points(p_points: &[[f32; 2]]) -> Area {
+    let mut path = Path::new();
+    if let Some(first) = p_points.first() {
+      path.move_to((first[0], first[1]));
+      for point in &p_points[1..] {
+        path.line_to((point[0], point[1]));
+      }
+    }
+    Area { path, feather: 0 }
+  }
   /// Sets the feather amount for the area edges.
   /// - `p_feather`: The feather radius in pixels.
   pub fn with_feather(mut self, p_feather: u32) -> Self {
     self.feather = p_feather;
     self
   }
-
   /// Gets the feather amount for this Area.
   pub fn feather(&self) -> u32 {
     self.feather
@@ -108,7 +120,6 @@ impl Area {
 
     inside
   }
-
   /// Sets the starting point of the area's (move to).
   /// - `p_start`: The starting point.
   pub fn move_to(&mut self, p_start: impl Into<PointF>) -> &mut Self {

@@ -60,15 +60,12 @@ pub mod model;
 pub mod tensor;
 pub mod tiled;
 
-#[cfg(feature = "onnx")]
 pub mod onnx;
 
-#[cfg(feature = "onnx")]
 mod image_model;
 
 pub use error::AiError;
 
-#[cfg(feature = "onnx")]
 pub use image_model::{ControlParameter, ControlParams, ControlSpec, ImageModel, ModelSpec, discover_models};
 
 /// Prelude module for convenient imports.
@@ -78,9 +75,7 @@ pub mod prelude {
   pub use crate::tensor::{image_to_nchw, nchw_to_image};
   pub use crate::tiled::{TileAccumulator, TileConfig, TileInfo, generate_tiles};
 
-  #[cfg(feature = "onnx")]
   pub use crate::image_model::{ControlParameter, ControlParams, ControlSpec, ImageModel, ModelSpec, discover_models};
 
-  #[cfg(feature = "onnx")]
   pub use crate::onnx::{OnnxConfig, OnnxSession};
 }

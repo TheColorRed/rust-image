@@ -12,11 +12,11 @@ const rendererConfig = {
   name: 'renderer',
   mode: isDevelopment ? 'development' : 'production',
   entry: {
-    renderer: './src/client/renderer.tsx',
-    dialog: './src/client/dialogs/entry.tsx',
+    renderer: './src/renderer/renderer.tsx',
+    dialog: './src/renderer/dialogs/entry.tsx',
   },
   output: {
-    path: resolve(__dirname, 'dist/client'),
+    path: resolve(__dirname, 'dist/renderer'),
     filename: '[name].bundle.js',
   },
   module: {
@@ -47,7 +47,7 @@ const rendererConfig = {
   resolve: {
     extensions: ['.js', '.jsx', '.ts', '.tsx'],
     alias: {
-      '@': resolve(__dirname, 'src/'),
+      '@': resolve(__dirname, 'src/renderer'),
     },
   },
   plugins: [
@@ -84,10 +84,46 @@ const rendererConfig = {
   },
 };
 
+const serverConfig = {
+  name: 'server',
+  mode: isDevelopment ? 'development' : 'production',
+  entry: './src/server/main.ts',
+  output: {
+    path: resolve(__dirname, 'dist/server'),
+    filename: 'main.js',
+  },
+  resolve: {
+    extensions: ['.js', '.jsx', '.ts', '.tsx'],
+    alias: {
+      '@': resolve(__dirname, 'src/server'),
+    },
+  },
+  module: {
+    rules: [
+      {
+        test: /\.(js|ts)$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-typescript'],
+          },
+        },
+      },
+    ],
+  },
+  externals: {
+    electron: 'commonjs electron',
+    '@alakazam/abra/abra.node': 'commonjs @alakazam/abra/abra.node',
+    '@alakazam/history/alakazam-history.node': 'commonjs @alakazam/history/alakazam-history.node',
+  },
+  target: 'electron-main',
+};
+
 const preloadConfig = {
   name: 'preload',
   mode: isDevelopment ? 'development' : 'production',
-  entry: './src/server/preload.ts',
+  entry: './src/server/preload/preload.ts',
   output: {
     path: resolve(__dirname, 'dist/server'),
     filename: 'preload.js',
@@ -115,4 +151,4 @@ const preloadConfig = {
   target: 'electron-preload',
 };
 
-export default [rendererConfig, preloadConfig];
+export default [rendererConfig, serverConfig, preloadConfig];

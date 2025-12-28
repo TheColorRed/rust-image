@@ -1,10 +1,7 @@
-import { LayerMetadata } from 'alakazam-bindings';
-import { ipcMain, webContents } from 'electron';
+import { toFileName } from '@/util/strings';
+import { LayerMetadata, type Project } from '@alakazam/abra';
+import { clipboard, ipcMain, webContents } from 'electron';
 import { filter, map, Subject, tap } from 'rxjs';
-import { toFileName } from '../util/strings.js';
-
-type Project = import('alakazam-bindings').Project;
-type Layer = import('alakazam-bindings').Layer;
 
 export interface AddLayerOptions {
   type: 'file' | 'adjustment' | 'empty' | 'group';
@@ -46,8 +43,8 @@ export function setActiveProject(projectId: string | null) {
 
 export function openProject(filePath: string) {
   if (!filePath) return null;
-  const alakazam = global.alakazam;
-  const project = new alakazam.Project(toFileName(filePath), filePath);
+  const alakazam = global.abra;
+  const project = alakazam.Project.newFromFile(toFileName(filePath), filePath);
   projects.set(project.id, project);
   setActiveProject(project.id);
   // Notify renderer processes about the new project
@@ -119,6 +116,45 @@ export function onMetadataChanged(projectId: string) {
 }
 
 ipcMain.handle('project-open', (_event, { filePath }) => openProject(filePath));
+ipcMain.handle('project-export-active', (_event, { filePath }) => {
+  const project = getActiveProject();
+  if (!project) {
+    throw new Error('No active project to export');
+  }
+  project.save(filePath);
+});
+
+ipcMain.handle('project-paste-image-from-clipboard', async (_event, { projectId }) => {
+  const project = projects.get(projectId);
+  if (!project) {
+    console.log(`Project with ID ${projectId} not found`);
+    return;
+  }
+  const image = clipboard.readImage();
+  if (image.isEmpty()) return;
+
+  const bitmap = image.toBitmap();
+  const size = image.getSize();
+  const pixelData = Uint8Array.from(bitmap);
+  const abraPixelData = new Uint8ClampedArray(pixelData.length);
+  const layerMetadata = project.addEmptyLayer('Pasted Image');
+  const layer = project.getLayerById(layerMetadata.id);
+
+  if (!layer) return;
+
+  // Convert BGRA to RGBA
+  for (let i = 0; i < pixelData.length; i += 4) {
+    abraPixelData[i + 0] = pixelData[i + 2]; // R
+    abraPixelData[i + 1] = pixelData[i + 1]; // G
+    abraPixelData[i + 2] = pixelData[i + 0]; // B
+    abraPixelData[i + 3] = pixelData[i + 3]; // A
+  }
+
+  layer.setImageData({ data: abraPixelData, width: size.width, height: size.height, colorSpace: 'srgb' });
+
+  onCompositeChanged(projectId);
+});
+
 ipcMain.handle('project-close', (_event, { projectId }) => closeProject(projectId));
 
 ipcMain.handle('project-get-layers', (_event, { projectId }) => {
@@ -351,6 +387,7 @@ ipcMain.handle('project-set-blend-mode', (_event, { projectId, layerIds, blendMo
     console.log(`Project with ID ${projectId} not found`);
     return;
   }
+  layerIds = Array.isArray(layerIds) ? layerIds : [layerIds];
   layerIds.forEach((layerId: string) => {
     const layer = project.getLayerById(layerId);
     if (!layer) {

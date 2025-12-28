@@ -119,51 +119,61 @@ pub fn gaussian_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: u32, p_appl
   let image_w = image_w as i32;
   let image_h = image_h as i32;
   let options = p_apply_options.into();
-  let ctx = get_ctx(options.as_ref());
 
-  // Precompute area-based downsampling decision so the closure stays small and focused.
-  let large_area_ratio = options
-    .as_ref()
-    .and_then(|o| o.area())
-    .map(|a| {
-      let (min_x, min_y, max_x, max_y) = a.bounds::<i32>();
+  let areas = options.as_ref().and_then(|o| o.area());
+  for area in areas.unwrap() {
+    let ctx = get_ctx(options.as_ref());
+    // Precompute area-based downsampling decision so the closure stays small and focused.
+    // let large_area_ratio = options
+    //   .as_ref()
+    //   .and_then(|o| o.area())
+    //   .map(|a| {
+    //     let (min_x, min_y, max_x, max_y) = a.bounds::<i32>();
+    //     let area_w = (max_x - min_x) as i64;
+    //     let area_h = (max_y - min_y) as i64;
+    //     (area_w * area_h) > (image_w as i64 * image_h as i64 / 4)
+    //   })
+    //   .unwrap_or(false);
+    let large_area_ratio = {
+      let (min_x, min_y, max_x, max_y) = area.bounds::<i32>();
       let area_w = (max_x - min_x) as i64;
       let area_h = (max_y - min_y) as i64;
       (area_w * area_h) > (image_w as i64 * image_h as i64 / 4)
-    })
-    .unwrap_or(false);
-
-  // Let apply_processing prepare the pixels and handle area/feather/mask+blending.
-  process_image(image, ctx, kernel_radius, |img| {
-    let pixels = img.to_rgba_vec();
-    let (width, height) = img.dimensions::<u32>();
-
-    // If radius is very large and area is sufficiently large, downsample and approximate
-    let vertical = if p_radius >= 24 && large_area_ratio && (width >= 128 || height >= 128) {
-      // choose a scale that reduces the radius to a reasonable size
-      let scale = if_pick!(p_radius >= 96 => 8, p_radius >= 48 => 4, else => 2);
-      let down_w = (width / scale).max(1);
-      let down_h = (height / scale).max(1);
-
-      // Build a temporary sub-image and downscale
-      let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
-      tmp_img.resize(down_w, down_h, None);
-      let new_radius = (p_radius as f32 / scale as f32).max(1.0).round() as u32;
-
-      // Apply separable gaussian on the small image (no area), this is faster because of far fewer pixels.
-      let blurred_small = separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
-      tmp_img.set_rgba_owned(blurred_small);
-
-      // Upscale back to original processing size
-      tmp_img.resize(width as u32, height as u32, None);
-      tmp_img.into_rgba_vec()
-    } else {
-      separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)
     };
 
-    // Write processed pixels back to the provided sub-image. apply_processing will handle blending.
-    img.set_rgba_owned(vertical);
-  });
+    // Let apply_processing prepare the pixels and handle area/feather/mask+blending.
+    process_image(image, ctx, kernel_radius, |img| {
+      let pixels = img.to_rgba_vec();
+      let (width, height) = img.dimensions::<u32>();
+
+      // If radius is very large and area is sufficiently large, downsample and approximate
+      let vertical = if p_radius >= 24 && large_area_ratio && (width >= 128 || height >= 128) {
+        // choose a scale that reduces the radius to a reasonable size
+        let scale = if_pick!(p_radius >= 96 => 8, p_radius >= 48 => 4, else => 2);
+        let down_w = (width / scale).max(1);
+        let down_h = (height / scale).max(1);
+
+        // Build a temporary sub-image and downscale
+        let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
+        tmp_img.resize(down_w, down_h, None);
+        let new_radius = (p_radius as f32 / scale as f32).max(1.0).round() as u32;
+
+        // Apply separable gaussian on the small image (no area), this is faster because of far fewer pixels.
+        let blurred_small =
+          separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
+        tmp_img.set_rgba_owned(blurred_small);
+
+        // Upscale back to original processing size
+        tmp_img.resize(width as u32, height as u32, None);
+        tmp_img.into_rgba_vec()
+      } else {
+        separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)
+      };
+
+      // Write processed pixels back to the provided sub-image. apply_processing will handle blending.
+      img.set_rgba_owned(vertical);
+    });
+  }
   println!("Gaussian blur took: {:?}", start.elapsed());
   // DebugFilters::GaussianBlur(radius as f32, duration.elapsed()).log();
 }

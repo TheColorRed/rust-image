@@ -19,7 +19,7 @@ use rayon::prelude::*;
 /// Lightweight structure representing the primitives core needs from ApplyOptions
 /// without depending on the options crate.
 pub struct ApplyContext<'a> {
-  pub area: Option<&'a Area>,
+  pub area: Option<Vec<&'a Area>>,
   pub mask_image: Option<&'a [u8]>,
 }
 use std::borrow::Cow;
@@ -318,49 +318,52 @@ fn apply_processed_pixels_to_image(
 pub fn process_image<F>(
   p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_kernel_padding: impl Into<i32>, p_processor: F,
 ) where
-  F: FnOnce(&mut Image),
+  F: FnMut(&mut Image),
 {
   let start = std::time::Instant::now();
   // No auto-init here; provider should be registered by an integration crate (e.g., gpu_integration)
   // If a provider is present it will be used, otherwise CPU fallback.
-  let area = p_ctx.as_ref().and_then(|c| c.area);
+  let areas = p_ctx.as_ref().and_then(|c| c.area.clone());
   let mask: Option<&[u8]> = p_ctx.as_ref().and_then(|c| c.mask_image);
   let kernel_padding = p_kernel_padding.into();
   // Prepare a sub-area for processing
-  let prepared = prepare_area_pixels(p_image, area, kernel_padding);
-  if prepared.area_w == 0 || prepared.area_h == 0 {
-    return;
-  }
-  let meta = prepared.meta();
+  let mut processor = p_processor;
+  for area in areas.unwrap() {
+    let prepared = prepare_area_pixels(p_image, Some(area), kernel_padding);
+    if prepared.area_w == 0 || prepared.area_h == 0 {
+      return;
+    }
+    let meta = prepared.meta();
 
-  let is_gpu_enabled = Settings::gpu_enabled();
-  // If a GPU provider is registered and wants to process this area, try it first.
-  if is_gpu_enabled && let Some(provider) = get_gpu_provider() {
-    if (provider.should_process)(&meta) {
-      match (provider.process)(&meta, prepared.pixels.as_ref()) {
-        Ok(processed) => {
-          println!("Processing using the GPU");
-          apply_processed_pixels_to_image(p_image, processed, &meta, area, mask);
-          println!("GPU processing took {:?}", start.elapsed());
-          return;
-        }
-        Err(_) => {
-          // Fall back to CPU processing below. We purposely ignore the error
-          // to keep GPU integration optional and non-fatal for callers.
+    let is_gpu_enabled = Settings::gpu_enabled();
+    // If a GPU provider is registered and wants to process this area, try it first.
+    if is_gpu_enabled && let Some(provider) = get_gpu_provider() {
+      if (provider.should_process)(&meta) {
+        match (provider.process)(&meta, prepared.pixels.as_ref()) {
+          Ok(processed) => {
+            println!("Processing using the GPU");
+            apply_processed_pixels_to_image(p_image, processed, &meta, Some(area), mask);
+            println!("GPU processing took {:?}", start.elapsed());
+            return;
+          }
+          Err(_) => {
+            // Fall back to CPU processing below. We purposely ignore the error
+            // to keep GPU integration optional and non-fatal for callers.
+          }
         }
       }
     }
-  }
 
-  println!("Processing using the CPU");
-  // CPU fallback: create tmp_img and run p_processor
-  let width = prepared.rect_w as usize;
-  let height = prepared.rect_h as usize;
-  let pixels = prepared.pixels.as_ref();
-  let mut tmp_img = Image::new_from_pixels(width as u32, height as u32, pixels.to_vec(), Channels::RGBA);
-  p_processor(&mut tmp_img);
-  apply_processed_pixels_to_image(p_image, tmp_img.into_rgba_vec(), &meta, area, mask);
-  println!("CPU processing took {:?}", start.elapsed());
+    println!("Processing using the CPU");
+    // CPU fallback: create tmp_img and run p_processor
+    let width = prepared.rect_w as usize;
+    let height = prepared.rect_h as usize;
+    let pixels = prepared.pixels.as_ref();
+    let mut tmp_img = Image::new_from_pixels(width as u32, height as u32, pixels.to_vec(), Channels::RGBA);
+    (processor)(&mut tmp_img);
+    apply_processed_pixels_to_image(p_image, tmp_img.into_rgba_vec(), &meta, Some(area), mask);
+    println!("CPU processing took {:?}", start.elapsed());
+  }
 }
 
 /// Convert an optional `ApplyOptions` into the lightweight `ApplyContext` used internally

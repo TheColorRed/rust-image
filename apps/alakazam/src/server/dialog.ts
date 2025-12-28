@@ -1,10 +1,24 @@
+import { cancelAdjustment } from '@/actions/adjustments';
 import { BrowserWindow, ipcMain, webContents } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import { auditTime, Subject } from 'rxjs';
 import { fileURLToPath } from 'url';
-import { cancelAdjustment } from './actions/adjustments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function resolvePreload() {
+  const candidates = [
+    path.join(__dirname, 'preload.js'),
+    path.join(process.cwd(), 'dist', 'server', 'preload.js'),
+    path.join(__dirname, '..', '..', 'dist', 'server', 'preload.js'),
+    path.join(__dirname, '..', 'dist', 'server', 'preload.js'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(__dirname, 'preload.js');
+}
 
 export interface DialogOptions {
   size?: [number, number];
@@ -28,6 +42,7 @@ export function showDialog(
   const size = options.size ?? [0, 0];
   const focusedWindow = BrowserWindow.getFocusedWindow();
   if (focusedWindow) {
+    console.log('Resolved preload path:', resolvePreload());
     const browserWindow = new BrowserWindow({
       parent: focusedWindow,
       modal: options.blockParent ?? true,
@@ -40,7 +55,7 @@ export function showDialog(
       autoHideMenuBar: true,
       show: false,
       webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
+        preload: resolvePreload(),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

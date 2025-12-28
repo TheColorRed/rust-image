@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
-import { applyInstantAdjustment } from './actions/adjustments.js';
-import { showDialog } from './dialog.js';
-import { openProject } from './events/projects.js';
-import { openFileDialog } from './native-dialogs.js';
-// import { openProjectDialog } from './events/dialogs.js';
+import { applyInstantAdjustment } from './actions/adjustments';
+import { showDialog } from './dialog';
+import { openProject } from './events/projects';
+import { openFileDialog } from './native-dialogs';
+// import { openProjectDialog } from './events/dialogs';
 
 const isMac = process.platform === 'darwin';
 

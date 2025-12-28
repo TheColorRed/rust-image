@@ -1,5 +1,5 @@
+import { onCompositeChanged, projects } from '@/events/projects';
 import { ipcMain } from 'electron';
-import { onCompositeChanged, projects } from './projects.js';
 
 ipcMain.handle('transform-resize-layer', (_event, { projectId, layerId, size }) => {
   const project = projects.get(projectId);

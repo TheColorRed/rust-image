@@ -27,6 +27,7 @@ dependencies = [
  "abra-core",
  "ndarray 0.17.1",
  "ort",
+ "rayon",
  "saphyr",
 ]
 
@@ -92,6 +93,16 @@ dependencies = [
 
 [[package]]
 name = "alakazam"
+version = "0.1.0"
+dependencies = [
+ "abra",
+ "napi",
+ "napi-build",
+ "napi-derive",
+]
+
+[[package]]
+name = "alakazam-history"
 version = "0.1.0"
 dependencies = [
  "abra",
@@ -1444,9 +1455,9 @@ dependencies = [
 
 [[package]]
 name = "napi"
-version = "3.6.1"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3af30fe8e799dda3a555c496c59e960e4cff1e931b63acbaf3a3b25d9fad22b6"
+checksum = "f27a163b545fd2184d2efdccf3d3df56acdb63465f2fcfebcaee0463c1e91783"
 dependencies = [
  "bitflags 2.10.0",
  "ctor",
@@ -2338,6 +2349,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 dependencies = [
  "float-cmp",
+]
+
+[[package]]
+name = "super-resolution"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "abra-super-resolution",
 ]
 
 [[package]]

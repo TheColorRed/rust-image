@@ -6,6 +6,8 @@
 
 use abra_core::Image;
 
+use rayon::prelude::*;
+
 /// Configuration for tiled image processing.
 #[derive(Clone, Debug)]
 pub struct TileConfig {
@@ -205,5 +207,103 @@ impl TileAccumulator {
     let mut image = Image::new(self.width, self.height);
     image.set_new_pixels(&rgba_data, self.width, self.height);
     image
+  }
+}
+
+impl TileAccumulator {
+  /// Merge another accumulator into this one (element-wise).
+  pub fn merge(&mut self, other: TileAccumulator) {
+    debug_assert_eq!(self.width, other.width);
+    debug_assert_eq!(self.height, other.height);
+    for i in 0..self.sum_r.len() {
+      self.sum_r[i] += other.sum_r[i];
+      self.sum_g[i] += other.sum_g[i];
+      self.sum_b[i] += other.sum_b[i];
+      self.weights[i] += other.weights[i];
+    }
+  }
+}
+
+/// Process tiles using the provided `process_tile` callback.
+///
+/// The `process_tile` callback is given the `TileInfo` and a mutable scratch
+/// buffer (NCHW float layout) sized to hold the tile's output and should fill
+/// the buffer with R,G,B channels packed as `[R..., G..., B...]`.
+///
+/// The implementation uses Rayon for parallel processing when the `parallel`
+/// feature is enabled and falls back to a sequential implementation otherwise.
+pub fn process_tiles<F>(image: &Image, config: &TileConfig, process_tile: F) -> Image
+where
+  F: Fn(&TileInfo, &mut [f32]) + Sync + Send,
+{
+  let (width, height) = image.dimensions::<u32>();
+  let tiles = generate_tiles(width, height, config);
+  let out_width = ((width as f32) * config.scale_factor).round() as u32;
+  let out_height = ((height as f32) * config.scale_factor).round() as u32;
+
+  let accs = tiles
+    .par_iter()
+    .map(|tile| {
+      let tile_out_w = ((tile.width as f32) * config.scale_factor).round() as u32;
+      let tile_out_h = ((tile.height as f32) * config.scale_factor).round() as u32;
+      let buf_len = (3 * tile_out_w * tile_out_h) as usize;
+      let mut buf = vec![0f32; buf_len];
+      process_tile(tile, &mut buf);
+      let mut local_acc = TileAccumulator::new(out_width, out_height);
+      let dest_x = ((tile.x as f32) * config.scale_factor).round() as u32;
+      let dest_y = ((tile.y as f32) * config.scale_factor).round() as u32;
+      local_acc.accumulate(dest_x, dest_y, tile_out_w, tile_out_h, &buf);
+      local_acc
+    })
+    .reduce_with(|mut a, b| {
+      a.merge(b);
+      a
+    })
+    .unwrap_or_else(|| TileAccumulator::new(out_width, out_height));
+
+  accs.finalize()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn dummy_process(tile: &TileInfo, buf: &mut [f32]) {
+    // fill with gradient based on tile index to make outputs deterministic
+    let hw = (buf.len() / 3) as usize;
+    for i in 0..hw {
+      buf[i] = (tile.index as f32) / (tile.total as f32); // R
+      buf[hw + i] = 0.0; // G
+      buf[2 * hw + i] = 0.0; // B
+    }
+  }
+
+  #[test]
+  fn test_process_tiles_produces_expected_size() {
+    let img = Image::new(100, 80);
+    let config = TileConfig {
+      tile_size: 32,
+      overlap: 8,
+      scale_factor: 1.0,
+    };
+    let out = process_tiles(&img, &config, dummy_process);
+    let (w, h) = out.dimensions::<u32>();
+    assert_eq!(w, 100);
+    assert_eq!(h, 80);
+  }
+
+  #[test]
+  fn test_process_tiles_deterministic() {
+    let img = Image::new(64, 48);
+    let config = TileConfig {
+      tile_size: 32,
+      overlap: 8,
+      scale_factor: 1.0,
+    };
+
+    let a = process_tiles(&img, &config, dummy_process);
+    let b = process_tiles(&img, &config, dummy_process);
+
+    assert_eq!(a.to_rgba_vec(), b.to_rgba_vec());
   }
 }

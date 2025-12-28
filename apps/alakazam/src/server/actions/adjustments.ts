@@ -1,12 +1,14 @@
-import { LensBlurOptions } from 'alakazam-bindings';
-import { ipcMain } from 'electron';
+import { addHistoryEntry } from '@/events/history';
 import {
   clearProjectPreview,
   getActiveProject,
   getProjectPreview,
   onCompositeChanged,
   setProjectPreview,
-} from '../events/projects.js';
+} from '@/events/projects';
+import { getSelectionArea, getSelectionFeather } from '@/services/selection';
+import { LensBlurOptions } from '@alakazam/abra';
+import { ipcMain } from 'electron';
 
 export type AdjustmentTypes = 'autoColor' | 'autoTone' | 'invert' | 'grayscale';
 /**
@@ -24,16 +26,16 @@ export function applyInstantAdjustment<T>(type: AdjustmentTypes, options?: T) {
   let compositeChanged = true;
   switch (type) {
     case 'autoColor':
-      global.alakazam.autoColor(layer);
+      abra.autoColor(layer);
       break;
     case 'autoTone':
-      global.alakazam.autoTone(layer);
+      abra.autoTone(layer);
       break;
     case 'invert':
-      global.alakazam.invert(layer);
+      abra.invert(layer);
       break;
     case 'grayscale':
-      global.alakazam.grayscale(layer);
+      abra.grayscale(layer);
       break;
     default:
       compositeChanged = false;
@@ -49,6 +51,15 @@ export function applyInstantAdjustment<T>(type: AdjustmentTypes, options?: T) {
 export function applyAdjustment<T>(options?: T) {
   const project = getActiveProject();
   if (!project) return;
+
+  const layersMetadata = project.activeLayers();
+  for (const layerMetadata of layersMetadata) {
+    const layer = project.getLayerById(layerMetadata.id);
+    if (!layer) continue;
+    const data = layer.imageData();
+    const entry = new global.alakazamHistory.AbraHistoryEntry('Applied adjustment', data);
+    addHistoryEntry(project.id, entry);
+  }
 
   // Clear preview, the layer is already adjusted
   clearProjectPreview(project.id);
@@ -105,12 +116,24 @@ export function previewAdjustment<T>(type: DialogFeatureType, options?: T) {
     layer.setImageData(currentPreview.originalImageData);
     layer.markDirty();
 
+    // Setup the adjustment options
+    // The selection is in global space so we need to convert to local space
+    // since the operation is performed on the image
+    const adjustmentOptions = new abra.ApplyOptions();
+    const selection = getSelectionArea(project.id);
+    const feather = getSelectionFeather(project.id);
+    const { x, y } = layer.position();
+    const adjustedSelection = selection.map(([sx, sy]) => [sx - x, sy - y] as [number, number]);
+    const area = abra.Area.fromPoints(adjustedSelection);
+    area.setFeather(feather);
+    adjustmentOptions.setArea([area]);
+
     // Apply adjustments
     switch (type) {
       case 'brightness-contrast':
         if (typeof newOptions.brightness !== 'number' || typeof newOptions.contrast !== 'number') break;
-        global.alakazam.brightness(layer, newOptions.brightness);
-        global.alakazam.contrast(layer, newOptions.contrast);
+        abra.brightness(layer, newOptions.brightness, adjustmentOptions);
+        abra.contrast(layer, newOptions.contrast, adjustmentOptions);
         break;
       case 'exposure':
         if (
@@ -119,64 +142,63 @@ export function previewAdjustment<T>(type: DialogFeatureType, options?: T) {
           typeof newOptions.gamma !== 'number'
         )
           break;
-        global.alakazam.exposure(layer, newOptions.exposure, newOptions.offset, newOptions.gamma);
+        abra.exposure(layer, newOptions.exposure, newOptions.offset, newOptions.gamma, adjustmentOptions);
         break;
       case 'vibrance':
         if (typeof newOptions.vibrance !== 'number' || typeof newOptions.saturation !== 'number') break;
-        global.alakazam.vibrance(layer, newOptions.vibrance, newOptions.saturation);
+        abra.vibrance(layer, newOptions.vibrance, newOptions.saturation, adjustmentOptions);
         break;
       // Blur adjustments
       case 'box-blur':
         if (typeof newOptions.radius !== 'number') break;
-        global.alakazam.boxBlur(layer, newOptions.radius);
+        abra.boxBlur(layer, newOptions.radius, adjustmentOptions);
         break;
       case 'gaussian-blur':
         if (typeof newOptions.radius !== 'number') break;
-        global.alakazam.gaussianBlur(layer, newOptions.radius);
+        abra.gaussianBlur(layer, newOptions.radius, adjustmentOptions);
         break;
       case 'lens-blur':
         if (typeof newOptions === 'undefined') break;
-        global.alakazam.lensBlur(layer, newOptions as unknown as LensBlurOptions);
+        abra.lensBlur(layer, newOptions as unknown as LensBlurOptions, adjustmentOptions);
         break;
       case 'motion-blur':
         if (typeof newOptions.angle !== 'number' || typeof newOptions.distance !== 'number') break;
-        global.alakazam.motionBlur(layer, newOptions.angle, newOptions.distance);
+        abra.motionBlur(layer, newOptions.angle, newOptions.distance, adjustmentOptions);
         break;
       case 'surface-blur':
         if (typeof newOptions.radius !== 'number' || typeof newOptions.threshold !== 'number') break;
-        global.alakazam.surfaceBlur(layer, newOptions.radius, newOptions.threshold);
+        abra.surfaceBlur(layer, newOptions.radius, newOptions.threshold, adjustmentOptions);
         break;
       // Distort adjustments
       case 'pinch':
         if (typeof newOptions.amount !== 'number') break;
         // convert number to to -1.0 to 1.0 range
         const pinchAmount = Math.max(-100, Math.min(100, newOptions.amount as number)) / 100;
-        global.alakazam.pinch(layer, pinchAmount);
+        abra.pinch(layer, pinchAmount, adjustmentOptions);
         break;
       case 'ripple':
         if (typeof newOptions.amount !== 'number' || typeof newOptions.size !== 'string') break;
         const rippleAmount = Math.max(-100, Math.min(100, newOptions.amount as number)) / 100;
-        global.alakazam.ripple(
+        abra.ripple(
           layer,
           rippleAmount,
           newOptions.size as 'small' | 'medium' | 'large',
           newOptions.shape as 'circular' | 'square' | 'random' | number,
+          adjustmentOptions,
         );
         break;
       // Noise adjustments
       case 'add-noise':
         if (typeof newOptions.amount !== 'number' || typeof newOptions.distribution !== 'string') break;
-        global.alakazam.noise(layer, newOptions.amount, newOptions.distribution as 'uniform' | 'gaussian');
+        abra.noise(layer, newOptions.amount, newOptions.distribution as 'uniform' | 'gaussian', adjustmentOptions);
         break;
       case 'despeckle':
         if (typeof newOptions.radius !== 'number' || typeof newOptions.threshold !== 'number') break;
-        global.alakazam.despeckle(layer, newOptions.radius, newOptions.threshold);
+        abra.despeckle(layer, newOptions.radius, newOptions.threshold, adjustmentOptions);
         break;
       case 'median':
         if (typeof newOptions.radius !== 'number') break;
-        global.alakazam.median(layer, newOptions.radius);
-        break;
-      default:
+        abra.median(layer, newOptions.radius, adjustmentOptions);
         break;
     }
   }

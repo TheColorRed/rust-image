@@ -7,14 +7,15 @@ description = "Lightweight AI model loading for Abra"
 [dependencies]
 abra-core = { workspace = true }
 ndarray = { workspace = true }
+rayon = { workspace = true }
 saphyr = { workspace = true }
 
-# Optional ONNX Runtime support
-ort = { workspace = true, optional = true }
+# ONNX Runtime support (required)
+ort = { workspace = true }
 
 [features]
 default = []
-onnx = ["ort"]
+onnx = []
 
 [lib]
 crate-type = ["rlib"]

@@ -6,7 +6,7 @@ use super::point::Point;
 use super::pointf::PointF;
 use super::viewbox::{AspectRatio, ViewBox};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 /// A segment in a path.
 pub enum Segment {
   /// A straight line segment to a point.

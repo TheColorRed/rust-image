@@ -1,12 +1,27 @@
+import { menuTemplate } from '@/main-menu';
 import { app, BrowserWindow, ipcMain, Menu, session } from 'electron';
+import fs from 'fs';
 import { createRequire } from 'module';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createMenu, menuTemplate } from './main-menu.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function resolvePreload() {
+  const candidates = [
+    path.join(__dirname, 'preload.js'),
+    path.join(process.cwd(), 'dist', 'server', 'preload.js'),
+    path.join(__dirname, '..', '..', 'dist', 'server', 'preload.js'),
+    path.join(__dirname, '..', 'dist', 'server', 'preload.js'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  // Fallback to the builtin location — Electron will report a clear error if it's missing
+  return path.join(__dirname, 'preload.js');
+}
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -16,22 +31,19 @@ if (isDev) {
 }
 
 declare global {
-  var alakazam: typeof import('../../bindings');
+  var abra: typeof import('@alakazam/abra');
+  var alakazamHistory: typeof import('@alakazam/history');
 }
 
-// alakazam;
-// let alakazam: typeof import('../../bindings');
 try {
-  global.alakazam = require('../../bindings/alakazam.node');
+  global.abra = require('@alakazam/abra/abra.node');
+  global.alakazamHistory = require('@alakazam/history/alakazam-history.node');
   console.log('Native module loaded successfully');
 } catch (err) {
   console.error('Failed to load native module:', err);
   process.exit(1);
 }
 
-// import './project/manage.js';
-
-// fmkadmapgofadopljbjfkapdkoienihi
 const reactDevToolsPath = path.join(
   os.homedir(),
   'AppData/Local/Google/Chrome/User Data/Default/Extensions/fmkadmapgofadopljbjfkapdkoienihi/7.0.1_0',
@@ -52,13 +64,14 @@ app.whenReady().then(async () => {
     });
   });
 
+  console.log('Resolved preload path:', resolvePreload());
   const mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: resolvePreload(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -66,8 +79,8 @@ app.whenReady().then(async () => {
   });
 
   // Create and set the application menu
-  const menu = createMenu(mainWindow);
-  Menu.setApplicationMenu(menu);
+  // const menu = createMenu(mainWindow);
+  // Menu.setApplicationMenu(menu);
   mainWindow.maximize();
   mainWindow.moveTop();
 
@@ -132,7 +145,7 @@ app.whenReady().then(async () => {
     }
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../client/index.html'));
   }
   mainWindow.on('blur', () => mainWindow.webContents.send('window-lost-focus'));
 });
@@ -159,8 +172,11 @@ ipcMain.handle('toggle-dev-tools', event => {
 });
 
 // Events that come from the client.
-import './events/dialogs.js';
-import './events/drawing.js';
-import './events/projects.js';
-import { openProject } from './events/projects.js';
-import './events/transform.js';
+import './events/clipboard';
+import './events/dialogs';
+import './events/drawing';
+import './events/image-data';
+import './events/projects';
+import { openProject } from './events/projects';
+import './events/tools/selection';
+import './events/transform';

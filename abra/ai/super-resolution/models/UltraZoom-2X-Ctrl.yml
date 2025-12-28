@@ -6,9 +6,10 @@
 
 name: UltraZoom-2X-Ctrl
 description: 2x upscale with controllable enhancement
-scale_factor: 2.0
-tile_size: 128
-tile_overlap: 16
+params:
+  scale_factor: 2.0
+  tile_size: 128
+  tile_overlap: 16
 
 # Control input configuration
 control:

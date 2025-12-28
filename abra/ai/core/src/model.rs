@@ -34,7 +34,7 @@ pub trait AiProcessModel {
 }
 /// This trait is used to implement how a tool processes an input image with control parameters.
 /// Implement this if the tool needs to support control parameters.
-pub trait AiProcessModelControl {
+pub trait AiProcessModelWithControl {
   /// This function describes how an AI tool should process an input image with control parameters.
   ///
   /// # Arguments

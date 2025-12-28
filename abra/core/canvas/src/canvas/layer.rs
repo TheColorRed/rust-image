@@ -244,6 +244,11 @@ impl Layer {
     position() -> (i32, i32)
   );
 
+  /// Gets the anchor point of the layer.
+  pub fn anchor(&self) -> Option<Anchor> {
+    self.borrow().anchor()
+  }
+
   /// Gets the current index of this layer in the canvas's layer stack.
   pub fn current_index(&self) -> Option<usize> {
     self.borrow().current_index()

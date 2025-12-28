@@ -37,7 +37,7 @@ pub struct ApplyOptions {
   /// If set, the filter will only be applied within this area.
   /// If an area has a feather on its edges, then the filter will be applied
   /// gradually from the edge of the area to the feathered region.
-  area: Option<Area>,
+  area: Option<Vec<Area>>,
 }
 
 impl Default for ApplyOptions {
@@ -54,7 +54,7 @@ impl ApplyOptions {
   /// Gets the context representation of the options for use by core image helpers.
   pub fn ctx(&self) -> ApplyContext<'_> {
     ApplyContext {
-      area: self.area.as_ref(),
+      area: self.area.as_ref().map(|v| v.iter().collect()),
       mask_image: self.mask.as_ref().map(|m| m.image().rgba()),
     }
   }
@@ -67,6 +67,12 @@ impl ApplyOptions {
   /// Sets an area to be used by the filter.
   /// - `p_area`: The `Area` to apply; if set, the operation is restricted to this area and may be feathered.
   pub fn with_area(mut self, p_area: impl Into<Area>) -> Self {
+    self.area = Some(vec![p_area.into()]);
+    self
+  }
+  /// Sets multiple areas to be used by the filter.
+  /// - `p_area`: A vector of `Area` to apply; if set, the operation is restricted to these areas and may be feathered.
+  pub fn with_areas(mut self, p_area: impl Into<Vec<Area>>) -> Self {
     self.area = Some(p_area.into());
     self
   }
@@ -75,8 +81,8 @@ impl ApplyOptions {
     self.mask.as_ref()
   }
   /// Returns a reference to the area if set.
-  pub fn area(&self) -> Option<&Area> {
-    self.area.as_ref()
+  pub fn area(&self) -> Option<&[Area]> {
+    self.area.as_deref()
   }
 }
 
@@ -84,7 +90,7 @@ impl ApplyOptions {
 /// This helper lives in the `options` crate to avoid a circular dependency (core -> options -> core).
 pub fn get_ctx<'a>(opts: Option<&'a ApplyOptions>) -> Option<ApplyContext<'a>> {
   opts.map(|o| ApplyContext {
-    area: o.area(),
+    area: o.area().map(|v| v.iter().collect()),
     mask_image: o.mask().map(|m| m.image().rgba()),
   })
 }

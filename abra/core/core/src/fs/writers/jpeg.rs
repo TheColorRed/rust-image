@@ -19,7 +19,20 @@ pub fn write_jpg(file: impl Into<String>, image: &Image, options: &Option<Writer
   println!("JPEG Quality set to {}", quality);
 
   let (width, height) = image.dimensions::<u32>();
-  let image = turbojpeg::Image::mandelbrot(width as usize, height as usize, RGB);
-  let jpeg_data = compress(image.as_deref(), quality as i32, turbojpeg::Subsamp::Sub2x2).map_err(|e| e.to_string())?;
+
+  // Convert our RGBA image to an RGB buffer (JPEG doesn't support alpha)
+  let rgb_pixels = image.rgb();
+
+  // Build a turbojpeg Image<&[u8]> describing our RGB pixels
+  let tj_image = turbojpeg::Image {
+    pixels: &rgb_pixels[..],
+    width: width as usize,
+    pitch: (width as usize) * 3, // 3 bytes per pixel for RGB
+    height: height as usize,
+    format: RGB,
+  };
+
+  // Compress into JPEG using TurboJPEG
+  let jpeg_data = compress(tj_image, quality as i32, turbojpeg::Subsamp::Sub2x2).map_err(|e| e.to_string())?;
   write(file.as_str(), &jpeg_data).map_err(|e| e.to_string())
 }

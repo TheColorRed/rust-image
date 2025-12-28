@@ -7,8 +7,10 @@ members = [
   "abra/ai/super-resolution",
   "abra/plugins/*",
   "apps/examples/*",
-  "apps/alakazam/bindings",
+  "apps/examples/ai/super-resolution",
+  "packages/node/*",
 ]
+exclude = ["apps/examples/ai"]
 default-members = [
   # "packages/rxrs",
   # "packages/abra",
@@ -40,6 +42,8 @@ ctor = { version = "0.6.1" }
 paste = { version = "1.0.14" }
 once_cell = { version = "1.21" }
 ort = { version = "2.0.0-rc.10" }
+napi = { version = "3.7.0", default-features = false, features = ["napi4"] }
+napi-derive = "3.4.0"
 
 # Packages
 abra = { path = "./abra/abra" }
@@ -61,6 +65,7 @@ collage = { path = "./abra/plugins/collage" }
 # Abra AI Packages
 abra-ai-core = { path = "./abra/ai/core" }
 abra-super-resolution = { path = "./abra/ai/super-resolution" }
+
 [workspace.dependencies.uuid]
 version = "1.19.0"
 features = ["v4"]

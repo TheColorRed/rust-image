@@ -53,12 +53,12 @@ impl AiModel for SuperResolution {
   /// - `p_name`: The name of the model to load (e.g., "UltraZoom-2X-Ctrl").
   fn load(p_name: impl AsRef<str>) -> Self {
     // Find models in the super-resolution package.
-    let models = discover_models("packages/ai/super-resolution/models")
+    let models = discover_models("abra/ai/super-resolution/models")
       .expect("Could not find associated models for Super Resolution");
 
     // Load the model by name.
     let model = ImageModel::new(models)
-      .load_by_name(p_name.as_ref())
+      .load_by_name(&p_name)
       .expect("Failed to load the model for Super Resolution");
     Self { model }
   }
@@ -78,7 +78,7 @@ impl AiProcessModel for SuperResolution {
   }
 }
 
-impl AiProcessModelControl for SuperResolution {
+impl AiProcessModelWithControl for SuperResolution {
   /// Processes an input image with control parameters and returns the enhanced output image.
   ///
   /// # Arguments

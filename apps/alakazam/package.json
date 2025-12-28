@@ -2,35 +2,42 @@
   "name": "alakazam",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "main": "src/server/main.ts",
+  "main": "./dist/server/main.js",
   "nodemonConfig": {
     "watch": [
       "dist/server",
-      "bindings/tmp/alakazam.node"
+      ".bindings-ready.txt"
     ],
-    "ext": "js",
-    "exec": "mv bindings/tmp/alakazam.node bindings/alakazam.node & mv bindings/tmp/index.d.ts bindings/index.d.ts & electron ./dist/server/main.js",
+    "verbose": true,
+    "legacyWatch": true,
+    "ext": "js,txt",
+    "exec": "node ./scripts/move-bindings.mjs && electron ./dist/server/main.js",
     "exitcrash": true
   },
   "scripts": {
     "start": "webpack --config webpack.config.mjs && tsc -p src/server && electron .",
     "build": "webpack --config webpack.config.mjs && tsc -p src/server",
     "nodemon": "cross-env NODE_ENV=development nodemon",
-    "dev": "rm -rf ./dist/server & concurrently --kill-others \"webpack serve --config webpack.config.mjs --mode development --config-name renderer\" \"webpack --config webpack.config.mjs --mode development --watch --config-name preload\" \"tsc -p src/server -w\" \"wait-on ./dist/server/main.js ./dist/server/preload.js && npm run nodemon\""
+    "webpack:preload": "webpack --config webpack.config.mjs --mode development --watch --config-name preload",
+    "webpack:renderer": "webpack serve --config webpack.config.mjs --mode development --config-name renderer",
+    "webpack:server": "webpack --config webpack.config.mjs --mode development --watch --config-name server",
+    "dev": "rm -rf ./dist/server & concurrently --kill-others \"npm run webpack:renderer\" \"npm run webpack:preload\" \"npm run webpack:server\" \"wait-on ./dist/server/main.js ./dist/server/preload.js && npm run nodemon\""
   },
   "dependencies": {
+    "@alakazam/abra": "1.0.0",
+    "@alakazam/history": "1.0.0",
     "@fortawesome/fontawesome-svg-core": "^7.1.0",
     "@fortawesome/react-fontawesome": "^3.1.1",
+    "@fortawesome/sharp-duotone-light-svg-icons": "^7.1.0",
     "@fortawesome/sharp-light-svg-icons": "^7.1.0",
     "@fortawesome/sharp-solid-svg-icons": "^7.1.0",
-    "@fortawesome/sharp-duotone-light-svg-icons": "^7.1.0",
     "@tailwindcss/postcss": "^4.1.17",
-    "alakazam-bindings": "1.0.0",
     "class-variance-authority": "^0.7.1",
+    "clipper-lib": "^6.4.2",
     "clsx": "^2.1.1",
     "electron": "^39.2.5",
     "pako": "^2.1.0",
+    "polygon-clipping": "^0.15.3",
     "postcss": "^8.5.6",
     "postcss-loader": "^8.2.0",
     "react": "^19.0.0",
@@ -53,6 +60,7 @@
     "cross-env": "^10.1.0",
     "css-loader": "^7.1.2",
     "electron-devtools-installer": "^4.0.0",
+    "fast-glob": "^3.3.3",
     "html-webpack-plugin": "^5.6.5",
     "nodemon": "^3.1.11",
     "prettier-plugin-tailwindcss": "^0.7.2",

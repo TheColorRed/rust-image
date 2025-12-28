@@ -49,8 +49,8 @@ use crate::error::AiError;
 use crate::onnx::OnnxSession;
 use crate::tensor::image_to_nchw;
 use crate::tiled::{TileAccumulator, TileConfig, generate_tiles};
-use abra_core::transform::cropped;
 use abra_core::Image;
+use abra_core::transform::cropped;
 use saphyr::{LoadableYamlNode, Yaml};
 use std::path::Path;
 use std::time::Instant;
@@ -129,14 +129,21 @@ impl ModelSpec {
   /// Creates a ModelSpec from a parsed YAML document.
   fn from_yaml(doc: &Yaml, onnx_path: String) -> Result<Self, AiError> {
     let name = doc["name"].as_str().unwrap_or("Unknown Model").to_string();
-
     let description = doc["description"].as_str().unwrap_or("No description").to_string();
 
-    let scale_factor = doc["scale_factor"].as_floating_point().map(|f| f as f32).unwrap_or(1.0);
+    let params = if doc["params"].is_badvalue() || doc["params"].is_null() {
+      doc
+    } else {
+      &doc["params"]
+    };
 
-    let tile_size = doc["tile_size"].as_integer().map(|i| i as u32).unwrap_or(256);
+    let scale_factor = params["scale_factor"]
+      .as_floating_point()
+      .map(|f| f as f32)
+      .unwrap_or(1.0);
 
-    let tile_overlap = doc["tile_overlap"].as_integer().map(|i| i as u32).unwrap_or(32);
+    let tile_size = params["tile_size"].as_integer().map(|i| i as u32).unwrap_or(256);
+    let tile_overlap = params["tile_overlap"].as_integer().map(|i| i as u32).unwrap_or(32);
 
     // Parse control specification if present
     let control = if doc["control"].is_badvalue() || doc["control"].is_null() {
@@ -340,11 +347,6 @@ impl ImageModel {
   /// - `p_name`: The name of the model to load.
   pub fn load_by_name(&self, p_name: impl AsRef<str>) -> Result<Self, AiError> {
     let name = p_name.as_ref();
-    // let mut models = Vec::new();
-    // for model_path in Settings::api_model_paths() {
-    //   let mut discovered = discover_models(model_path)?;
-    //   models.extend(discovered.drain(..));
-    // }
     let spec = self
       .available_models
       .iter()
