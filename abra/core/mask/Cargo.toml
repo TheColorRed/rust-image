@@ -9,4 +9,4 @@ abra-core = { workspace = true }
 drawing = { workspace = true }
 
 [lib]
-crate-type = ["dylib", "rlib"]
+crate-type = ["rlib"]

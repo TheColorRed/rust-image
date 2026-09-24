@@ -1,5 +1,6 @@
 use abra_core::{Color, Fill, Image, Path, Point};
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -19,9 +20,9 @@ pub enum OutlinePosition {
 
 #[derive(Clone, Debug)]
 /// Options for configuring a stroke effect.
-pub struct Stroke {
+pub struct Stroke<'a> {
   /// The color of the outline in RGBA format.
-  pub fill: Fill,
+  pub fill: Fill<'a>,
   /// The blend mode used to combine the outline with the layer.
   pub opacity: f32,
   /// The thickness of the outline.
@@ -30,14 +31,14 @@ pub struct Stroke {
   pub position: OutlinePosition,
 }
 
-impl Stroke {
+impl<'a> Stroke<'a> {
   /// Creates a new StrokeOptions with default settings.
   /// Default values:
   /// - size: 3.0 pixels
   /// - color: black with 100% opacity (0, 0, 0, 255)
   pub fn new() -> Self {
     Stroke {
-      fill: Fill::Solid(Color::black()),
+      fill: Fill::Solid(Cow::Owned(Color::black())),
       opacity: 1.0,
       size: 3,
       position: OutlinePosition::Inside,
@@ -45,26 +46,26 @@ impl Stroke {
   }
 
   /// Sets the size of the outline.
-  pub fn with_size(mut self, size: u32) -> Self {
-    self.size = size;
+  pub fn with_size(mut self, p_size: u32) -> Self {
+    self.size = p_size;
     self
   }
 
   /// Sets the fill of the outline.
-  pub fn with_fill(mut self, fill: Fill) -> Self {
-    self.fill = fill;
+  pub fn with_fill(mut self, p_fill: Fill<'a>) -> Self {
+    self.fill = p_fill;
     self
   }
 
   /// Sets the opacity of the outline.
-  pub fn with_opacity(mut self, opacity: f32) -> Self {
-    self.opacity = opacity;
+  pub fn with_opacity(mut self, p_opacity: f32) -> Self {
+    self.opacity = p_opacity;
     self
   }
 
   /// Sets the position of the stroke relative to the path: Inside, Outside or Center.
-  pub fn with_position(mut self, position: OutlinePosition) -> Self {
-    self.position = position;
+  pub fn with_position(mut self, p_position: OutlinePosition) -> Self {
+    self.position = p_position;
     self
   }
 }
@@ -93,23 +94,28 @@ pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image
     }
   }
 
-  // Respect configured opacity by adjusting fill alpha.
-  let color = match p_options.fill.clone() {
-    Fill::Solid(mut c) => {
+  // Respect configured opacity by adjusting fill alpha and materialize a Solid fill.
+  let solid_color = match &p_options.fill {
+    Fill::Solid(cow) => {
+      // Ensure owned Color so we can mutate alpha regardless of borrow state.
+      let mut col = cow.clone().into_owned();
       let factor = p_options.opacity.clamp(0.0, 1.0);
-      let new_a = ((c.a as f32) * factor).round().clamp(0.0, 255.0) as u8;
-      c.a = new_a;
-      c
+      col.a = ((col.a as f32) * factor).round().clamp(0.0, 255.0) as u8;
+      col
     }
-    _ => Color::black(),
+    _ => {
+      let mut col = Color::black();
+      let factor = p_options.opacity.clamp(0.0, 1.0);
+      col.a = ((col.a as f32) * factor).round().clamp(0.0, 255.0) as u8;
+      col
+    }
   };
+
+  let fill = Fill::Solid(Cow::Owned(solid_color));
 
   // Use the Painter to render the stroke using a brush. Build a brush based on options
   // with a hardness of 1.0 and paint the path directly into the composite image.
-  let brush = Brush::new()
-    .with_size(p_options.size)
-    .with_color(color)
-    .with_hardness(1.0);
+  let brush = Brush::new().with_size(p_options.size).with_color(fill).with_hardness(1.0);
 
   let mut painter = Painter::new(&mut composite);
   // Pass ownership of the mask to the shader (clone the area)

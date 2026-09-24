@@ -1,5 +1,5 @@
 mod pinch;
 mod ripple;
 
-pub use pinch::pinch;
+pub use pinch::{Pinch, pinch};
 pub use ripple::*;

@@ -1,3 +1,3 @@
 mod sharpen;
 
-pub use sharpen::sharpen;
+pub use sharpen::{Sharpen, sharpen};

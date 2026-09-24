@@ -43,7 +43,7 @@ export function ExposureDialog() {
 
   return (
     <DialogAdjustments adjustmentType={ADJUSTMENT_TYPE} preview={{ exposure, offset, gamma }}>
-      <Select onSelect={onPresetChange} value={preset}>
+      <Select onChange={onPresetChange} value={preset}>
         <Option value="default">Default</Option>
         <Option value="-1">Minus 1</Option>
         <Option value="-2">Minus 2</Option>

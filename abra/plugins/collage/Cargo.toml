@@ -10,4 +10,4 @@ rand = { workspace = true }
 
 [lib]
 name = "abra_collage"
-crate-type = ["dylib"]
+crate-type = ["rlib"]

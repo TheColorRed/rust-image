@@ -3,6 +3,7 @@
 Applies transforms to all layers on a canvas, keeping positions proportional where applicable.
 
 ## Methods
+
 - `resize(width, height, algorithm)`: scales all layers proportionally to fit new canvas size.
 - `resize_percentage(pct, algorithm)`: uniform scale by percentage.
 - `resize_width(width, algorithm)`: scale along X; updates layer positions on X.
@@ -13,9 +14,10 @@ Applies transforms to all layers on a canvas, keeping positions proportional whe
 - `rotate(deg, algorithm)`: rotates each layer image.
 
 ## Example
+
 ```rust
 let mut t = canvas.transform();
-t.resize(1200, 800, None)
- .crop(50, 50, 1100, 700)
- .rotate(3.0, None);
+t.resize(1200, 800, None);
+t.crop(50, 50, 1100, 700);
+t.rotate(3.0, None);
 ```

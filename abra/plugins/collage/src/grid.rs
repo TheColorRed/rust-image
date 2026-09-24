@@ -5,8 +5,8 @@ use abra::prelude::*;
 
 use crate::{CollagePlugin, CollageStyle};
 
-impl CollagePlugin {
-  pub(crate) fn grid_collage(&mut self) -> Canvas {
+impl<'a> CollagePlugin<'a> {
+  pub(crate) fn grid_collage(&mut self) -> Canvas<'a> {
     // Get the total number of cells in the grid.
     let mut cell_count = 0;
     if let CollageStyle::Grid(columns, rows) = self.style {
@@ -33,17 +33,13 @@ impl CollagePlugin {
       }
 
       let trans_image = Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
-      let canvas = Canvas::new("Cell")
-        .add_layer_from_image("empty", trans_image, None)
-        .add_layer_from_image(
-          "image",
-          Arc::new(image),
-          Some(
-            NewLayerOptions::new()
-              .with_anchor(Anchor::TopCenter)
-              .with_size(LayerSize::Cover(None)),
-          ),
-        );
+      let canvas = Canvas::new("Cell");
+      canvas.add_layer_from_image("empty", trans_image, None);
+      canvas.add_layer_from_image(
+        "image",
+        Arc::new(image),
+        Some(NewLayerOptions::new().with_anchor(Anchor::TopCenter).with_size(LayerSize::Cover(None))),
+      );
 
       root_canvas.add_canvas(
         canvas,

@@ -1,5 +1,5 @@
 [package]
-name = "rect-test"
+name = "drawing-example"
 version = "1.0.0"
 edition = "2024"
 
@@ -7,5 +7,5 @@ edition = "2024"
 abra = { workspace = true }
 
 [[bin]]
-name = "rect"
+name = "drawing-example"
 path = "main.rs"

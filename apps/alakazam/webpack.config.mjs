@@ -114,8 +114,7 @@ const serverConfig = {
   },
   externals: {
     electron: 'commonjs electron',
-    '@alakazam/abra/abra.node': 'commonjs @alakazam/abra/abra.node',
-    '@alakazam/history/alakazam-history.node': 'commonjs @alakazam/history/alakazam-history.node',
+    '@alakazam/core/alakazam.node': 'commonjs @alakazam/core/alakazam.node',
   },
   target: 'electron-main',
 };

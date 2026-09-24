@@ -1,5 +1,5 @@
-import { ProjectMetadata } from '@alakazam/abra';
 import { useCallback, useEffect, useState } from 'react';
+import { ProjectMetadata } from '../../../../../packages/node/alakazam';
 
 export function useProjects() {
   const [projects, setProjects] = useState<string[]>([]);

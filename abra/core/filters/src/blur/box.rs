@@ -1,16 +1,16 @@
 use crate::common::*;
 
-fn apply_box_blur(image: &mut Image, radius: u32) {
-  if radius == 0 {
+fn apply_box_blur(p_image: &mut Image, p_radius: u32) {
+  if p_radius == 0 {
     return;
   }
 
-  let (width, height) = image.dimensions::<u32>();
+  let (width, height) = p_image.dimensions::<u32>();
   let width = width as usize;
   let height = height as usize;
-  let kernel_radius = radius as i32;
+  let kernel_radius = p_radius as i32;
 
-  let src = image.rgba();
+  let src = p_image.rgba();
   let mut current = src.to_vec(); // working buffer for reading
   let mut tmp = vec![0u8; current.len()];
   let row_stride = width * 4;
@@ -85,18 +85,36 @@ fn apply_box_blur(image: &mut Image, radius: u32) {
   });
 
   // Write back the processed result
-  image.set_rgba_owned(tmp);
+  p_image.set_rgba_owned(tmp);
 }
 
 /// Applies a box blur to an image.
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the box blur.
 /// - `p_options`: Additional options for applying the blur.
-pub fn box_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: impl Into<f64>, p_apply_options: impl Into<Options>) {
-  let p_radius = p_radius.into().max(0.0) as u32;
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_filter!(apply_box_blur, image, p_apply_options, p_radius as i32, p_radius);
+pub struct BoxBlur {
+  radius: u32,
+  options: Options,
+}
+
+impl Apply for BoxBlur {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_box_blur, image, options, self.radius as i32, self.radius);
+  }
+}
+
+pub fn box_blur(p_radius: impl Into<f64>) -> BoxBlur {
+  BoxBlur {
+    radius: p_radius.into().max(0.0) as u32,
+    options: None,
+  }
 }
 
 #[cfg(test)]
@@ -116,7 +134,7 @@ mod tests {
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
     let orig = img.to_rgba_vec();
-    box_blur(&mut img, 2, ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0))));
+    box_blur(2).with_options(ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0)))).apply(&mut img);
     // Ensure outside area unchanged
     for y in 0..8u32 {
       for x in 0..8u32 {

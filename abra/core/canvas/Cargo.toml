@@ -7,9 +7,10 @@ edition = "2024"
 abra-core = { workspace = true }
 filters = { workspace = true }
 drawing = { workspace = true }
+typography = { workspace = true }
 
 rayon = { workspace = true }
 uuid = { workspace = true }
 
 [lib]
-crate-type = ["dylib", "rlib"]
+crate-type = ["rlib"]

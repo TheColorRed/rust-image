@@ -1,5 +1,5 @@
 use abra_core::{ImageRef, image::Image};
-use options::Options;
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
@@ -11,11 +11,7 @@ fn apply_exposure(p_image: &mut Image, p_exposure: f32, p_offset: f32, p_gamma_c
   let mut out = vec![0u8; (width * height * 4) as usize];
 
   // guard gamma correction
-  let gamma_correction = if p_gamma_correction <= 0.0 {
-    0.01
-  } else {
-    p_gamma_correction
-  };
+  let gamma_correction = if p_gamma_correction <= 0.0 { 0.01 } else { p_gamma_correction };
   // fixed gamma for sRGB conversion
   let gamma = 2.2;
   let inv_gamma = 1.0 / gamma;
@@ -60,36 +56,52 @@ fn apply_exposure(p_image: &mut Image, p_exposure: f32, p_offset: f32, p_gamma_c
   p_image.set_rgba(&out);
 }
 
+/// An exposure adjustment. Create one with [`exposure`].
+pub struct Exposure {
+  exposure: f64,
+  offset: f64,
+  gamma_correction: f64,
+  options: Options,
+}
+
+impl Apply for Exposure {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let exposure = (self.exposure as f32).clamp(-20.0, 20.0);
+    let offset = (self.offset as f32).clamp(-0.5, 0.5);
+    let gamma_correction = (self.gamma_correction as f32).clamp(0.01, 9.99);
+    apply_adjustment!(apply_exposure, image, self.options.as_ref(), 1, exposure, offset, gamma_correction);
+  }
+}
+
+impl Exposure {
+  /// Sets the offset added to each color channel, from `-0.5` to `0.5`. Lightens or darkens the shadows while
+  /// barely touching the highlights. Defaults to `0.0`.
+  pub fn with_offset(mut self, p_offset: impl Into<f64>) -> Self {
+    self.offset = p_offset.into();
+    self
+  }
+
+  /// Sets the gamma correction, from `0.01` to `9.99`. `1.0` means no correction. Defaults to `1.0`.
+  pub fn with_gamma(mut self, p_gamma_correction: impl Into<f64>) -> Self {
+    self.gamma_correction = p_gamma_correction.into();
+    self
+  }
+}
+
 /// Applies an exposure adjustment to the image.
-/// - `p_image`: The image to adjust.
-/// - `p_exposure`: The exposure value. Positive values increase exposure, negative values decrease it.
-/// - `p_offset`: The offset value to add to each color channel.
-/// - `p_gamma_correction`: The gamma correction value to apply. `1.0` means no correction.
-pub fn exposure<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_exposure: impl Into<f64>, p_offset: impl Into<f64>,
-  p_gamma_correction: impl Into<f64>, p_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  let exposure = (p_exposure.into() as f32).clamp(-20.0, 20.0);
-  let offset = (p_offset.into() as f32).clamp(-0.5, 0.5);
-  let gamma_correction = (p_gamma_correction.into() as f32).clamp(0.01, 9.99);
-
-  apply_adjustment!(apply_exposure, image, p_options, 1, exposure, offset, gamma_correction);
-}
-
-pub fn exposure_plus_one(p_image: &mut Image, p_options: impl Into<Options>) {
-  exposure(p_image, 1.0, 0.0, 1.0, p_options);
-}
-
-pub fn exposure_minus_one(p_image: &mut Image, p_options: impl Into<Options>) {
-  exposure(p_image, -1.0, 0.0, 1.0, p_options);
-}
-
-pub fn exposure_plus_two(p_image: &mut Image, p_options: impl Into<Options>) {
-  exposure(p_image, 2.0, 0.0, 1.0, p_options);
-}
-
-pub fn exposure_minus_two(p_image: &mut Image, p_options: impl Into<Options>) {
-  exposure(p_image, -2.0, 0.0, 1.0, p_options);
+/// # Arguments
+/// - `p_exposure`: The exposure in stops, from `-20.0` to `20.0`. Positive values brighten, negative values darken.
+pub fn exposure(p_exposure: impl Into<f64>) -> Exposure {
+  Exposure {
+    exposure: p_exposure.into(),
+    offset: 0.0,
+    gamma_correction: 1.0,
+    options: None,
+  }
 }

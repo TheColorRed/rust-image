@@ -18,8 +18,8 @@ use ndarray::Array4;
 /// let tensor = image_to_nchw(&image);
 /// // tensor shape: [1, 3, height, width]
 /// ```
-pub fn image_to_nchw(image: &Image) -> Array4<f32> {
-  let (width, height) = image.dimensions::<u32>();
+pub fn image_to_nchw(p_image: &Image) -> Array4<f32> {
+  let (width, height) = p_image.dimensions::<u32>();
   let total_pixels = (width * height) as usize;
 
   let mut values = Vec::with_capacity(total_pixels * 3);
@@ -28,7 +28,7 @@ pub fn image_to_nchw(image: &Image) -> Array4<f32> {
   for channel in 0..3 {
     for y in 0..height {
       for x in 0..width {
-        if let Some((r, g, b, _)) = image.get_pixel(x, y) {
+        if let Some((r, g, b, _)) = p_image.get_pixel(x, y) {
           let val = match channel {
             0 => r as f32 / 255.0,
             1 => g as f32 / 255.0,
@@ -53,9 +53,9 @@ pub fn image_to_nchw(image: &Image) -> Array4<f32> {
 ///
 /// # Arguments
 ///
-/// - `width`: Output image width
-/// - `height`: Output image height
-/// - `data`: Float data in NCHW layout (C=3 channels)
+/// - `p_width`: Output image width
+/// - `p_height`: Output image height
+/// - `p_data`: Float data in NCHW layout (C=3 channels)
 ///
 /// # Example
 ///
@@ -64,17 +64,17 @@ pub fn image_to_nchw(image: &Image) -> Array4<f32> {
 ///
 /// let image = nchw_to_image(256, 256, &tensor_data);
 /// ```
-pub fn nchw_to_image(width: u32, height: u32, data: &[f32]) -> Image {
-  let num_pixels = (width * height) as usize;
+pub fn nchw_to_image(p_width: u32, p_height: u32, p_data: &[f32]) -> Image {
+  let num_pixels = (p_width * p_height) as usize;
   let hw = num_pixels;
 
   let mut rgba_data = vec![0u8; num_pixels * 4];
 
   for i in 0..num_pixels {
     // NCHW layout: R at [0..hw], G at [hw..2*hw], B at [2*hw..3*hw]
-    let r = data.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-    let g = data.get(hw + i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-    let b = data.get(2 * hw + i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    let r = p_data.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    let g = p_data.get(hw + i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    let b = p_data.get(2 * hw + i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
 
     rgba_data[i * 4] = (r * 255.0) as u8;
     rgba_data[i * 4 + 1] = (g * 255.0) as u8;
@@ -82,8 +82,8 @@ pub fn nchw_to_image(width: u32, height: u32, data: &[f32]) -> Image {
     rgba_data[i * 4 + 3] = 255;
   }
 
-  let mut image = Image::new(width, height);
-  image.set_new_pixels(&rgba_data, width, height);
+  let mut image = Image::new(p_width, p_height);
+  image.set_new_pixels(&rgba_data, p_width, p_height);
   image
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { cn, focusable, keySelect } from '@/lib/util';
+import { cn, keySelect } from '@/lib/util';
 import { Button } from '@/ui/button';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTimes } from '@fortawesome/sharp-light-svg-icons';
@@ -34,6 +34,10 @@ export interface TabsProps {
   closeable?: boolean;
   /** Additional class names for the Tabs component. */
   className?: string;
+  /** Whether to show border on the X axis. */
+  borderX?: boolean;
+  /** Whether to show border on the bottom. */
+  borderB?: boolean;
   /** Triggered when the active tab changes passing the new id. */
   onActiveTabChange?: (index: number, id: string | number | null) => void;
   /** Triggered when a tab is closed passing the closed tab index. */
@@ -75,6 +79,8 @@ export function Tabs({
   activeId,
   className,
   closeable = false,
+  borderX = true,
+  borderB = true,
   onActiveTabChange,
   onClose,
 }: TabsProps) {
@@ -144,15 +150,27 @@ export function Tabs({
     [activeTabState, setActiveTabState, closeable, handleClose],
   );
 
+  const hasContent = activeTabContent.some(content => content !== null);
+
   return (
     <TabsContext.Provider value={contextValue}>
       <div data-name="tabs" className={cn('flex min-h-0 w-full flex-col', className)}>
-        <div data-name="tab-labels" className={tabLabel}>
+        <div data-name="tab-labels" className={cn('bg-medium', tabLabel)}>
           {labels}
         </div>
-        <div data-name="active-tab-content" className="flex min-h-0 grow flex-col">
-          {activeTabContent}
-        </div>
+        {hasContent ? (
+          <div
+            data-name="active-tab-content"
+            className={cn('border-dark flex min-h-0 grow flex-col', {
+              'border-x': borderX,
+              'border-b': borderB,
+              'border-t': true,
+              border: borderX && borderB,
+            })}
+          >
+            {activeTabContent}
+          </div>
+        ) : null}
       </div>
     </TabsContext.Provider>
   );
@@ -192,10 +210,11 @@ export function TabLabel({
       className={cn(
         'flex cursor-pointer items-center justify-center gap-2 p-2 text-center',
         {
-          'bg-primary hover:bg-primary font-semibold text-white': tabIndex === activeTabState[0],
+          'bg-default hover:bg-default border-dark relative z-1 -mb-px border border-b-0':
+            tabIndex === activeTabState[0],
+          'font-semibold text-white': tabIndex === activeTabState[0],
         },
         className,
-        focusable,
       )}
       tabIndex={0}
       onClick={() => setActiveTabState([tabIndex, id ?? null])}

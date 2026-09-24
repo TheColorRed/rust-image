@@ -70,22 +70,22 @@ impl NewLayerOptions {
 
   /// Sets the size of the layer.
   /// The image can be left at its original size, stretched, or constrained to fit within the canvas.
-  pub fn with_size(mut self, size: LayerSize) -> Self {
-    self.size = Some(size);
+  pub fn with_size(mut self, p_size: LayerSize) -> Self {
+    self.size = Some(p_size);
     self
   }
 
   /// Sets the anchor point for the layer.
   /// The anchor point determines how the layer is positioned within the canvas when drawn.
-  pub fn with_anchor(mut self, anchor: Anchor) -> Self {
-    self.anchor = Some(anchor);
+  pub fn with_anchor(mut self, p_anchor: Anchor) -> Self {
+    self.anchor = Some(p_anchor);
     self
   }
 
   /// Sets the opacity of the layer.
   /// The opacity value should be between 0.0 (completely transparent) and 1.0 (completely opaque).
-  pub fn with_opacity(mut self, opacity: f32) -> Self {
-    self.opacity = Some(opacity.clamp(0.0, 1.0));
+  pub fn with_opacity(mut self, p_opacity: f32) -> Self {
+    self.opacity = Some(p_opacity.clamp(0.0, 1.0));
     self
   }
 
@@ -93,8 +93,8 @@ impl NewLayerOptions {
   /// The blend mode determines how the layer's pixels are combined with the pixels of the layers below it.
   /// This can be any of the predefined blend modes in the `blend` module.
   /// Or a custom blend function can be provided that takes two `RGBA` colors and returns a blended `RGBA` color.
-  pub fn with_blend_mode(mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
-    self.blend_mode = Some(blend_mode);
+  pub fn with_blend_mode(mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+    self.blend_mode = Some(p_blend_mode);
     self
   }
 }

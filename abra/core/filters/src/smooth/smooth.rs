@@ -1,19 +1,31 @@
-use options::Options;
+use options::{Apply, Options};
 
 use crate::{apply_filter, kernel::apply_kernel};
 use abra_core::{Image, image::image_ext::ImageRef};
 
-fn apply_smooth(image: &mut Image) {
+fn apply_smooth(p_image: &mut Image) {
   let kernel = [0.0; 9].iter().map(|_| 1.0 / 9.0).collect::<Vec<f32>>();
-  apply_kernel(image, kernel.as_slice());
+  apply_kernel(p_image, kernel.as_slice());
 }
 
 /// Smooths the image using a 3x3 box blur kernel.
 /// This version supports `Options` to restrict and feather the operation.
-pub fn smooth<'a>(image: impl Into<ImageRef<'a>>, options: impl Into<Options>) {
-  let mut image_ref: ImageRef = image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_filter!(apply_smooth, image, options, 1);
+pub struct Smooth {
+  options: Options,
+}
+impl Apply for Smooth {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_smooth, image, options, 1);
+  }
+}
+pub fn smooth() -> Smooth {
+  Smooth { options: None }
 }
 
 #[cfg(test)]
@@ -33,7 +45,7 @@ mod tests {
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
     let orig = img.to_rgba_vec();
 
-    smooth(&mut img, ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0))));
+    smooth().with_options(ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0)))).apply(&mut img);
 
     // Ensure outside area unchanged
     for y in 0..8u32 {
@@ -59,7 +71,7 @@ mod tests {
     }
     img.set_pixel(3, 3, (255u8, 0u8, 0u8, 255));
     let orig = img.to_rgba_vec();
-    smooth(&mut img, None::<ApplyOptions>);
+    smooth().apply(&mut img);
     // Expect center to have changed
     let idx = ((3 * 8 + 3) * 4) as usize;
     assert!(

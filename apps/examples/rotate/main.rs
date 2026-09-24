@@ -8,14 +8,14 @@ const FILE: &str = "assets/bikini.jpg";
 const OUT_FILE: &str = "out/rotate.png";
 
 pub fn main() {
-  let mut image = Image::new_from_path(FILE);
+  let mut image = Image::read(FILE).expect("Failed to load image");
 
   let start_time = std::time::Instant::now();
 
-  rotate(&mut image, 45., None);
-  color::threshold(&mut image, 128);
+  image.rotate(45., None);
+  color::threshold(128).apply(&mut image);
 
   println!("Rotation took: {:?}", start_time.elapsed());
 
-  image.save(OUT_FILE, None);
+  image.write(OUT_FILE, None).expect("Failed to save image");
 }

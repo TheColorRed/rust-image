@@ -1,42 +1,33 @@
-use std::time::Instant;
-
-use crate::Image;
-use crate::ImageRef;
 use crate::transform::TransformAlgorithm;
 use crate::transform::interpolation;
+use crate::{Image, Size};
 // use crate::utils::debug::DebugTransform;
 use primitives::Image as PrimitiveImage;
 use rayon::prelude::*;
 
+/// Describes how an image should be resized.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ResizeTarget {
+  /// Resize to exact dimensions without preserving aspect ratio.
+  Exact(Size),
+  /// Resize to a width while preserving aspect ratio.
+  FitWidth(u32),
+  /// Resize to a height while preserving aspect ratio.
+  FitHeight(u32),
+  /// Change the width by a number of pixels while preserving aspect ratio.
+  RelativeWidth(i32),
+  /// Change the height by a number of pixels while preserving aspect ratio.
+  RelativeHeight(i32),
+  /// Resize both dimensions by a positive scale factor.
+  Scale(f32),
+}
+
 /// Trait for resizing functionality.
 pub trait Resize {
-  /// Resize the image to the given dimensions.
-  /// This does not maintain the aspect ratio unless the given dimensions match the original aspect ratio.
-  /// - `p_width`: The target width.
-  /// - `p_height`: The target height.
+  /// Resize the image according to the supplied target.
+  /// - `p_target`: The desired dimensions or aspect-preserving strategy.
   /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize(&mut self, p_width: u32, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Resize the image to a percentage of its original size.
-  /// 0 to 1.0 represents 0% to 100%, values greater than 1.0 represent percentages over 100%.
-  /// - `p_percentage`: The percentage to resize the image by.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize_percentage(&mut self, p_percentage: f32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Resize the image to the given width keeping the aspect ratio.
-  /// - `p_width`: The target width.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize_width(&mut self, p_width: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Resize the image to the given height keeping the aspect ratio.
-  /// - `p_height`: The target height.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize_height(&mut self, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Increase or decrease the image width by the given amount while keeping the aspect ratio.
-  /// - `p_width`: The amount to change the width by. Positive values increase the width, negative values decrease it.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize_width_relative(&mut self, p_width: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Increase or decrease the image height by the given amount while keeping the aspect ratio.
-  /// - `p_height`: The amount to change the height by. Positive values increase the height, negative values decrease it.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn resize_height_relative(&mut self, p_height: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>);
+  fn resize(&mut self, p_target: ResizeTarget, p_algorithm: impl Into<Option<TransformAlgorithm>>);
 }
 
 /// Resize using Edge Direct NEDI algorithm.
@@ -96,13 +87,8 @@ fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
         let p_bottom = get_pixel(px, py + 1);
 
         // Compute luminance for gradient calculation
-        let luma = |p: [f32; 4]| -> f32 {
-          if p[3] > 0.0 {
-            (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3]
-          } else {
-            0.0
-          }
-        };
+        let luma =
+          |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
 
         let gx = (luma(p_right) - luma(p_left)) * 0.5;
         let gy = (luma(p_bottom) - luma(p_top)) * 0.5;
@@ -153,22 +139,14 @@ fn resize_edge_direct_nedi(p_image: &mut Image, p_width: u32, p_height: u32) {
     let lambda2 = trace * 0.5 - discriminant;
 
     // Use the eigenvector corresponding to the larger eigenvalue (primary edge direction)
-    let use_lambda = if lambda1.abs() > lambda2.abs() {
-      lambda1
-    } else {
-      lambda2
-    };
+    let use_lambda = if lambda1.abs() > lambda2.abs() { lambda1 } else { lambda2 };
 
     // Eigenvector calculation
     if b.abs() > 1e-6 {
       let v_x = use_lambda - c;
       let v_y = b;
       let norm = (v_x * v_x + v_y * v_y).sqrt();
-      if norm > 0.0 {
-        (v_x / norm, v_y / norm)
-      } else {
-        (1.0, 0.0)
-      }
+      if norm > 0.0 { (v_x / norm, v_y / norm) } else { (1.0, 0.0) }
     } else if (a - c).abs() > 1e-6 {
       if a > c { (1.0, 0.0) } else { (0.0, 1.0) }
     } else {
@@ -366,13 +344,8 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
     let p22 = get_pixel(x + 1, y + 1);
 
     // Compute gradient for luminance (weighted RGB)
-    let luma = |p: [f32; 4]| -> f32 {
-      if p[3] > 0.0 {
-        (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3]
-      } else {
-        0.0
-      }
-    };
+    let luma =
+      |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
 
     let gx = -luma(p00) - 2.0 * luma(p10) - luma(p20) + luma(p02) + 2.0 * luma(p12) + luma(p22);
     let gy = -luma(p00) - 2.0 * luma(p01) - luma(p02) + luma(p20) + 2.0 * luma(p21) + luma(p22);
@@ -407,11 +380,7 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
     if magnitude > EDGE_THRESHOLD {
       // Strong edge detected - use directional interpolation
       // Normalize angle to [0, π]
-      let norm_angle = if angle < 0.0 {
-        angle + std::f32::consts::PI
-      } else {
-        angle
-      };
+      let norm_angle = if angle < 0.0 { angle + std::f32::consts::PI } else { angle };
 
       // Determine primary interpolation direction (quantized to 8 directions)
       let direction = ((norm_angle / std::f32::consts::PI * 4.0).round() as i32) % 4;
@@ -509,10 +478,10 @@ fn resize_edge_direct_edi(p_image: &mut Image, p_width: u32, p_height: u32) {
 /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
 fn resize_impl(p_image: &mut Image, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm) {
   let new_pixels = match p_algorithm {
-    TransformAlgorithm::NearestNeighbor => interpolation::resample_nearest(p_image, p_width, p_height),
-    TransformAlgorithm::Bilinear => interpolation::resample_bilinear(p_image, p_width, p_height),
-    TransformAlgorithm::Bicubic => interpolation::resample_bicubic(p_image, p_width, p_height),
-    TransformAlgorithm::Lanczos => interpolation::resample_lanczos(p_image, p_width, p_height),
+    TransformAlgorithm::NearestNeighbor
+    | TransformAlgorithm::Bilinear
+    | TransformAlgorithm::Bicubic
+    | TransformAlgorithm::Lanczos => interpolation::resample(p_image, p_width, p_height, p_algorithm.interpolation()),
     TransformAlgorithm::EdgeDirectNEDI => {
       resize_edge_direct_nedi(p_image, p_width, p_height);
       return;
@@ -561,132 +530,123 @@ pub(crate) fn get_resize_algorithm(
   }
 }
 
-/// Resize the image to the given dimensions.
-/// This does not maintain the aspect ratio unless the given dimensions match the original aspect ratio.
-/// Resizing will only be performed if the dimensions have changed.
-/// - `p_image`: The image to resize.
-/// - `p_width`: The target width.
-/// - `p_height`: The target height.
-/// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-pub fn resize<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_width: u32, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>,
-) {
-  let _start = Instant::now();
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  let (old_width, old_height) = image.dimensions::<u32>();
+/// Resolves an image resize target to exact pixel dimensions.
+fn target_dimensions(p_image: &Image, p_target: ResizeTarget) -> Option<(u32, u32)> {
+  let (old_width, old_height) = p_image.dimensions::<u32>();
+  match p_target {
+    ResizeTarget::Exact(size) => Some((size.width.max(0.0) as u32, size.height.max(0.0) as u32)),
+    ResizeTarget::FitWidth(width) => {
+      let height = ((old_height as f32 / old_width as f32 * width as f32) as u32).max(1);
+      Some((width, height))
+    }
+    ResizeTarget::FitHeight(height) => {
+      let width = (old_width as f32 / old_height as f32 * height as f32) as u32;
+      Some((width, height))
+    }
+    ResizeTarget::RelativeWidth(amount) => {
+      let width = (old_width as i32 + amount).max(1) as u32;
+      target_dimensions(p_image, ResizeTarget::FitWidth(width))
+    }
+    ResizeTarget::RelativeHeight(amount) => {
+      let height = (old_height as i32 + amount).max(1) as u32;
+      target_dimensions(p_image, ResizeTarget::FitHeight(height))
+    }
+    ResizeTarget::Scale(scale) if scale > 0.0 => {
+      Some(((old_width as f32 * scale).max(1.0) as u32, (old_height as f32 * scale).max(1.0) as u32))
+    }
+    ResizeTarget::Scale(_) => None,
+  }
+}
 
-  let resolved_algo = get_resize_algorithm(p_algorithm.into(), old_width, old_height, p_width, p_height);
-  // Only perform resize if dimensions have changed.
-  if p_width != old_width || p_height != old_height {
-    resize_impl(image, p_width, p_height, resolved_algo);
+/// A resize that has been described but not yet run. Create one with [`resize`], optionally set the algorithm
+/// with [`ResizeImage::with_algorithm`], then run it with [`ResizeImage::apply`].
+pub struct ResizeImage {
+  pub target: ResizeTarget,
+  pub algorithm: Option<TransformAlgorithm>,
+}
+
+impl ResizeImage {
+  /// Sets the resizing algorithm. When `None` (the default), the best algorithm is selected automatically.
+  pub fn with_algorithm(mut self, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> Self {
+    self.algorithm = p_algorithm.into();
+    self
   }
 
-  // DebugTransform::Resize(resolved_algo, old_width, old_height, p_width, p_height, start.elapsed()).log();
+  /// Resizes the image. Nothing happens when the resolved dimensions are the same as the image's.
+  pub fn apply(&self, p_image: &mut Image) {
+    let (old_width, old_height) = p_image.dimensions::<u32>();
+    let Some((width, height)) = target_dimensions(p_image, self.target) else {
+      return;
+    };
+    if width == old_width && height == old_height {
+      return;
+    }
+
+    let algorithm = get_resize_algorithm(self.algorithm, old_width, old_height, width, height);
+    resize_impl(p_image, width, height, algorithm);
+  }
 }
 
-/// Resize the image to the given width keeping the aspect ratio.
-/// The height will be calculated automatically to maintain the aspect ratio.
-/// Resizing will only be performed if the dimensions have changed.
-/// - `p_image`: The image to resize.
-/// - `p_width`: The target width.
-/// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-pub fn width(p_image: &mut Image, p_width: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (old_width, old_height) = p_image.dimensions::<u32>();
-  let new_height = ((old_height as f32 / old_width as f32 * p_width as f32) as u32).max(1);
-  resize(p_image, p_width, new_height, p_algorithm);
-}
-
-/// Resize the image to the given height keeping the aspect ratio.
-/// The width will be calculated automatically to maintain the aspect ratio.
-/// Resizing will only be performed if the dimensions have changed.
-/// - `p_image`: The image to resize.
-/// - `p_height`: The target height.
-/// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-pub fn height(p_image: &mut Image, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (old_width, old_height) = p_image.dimensions::<u32>();
-  let new_width = (old_width as f32 / old_height as f32 * p_height as f32) as u32;
-  resize(p_image, new_width, p_height, p_algorithm);
-}
-
-/// Increase or decrease the image width by the given amount while keeping the aspect ratio.
-/// Resizing will only be performed if the dimensions have changed.
-///
-/// For example if the image is `100x200`, then calling `width_relative(&mut image, 5, None)`
-/// will increase the width of the image by `5px` keeping the aspect ratio for the height.
-///
-/// - `p_image`: The image to resize.
-/// - `p_width`: The amount to change the width by (positive to increase, negative to decrease).
-/// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-pub fn width_relative(p_image: &mut Image, p_width: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (image_width, _) = p_image.dimensions::<u32>();
-  let new_width = (image_width as i32 + p_width).max(1) as u32;
-  width(p_image, new_width, p_algorithm);
-}
-
-/// Increase or decrease the image height by the given amount while keeping the aspect ratio.
-/// Resizing will only be performed if the dimensions have changed.
-///
-/// For example if the image is `100x200`, then calling `height_relative(&mut image, -10, None)`
-/// will decrease the height of the image by `10px` keeping the aspect ratio for the width.
-///
-/// - `p_image`: The image to resize.
-/// - `p_height`: The amount to change the height by (positive to increase, negative to decrease).
-/// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-pub fn height_relative(p_image: &mut Image, p_height: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (_, image_height) = p_image.dimensions::<u32>();
-  let new_height = (image_height as i32 + p_height).max(1) as u32;
-  height(p_image, new_height, p_algorithm);
-}
-
-/// Resize the image by a scale factor.
-///
+/// Resizes an image according to an exact or aspect-preserving target.
 /// # Arguments
-/// * `p_percentage` - Scale factor where:
-///   - 0 < p_percentage < 1 decreases the size (e.g., 0.5 = half size)
-///   - p_percentage == 1 keeps the original size
-///   - p_percentage > 1 increases the size (e.g., 2 = double size, 50 = 50x larger)
+/// - `p_target`: The desired dimensions or resizing strategy.
 ///
-/// # Examples
-/// - `0.5` resizes to 50% of original (half size)
-/// - `1.0` keeps original size
-/// - `2.0` resizes to 200% of original (double size)
-/// - `50.0` resizes to 5000% of original (50x larger)
-pub fn resize_percentage(p_image: &mut Image, p_percentage: f32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  if p_percentage <= 0.0 {
-    return; // Invalid scale factor, do nothing
+/// The resizing algorithm is chosen automatically unless set with [`ResizeImage::with_algorithm`].
+pub fn resize(p_target: ResizeTarget) -> ResizeImage {
+  ResizeImage {
+    target: p_target,
+    algorithm: None,
   }
-
-  let (old_width, old_height) = p_image.dimensions::<u32>();
-  let new_width = ((old_width as f32 * p_percentage).max(1.0)) as u32;
-  let new_height = ((old_height as f32 * p_percentage).max(1.0)) as u32;
-  resize(p_image, new_width, new_height, p_algorithm);
 }
 
 // Implement Resize trait for primitives::Image so external code that expects
 // `abra_core::Image` (a re-export of primitives::Image) can call `.resize(...)`.
 impl Resize for PrimitiveImage {
-  fn resize(&mut self, p_width: u32, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::resize(self, p_width, p_height, p_algorithm);
+  fn resize(&mut self, p_target: ResizeTarget, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
+    crate::transform::resize(p_target).with_algorithm(p_algorithm).apply(self);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn image(p_width: u32, p_height: u32) -> Image {
+    Image::from_rgba_bytes(p_width, p_height, &[10, 20, 30, 255].repeat((p_width * p_height) as usize))
   }
 
-  fn resize_percentage(&mut self, percentage: f32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::resize_percentage(self, percentage, p_algorithm);
+  #[test]
+  fn builder_resizes_to_the_target() {
+    let mut img = image(20, 10);
+    resize(ResizeTarget::Exact(Size::new(8, 4))).apply(&mut img);
+    assert_eq!(img.dimensions::<u32>(), (8, 4));
+
+    resize(ResizeTarget::FitWidth(16)).apply(&mut img);
+    assert_eq!(img.dimensions::<u32>(), (16, 8));
   }
 
-  fn resize_width(&mut self, p_width: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::width(self, p_width, p_algorithm);
+  #[test]
+  fn builder_accepts_an_algorithm() {
+    for algorithm in [TransformAlgorithm::NearestNeighbor, TransformAlgorithm::Lanczos] {
+      let mut img = image(20, 10);
+      resize(ResizeTarget::Scale(2.0)).with_algorithm(algorithm).apply(&mut img);
+      assert_eq!(img.dimensions::<u32>(), (40, 20));
+    }
   }
 
-  fn resize_height(&mut self, p_height: u32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::height(self, p_height, p_algorithm);
+  #[test]
+  fn builder_leaves_an_image_alone_when_the_size_is_unchanged() {
+    let mut img = image(6, 3);
+    let before = img.rgba().to_vec();
+    resize(ResizeTarget::Exact(Size::new(6, 3))).apply(&mut img);
+    assert_eq!(img.dimensions::<u32>(), (6, 3));
+    assert_eq!(img.rgba(), before.as_slice());
   }
 
-  fn resize_width_relative(&mut self, p_width: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::width_relative(self, p_width, p_algorithm);
-  }
-
-  fn resize_height_relative(&mut self, p_height: i32, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::height_relative(self, p_height, p_algorithm);
+  #[test]
+  fn trait_method_still_works() {
+    let mut img = image(10, 10);
+    Resize::resize(&mut img, ResizeTarget::Exact(Size::new(5, 5)), None);
+    assert_eq!(img.dimensions::<u32>(), (5, 5));
   }
 }

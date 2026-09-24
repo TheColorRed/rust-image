@@ -1,5 +1,5 @@
-use abra_core::{Histogram, Image, image::image_ext::ImageRef, lab_to_rgb, rgb_to_lab};
-use options::Options;
+use abra_core::{Histogram, HistogramChannel, Image, image::image_ext::ImageRef, lab_to_rgb, rgb_to_lab};
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
@@ -22,14 +22,14 @@ fn apply_auto_color(p_image: &mut Image) {
 
   // Use histogram helpers to compute channel clip bounds
   // Clip bounds still available via Histogram helpers, but to compute mapping we use LUTs
-  let _ = hist.red_clip_bounds(clip_fraction);
-  let _ = hist.green_clip_bounds(clip_fraction);
-  let _ = hist.blue_clip_bounds(clip_fraction);
+  let _ = hist.clip_bounds(HistogramChannel::Red, clip_fraction);
+  let _ = hist.clip_bounds(HistogramChannel::Green, clip_fraction);
+  let _ = hist.clip_bounds(HistogramChannel::Blue, clip_fraction);
 
   // Second pass: compute midtone mean a & b (Lab) using post-levels LUTs.
-  let lut_r = hist.red_levels_lut(clip_fraction);
-  let lut_g = hist.green_levels_lut(clip_fraction);
-  let lut_b = hist.blue_levels_lut(clip_fraction);
+  let lut_r = hist.levels_lut(HistogramChannel::Red, clip_fraction);
+  let lut_g = hist.levels_lut(HistogramChannel::Green, clip_fraction);
+  let lut_b = hist.levels_lut(HistogramChannel::Blue, clip_fraction);
 
   let (sum_a, sum_b_lab, midtone_count) = src
     .par_chunks(4)
@@ -57,16 +57,8 @@ fn apply_auto_color(p_image: &mut Image) {
     })
     .reduce(|| (0.0f64, 0.0f64, 0u64), |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2));
 
-  let mean_a = if midtone_count > 0 {
-    sum_a / (midtone_count as f64)
-  } else {
-    0.0
-  };
-  let mean_b_c = if midtone_count > 0 {
-    sum_b_lab / (midtone_count as f64)
-  } else {
-    0.0
-  };
+  let mean_a = if midtone_count > 0 { sum_a / (midtone_count as f64) } else { 0.0 };
+  let mean_b_c = if midtone_count > 0 { sum_b_lab / (midtone_count as f64) } else { 0.0 };
 
   // If there are very few midtone samples we avoid neutralizing (prevents noise)
   let min_midtone_samples: u64 = 5;
@@ -116,21 +108,35 @@ fn apply_auto_color(p_image: &mut Image) {
   });
   p_image.set_rgba(&out);
 }
-/// Applies an auto color adjustment to the image.
-/// This function analyzes the image's histogram to perform
-/// levels stretching and color neutralization.
-/// - `p_image`: The image to adjust.
-/// - `p_options`: Options to apply the adjustment.
-pub fn auto_color<'a>(p_image: impl Into<ImageRef<'a>>, p_options: impl Into<Options>) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_adjustment!(apply_auto_color, image, p_options, 1);
+
+/// Configures an automatic color adjustment before applying it to an image.
+#[derive(Default)]
+pub struct AutoColor {
+  options: Options,
+}
+
+impl Apply for AutoColor {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    apply_adjustment!(apply_auto_color, image, self.options.as_ref(), 1);
+  }
+}
+
+/// Creates an automatic color adjustment with default application options.
+pub fn auto_color() -> AutoColor {
+  AutoColor::default()
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use abra_core::Color;
+  use options::ApplyOptions;
 
   #[test]
   fn dark_pixels_remain_dark_after_auto_color() {
@@ -138,11 +144,27 @@ mod tests {
     // Fill with near-black color that has a slight green cast. If we neutralize
     // midtones incorrectly, these pixels could become tinted. They should remain dark.
     img.clear_color(Color::from_rgba(6, 4, 5, 255));
-    // Apply auto color with default options
-    auto_color(&mut img, None);
+    // Apply auto color with default options.
+    auto_color().apply(&mut img);
     let (r, g, b, _a) = img.get_pixel(2, 2).unwrap();
     // Assert maximum channel remains small (no hue pops)
     assert!(r <= 12 && g <= 12 && b <= 12, "Dark pixel got too bright: {},{},{}", r, g, b);
+  }
+
+  #[test]
+  fn auto_color_accepts_application_options_before_apply() {
+    let mut image = Image::new_from_color(2, 2, Color::from_rgb(80, 90, 100));
+    auto_color().with_options(ApplyOptions::new()).apply(&mut image);
+  }
+
+  #[test]
+  fn auto_color_can_apply_to_multiple_images() {
+    let adjustment = auto_color();
+    let mut first = Image::new_from_color(2, 2, Color::from_rgb(80, 90, 100));
+    let mut second = Image::new_from_color(2, 2, Color::from_rgb(100, 90, 80));
+
+    adjustment.apply(&mut first);
+    adjustment.apply(&mut second);
   }
   #[test]
   fn debug_lab_roundtrip() {

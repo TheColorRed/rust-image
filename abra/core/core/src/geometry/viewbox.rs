@@ -124,11 +124,7 @@ impl ViewBox {
 
   /// Returns the aspect ratio of the viewBox (width / height).
   pub fn aspect_ratio(&self) -> f32 {
-    if self.height != 0.0 {
-      self.width / self.height
-    } else {
-      1.0
-    }
+    if self.height != 0.0 { self.width / self.height } else { 1.0 }
   }
 }
 

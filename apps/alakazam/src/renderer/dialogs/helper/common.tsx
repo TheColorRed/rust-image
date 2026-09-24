@@ -168,7 +168,7 @@ export function AdjustmentRow<T = number>({
         .join(' ');
 
     return (
-      <Select value={inputValue as string} className="w-60" onSelect={e => setInputValue(e as T)}>
+      <Select value={inputValue as string} className="w-60" onChange={e => setInputValue(e as T)}>
         {options?.map(option => (
           <Option key={option as string} value={option as string}>
             {titleCase(option as string)}

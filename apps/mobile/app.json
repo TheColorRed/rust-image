@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Mobile",
+    "slug": "mobile",
+    "scheme": "alakazam",
+    "platforms": ["android"],
+    "android": {
+      "package": "com.alakazam.mobile"
+    },
+    "plugins": []
+  }
+}

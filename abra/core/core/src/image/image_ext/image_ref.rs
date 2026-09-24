@@ -16,10 +16,10 @@ pub struct ImageRef<'a> {
 }
 
 impl<'a> ImageRef<'a> {
-  pub fn new(ptr: *mut PrimitiveImage, owner: Option<Box<dyn GuardedOwner + 'a>>) -> Self {
+  pub fn new(p_ptr: *mut PrimitiveImage, p_owner: Option<Box<dyn GuardedOwner + 'a>>) -> Self {
     Self {
-      ptr,
-      _owner: owner,
+      ptr: p_ptr,
+      _owner: p_owner,
       _marker: PhantomData,
     }
   }
@@ -39,8 +39,8 @@ impl<'a> DerefMut for ImageRef<'a> {
 }
 
 impl<'a> From<&'a mut PrimitiveImage> for ImageRef<'a> {
-  fn from(image: &'a mut PrimitiveImage) -> Self {
-    let ptr = image as *mut PrimitiveImage;
+  fn from(p_image: &'a mut PrimitiveImage) -> Self {
+    let ptr = p_image as *mut PrimitiveImage;
     ImageRef::new(ptr, None)
   }
 }

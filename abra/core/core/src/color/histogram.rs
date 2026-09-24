@@ -2,6 +2,15 @@ use primitives::Image;
 
 use rayon::prelude::*;
 
+/// Selects a histogram color channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistogramChannel {
+  Red,
+  Green,
+  Blue,
+  Alpha,
+}
+
 /// Represents the color histogram of an image.
 #[derive(Debug, Clone)]
 pub struct Histogram {
@@ -16,6 +25,15 @@ pub struct Histogram {
 }
 
 impl Histogram {
+  /// Returns the bins for the selected channel.
+  fn channel(&self, p_channel: HistogramChannel) -> &[u64; 256] {
+    match p_channel {
+      HistogramChannel::Red => &self.red,
+      HistogramChannel::Green => &self.green,
+      HistogramChannel::Blue => &self.blue,
+      HistogramChannel::Alpha => &self.alpha,
+    }
+  }
   /// Creates a new, empty histogram.
   pub fn new() -> Self {
     Self {
@@ -37,10 +55,10 @@ impl Histogram {
     Self::from_rgba_skip_transparent(src)
   }
   /// Computes the histogram from the given RGBA pixel data.
-  /// - `rgba`: The RGBA pixel data.
+  /// - `p_rgba`: The RGBA pixel data.
   /// Returns the computed histogram.
-  pub fn from_rgba(rgba: &[u8]) -> Self {
-    rgba
+  pub fn from_rgba(p_rgba: &[u8]) -> Self {
+    p_rgba
       .par_chunks(4)
       .fold(
         || Histogram::new(),
@@ -66,10 +84,10 @@ impl Histogram {
       )
   }
   /// Computes the histogram from the given RGBA pixel data, skipping fully-transparent pixels.
-  /// - `rgba`: The RGBA pixel data.
+  /// - `p_rgba`: The RGBA pixel data.
   /// Returns the computed histogram.
-  pub fn from_rgba_skip_transparent(rgba: &[u8]) -> Self {
-    rgba
+  pub fn from_rgba_skip_transparent(p_rgba: &[u8]) -> Self {
+    p_rgba
       .par_chunks(4)
       .fold(
         || Histogram::new(),
@@ -125,13 +143,13 @@ impl Histogram {
   /// - clip_fraction is applied symmetrically to both tails.
   /// - if the histogram is empty, returns (0, 255) as identity mapping.
   /// - if the histogram collapses to a single non-zero bin returns (bin, bin).
-  pub fn clip_bounds_from_slice(&self, hist: &[u64; 256], clip_fraction: f32) -> (u8, u8) {
-    let total_pixels = hist.iter().sum::<u64>();
+  pub fn clip_bounds_from_slice(&self, p_hist: &[u64; 256], p_clip_fraction: f32) -> (u8, u8) {
+    let total_pixels = p_hist.iter().sum::<u64>();
     let mut lo_bin = 0usize;
     let mut hi_bin = 255usize;
-    let clip_count = (clip_fraction * (total_pixels as f32)).round() as u64;
+    let clip_count = (p_clip_fraction * (total_pixels as f32)).round() as u64;
     let mut cum: u64 = 0;
-    for (i, &c) in hist.iter().enumerate() {
+    for (i, &c) in p_hist.iter().enumerate() {
       cum += c;
       if cum >= clip_count {
         lo_bin = i;
@@ -139,7 +157,7 @@ impl Histogram {
       }
     }
     cum = 0;
-    for (i, &c) in hist.iter().enumerate().rev() {
+    for (i, &c) in p_hist.iter().enumerate().rev() {
       cum += c;
       if cum >= clip_count {
         hi_bin = i;
@@ -150,13 +168,13 @@ impl Histogram {
       // Fallback: use min/max non-zero bins or defaults 0/255
       let mut min = 0usize;
       let mut max = 255usize;
-      for (i, &c) in hist.iter().enumerate() {
+      for (i, &c) in p_hist.iter().enumerate() {
         if c > 0 {
           min = i;
           break;
         }
       }
-      for (i, &c) in hist.iter().enumerate().rev() {
+      for (i, &c) in p_hist.iter().enumerate().rev() {
         if c > 0 {
           max = i;
           break;
@@ -167,29 +185,15 @@ impl Histogram {
     }
     (lo_bin as u8, hi_bin as u8)
   }
-  /// Gets the red channel clip bounds for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns a tuple containing the low and high clip bounds.
-  pub fn red_clip_bounds(&self, clip_fraction: f32) -> (u8, u8) {
-    self.clip_bounds_from_slice(&*self.red, clip_fraction)
-  }
-  /// Gets the green channel clip bounds for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns a tuple containing the low and high clip bounds.
-  pub fn green_clip_bounds(&self, clip_fraction: f32) -> (u8, u8) {
-    self.clip_bounds_from_slice(&*self.green, clip_fraction)
-  }
-  /// Gets the blue channel clip bounds for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns a tuple containing the low and high clip bounds.
-  pub fn blue_clip_bounds(&self, clip_fraction: f32) -> (u8, u8) {
-    self.clip_bounds_from_slice(&*self.blue, clip_fraction)
+  /// Gets clip bounds for the selected channel.
+  pub fn clip_bounds(&self, p_channel: HistogramChannel, p_clip_fraction: f32) -> (u8, u8) {
+    self.clip_bounds_from_slice(self.channel(p_channel), p_clip_fraction)
   }
   /// Construct a lookup table (LUT) for levels mapping given clip_fraction.
   /// The LUT maps an 8-bit channel value [0..255] to an 8-bit mapped value [0..255]
   /// according to the lo/hi clip bounds computed for the histogram slice.
-  pub fn levels_lut_from_slice(&self, hist: &[u64; 256], clip_fraction: f32) -> [u8; 256] {
-    let (lo, hi) = self.clip_bounds_from_slice(hist, clip_fraction);
+  pub fn levels_lut_from_slice(&self, p_hist: &[u64; 256], p_clip_fraction: f32) -> [u8; 256] {
+    let (lo, hi) = self.clip_bounds_from_slice(p_hist, p_clip_fraction);
     let lo_i = lo as i32;
     let hi_i = hi as i32;
     let denom = ((hi_i - lo_i) as f32).max(1.0);
@@ -206,23 +210,9 @@ impl Histogram {
     }
     lut
   }
-  /// Gets the red channel levels lookup table (LUT) for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns the red channel levels LUT.
-  pub fn red_levels_lut(&self, clip_fraction: f32) -> [u8; 256] {
-    self.levels_lut_from_slice(&*self.red, clip_fraction)
-  }
-  /// Gets the green channel levels lookup table (LUT) for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns the green channel levels LUT.
-  pub fn green_levels_lut(&self, clip_fraction: f32) -> [u8; 256] {
-    self.levels_lut_from_slice(&*self.green, clip_fraction)
-  }
-  /// Gets the blue channel levels lookup table (LUT) for the given clip fraction.
-  /// - `clip_fraction`: The fraction of pixels to clip from each tail.
-  /// Returns the blue channel levels LUT.
-  pub fn blue_levels_lut(&self, clip_fraction: f32) -> [u8; 256] {
-    self.levels_lut_from_slice(&*self.blue, clip_fraction)
+  /// Gets a levels lookup table for the selected channel.
+  pub fn levels_lut(&self, p_channel: HistogramChannel, p_clip_fraction: f32) -> [u8; 256] {
+    self.levels_lut_from_slice(self.channel(p_channel), p_clip_fraction)
   }
 
   /// Clears all histogram data, resetting all channels to zero.
@@ -241,14 +231,14 @@ impl Histogram {
 
   /// Fast histogram-based median finder for a single channel.
   /// Uses counting sort approach: O(256) instead of O(n log n).
-  /// - `hist`: The histogram array to find the median from.
-  /// - `count`: The total number of samples in the histogram.
+  /// - `p_hist`: The histogram array to find the median from.
+  /// - `p_count`: The total number of samples in the histogram.
   /// Returns the median value (0-255).
   #[inline]
-  pub fn median_from_hist(hist: &[u64; 256], count: u64) -> u8 {
-    let half = count / 2;
+  pub fn median_from_hist(p_hist: &[u64; 256], p_count: u64) -> u8 {
+    let half = p_count / 2;
     let mut cumulative = 0u64;
-    for (val, &freq) in hist.iter().enumerate() {
+    for (val, &freq) in p_hist.iter().enumerate() {
       cumulative += freq;
       if cumulative > half {
         return val as u8;
@@ -268,80 +258,44 @@ impl Histogram {
     )
   }
 
-  /// Gets the median value from the red channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the median red value (0-255).
+  /// Gets the median value from the selected channel.
   #[inline]
-  pub fn red_median(&self, count: u64) -> u8 {
-    Self::median_from_hist(&*self.red, count)
-  }
-
-  /// Gets the median value from the green channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the median green value (0-255).
-  #[inline]
-  pub fn green_median(&self, count: u64) -> u8 {
-    Self::median_from_hist(&*self.green, count)
-  }
-
-  /// Gets the median value from the blue channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the median blue value (0-255).
-  #[inline]
-  pub fn blue_median(&self, count: u64) -> u8 {
-    Self::median_from_hist(&*self.blue, count)
+  pub fn median(&self, p_channel: HistogramChannel, p_count: u64) -> u8 {
+    Self::median_from_hist(self.channel(p_channel), p_count)
   }
 
   /// Computes the mean (average) value from a histogram channel.
-  /// - `hist`: The histogram array.
-  /// - `count`: The total number of samples.
+  /// - `p_hist`: The histogram array.
+  /// - `p_count`: The total number of samples.
   /// Returns the mean value (0-255).
   #[inline]
-  pub fn mean_from_hist(hist: &[u64; 256], count: u64) -> u8 {
-    if count == 0 {
+  pub fn mean_from_hist(p_hist: &[u64; 256], p_count: u64) -> u8 {
+    if p_count == 0 {
       return 0;
     }
     let mut sum = 0u64;
-    for (val, &freq) in hist.iter().enumerate() {
+    for (val, &freq) in p_hist.iter().enumerate() {
       sum += (val as u64) * freq;
     }
-    (sum / count).min(255) as u8
+    (sum / p_count).min(255) as u8
   }
 
-  /// Gets the mean value from the red channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the mean red value (0-255).
+  /// Gets the mean value from the selected channel.
   #[inline]
-  pub fn red_mean(&self, count: u64) -> u8 {
-    Self::mean_from_hist(&*self.red, count)
-  }
-
-  /// Gets the mean value from the green channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the mean green value (0-255).
-  #[inline]
-  pub fn green_mean(&self, count: u64) -> u8 {
-    Self::mean_from_hist(&*self.green, count)
-  }
-
-  /// Gets the mean value from the blue channel histogram.
-  /// - `count`: The total number of samples in the histogram.
-  /// Returns the mean blue value (0-255).
-  #[inline]
-  pub fn blue_mean(&self, count: u64) -> u8 {
-    Self::mean_from_hist(&*self.blue, count)
+  pub fn mean(&self, p_channel: HistogramChannel, p_count: u64) -> u8 {
+    Self::mean_from_hist(self.channel(p_channel), p_count)
   }
 
   /// Computes a weighted average from a histogram, only considering values within a threshold range.
   /// This is useful for bilateral/edge-aware filtering.
-  /// - `hist`: The histogram array.
-  /// - `center_value`: The center pixel value to compare against.
-  /// - `threshold`: Maximum difference allowed from center value.
+  /// - `p_hist`: The histogram array.
+  /// - `p_center_value`: The center pixel value to compare against.
+  /// - `p_threshold`: Maximum difference allowed from center value.
   /// Returns the weighted average value (0-255), or center_value if no pixels match.
   #[inline]
-  pub fn weighted_average_in_range(hist: &[u64; 256], center_value: u8, threshold: u8) -> u8 {
-    let cv = center_value as i32;
-    let thr = threshold as i32;
+  pub fn weighted_average_in_range(p_hist: &[u64; 256], p_center_value: u8, p_threshold: u8) -> u8 {
+    let cv = p_center_value as i32;
+    let thr = p_threshold as i32;
     let min_val = (cv - thr).max(0) as usize;
     let max_val = (cv + thr).min(255) as usize;
 
@@ -349,57 +303,32 @@ impl Histogram {
     let mut count = 0u64;
 
     for val in min_val..=max_val {
-      let freq = hist[val];
+      let freq = p_hist[val];
       if freq > 0 {
         sum += (val as u64) * freq;
         count += freq;
       }
     }
 
-    if count == 0 {
-      center_value
-    } else {
-      (sum / count).min(255) as u8
-    }
+    if count == 0 { p_center_value } else { (sum / count).min(255) as u8 }
   }
 
-  /// Gets the weighted average from the red channel within threshold range.
-  /// - `center_value`: The center pixel value.
-  /// - `threshold`: Maximum difference allowed.
-  /// Returns the weighted average red value (0-255).
+  /// Gets a weighted average from the selected channel within a threshold range.
   #[inline]
-  pub fn red_weighted_average(&self, center_value: u8, threshold: u8) -> u8 {
-    Self::weighted_average_in_range(&*self.red, center_value, threshold)
-  }
-
-  /// Gets the weighted average from the green channel within threshold range.
-  /// - `center_value`: The center pixel value.
-  /// - `threshold`: Maximum difference allowed.
-  /// Returns the weighted average green value (0-255).
-  #[inline]
-  pub fn green_weighted_average(&self, center_value: u8, threshold: u8) -> u8 {
-    Self::weighted_average_in_range(&*self.green, center_value, threshold)
-  }
-
-  /// Gets the weighted average from the blue channel within threshold range.
-  /// - `center_value`: The center pixel value.
-  /// - `threshold`: Maximum difference allowed.
-  /// Returns the weighted average blue value (0-255).
-  #[inline]
-  pub fn blue_weighted_average(&self, center_value: u8, threshold: u8) -> u8 {
-    Self::weighted_average_in_range(&*self.blue, center_value, threshold)
+  pub fn weighted_average(&self, p_channel: HistogramChannel, p_center_value: u8, p_threshold: u8) -> u8 {
+    Self::weighted_average_in_range(self.channel(p_channel), p_center_value, p_threshold)
   }
 
   /// Finds the value at a given percentile in the histogram.
-  /// - `hist`: The histogram array.
-  /// - `count`: Total number of samples.
-  /// - `percentile`: Value between 0.0 and 1.0 (e.g., 0.5 for median).
+  /// - `p_hist`: The histogram array.
+  /// - `p_count`: Total number of samples.
+  /// - `p_percentile`: Value between 0.0 and 1.0 (e.g., 0.5 for median).
   /// Returns the value at the specified percentile (0-255).
   #[inline]
-  pub fn percentile_from_hist(hist: &[u64; 256], count: u64, percentile: f32) -> u8 {
-    let target = (count as f32 * percentile.clamp(0.0, 1.0)) as u64;
+  pub fn percentile_from_hist(p_hist: &[u64; 256], p_count: u64, p_percentile: f32) -> u8 {
+    let target = (p_count as f32 * p_percentile.clamp(0.0, 1.0)) as u64;
     let mut cumulative = 0u64;
-    for (val, &freq) in hist.iter().enumerate() {
+    for (val, &freq) in p_hist.iter().enumerate() {
       cumulative += freq;
       if cumulative >= target {
         return val as u8;
@@ -408,31 +337,10 @@ impl Histogram {
     255
   }
 
-  /// Gets the value at a percentile from the red channel.
-  /// - `count`: Total number of samples.
-  /// - `percentile`: Value between 0.0 and 1.0.
-  /// Returns the red value at the percentile (0-255).
+  /// Gets a percentile value from the selected channel.
   #[inline]
-  pub fn red_percentile(&self, count: u64, percentile: f32) -> u8 {
-    Self::percentile_from_hist(&*self.red, count, percentile)
-  }
-
-  /// Gets the value at a percentile from the green channel.
-  /// - `count`: Total number of samples.
-  /// - `percentile`: Value between 0.0 and 1.0.
-  /// Returns the green value at the percentile (0-255).
-  #[inline]
-  pub fn green_percentile(&self, count: u64, percentile: f32) -> u8 {
-    Self::percentile_from_hist(&*self.green, count, percentile)
-  }
-
-  /// Gets the value at a percentile from the blue channel.
-  /// - `count`: Total number of samples.
-  /// - `percentile`: Value between 0.0 and 1.0.
-  /// Returns the blue value at the percentile (0-255).
-  #[inline]
-  pub fn blue_percentile(&self, count: u64, percentile: f32) -> u8 {
-    Self::percentile_from_hist(&*self.blue, count, percentile)
+  pub fn percentile(&self, p_channel: HistogramChannel, p_count: u64, p_percentile: f32) -> u8 {
+    Self::percentile_from_hist(self.channel(p_channel), p_count, p_percentile)
   }
 }
 
@@ -469,7 +377,7 @@ mod tests {
     hist.red[10] = 2;
     hist.red[200] = 3;
     // clip fraction zero should return identity 0..255
-    assert_eq!(hist.red_clip_bounds(0.0), (0u8, 255u8));
+    assert_eq!(hist.clip_bounds(HistogramChannel::Red, 0.0), (0u8, 255u8));
   }
 
   #[test]
@@ -478,13 +386,13 @@ mod tests {
     // All counts in one bin -> fallback should return the same bin
     hist.red[50] = 42;
     // Use a clip fraction large enough to ensure clip_count > 0
-    assert_eq!(hist.red_clip_bounds(0.05), (50u8, 50u8));
+    assert_eq!(hist.clip_bounds(HistogramChannel::Red, 0.05), (50u8, 50u8));
   }
 
   #[test]
   fn clip_bounds_empty_hist_returns_identity() {
     let hist = Histogram::new();
-    assert_eq!(hist.red_clip_bounds(0.01), (0u8, 255u8));
+    assert_eq!(hist.clip_bounds(HistogramChannel::Red, 0.01), (0u8, 255u8));
   }
 
   #[test]
@@ -495,7 +403,7 @@ mod tests {
     hist.red[200] = 30;
     hist.red[240] = 5;
     // total 40, clip_fraction 0.125 => clip_count = 5
-    assert_eq!(hist.red_clip_bounds(0.125), (10u8, 240u8));
+    assert_eq!(hist.clip_bounds(HistogramChannel::Red, 0.125), (10u8, 240u8));
   }
 
   #[test]
@@ -503,7 +411,7 @@ mod tests {
     let mut hist = Histogram::new();
     // Any distribution doesn't matter for clip_fraction == 0
     hist.red[10] = 10;
-    let lut = hist.red_levels_lut(0.0);
+    let lut = hist.levels_lut(HistogramChannel::Red, 0.0);
     // lut[i] should equal i for identity mapping
     assert_eq!(lut[0], 0u8);
     assert_eq!(lut[128], 128u8);
@@ -516,7 +424,7 @@ mod tests {
     hist.red[10] = 5;
     hist.red[200] = 30;
     hist.red[240] = 5;
-    let lut = hist.red_levels_lut(0.125);
+    let lut = hist.levels_lut(HistogramChannel::Red, 0.125);
     // Boundaries
     assert_eq!(lut[10], 0u8);
     assert_eq!(lut[240], 255u8);

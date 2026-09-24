@@ -17,33 +17,33 @@ pub fn main() {
 
   let load_start = std::time::Instant::now();
 
-  let loader = ImageLoader::FromGlob(vec!["assets/**/*{boob,tit,chest}*.{jpg}"]).load();
+  let loader = ImageLoader::FromGlob(vec!["assets/**/*{boob,tit,chest}*.{jpg}"]).load(LoadMode::Parallel { threads: 4 });
   let img = loader.at(1u8);
   let path = Path::new().line_to((1024 * 3, 1024 * 2)).clone();
   let mut colors = img.unwrap().as_ref().clone();
   let colors = colors.colors().as_slice().unwrap();
-  let mut collage_plugin = CollagePlugin::new((1024 * 3, 1024 * 2), loader)
-    .with_style(CollageStyle::LayeredGrid(2, 10))
-    .with_options(
+  let mut collage_plugin =
+    CollagePlugin::new((1024 * 3, 1024 * 2), loader).with_style(CollageStyle::LayeredGrid(2, 10)).with_options(
       CollageOptions::new()
         .with_rotation_range(-15, 15)
         .with_scale_range(1.25, 1.5)
         // .with_background(Color::pink())
-        .with_background(
+        .with_background(Fill::Gradient(
           Gradient::evenly(vec![
             // Color::magenta(),
-            Color::mean(colors),
+            Color::average(colors),
             Color::median(colors),
             Color::mode(colors),
           ])
-          .with_direction(path),
-        )
+          .with_direction(path)
+          .into(),
+        ))
         // .with_background(first.unwrap())
-        // .with_background(Fill::Image(abra::Image::new_from_path(image_paths[0]).into()))
+        // .with_background(Fill::Image(abra::Image::read(image_paths[0]).unwrap().into()))
         // .with_background(Fill::Gradient(Gradient::rainbow()))
         .with_effects(
           LayerEffects::new()
-            .with_stroke(Stroke::new().with_fill(Fill::Solid(Color::white())).with_size(50))
+            .with_stroke(Stroke::new().with_fill(Fill::Solid(Color::white().into())).with_size(50))
             .with_drop_shadow(
               DropShadow::new()
                 .with_angle(45.0)
@@ -56,8 +56,8 @@ pub fn main() {
 
   println!("Images loaded in {:?}", load_start.elapsed());
 
-  let result = collage_plugin.apply().unwrap();
-  if let Some(canvas) = result.canvas_at(0) {
+  let mut result = collage_plugin.apply().unwrap();
+  if let Some(canvas) = result.take_canvas_at(0) {
     canvas.save("out/collage_result.png", None);
   }
 }

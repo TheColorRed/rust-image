@@ -36,3 +36,37 @@ h6 {
   font-weight: 200;
   letter-spacing: 2px;
 }
+
+/* Clean, minimal scrollbars (cross-browser) */
+:root {
+  --scrollbar-thumb: var(--color-medium);
+  --scrollbar-thumb-hover: var(--color-dark);
+  --scrollbar-track: transparent;
+}
+
+/* Electron / Chromium (WebKit) scrollbars — thin, rounded */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent; /* padding effect */
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* Utility classes (Chromium) */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

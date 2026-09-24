@@ -14,9 +14,9 @@ mod options_new_layer;
 mod origin;
 
 pub use anchor::Anchor;
-pub use canvas::Canvas;
-pub use canvas_transform::CanvasTransform;
-pub use layer::{AdjustmentLayerType, Layer};
+pub use canvas::{Canvas, CanvasUnit};
+pub use canvas_transform::{CanvasResizeTarget, CanvasTransform};
+pub use layer::{AdjustmentLayerType, Layer, LayerMove};
 pub use layer_transform::LayerTransform;
 pub use options_add_canvas::AddCanvasOptions;
 pub use options_new_layer::{LayerSize, NewLayerOptions};

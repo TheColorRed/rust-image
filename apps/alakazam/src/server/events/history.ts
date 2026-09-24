@@ -1,13 +1,12 @@
-import { AbraHistory, AbraHistoryEntry } from '@alakazam/history';
 import { ipcMain } from 'electron';
 
-const history: AbraHistory[] = [];
+const history: any[] = [];
 /**
  * Adds a history entry for a given project.
  * @param projectId The ID of the project.
  * @param entry The history entry to add.
  */
-export function addHistoryEntry(projectId: string, entry: AbraHistoryEntry) {
+export function addHistoryEntry(projectId: string, entry: any) {
   const projectHistory = history.find(h => h.projectId === projectId);
   if (projectHistory) {
     projectHistory.add(entry);

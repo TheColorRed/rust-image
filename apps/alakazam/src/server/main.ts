@@ -31,13 +31,17 @@ if (isDev) {
 }
 
 declare global {
-  var abra: typeof import('@alakazam/abra');
-  var alakazamHistory: typeof import('@alakazam/history');
+  var abra: typeof import('@alakazam/core');
+  // Consolidated namespaces from abra
+  var alakazamHistory: any;
+  var gizmos: any;
 }
 
 try {
-  global.abra = require('@alakazam/abra/abra.node');
-  global.alakazamHistory = require('@alakazam/history/alakazam-history.node');
+  global.abra = require('@alakazam/core/alakazam.node');
+  // Expose consolidated namespaces from single binary
+  global.alakazamHistory = global.abra.AlakazamHistory;
+  global.gizmos = global.abra.AlakazamGizmos;
   console.log('Native module loaded successfully');
 } catch (err) {
   console.error('Failed to load native module:', err);
@@ -175,8 +179,10 @@ ipcMain.handle('toggle-dev-tools', event => {
 import './events/clipboard';
 import './events/dialogs';
 import './events/drawing';
+import './events/gizmos';
 import './events/image-data';
 import './events/projects';
 import { openProject } from './events/projects';
+import './events/tools/gradient';
 import './events/tools/selection';
 import './events/transform';

@@ -1,16 +1,16 @@
 use super::point::Point;
 
 /// Bresenham's line algorithm
-pub fn bresenham(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i32)> {
+pub fn bresenham(p_x0: i32, p_y0: i32, p_x1: i32, p_y1: i32) -> Vec<(i32, i32)> {
   let mut result = Vec::new();
-  let dx = (x1 - x0).abs();
-  let dy = -(y1 - y0).abs();
-  let sx = if x0 < x1 { 1 } else { -1 };
-  let sy = if y0 < y1 { 1 } else { -1 };
+  let dx = (p_x1 - p_x0).abs();
+  let dy = -(p_y1 - p_y0).abs();
+  let sx = if p_x0 < p_x1 { 1 } else { -1 };
+  let sy = if p_y0 < p_y1 { 1 } else { -1 };
   let mut err = dx + dy;
-  let mut x = x0;
-  let mut y = y0;
-  while x != x1 || y != y1 {
+  let mut x = p_x0;
+  let mut y = p_y0;
+  while x != p_x1 || y != p_y1 {
     result.push((x, y));
     let e2 = 2 * err;
     if e2 >= dy {
@@ -27,6 +27,6 @@ pub fn bresenham(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i32)> {
 }
 
 /// Bresenham's line algorithm from points
-pub fn bresenham_from_points(p0: Point, p1: Point) -> Vec<(i32, i32)> {
-  bresenham(p0.x(), p0.y(), p1.x(), p1.y())
+pub fn bresenham_from_points(p_p0: Point, p_p1: Point) -> Vec<(i32, i32)> {
+  bresenham(p_p0.x(), p_p0.y(), p_p1.x(), p_p1.y())
 }

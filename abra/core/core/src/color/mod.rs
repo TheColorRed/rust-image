@@ -5,6 +5,6 @@ mod gradient;
 mod histogram;
 
 pub use fill::Fill;
-pub use gradient::Gradient;
-pub use histogram::Histogram;
+pub use gradient::{ColorStop, Gradient};
+pub use histogram::{Histogram, HistogramChannel};
 pub use primitives::color::*;

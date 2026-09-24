@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use abra::canvas::prelude::*;
@@ -5,7 +6,7 @@ use abra::drawing::prelude::*;
 use abra::plugin::{Plugin, PluginError, PluginResult};
 use abra::prelude::*;
 
-use rand::prelude::{IndexedRandom, Rng};
+use rand::prelude::{IndexedRandom, Rng, RngExt};
 use rand::rngs::ThreadRng;
 
 mod grid;
@@ -17,7 +18,7 @@ pub mod prelude {
 }
 
 #[derive(Clone)]
-pub struct CollageOptions {
+pub struct CollageOptions<'a> {
   /// Rotation range for images in the collage.
   /// - Positive values rotate clockwise.
   /// - Negative values rotate counter-clockwise.
@@ -29,43 +30,43 @@ pub struct CollageOptions {
   scale: (f32, f32),
   /// Background color for the collage.
   /// - If None, the background will be transparent.
-  background: Fill,
+  background: Fill<'a>,
   /// The effects to apply to each layer in the collage.
-  effects: Option<LayerEffects>,
+  effects: Option<LayerEffects<'a>>,
 }
 
-impl CollageOptions {
+impl<'a> CollageOptions<'a> {
   /// Creates a new CollageOptions instance with default values.
   pub fn new() -> Self {
     Self {
       rotation: (0.0, 0.0),
       scale: (1.0, 1.0),
-      background: Fill::Solid(Color::transparent()),
+      background: Fill::Solid(Cow::Owned(Color::transparent())),
       effects: None,
     }
   }
 
   /// Sets the rotation range for images in the collage.
-  pub fn with_rotation_range(mut self, min: impl Into<f64>, max: impl Into<f64>) -> Self {
-    self.rotation = (min.into() as f32, max.into() as f32);
+  pub fn with_rotation_range(mut self, p_min: impl Into<f64>, p_max: impl Into<f64>) -> Self {
+    self.rotation = (p_min.into() as f32, p_max.into() as f32);
     self
   }
 
   /// Sets the scale range for images in the collage.
-  pub fn with_scale_range(mut self, min: impl Into<f64>, max: impl Into<f64>) -> Self {
-    self.scale = (min.into() as f32, max.into() as f32);
+  pub fn with_scale_range(mut self, p_min: impl Into<f64>, p_max: impl Into<f64>) -> Self {
+    self.scale = (p_min.into() as f32, p_max.into() as f32);
     self
   }
 
   /// Sets the background color for the collage.
-  pub fn with_background(mut self, background: impl Into<Fill>) -> Self {
-    self.background = background.into();
+  pub fn with_background(mut self, p_background: impl Into<Fill<'a>>) -> Self {
+    self.background = p_background.into();
     self
   }
 
   /// Sets the effects to apply to each layer in the collage.
-  pub fn with_effects(mut self, effects: LayerEffects) -> Self {
-    self.effects = Some(effects);
+  pub fn with_effects(mut self, p_effects: LayerEffects<'a>) -> Self {
+    self.effects = Some(p_effects);
     self
   }
 }
@@ -88,7 +89,7 @@ pub enum CollageStyle {
 }
 
 /// A plugin that creates collages from multiple images.
-pub struct CollagePlugin {
+pub struct CollagePlugin<'a> {
   /// The size of the collage canvas.
   size: (u32, u32),
   /// The style of the collage.
@@ -96,19 +97,19 @@ pub struct CollagePlugin {
   /// The images to include in the collage.
   images: Vec<Arc<Image>>,
   /// Options for generating the collage.
-  options: Option<CollageOptions>,
+  options: Option<CollageOptions<'a>>,
   /// Indices of images already selected to avoid duplicates.
   selected_images: Vec<usize>,
   /// Random number generator for consistent randomness across selections.
   rng: ThreadRng,
 }
 
-impl CollagePlugin {
+impl<'a> CollagePlugin<'a> {
   /// Creates a new CollagePlugin instance from already loaded images.
-  pub fn new<I: Into<LoadedImages>>(size: (u32, u32), images: I) -> Self {
-    let loaded = images.into();
+  pub fn new<I: Into<LoadedImages>>(p_size: (u32, u32), p_images: I) -> Self {
+    let loaded = p_images.into();
     Self {
-      size,
+      size: p_size,
       style: CollageStyle::Grid(2, 2),
       images: loaded.all(),
       options: None,
@@ -117,13 +118,13 @@ impl CollagePlugin {
     }
   }
 
-  pub fn with_style(mut self, style: CollageStyle) -> Self {
-    self.style = style;
+  pub fn with_style(mut self, p_style: CollageStyle) -> Self {
+    self.style = p_style;
     self
   }
 
-  pub fn with_options(mut self, options: CollageOptions) -> Self {
-    self.options = Some(options);
+  pub fn with_options(mut self, p_options: CollageOptions<'a>) -> Self {
+    self.options = Some(p_options);
     self
   }
 
@@ -131,9 +132,7 @@ impl CollagePlugin {
   /// Ensures no duplicates until all images have been used.
   /// If there are more images than cells in the collage, not all images will be used.
   fn select_random_image(&mut self) -> Arc<Image> {
-    let available_indices: Vec<usize> = (0..self.images.len())
-      .filter(|i| !self.selected_images.contains(i))
-      .collect();
+    let available_indices: Vec<usize> = (0..self.images.len()).filter(|i| !self.selected_images.contains(i)).collect();
 
     if available_indices.is_empty() {
       // Reset selected images if all have been used
@@ -146,44 +145,57 @@ impl CollagePlugin {
     self.images[selected_index].clone()
   }
 
-  fn select_range(&mut self, range: (f32, f32)) -> f32 {
-    let (min, max) = range;
+  fn select_range(&mut self, p_range: (f32, f32)) -> f32 {
+    let (min, max) = p_range;
     self.rng.random_range(min..=max)
   }
 
-  fn set_background(&self, root_canvas: &Canvas) {
+  fn set_background(&self, p_root_canvas: &Canvas) {
     if let Some(options) = &self.options {
       let background = match options.background.clone() {
-        Fill::Solid(color) => {
+        Fill::Solid(color_cow) => {
+          let color = color_cow.into_owned();
           let bg_image = Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
-          Canvas::new("Background Color").add_layer_from_image("background color", bg_image, None)
+          {
+            let canvas = Canvas::new("Background Color");
+            canvas.add_layer_from_image("background color", bg_image, None);
+            canvas
+          }
         }
-        Fill::Gradient(gradient) => {
+        Fill::Gradient(gradient_cow) => {
           let mut bg_image = Image::new(self.size.0, self.size.1);
-          let brush = Brush::new().with_color(gradient.clone());
+          // Use a reference to the Gradient when creating the Brush to satisfy Into<Fill<'_>> bounds
+          let brush = Brush::new().with_color(gradient_cow.as_ref());
           let area = Area::new_from_image(&bg_image);
-          fill_area_with_brush(&mut bg_image, &area, &brush);
+          Painter::new(&mut bg_image).fill_area_with_brush(&area, &brush);
 
-          Canvas::new("Background Color").add_layer_from_image("background color", Arc::new(bg_image), None)
+          {
+            let canvas = Canvas::new("Background Color");
+            canvas.add_layer_from_image("background color", Arc::new(bg_image), None);
+            canvas
+          }
         }
         Fill::Image(image) => {
           let bg_image = Arc::new(Image::new(self.size.0, self.size.1));
-          Canvas::new("Background Color")
-            .add_layer_from_image("background color", bg_image, None)
-            .add_layer_from_image(
+          {
+            let canvas = Canvas::new("Background Color");
+            canvas.add_layer_from_image("background color", bg_image, None);
+            canvas.add_layer_from_image(
               "Image",
               image.clone(),
               Some(NewLayerOptions::new().with_size(LayerSize::Cover(None))),
-            )
-            .flatten()
+            );
+            canvas.flatten();
+            canvas
+          }
         }
       };
-      root_canvas.add_canvas(background, None);
+      p_root_canvas.add_canvas(background, None);
     }
   }
 }
 
-impl Plugin for CollagePlugin {
+impl<'a> Plugin<'a> for CollagePlugin<'a> {
   fn name(&self) -> &str {
     "Collage"
   }
@@ -192,7 +204,7 @@ impl Plugin for CollagePlugin {
     "A plugin that creates collages from multiple images."
   }
 
-  fn apply(&mut self) -> Result<PluginResult, PluginError> {
+  fn apply(&mut self) -> Result<PluginResult<'a>, PluginError> {
     let start = std::time::Instant::now();
     let mut plugin_result = PluginResult::new();
     match &self.style {

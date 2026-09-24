@@ -1,10 +1,13 @@
 import { AppContext } from '@/app';
+import { ActiveColors } from '@/components/tools/active-colors';
 import { cn } from '@/lib/util';
 import { Button } from '@/ui/button';
+import { Separator } from '@/ui/separator';
 import { Tooltip } from '@/ui/tooltip';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faArrowsUpDownLeftRight,
+  faCircleHalfStroke,
   faEyeDropper,
   faPaintBrushFine,
   faPencilMechanical,
@@ -48,7 +51,10 @@ export function ToolBar() {
         <Tool tooltip="Selection tool" toolName="selection" icon={faSquareDashed} />
         <Tool tooltip="Eyedropper tool" toolName="eye-dropper" icon={faEyeDropper} />
         <Tool tooltip="Paint brush tool" toolName="paint-brush" icon={faPaintBrushFine} />
+        <Tool tooltip="Gradient tool" toolName="gradient" icon={faCircleHalfStroke} />
         <Tool tooltip="Pencil tool" toolName="pencil" icon={faPencilMechanical} />
+        <Separator />
+        <ActiveColors layout="overlap" />
       </div>
     </ToolBarContext.Provider>
   );

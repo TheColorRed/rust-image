@@ -2,9 +2,11 @@ import { useFiles } from '@/hooks/file';
 import { useProjects } from '@/hooks/projects';
 // import { addImage, numberOfProjects } from '@/lib/projects';
 import { TitleBar } from '@/components/title-bar';
+import { cursor$, mouseMove$ } from '@/events/body';
 import Projects from '@/pages/projects';
 import Welcome from '@/pages/welcome';
 import { createContext, useEffect, useMemo, useRef, useState } from 'react';
+import { filter } from 'rxjs';
 
 export const AppContext = createContext({
   projects: {} as ReturnType<typeof useProjects>,
@@ -18,6 +20,8 @@ export default function App() {
   const ipc = useFiles();
   const projects = useProjects();
   const timeoutRef = useRef<NodeJS.Timeout>(null);
+  const appCursorRef = useRef<HTMLDivElement>(null);
+  const currentCursor = useRef<string>('default');
 
   useEffect(() => {
     let handler = ipc.on('fileOpened', event => {
@@ -48,6 +52,37 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const cursorSubscription = cursor$.subscribe(({ cursor, origin, size }) => {
+      if (!appCursorRef.current) return;
+      if (cursor === 'default') {
+        document.body.style.cursor = cursor;
+        appCursorRef.current.style.backgroundImage = '';
+        currentCursor.current = 'default';
+        return;
+      }
+      size = Array.isArray(size) ? Math.max(size[0], size[1]) : size;
+      appCursorRef.current.style.width = `${size}px`;
+      appCursorRef.current.style.height = `${size}px`;
+      appCursorRef.current.style.marginLeft = origin ? `-${origin[0]}px` : `-${size / 2}px`;
+      appCursorRef.current.style.marginTop = origin ? `-${origin[1]}px` : `-${size / 2}px`;
+      appCursorRef.current.style.backgroundImage = `url('${cursor}')`;
+      appCursorRef.current.style.backgroundSize = 'contain';
+      appCursorRef.current.style.backgroundRepeat = 'no-repeat';
+      document.body.style.cursor = 'none';
+      currentCursor.current = cursor;
+    });
+    const mouseMoveSubscription = mouseMove$.pipe(filter(() => currentCursor.current !== 'default')).subscribe(evt => {
+      if (!appCursorRef.current) return;
+      appCursorRef.current.style.left = `${evt.clientX}px`;
+      appCursorRef.current.style.top = `${evt.clientY}px`;
+    });
+    return () => {
+      cursorSubscription.unsubscribe();
+      mouseMoveSubscription.unsubscribe();
+    };
+  }, []);
+
   const contextValue = useMemo(
     () => ({
       projects,
@@ -59,11 +94,14 @@ export default function App() {
   );
 
   return (
-    <div className="bg-default flex h-screen flex-col text-white">
-      <AppContext.Provider value={contextValue}>
-        <TitleBar />
-        <div className="flex-1 overflow-hidden">{projects.projects.length === 0 ? <Welcome /> : <Projects />}</div>
-      </AppContext.Provider>
-    </div>
+    <>
+      <div ref={appCursorRef} className="pointer-events-none absolute z-20" />
+      <div className="bg-default flex h-screen flex-col text-white">
+        <AppContext.Provider value={contextValue}>
+          <TitleBar />
+          <div className="flex-1 overflow-hidden">{projects.projects.length === 0 ? <Welcome /> : <Projects />}</div>
+        </AppContext.Provider>
+      </div>
+    </>
   );
 }

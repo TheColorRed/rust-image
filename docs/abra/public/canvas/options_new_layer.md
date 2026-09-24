@@ -26,5 +26,6 @@ let opts = NewLayerOptions::new()
   .with_anchor(Anchor::BottomRight)
   .with_opacity(0.85);
 
-let canvas = Canvas::new("Config").add_layer_from_path("Pic", "assets/pic.png", Some(opts));
+let canvas = Canvas::new("Config");
+canvas.add_layer_from_path("Pic", "assets/pic.png", Some(opts));
 ```

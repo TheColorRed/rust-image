@@ -27,8 +27,8 @@ use std::sync::Arc;
 /// registry. The callback here simply forwards the pixels back unchanged — a
 /// real implementation would dispatch compute shaders, but for initial
 /// integration this keeps API demoable and safe.
-pub fn register_gpu_context(ctx: Arc<GpuContext>) {
-  let ctx_clone = ctx.clone();
+pub fn register_gpu_context(p_ctx: Arc<GpuContext>) {
+  let ctx_clone = p_ctx.clone();
   let should_process_cb = Arc::new(move |_meta: &PreparedAreaMeta| -> bool {
     // Only process when a GPU operation is set.
     match get_gpu_op() {

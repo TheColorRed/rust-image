@@ -1,0 +1,12 @@
+[package]
+name = "tools"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+rayon = { workspace = true }
+abra-core = { workspace = true }
+options = { workspace = true }

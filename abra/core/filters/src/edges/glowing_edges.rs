@@ -1,19 +1,25 @@
-use crate::{blur::blur, kernel::apply_kernel, sobel::sobel_horizontal};
-use abra_core::Image;
+use crate::{
+  apply_filter,
+  blur::blur,
+  kernel::apply_kernel,
+  sobel::{SobelDirection, sobel},
+};
+use abra_core::{Image, ImageRef};
 use adjustments::color::grayscale;
+use options::Apply;
 
 // TODO: Implement the glowing_edges filter to look a little more like Photoshop's glowing edges filter.
 /// Applies the glowing edges filter to the image.
-pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, _smoothness: u32) {
+fn apply_glowing_edges(p_image: &mut Image, p_edge_width: u32, _edge_brightness: u32, _smoothness: u32) {
   // Step 1: Convert to grayscale
-  let mut clone = image.clone();
-  grayscale(&mut clone, None);
+  let mut clone = p_image.clone();
+  grayscale().apply(&mut clone);
 
   // Step 2: Apply Sobel filter to detect edges
-  sobel_horizontal(&mut clone);
+  sobel(SobelDirection::Horizontal).apply(&mut clone);
 
   // Step 3: Adjust edge width by dilating the edges
-  for _ in 0..edge_width {
+  for _ in 0..p_edge_width {
     apply_kernel(&mut clone, &[0.0, 0.5, 0.0, 0.5, 1.0, 0.5, 0.0, 0.5, 0.0]);
   }
 
@@ -36,7 +42,7 @@ pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, 
   clone.set_rgba_owned(pixels);
 
   // Step 5: Apply Gaussian blur to smooth the edges
-  blur(&mut clone, None);
+  blur().apply(&mut clone);
 
   // image.set_pixels(clone.rgba().to_vec());
 
@@ -56,4 +62,51 @@ pub fn glowing_edges(image: &mut Image, edge_width: u32, _edge_brightness: u32, 
   // });
 
   // image.copy_channel_data(&clone);
+}
+
+pub struct GlowingEdges {
+  edge_width: u32,
+  edge_brightness: u32,
+  smoothness: u32,
+  options: options::Options,
+}
+impl Apply for GlowingEdges {
+  fn options_mut(&mut self) -> &mut options::Options {
+    &mut self.options
+  }
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_glowing_edges, image, options, 1, self.edge_width, self.edge_brightness, self.smoothness);
+  }
+}
+impl GlowingEdges {
+  /// Sets the width of the detected edges. Defaults to `2`.
+  pub fn with_edge_width(mut self, p_edge_width: u32) -> Self {
+    self.edge_width = p_edge_width;
+    self
+  }
+
+  /// Sets how bright the edges glow. Defaults to `6`.
+  pub fn with_edge_brightness(mut self, p_edge_brightness: u32) -> Self {
+    self.edge_brightness = p_edge_brightness;
+    self
+  }
+
+  /// Sets how much the edges are smoothed. Defaults to `5`.
+  pub fn with_smoothness(mut self, p_smoothness: u32) -> Self {
+    self.smoothness = p_smoothness;
+    self
+  }
+}
+
+/// Finds the edges in the image and makes them glow against a dark background.
+pub fn glowing_edges() -> GlowingEdges {
+  GlowingEdges {
+    edge_width: 2,
+    edge_brightness: 6,
+    smoothness: 5,
+    options: None,
+  }
 }

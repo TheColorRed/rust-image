@@ -4,63 +4,146 @@ mod combine;
 mod fs;
 pub mod geometry;
 pub mod image;
+mod image_loader;
 mod loader;
+pub mod performance;
 pub mod settings;
 pub mod transform;
+pub mod units;
 
 pub use color::*;
+pub use performance::{Performance, PerformanceOptions};
 pub use settings::Settings;
 pub use transform::*;
 // pub use debug::*;
 pub use combine::*;
 pub use fs::WriterOptions;
-// Re-export selected I/O helpers so other crates (e.g., abra wrapper) can access them
-pub use fs::file_info::FileInfo;
-// Explicitly export reader and writer functions to avoid ambiguous glob re-exports.
-pub use fs::readers::gif::read_gif;
-pub use fs::readers::jpeg::read_jpg;
-pub use fs::readers::png::read_png;
-pub use fs::readers::svg::read_svg;
-pub use fs::readers::webp::read_webp;
-pub use fs::writers::gif::write_gif;
-pub use fs::writers::jpeg::write_jpg;
-pub use fs::writers::png::write_png;
-pub use fs::writers::webp::write_webp;
+pub use fs::path::IntoGlobPatterns;
+pub use fs::path::{get_paths_from_folders, get_paths_from_glob};
+pub use fs::{ImageFormat, reader, writer};
 pub use geometry::*;
+pub use units::*;
 // `image` module content moved to `primitives` crate and re-exported below.
+pub use image_loader::*;
 pub use loader::*;
 // Re-export primitives Image for workspace users. This replaces the core-defined Image type
 // so consumers can continue to use `use abra_core::Image;` with the new primitives implementation.
-pub use image::image_ext::ImageRef;
+pub use image::image_ext::{CoreImageFsExt, ImageRef};
 pub use primitives::Channels;
 pub use primitives::Color;
 pub use primitives::Image;
+pub use primitives::Resolution;
 
-// lib.rs or geometry/mod.rs (a public crate-local trait)
+/// Converts primitive numeric inputs to a requested numeric type.
+pub trait IntoNumber {
+  fn into<T: FromF32>(self) -> T;
+}
+
+macro_rules! impl_into_number_trait {
+  ($($number:ty),+ $(,)?) => {
+    $(
+      impl IntoNumber for $number {
+        fn into<T: FromF32>(self) -> T {
+          T::from_f32(self as f32)
+        }
+      }
+    )+
+  };
+}
+
+impl_into_number_trait!(f32, f64, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
+/// Implements conversion from primitive numeric values into a local target type.
+///
+/// The target must implement `From<f32>`; integer and `f64` values are converted
+/// through `f32`. Invoke this macro in the crate that owns the target type.
+#[macro_export]
+macro_rules! impl_into_number {
+  ($target:ty) => {
+    impl From<f64> for $target {
+      fn from(p_value: f64) -> Self {
+        Self::from(p_value as f32)
+      }
+    }
+
+    impl $crate::FromF32 for $target {
+      fn from_f32(p_value: f32) -> Self {
+        Self::from(p_value)
+      }
+    }
+
+    $crate::impl_into_number!(@integers $target; i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+  };
+  (@integers $target:ty; $($number:ty),+ $(,)?) => {
+    $(
+      impl From<$number> for $target {
+        fn from(p_value: $number) -> Self {
+          Self::from(p_value as f32)
+        }
+      }
+    )+
+  };
+}
+
+/// Converts an `f32` value into a target type.
 pub trait FromF32 {
-  fn from_f32(v: f32) -> Self;
+  fn from_f32(p_v: f32) -> Self;
 }
 
 impl FromF32 for f32 {
-  fn from_f32(v: f32) -> Self {
-    v
+  fn from_f32(p_v: f32) -> Self {
+    p_v
+  }
+}
+
+impl FromF32 for f64 {
+  fn from_f32(p_v: f32) -> Self {
+    p_v as f64
   }
 }
 
 impl FromF32 for i32 {
-  fn from_f32(v: f32) -> Self {
-    v.round() as _
+  fn from_f32(p_v: f32) -> Self {
+    p_v.round() as _
   } // or floor(), or trunc()
 }
 
+macro_rules! impl_from_f32_rounding {
+  ($($number:ty),+ $(,)?) => {
+    $(
+      impl FromF32 for $number {
+        fn from_f32(p_v: f32) -> Self {
+          p_v.round() as Self
+        }
+      }
+    )+
+  };
+}
+
+impl_from_f32_rounding!(i8, i16, i64, i128, isize, u16, u64, u128, usize);
+
 impl FromF32 for u8 {
-  fn from_f32(v: f32) -> Self {
-    v.round().clamp(0.0, 255.0) as _
+  fn from_f32(p_v: f32) -> Self {
+    p_v.round() as _
   }
 }
+
 impl FromF32 for u32 {
-  fn from_f32(v: f32) -> Self {
-    v.round().clamp(0.0, 255.0) as _
+  fn from_f32(p_v: f32) -> Self {
+    p_v.round() as _
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::IntoNumber;
+
+  #[test]
+  fn numeric_conversion_preserves_pixel_dimensions_above_255() {
+    let width: u32 = IntoNumber::into(800_u32);
+    let height: u32 = IntoNumber::into(1201_u32);
+
+    assert_eq!((width, height), (800, 1201));
   }
 }
 

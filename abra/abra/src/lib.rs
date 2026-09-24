@@ -17,6 +17,11 @@ pub mod adjustments {
     pub use ::adjustments::*;
   }
 }
+pub mod tools {
+  pub mod prelude {
+    pub use ::tools::*;
+  }
+}
 pub mod canvas {
   pub mod prelude {
     pub use ::canvas::*;
@@ -42,6 +47,11 @@ pub mod options {
     pub use ::options::*;
   }
 }
+pub mod typography {
+  pub mod prelude {
+    pub use ::typography::*;
+  }
+}
 pub mod transform {
   pub mod prelude {
     pub use abra_core::transform::*;
@@ -51,7 +61,7 @@ pub mod transform {
 // Ensure the gpu_integration crate is linked (and its crate-init code runs) when
 extern crate gpu_integration as _gpu_integration;
 
-#[ctor]
+#[ctor(unsafe)]
 fn init_abra_core() {
   init_settings();
   init_gpu_integration();

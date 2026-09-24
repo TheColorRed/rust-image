@@ -6,8 +6,8 @@ GPU inference would provide **10-50× speedup** over CPU for neural network mode
 
 ## Current Status
 
-| Backend           | Status          | Notes                                                                   |
-| ----------------- | --------------- | ----------------------------------------------------------------------- |
+| Backend           | Status           | Notes                                                                   |
+| ----------------- | ---------------- | ----------------------------------------------------------------------- |
 | **DirectML**      | ❌ Crashes       | `STATUS_ACCESS_VIOLATION` on AMD GPUs during inference                  |
 | **WebGPU**        | ❌ Linker issues | Windows `kernel32.dll` import library conflicts with `dylib` crate type |
 | **CUDA**          | ⚠️ Not tested    | Requires NVIDIA GPU                                                     |
@@ -19,9 +19,11 @@ GPU inference would provide **10-50× speedup** over CPU for neural network mode
 ## Option 1: Fix DirectML (Windows, AMD/NVIDIA/Intel)
 
 ### What is DirectML?
+
 DirectML is Microsoft's hardware-accelerated machine learning API built on DirectX 12. It supports AMD, NVIDIA, and Intel GPUs on Windows.
 
 ### Current Issue
+
 ```
 STATUS_ACCESS_VIOLATION during model inference
 - Occurs after successful session creation
@@ -32,18 +34,21 @@ STATUS_ACCESS_VIOLATION during model inference
 ### Investigation Steps
 
 1. **Update GPU drivers to latest version**
+
    ```powershell
    # Check current driver version
    wmic path win32_VideoController get name,driverversion
    ```
 
 2. **Test with different ONNX Runtime versions**
+
    ```toml
    # Try older stable version
    ort = { version = "1.16", features = ["directml"] }
    ```
 
 3. **Simplify the model for testing**
+
    ```python
    # Export a minimal test model
    import torch
@@ -63,6 +68,7 @@ STATUS_ACCESS_VIOLATION during model inference
    ```
 
 4. **Enable DirectML debug layer**
+
    ```rust
    use ort::execution_providers::DirectMLExecutionProvider;
 
@@ -104,31 +110,37 @@ fn try_directml_session(model_bytes: &[u8]) -> Option<Session> {
 ## Option 2: Fix WebGPU/Vulkan (Cross-platform)
 
 ### What is WebGPU?
+
 WebGPU is a modern graphics/compute API that abstracts over Vulkan (Windows/Linux), Metal (macOS), and DX12 (Windows). ONNX Runtime's WebGPU EP uses this for GPU inference.
 
 ### Current Issue
+
 ```
 error: error creating import library for kernel32.dll: The file exists. (os error 80)
 ```
 
 This occurs when linking the `sr-test` binary due to conflicts between:
+
 - `wgpu-core-deps-windows-linux-android` crate
 - Multiple crates creating the same Windows import libraries
 
 ### Potential Fixes
 
 1. **Change crate-type from `dylib` to `rlib`** ✅ Already done
+
    ```toml
    [lib]
-   crate-type = ["rlib"]  # Instead of ["dylib"]
+   crate-type = ["rlib"]
    ```
 
 2. **Use `--target-dir` to isolate builds**
+
    ```bash
    cargo build --package sr-test --target-dir target/sr-test
    ```
 
 3. **Build in release mode** (different linking behavior)
+
    ```bash
    cargo build --package sr-test --release
    ```
@@ -167,6 +179,7 @@ fn try_webgpu_session(model_bytes: &[u8]) -> Option<Session> {
 ## Option 3: Use CUDA (NVIDIA GPUs)
 
 ### Requirements
+
 - NVIDIA GPU (GTX 10xx or newer recommended)
 - CUDA Toolkit 11.x or 12.x
 - cuDNN library
@@ -215,6 +228,7 @@ fn try_cuda_session(model_bytes: &[u8]) -> Option<Session> {
 ## Option 4: Use ROCm/MIGraphX (AMD GPUs, Linux)
 
 ### Requirements
+
 - AMD GPU (RX 5000 series or newer)
 - Linux operating system
 - ROCm 5.x or 6.x installed
@@ -263,14 +277,18 @@ fn try_migraphx_session(model_bytes: &[u8]) -> Option<Session> {
 ## Option 5: Use Burn with Vulkan Backend
 
 ### What is Burn?
+
 Burn is a pure-Rust deep learning framework with native Vulkan support via `wgpu`.
 
 ### Limitation
+
 **burn-import** cannot convert SCUNet-GAN because it uses unsupported ONNX operators:
+
 - `Einsum` - Complex tensor contractions (Swin Transformer attention)
 - `ScatterND` - Advanced scatter/indexing operations
 
 ### Alternative: Use a Burn-Compatible Model
+
 If we switch to a simpler model architecture (see `SMALLER_MODELS.md`), burn-import might work:
 
 ```toml
@@ -311,4 +329,4 @@ fn main() {
 | WebGPU/Vulkan | 3-8              | 5-12 seconds          |
 | ROCm/MIGraphX | 8-15             | 3-5 seconds           |
 
-*Estimates based on typical GPU vs CPU performance ratios for transformer models.*
+_Estimates based on typical GPU vs CPU performance ratios for transformer models._

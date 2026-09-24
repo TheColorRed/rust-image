@@ -8,13 +8,13 @@ use png::Encoder;
 use std::fs::File;
 
 /// Writes the image data to a PNG file
-pub fn write_png(file: impl Into<String>, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
-  let file = file.into();
-  let dir = dirname(&file);
+pub fn write_png(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
+  let p_file = p_file.into();
+  let dir = dirname(&p_file);
   mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
-  let file = File::create(file).map_err(|e| e.to_string())?;
-  let (width, height) = image.dimensions();
-  let mut encoder = Encoder::new(file, width, height);
+  let p_file = File::create(p_file).map_err(|e| e.to_string())?;
+  let (width, height) = p_image.dimensions();
+  let mut encoder = Encoder::new(p_file, width, height);
 
   let channels = 4; // Always use RGBA
 
@@ -22,7 +22,7 @@ pub fn write_png(file: impl Into<String>, image: &Image, options: &Option<Writer
   encoder.set_depth(png::BitDepth::Eight);
 
   // Set compression level based on quality (higher quality = less compression for speed)
-  if let Some(opts) = options {
+  if let Some(opts) = p_options {
     let compression = if opts.quality > 75 {
       png::Compression::Fastest
     } else if opts.quality > 25 {
@@ -39,10 +39,10 @@ pub fn write_png(file: impl Into<String>, image: &Image, options: &Option<Writer
 
   let mut writer = encoder.write_header().unwrap();
   if channels == 4 {
-    let pixels = image.rgba();
+    let pixels = p_image.rgba();
     writer.write_image_data(pixels).unwrap();
   } else {
-    let pixels = image.rgb();
+    let pixels = p_image.rgb();
     writer.write_image_data(&pixels).unwrap();
   }
 

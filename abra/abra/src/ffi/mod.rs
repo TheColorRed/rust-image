@@ -46,11 +46,8 @@ macro_rules! constructor_ffi_slice {
   ($fn_name:ident, $ty:ty, $ctor:path, $ptr_name:ident : *const $elem_ty:ty, $len_name:ident : usize) => {
     #[unsafe(no_mangle)]
     pub extern "C" fn $fn_name($ptr_name: *const $elem_ty, $len_name: usize) -> *mut $ty {
-      let slice: &[$elem_ty] = if $ptr_name.is_null() {
-        &[]
-      } else {
-        unsafe { std::slice::from_raw_parts($ptr_name, $len_name) }
-      };
+      let slice: &[$elem_ty] =
+        if $ptr_name.is_null() { &[] } else { unsafe { std::slice::from_raw_parts($ptr_name, $len_name) } };
       box_ffi!($ctor(slice))
     }
   };

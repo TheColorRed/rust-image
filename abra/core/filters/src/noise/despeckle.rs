@@ -1,6 +1,6 @@
 use crate::common::*;
 
-use abra_core::color::Histogram;
+use abra_core::color::{Histogram, HistogramChannel};
 
 fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
   let (width, height) = p_image.dimensions::<u32>();
@@ -72,9 +72,9 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
       let center_lum = (299 * cr + 587 * cg + 114 * cb) / 1000;
 
       // Compute median using histogram (much faster than sorting!)
-      let mr = hist.red_median(pixel_count) as i32;
-      let mg = hist.green_median(pixel_count) as i32;
-      let mb = hist.blue_median(pixel_count) as i32;
+      let mr = hist.median(HistogramChannel::Red, pixel_count) as i32;
+      let mg = hist.median(HistogramChannel::Green, pixel_count) as i32;
+      let mb = hist.median(HistogramChannel::Blue, pixel_count) as i32;
 
       // If pixel is an outlier (local min or local max), replace with median
       let mut out_r = cr as u8;
@@ -111,19 +111,34 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
 /// Applies a despeckle filter to the image, removing isolated noise pixels while preserving edges.
 /// - `p_image`: The image to apply the filter to.
 /// - `p_apply_options`: Options to specify for the filter.
-pub fn despeckle<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_radius: f32, p_threshold: f32, p_apply_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_filter!(apply_despeckle, image, p_apply_options, 1, p_radius, p_threshold);
+pub struct Despeckle {
+  radius: f32,
+  threshold: f32,
+  options: Options,
+}
+impl Apply for Despeckle {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_despeckle, image, options, 1, self.radius, self.threshold);
+  }
+}
+pub fn despeckle(p_radius: f32, p_threshold: f32) -> Despeckle {
+  Despeckle {
+    radius: p_radius,
+    threshold: p_threshold,
+    options: None,
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use abra_core::Image;
-  use options::ApplyOptions;
 
   #[test]
   fn despeckle_removes_isolated_speck() {
@@ -137,7 +152,7 @@ mod tests {
     // Add single white speck in center
     img.set_pixel(2, 2, (255u8, 255u8, 255u8, 255));
 
-    despeckle(&mut img, 1.0, 13.0, ApplyOptions::new());
+    despeckle(1.0, 13.0).apply(&mut img);
 
     let (r, g, b, _) = img.get_pixel(2, 2).unwrap();
     assert_eq!(r, 0);
@@ -158,7 +173,7 @@ mod tests {
     img.set_pixel(2, 1, (0u8, 0u8, 0u8, 255));
 
     // Apply despeckle (should preserve the edge while removing isolated speck)
-    despeckle(&mut img, 1.0, 13.0, ApplyOptions::new());
+    despeckle(1.0, 13.0).apply(&mut img);
 
     // The pixel (2,1) should become white (replaced by median) because it's an isolated speck
     let (r, g, b, _) = img.get_pixel(2, 1).unwrap();
@@ -202,9 +217,9 @@ mod tests {
       }
     }
 
-    let mr = hist.red_median(pixel_count);
-    let mg = hist.green_median(pixel_count);
-    let mb = hist.blue_median(pixel_count);
+    let mr = hist.median(HistogramChannel::Red, pixel_count);
+    let mg = hist.median(HistogramChannel::Green, pixel_count);
+    let mb = hist.median(HistogramChannel::Blue, pixel_count);
 
     // Debug: print neighbors to help track median behavior
     // debug: neighbors and median computed

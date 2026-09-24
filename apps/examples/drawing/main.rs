@@ -1,66 +1,52 @@
-use abra::abra_core::Heart;
+use abra::drawing::prelude::{Brush, Painter};
 use abra::prelude::*;
 
 pub fn main() {
-  let image = Image::new_from_path("assets/bikini.jpg");
-  let (_width, _height) = image.dimensions::<u32>();
-  let start_time = std::time::Instant::now();
+  let mut butterfly_image = Image::new(3840, 2160);
+  let blue = Color::from_rgba(34, 108, 196, 220);
+  let orange = Color::from_rgba(224, 100, 42, 210);
 
-  let _heart = Heart::new();
+  let ellipse_brush = Brush::new().with_size(32).with_color(&blue).with_hardness(1.0);
+  let start = std::time::Instant::now();
+  let ellipse = Path::ellipse((1920.0, 1080.0), 1200.0, 760.0, 256);
+  Painter::new(&mut butterfly_image).stroke_with_brush(&ellipse, &ellipse_brush);
+  println!("ellipse stroke: {:?}", start.elapsed());
 
-  // New API - fluent builder with Into conversions
-  // let path = Path::new()
-  //   .with_move_to((100.0, 200.0))
-  //   .with_quad_to((200.0, 300.0), (300.0, 200.0));
+  const ANIMAL_SEGMENTS: usize = 100;
+  let mut path = Path::new();
+  for segment in 0..=ANIMAL_SEGMENTS {
+    let theta = segment as f32 / ANIMAL_SEGMENTS as f32 * std::f32::consts::TAU;
+    let wing_shape = 0.45 + 0.55 * (2.0 * theta).cos().abs();
+    let x = 1920.0 + theta.cos() * 780.0 * wing_shape;
+    let y = 1120.0 + theta.sin() * 610.0 * (0.55 + 0.45 * (2.0 * theta).cos());
+    if segment == 0 {
+      path.move_to((x, y));
+    } else {
+      path.line_to((x, y));
+    }
+  }
+  let stroke_brush = Brush::new().with_size(28).with_color(&orange).with_hardness(0.7);
+  let start = std::time::Instant::now();
+  Painter::new(&mut butterfly_image).stroke_with_brush(&path, &stroke_brush);
+  println!("100-segment butterfly stroke: {:?}", start.elapsed());
 
-  // Curve drawing will be updated to accept the new Path type
-  // line::curve(&mut image, path, Color::from_rgba(255, 0, 0, 128));
+  let mut fill_path = Path::new();
+  fill_path.move_to((620.0, 380.0));
+  fill_path.line_to((1540.0, 240.0));
+  fill_path.line_to((2290.0, 530.0));
+  fill_path.line_to((3140.0, 420.0));
+  fill_path.line_to((3370.0, 1220.0));
+  fill_path.line_to((2800.0, 1840.0));
+  fill_path.line_to((1760.0, 1920.0));
+  fill_path.line_to((780.0, 1580.0));
+  let area: Area = fill_path.into();
+  let fill_brush = Brush::new().with_size(32).with_color(&orange).with_hardness(0.6);
+  let mut fill_image = Image::new(3840, 2160);
+  let start = std::time::Instant::now();
+  Painter::new(&mut fill_image).fill_area_with_brush(&area, &fill_brush);
+  println!("brush fill: {:?}", start.elapsed());
 
-  // let r = Rect::new_rect(100, 100);
-
-  // shapes::circle_stroke(
-  //   &mut image,
-  //   Point::new((width / 2) as i32, (height / 2) as i32),
-  //   15,
-  //   Color::red(),
-  //   2,
-  // );
-  // shapes::rect(
-  //   &mut image,
-  //   Point::new(100, 100),
-  //   Rect::new_rect(20, 200),
-  //   Color::from_rgba(0, 0, 255, 128),
-  // );
-
-  // shapes::circle(&mut image, Point::new(400, 200), 50, Color::from_rgba(0, 255, 255, 128));
-
-  // shapes::ellipse_filled(
-  //   &mut image,
-  //   Point::new((width / 2) as i32, (height / 2) as i32),
-  //   Rect::new_rect(100, 200),
-  //   Color::from_rgba(255, 0, 255, 128),
-  // );
-
-  // shapes::polygon(
-  //   &mut image,
-  //   Point::new(200, 100),
-  //   // make a 5 pointed star with 10 points
-  //   Path::new(vec![
-  //     (0, 0),
-  //     (10, 30),
-  //     (40, 30),
-  //     (20, 50),
-  //     (30, 80),
-  //     (0, 60),
-  //     (-30, 80),
-  //     (-20, 50),
-  //     (-40, 30),
-  //     (-10, 30),
-  //   ]),
-  //   Color::from_rgba(255, 0, 0, 128),
-  // );
-
-  println!("Time: {:?}", start_time.elapsed());
-
-  image.save("out/rect.png", None);
+  std::fs::create_dir_all("out").expect("failed to create output directory");
+  butterfly_image.write("out/butterfly.png", None).expect("Failed to save butterfly image");
+  fill_image.write("out/brush-fill.png", None).expect("Failed to save fill image");
 }

@@ -1,5 +1,5 @@
 import { toFileName } from '@/util/strings';
-import { LayerMetadata, type Project } from '@alakazam/abra';
+import { type LayerMetadata, type Project } from '@alakazam/core';
 import { clipboard, ipcMain, webContents } from 'electron';
 import { filter, map, Subject, tap } from 'rxjs';
 
@@ -445,4 +445,8 @@ ipcMain.handle('project-get-layer-composite', (_event, { projectId, layerId, max
     return;
   }
   return project.compositeLayer(layer, maxSize);
+});
+
+ipcMain.handle('get-transparent-image', (_event, { width, height }) => {
+  return gizmos.getEmptyLayerBackground(width, height);
 });

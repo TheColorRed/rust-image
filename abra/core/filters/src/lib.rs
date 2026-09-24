@@ -10,10 +10,12 @@ pub mod sobel;
 
 mod kernel;
 
+pub use options::Apply;
+
 pub(crate) mod common {
   pub use crate::apply_filter;
-  pub use abra_core::image::image_ext::CoreImageFsExt;
   pub use abra_core::{Image, ImageRef};
+  pub use options::Apply;
   pub use options::ApplyOptions;
   pub use options::Options;
   pub use rayon::prelude::*;
@@ -46,9 +48,9 @@ pub(crate) mod common {
 #[macro_export]
 macro_rules! apply_filter {
   ($func:ident, $image:ident, $apply_opts:ident, $kernel_padding:expr $(, $rest:expr )* ) => {
-    let options = $apply_opts.into();
+    let options: options::Options = $apply_opts.into();
     let ctx = options::get_ctx(options.as_ref());
-    abra_core::image::apply_area::process_image($image, ctx, $kernel_padding, |img| {
+    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, |img| {
       $func(img $(, $rest )*);
     });
   };

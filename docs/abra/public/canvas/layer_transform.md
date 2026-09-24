@@ -1,8 +1,9 @@
 # LayerTransform
 
-Thin proxy that delegates all transforms to the underlying image.
+Records transforms on a layer. Rasterization is deferred until the canvas is composed by `save` or `as_image`, after text DPI inheritance, effects, and the remaining layer settings have resolved.
 
 ## Methods
+
 - `resize(width, height, algorithm)`
 - `resize_percentage(pct, algorithm)`
 - `resize_width(width, algorithm)` / `resize_height(height, algorithm)`
@@ -10,6 +11,7 @@ Thin proxy that delegates all transforms to the underlying image.
 - `crop(x, y, w, h)`
 
 ## Example
+
 ```rust
 let logo = canvas.get_layer_by_name("Logo").unwrap();
 logo.transform()

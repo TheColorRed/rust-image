@@ -23,19 +23,19 @@ pub enum RippleShape {
 
 impl RippleShape {
   /// Calculates the distance from the center based on the shape type.
-  /// - `dx`: The horizontal distance from center.
-  /// - `dy`: The vertical distance from center.
-  fn calculate_distance(&self, dx: f32, dy: f32) -> f32 {
+  /// - `p_dx`: The horizontal distance from center.
+  /// - `p_dy`: The vertical distance from center.
+  fn calculate_distance(&self, p_dx: f32, p_dy: f32) -> f32 {
     match self {
-      RippleShape::Circular => (dx * dx + dy * dy).sqrt(),
-      RippleShape::Square => dx.abs().max(dy.abs()),
+      RippleShape::Circular => (p_dx * p_dx + p_dy * p_dy).sqrt(),
+      RippleShape::Square => p_dx.abs().max(p_dy.abs()),
       RippleShape::Random => 0.0, // Random shape doesn't use distance calculation
       RippleShape::Angle(angle) => {
         // Convert angle from degrees to radians
         let angle_rad = angle.to_radians();
         let cos_a = angle_rad.cos();
         let sin_a = angle_rad.sin();
-        (dx * cos_a + dy * sin_a).abs()
+        (p_dx * cos_a + p_dy * sin_a).abs()
       }
     }
   }
@@ -138,25 +138,54 @@ fn apply_ripple(p_image: &mut Image, p_amount: f32, p_size: RippleSize, p_shape:
     };
 
     // Use bicubic interpolation for smoother, higher quality results
-    let pixel = sample_bicubic(&original_image, src_x, src_y);
+    let pixel = sample(&original_image, src_x, src_y, Interpolation::Bicubic);
     chunk.copy_from_slice(&pixel);
   });
 
   p_image.set_new_pixels(&new_pixels, width, height);
 }
 
+/// A ripple distortion. Create one with [`ripple`].
+pub struct Ripple {
+  amount: f32,
+  size: RippleSize,
+  shape: RippleShape,
+  options: Options,
+}
+impl Apply for Ripple {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_ripple, image, options, 1, self.amount, self.size.clone(), self.shape.clone());
+  }
+}
+impl Ripple {
+  /// Sets the size of the ripples. Defaults to [`RippleSize::Medium`].
+  pub fn with_size(mut self, p_size: RippleSize) -> Self {
+    self.size = p_size;
+    self
+  }
+
+  /// Sets the shape of the ripple pattern. Defaults to [`RippleShape::Circular`].
+  pub fn with_shape(mut self, p_shape: RippleShape) -> Self {
+    self.shape = p_shape;
+    self
+  }
+}
+
 /// Applies a ripple distortion effect to the image.
-/// - `p_image`: The image to apply the effect to.
-/// - `p_amount`: The amount of ripple effect to apply. Positive values create inward ripples, negative values create outward ripples.
-/// - `p_size`: The size of the ripple effect.
-/// - `p_shape`: The shape of the ripple pattern (Circular, Square, Angle, or Random).
-/// - `p_apply_options`: Options to specify for the filter.
-pub fn ripple<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_amount: f32, p_size: RippleSize, p_shape: RippleShape,
-  p_apply_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  let p_amount = p_amount.clamp(-1.0, 1.0);
-  apply_filter!(apply_ripple, image, p_apply_options, 1, p_amount, p_size.clone(), p_shape.clone());
+/// # Arguments
+/// - `p_amount`: The strength of the ripples, from `-1.0` to `1.0`. Positive values create inward ripples, negative
+///   values create outward ripples.
+pub fn ripple(p_amount: f32) -> Ripple {
+  Ripple {
+    amount: p_amount.clamp(-1.0, 1.0),
+    size: RippleSize::Medium,
+    shape: RippleShape::Circular,
+    options: None,
+  }
 }

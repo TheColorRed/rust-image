@@ -4,11 +4,11 @@ use crate::common::*;
 /// - `image`: target image buffer
 /// - `p_angle_degrees`: direction of motion in degrees (0 = +X/right)
 /// - `p_distance`: length of the blur in pixels (>= 1)
-fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
+fn apply_motion_blur(p_img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
   if p_distance == 0 {
     return;
   }
-  let (width, height) = img.dimensions::<u32>();
+  let (width, height) = p_img.dimensions::<u32>();
   if width == 0 || height == 0 {
     return;
   }
@@ -22,7 +22,7 @@ fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
   let half = (samples as f32 - 1.0) * 0.5; // center the kernel so blur is symmetric
 
   // Snapshot source pixels once (borrow slice to avoid copying full buffer)
-  let src = img.rgba();
+  let src = p_img.rgba();
   let (w, h) = (width as usize, height as usize);
   let mut out = vec![0u8; w * h * 4];
 
@@ -59,8 +59,8 @@ fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
         let i11 = ((y1 as usize) * w + x1 as usize) * 4;
 
         #[inline]
-        fn lerp(a: f32, b: f32, t: f32) -> f32 {
-          a + (b - a) * t
+        fn lerp(p_a: f32, p_b: f32, p_t: f32) -> f32 {
+          p_a + (p_b - p_a) * p_t
         }
 
         let r0 = lerp(src[i00] as f32, src[i10] as f32, tx);
@@ -89,7 +89,7 @@ fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
     dst_px[3] = (acc_a * inv).clamp(0.0, 255.0) as u8;
   });
 
-  img.set_rgba_owned(out);
+  p_img.set_rgba_owned(out);
 }
 
 /// Applies a motion blur to an image.
@@ -97,10 +97,29 @@ fn apply_motion_blur(img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
 /// - `p_angle_degrees`: The angle of the motion blur in degrees.
 /// - `p_distance`: The distance of the motion blur in pixels.
 /// - `p_apply_options`: Additional options for applying the blur.
-pub fn motion_blur<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_angle_degrees: f32, p_distance: u32, p_apply_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_filter!(apply_motion_blur, image, p_apply_options, 1, p_angle_degrees, p_distance);
+pub struct MotionBlur {
+  angle_degrees: f32,
+  distance: u32,
+  options: Options,
+}
+
+impl Apply for MotionBlur {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_motion_blur, image, options, 1, self.angle_degrees, self.distance);
+  }
+}
+
+pub fn motion_blur(p_angle_degrees: f32, p_distance: u32) -> MotionBlur {
+  MotionBlur {
+    angle_degrees: p_angle_degrees,
+    distance: p_distance,
+    options: None,
+  }
 }

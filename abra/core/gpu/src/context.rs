@@ -20,9 +20,7 @@ impl GpuContext {
   /// Create a new async context by requesting an adapter and device.
   pub async fn new_default_async() -> anyhow::Result<Self> {
     let instance = wgpu::Instance::default();
-    let adapter = instance
-      .request_adapter(&wgpu::RequestAdapterOptions::default())
-      .await?;
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await?;
 
     let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await?;
 
@@ -39,12 +37,12 @@ impl GpuContext {
   }
 
   /// Compile a WGSL shader module from the given source string.
-  pub fn compile_wgsl(&self, source: impl Into<String>, label: Option<&str>) -> wgpu::ShaderModule {
-    let source = source.into();
-    let source = source.as_str();
+  pub fn compile_wgsl(&self, p_source: impl Into<String>, p_label: Option<&str>) -> wgpu::ShaderModule {
+    let p_source = p_source.into();
+    let p_source = p_source.as_str();
     self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-      label,
-      source: wgpu::ShaderSource::Wgsl(source.into()),
+      label: p_label,
+      source: wgpu::ShaderSource::Wgsl(p_source.into()),
     })
   }
 
@@ -56,17 +54,17 @@ impl GpuContext {
   ///  - 1: storage texture (write-only)
   ///  - 2: uniform buffer (optional)
   ///
-  /// The `work_group` argument describes the compute workgroup size used for
+  /// The `p_work_group` argument describes the compute workgroup size used for
   /// calculating dispatch counts (e.g., (8,8)).
   pub fn run_compute_with_image_io(
-    &self, shader_source: impl Into<String>, shader_label: Option<&str>, entry_point: impl Into<String>,
-    in_pixels: &[u8], width: u32, height: u32, work_group: (u32, u32), uniform_bytes: Option<&[u8]>,
-    in_format: wgpu::TextureFormat, out_format: wgpu::TextureFormat,
+    &self, p_shader_source: impl Into<String>, p_shader_label: Option<&str>, p_entry_point: impl Into<String>,
+    p_in_pixels: &[u8], p_width: u32, p_height: u32, p_work_group: (u32, u32), p_uniform_bytes: Option<&[u8]>,
+    p_in_format: wgpu::TextureFormat, p_out_format: wgpu::TextureFormat,
   ) -> anyhow::Result<Vec<u8>> {
     // Create textures
     let size = wgpu::Extent3d {
-      width,
-      height,
+      width: p_width,
+      height: p_height,
       depth_or_array_layers: 1,
     };
     let in_texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -75,7 +73,7 @@ impl GpuContext {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: in_format,
+      format: p_in_format,
       usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
     });
@@ -85,13 +83,13 @@ impl GpuContext {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: out_format,
+      format: p_out_format,
       usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
     });
 
     // Write input pixels into input texture
-    let bytes_per_row = 4u32 * width;
+    let bytes_per_row = 4u32 * p_width;
     self.queue.write_texture(
       wgpu::TexelCopyTextureInfo {
         texture: &in_texture,
@@ -99,17 +97,17 @@ impl GpuContext {
         origin: wgpu::Origin3d::ZERO,
         aspect: wgpu::TextureAspect::All,
       },
-      in_pixels,
+      p_in_pixels,
       wgpu::TexelCopyBufferLayout {
         offset: 0,
         bytes_per_row: Some(bytes_per_row),
-        rows_per_image: Some(height),
+        rows_per_image: Some(p_height),
       },
       size,
     );
 
     // Shader & pipeline
-    let shader = self.compile_wgsl(shader_source, shader_label);
+    let shader = self.compile_wgsl(p_shader_source, p_shader_label);
 
     // Build bind group layout entries
     let mut entries = vec![
@@ -128,13 +126,13 @@ impl GpuContext {
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::StorageTexture {
           access: wgpu::StorageTextureAccess::WriteOnly,
-          format: out_format,
+          format: p_out_format,
           view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
       },
     ];
-    if uniform_bytes.is_some() {
+    if p_uniform_bytes.is_some() {
       entries.push(wgpu::BindGroupLayoutEntry {
         binding: 2,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -160,7 +158,7 @@ impl GpuContext {
       label: Some("compute::pipeline"),
       layout: Some(&pipeline_layout),
       module: &shader,
-      entry_point: Some(entry_point.into().as_str()),
+      entry_point: Some(p_entry_point.into().as_str()),
       cache: None,
       compilation_options: wgpu::PipelineCompilationOptions::default(),
     });
@@ -180,7 +178,7 @@ impl GpuContext {
       },
     ];
     let mut uniform_buf: Option<wgpu::Buffer> = None;
-    if let Some(data) = uniform_bytes {
+    if let Some(data) = p_uniform_bytes {
       let buf = (&*self.device).create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("compute::uniform"),
         contents: data,
@@ -212,8 +210,8 @@ impl GpuContext {
       });
       pass.set_pipeline(&pipeline);
       pass.set_bind_group(0, &bg, &[]);
-      let x_groups = (width + (work_group.0 - 1)) / work_group.0;
-      let y_groups = (height + (work_group.1 - 1)) / work_group.1;
+      let x_groups = (p_width + (p_work_group.0 - 1)) / p_work_group.0;
+      let y_groups = (p_height + (p_work_group.1 - 1)) / p_work_group.1;
       pass.dispatch_workgroups(x_groups as u32, y_groups as u32, 1);
     }
     self.queue.submit(Some(encoder.finish()));
@@ -223,9 +221,9 @@ impl GpuContext {
     let out_img = crate::image::GpuImage {
       texture: out_texture,
       view: out_view,
-      width,
-      height,
-      format: out_format,
+      width: p_width,
+      height: p_height,
+      format: p_out_format,
     };
     let img = out_img.to_image_blocking(self)?;
     Ok(img.into_rgba_vec())

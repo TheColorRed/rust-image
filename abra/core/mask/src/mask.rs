@@ -69,14 +69,14 @@ impl Mask {
   }
 
   /// Create a mask by consuming an Image.
-  pub fn from_image(img: Image) -> Mask {
-    Mask { image_mask: img }
+  pub fn from_image(p_img: Image) -> Mask {
+    Mask { image_mask: p_img }
   }
 }
 
 impl From<Image> for Mask {
-  fn from(img: Image) -> Mask {
-    Mask::from_image(img)
+  fn from(p_img: Image) -> Mask {
+    Mask::from_image(p_img)
   }
 }
 
@@ -88,16 +88,8 @@ impl Mask {
   pub fn draw_area(&mut self, p_area: &Area, p_color: Color, p_at: impl IntoOptionalPointF) {
     let color = self.to_color(p_color);
     let position = p_at.into_optional_point_f().unwrap_or(PointF::new(0, 0));
-    let filled_image = fill(p_area, color);
-    blend::blend_images_at(
-      &mut self.image_mask,
-      &filled_image,
-      0,
-      0,
-      position.x as i32,
-      position.y as i32,
-      blend::normal,
-    );
+    let filled_image = fill(p_area, &color).to_image();
+    blend::blend(&filled_image).with_offset((position.x as i32, position.y as i32)).apply(&mut self.image_mask);
   }
 
   /// The underlying mask image.
@@ -119,9 +111,9 @@ impl Mask {
     }
   }
 
-  fn to_color(&self, color: Color) -> Color {
-    let c = ((color.r as u16 + color.g as u16 + color.b as u16) / 3) as u8;
-    Color::from_rgba(c, c, c, color.a)
+  fn to_color(&self, p_color: Color) -> Color {
+    let c = ((p_color.r as u16 + p_color.g as u16 + p_color.b as u16) / 3) as u8;
+    Color::from_rgba(c, c, c, p_color.a)
   }
 }
 
@@ -160,22 +152,8 @@ pub fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
 /// - RGBA: length = width * height * 4 (converted to grayscale)
 pub fn apply_mask_to_image(p_image: &mut Image, p_mask: &[u8]) {
   let (width, height) = p_image.dimensions::<usize>();
-  let px_count = width * height;
-
-  let mask_gray: Vec<u8> = match p_mask.len() {
-    len if len == px_count => p_mask.to_vec(),
-    len if len == px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
-    other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
-  };
-
-  let alphas: Vec<u8> = mask_gray.into_iter().map(mask_value_to_alpha).collect();
-
-  // Write alphas into the image buffer
   if let Some(pixels) = p_image.colors().as_slice_mut() {
-    // Write alphas directly into the image buffer
-    for (rgba, &a) in pixels.chunks_mut(4).zip(alphas.iter()) {
-      rgba[3] = a;
-    }
+    apply_mask_to_rgba_pixels(pixels, p_mask, width * height);
   }
 }
 
@@ -184,15 +162,16 @@ pub fn apply_mask_to_image(p_image: &mut Image, p_mask: &[u8]) {
 /// See `apply_mask_to_image` for mask semantics and accepted formats.
 pub fn apply_mask_to_pixels_rgba(p_pixels: &mut [u8], p_mask: &[u8]) {
   assert!(p_pixels.len() % 4 == 0, "pixels must be RGBA (len divisible by 4)");
-  let px_count = p_pixels.len() / 4;
+  apply_mask_to_rgba_pixels(p_pixels, p_mask, p_pixels.len() / 4);
+}
 
+fn apply_mask_to_rgba_pixels(p_pixels: &mut [u8], p_mask: &[u8], p_px_count: usize) {
   let mask_gray: Vec<u8> = match p_mask.len() {
-    len if len == px_count => p_mask.to_vec(),
-    len if len == px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
-    other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", px_count, px_count * 4, other),
+    len if len == p_px_count => p_mask.to_vec(),
+    len if len == p_px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
+    other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", p_px_count, p_px_count * 4, other),
   };
 
-  // Apply in-place
   for (rgba, &m) in p_pixels.chunks_mut(4).zip(mask_gray.iter()) {
     rgba[3] = mask_value_to_alpha(m);
   }

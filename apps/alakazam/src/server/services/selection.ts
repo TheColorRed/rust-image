@@ -33,3 +33,11 @@ export function setSelectionFeather(projectId: string, value: number) {
 export function getSelectionFeather(projectId: string): number {
   return feather.get(projectId) ?? 0;
 }
+/**
+ * Clears the selection area for a project.
+ * @param projectId The ID of the project.
+ */
+export function clearSelectionArea(projectId: string) {
+  selection.delete(projectId);
+  feather.delete(projectId);
+}

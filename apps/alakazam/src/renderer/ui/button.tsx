@@ -189,22 +189,22 @@ export function Button(props: ButtonProps & ComponentProps<'button'>) {
     };
   }, [optionsOpen]);
 
-  const baseButton = (extraClassName = '') => (
-    <button
-      {...props}
-      onClick={e => {
-        if (hasOptions && activationStyle === 'whole') setOptionsOpen(!optionsOpen);
-        props.onClick?.(e);
-      }}
-      className={cn(
-        buttonVariants({ variant: props.variant, size: props.size, aspect: props.aspect, active: props.active }),
-        props.className,
-        extraClassName,
-      )}
-    >
-      {props.children}
-    </button>
-  );
+  const baseButton = (extraClassName = '') => {
+    const { active, size, variant, aspect, className, onClick, onOptionsOpenChange, children, ...buttonProps } = props;
+
+    return (
+      <button
+        {...buttonProps}
+        onClick={e => {
+          if (hasOptions && activationStyle === 'whole') setOptionsOpen(!optionsOpen);
+          onClick?.(e);
+        }}
+        className={cn(buttonVariants({ variant, size, aspect, active }), className, extraClassName)}
+      >
+        {children}
+      </button>
+    );
+  };
 
   const splitButton = () => (
     <div className="inline-flex rounded-md p-1 hover:bg-white/10" data-test="split-button">

@@ -1,0 +1,16 @@
+# Node
+node_modules/
+
+# Expo / React Native build artifacts
+.expo/
+.expo-shared/
+android/
+ios/
+dist/
+
+# Logs
+npm-debug.log
+yarn-error.log
+
+# Editor
+.vscode/

@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "abra",
+    "alakazam",
     "aletta",
     "arboard",
     "badvalue",
@@ -16,6 +17,7 @@
     "idents",
     "inplace",
     "kadabra",
+    "Lanczos",
     "luma",
     "mkdirp",
     "napi",
@@ -95,5 +97,8 @@
   // "rust-analyzer.checkOnSave": false,
   "rust-analyzer.diagnostics.experimental.enable": true,
   "rust-analyzer.procMacro.enable": false,
-  "typescript.experimental.useTsgo": false
+  "typescript.experimental.useTsgo": false,
+  "react-native-tools.projectRoot": "C:/Users/untun/Documents/vscode/rust/image/apps/mobile",
+  "react-native-tools.logLevel": "Trace",
+  "terminal.integrated.defaultProfile.windows": "Fish"
 }

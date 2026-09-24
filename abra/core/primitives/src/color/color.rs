@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 
 use rayon::prelude::*;
@@ -22,30 +23,36 @@ pub struct Color {
 }
 
 impl From<(u8, u8, u8)> for Color {
-  fn from(rgb: (u8, u8, u8)) -> Self {
+  fn from(p_rgb: (u8, u8, u8)) -> Self {
     Color {
-      r: rgb.0,
-      g: rgb.1,
-      b: rgb.2,
+      r: p_rgb.0,
+      g: p_rgb.1,
+      b: p_rgb.2,
       a: 255,
     }
   }
 }
 
 impl From<(u8, u8, u8, u8)> for Color {
-  fn from(rgba: (u8, u8, u8, u8)) -> Self {
+  fn from(p_rgba: (u8, u8, u8, u8)) -> Self {
     Color {
-      r: rgba.0,
-      g: rgba.1,
-      b: rgba.2,
-      a: rgba.3,
+      r: p_rgba.0,
+      g: p_rgba.1,
+      b: p_rgba.2,
+      a: p_rgba.3,
     }
   }
 }
 
+impl<'a> Into<Cow<'a, Color>> for Color {
+  fn into(self) -> Cow<'a, Color> {
+    Cow::Owned(self)
+  }
+}
+
 impl Display for Color {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    writeln!(f, "Color {{ r: {}, g: {}, b: {}, a: {} }}", self.r, self.g, self.b, self.a)
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    writeln!(p_f, "Color {{ r: {}, g: {}, b: {}, a: {} }}", self.r, self.g, self.b, self.a)
   }
 }
 
@@ -58,37 +65,190 @@ impl Color {
       a: 255,
     }
   }
+
+  /// Returns either black or white, whichever has higher contrast with the color.
+  pub fn black_white_contrast(p_color: Color) -> Color {
+    let black = Color::black();
+    let white = Color::white();
+    if p_color.contrast_ratio(black) > p_color.contrast_ratio(white) { black } else { white }
+  }
+
+  fn from_hsl_with_alpha(p_h: f32, p_s: f32, p_l: f32, p_alpha: u8) -> Self {
+    Self {
+      a: p_alpha,
+      ..Self::from_hsl(p_h, p_s, p_l)
+    }
+  }
+
+  fn from_hsv_with_alpha(p_h: f32, p_s: f32, p_v: f32, p_alpha: u8) -> Self {
+    Self {
+      a: p_alpha,
+      ..Self::from_hsv(p_h, p_s, p_v)
+    }
+  }
+
+  /// Creates a five-color analogous scheme around the given color.
+  ///
+  /// Analogous colors sit next to each other on the color wheel and produce a low-contrast,
+  /// cohesive palette. The returned hues use offsets of -30, -15, 0, 15, and 30 degrees,
+  /// placing the source color in the middle. Saturation, lightness, and alpha are preserved.
+  pub fn analogous(p_color: Color) -> Vec<Color> {
+    let (h, s, l) = p_color.hsl();
+    [-30.0, -15.0, 0.0, 15.0, 30.0]
+      .iter()
+      .map(|offset| Self::from_hsl_with_alpha((h + offset).rem_euclid(360.0), s, l, p_color.a))
+      .collect()
+  }
+
+  /// Returns the complementary color.
+  ///
+  /// Complementary colors are 180 degrees apart on the color wheel, producing the strongest
+  /// hue contrast. Saturation, lightness, and alpha are preserved.
+  pub fn complementary(p_color: Color) -> Color {
+    let (h, s, l) = p_color.hsl();
+    Self::from_hsl_with_alpha((h + 180.0) % 360.0, s, l, p_color.a)
+  }
+
+  /// Creates a five-color split-complementary theme around the given color.
+  ///
+  /// This follows the Adobe-style theme layout: the source color, the two hues on either side
+  /// of its complement, then darker variants of the source and the clockwise complement.
+  pub fn split_complementary(p_color: Color) -> Vec<Color> {
+    let (h, s, v) = p_color.hsv();
+    let clockwise = Self::from_hsv_with_alpha((h + 210.0).rem_euclid(360.0), s, v, p_color.a);
+    let counterclockwise = Self::from_hsv_with_alpha((h + 150.0).rem_euclid(360.0), s, v, p_color.a);
+
+    vec![
+      p_color,
+      clockwise,
+      counterclockwise,
+      Self::from_hsv_with_alpha(h, s * 0.5, v * 0.5, p_color.a),
+      Self::from_hsv_with_alpha((h + 210.0).rem_euclid(360.0), s * 0.5, v * 0.5, p_color.a),
+    ]
+  }
+
+  /// Returns the other two colors in the source color's triadic scheme.
+  ///
+  /// A triadic scheme places three colors 120 degrees apart on the color wheel. The returned
+  /// colors are offset by 120 and 240 degrees, with saturation, lightness, and alpha preserved.
+  pub fn triadic(p_color: Color) -> Vec<Color> {
+    let (h, s, l) = p_color.hsl();
+    let color1 = Self::from_hsl_with_alpha((h + 120.0) % 360.0, s, l, p_color.a);
+    let color2 = Self::from_hsl_with_alpha((h + 240.0) % 360.0, s, l, p_color.a);
+    vec![color1, color2]
+  }
+
+  /// Returns the other three colors in the source color's square scheme.
+  ///
+  /// A square scheme places four colors 90 degrees apart on the color wheel. The returned colors
+  /// are offset by 90, 180, and 270 degrees, producing a broad balance of warm and cool hues.
+  pub fn square(p_color: Color) -> Vec<Color> {
+    let (h, s, l) = p_color.hsl();
+    let color1 = Self::from_hsl_with_alpha((h + 90.0) % 360.0, s, l, p_color.a);
+    let color2 = Self::from_hsl_with_alpha((h + 180.0) % 360.0, s, l, p_color.a);
+    let color3 = Self::from_hsl_with_alpha((h + 270.0) % 360.0, s, l, p_color.a);
+    vec![color1, color2, color3]
+  }
+
+  /// Returns the two colors in a compound scheme based on the source color.
+  ///
+  /// A compound scheme combines a neighboring hue at 30 degrees with its opposite at 210 degrees.
+  /// It mixes the cohesion of an analogous scheme with the contrast of a complementary scheme.
+  pub fn compound(p_color: Color) -> Vec<Color> {
+    let (h, s, l) = p_color.hsl();
+    let color1 = Self::from_hsl_with_alpha((h + 30.0) % 360.0, s, l, p_color.a);
+    let color2 = Self::from_hsl_with_alpha((h + 210.0) % 360.0, s, l, p_color.a);
+    vec![color1, color2]
+  }
+
+  /// Creates `p_out` progressively darker shades of the given color.
+  ///
+  /// A shade is formed by mixing a color with black. The first item is the source color and the
+  /// final item contains 75% black, avoiding a pure-black endpoint. Alpha is preserved.
+  pub fn shades(p_color: Color, p_out: usize) -> Vec<Color> {
+    if p_out == 0 {
+      return Vec::new();
+    }
+
+    (0..p_out)
+      .map(|index| {
+        let progress = if p_out == 1 { 0.0 } else { index as f32 / (p_out - 1) as f32 };
+        let scale = 1.0 - progress * 0.75;
+        Self::from_rgba(
+          (p_color.r as f32 * scale).round() as u8,
+          (p_color.g as f32 * scale).round() as u8,
+          (p_color.b as f32 * scale).round() as u8,
+          p_color.a,
+        )
+      })
+      .collect()
+  }
+
+  /// Creates `p_out` monochromatic colors around the given color.
+  ///
+  /// Monochromatic colors share one hue and saturation while varying in lightness. The source
+  /// color is placed between evenly distributed darker and lighter variants. Alpha is preserved.
+  pub fn monochromatic(p_color: Color, p_out: usize) -> Vec<Color> {
+    let (h, s, l) = p_color.hsl();
+    if p_out == 0 {
+      return Vec::new();
+    }
+
+    let darker_count = p_out / 2;
+    let lighter_count = p_out - darker_count - 1;
+    let darker = (1..=darker_count).map(|index| {
+      let new_l = l * index as f32 / (darker_count + 1) as f32;
+      Self::from_hsl_with_alpha(h, s, new_l, p_color.a)
+    });
+    let lighter = (1..=lighter_count).map(|index| {
+      let new_l = l + (1.0 - l) * index as f32 / (lighter_count + 1) as f32;
+      Self::from_hsl_with_alpha(h, s, new_l, p_color.a)
+    });
+
+    darker.chain(std::iter::once(p_color)).chain(lighter).collect()
+  }
+
   /// Creates a black color.
   pub fn black() -> Self {
     Self::from_rgba(0, 0, 0, 255)
   }
   /// Creates a color from RGB values (alpha set to 255).
-  pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-    Self { r, g, b, a: 255 }
+  pub fn from_rgb(p_r: u8, p_g: u8, p_b: u8) -> Self {
+    Self {
+      r: p_r,
+      g: p_g,
+      b: p_b,
+      a: 255,
+    }
   }
   /// Creates a color from RGBA values.
-  pub fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
-    Self { r, g, b, a }
+  pub fn from_rgba(p_r: u8, p_g: u8, p_b: u8, p_a: u8) -> Self {
+    Self {
+      r: p_r,
+      g: p_g,
+      b: p_b,
+      a: p_a,
+    }
   }
   /// Creates a color from HSV values (alpha set to 255).
-  pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
-    let (r, g, b) = hsv_to_rgb(h, s, v);
+  pub fn from_hsv(p_h: f32, p_s: f32, p_v: f32) -> Self {
+    let (r, g, b) = hsv_to_rgb(p_h, p_s, p_v);
     Self { r, g, b, a: 255 }
   }
   /// Creates a color from a hexadecimal value (alpha set to 255).
-  pub fn from_hex(hex: u32) -> Self {
+  pub fn from_hex(p_hex: u32) -> Self {
     Self {
-      r: ((hex >> 16) & 0xFF) as u8,
-      g: ((hex >> 8) & 0xFF) as u8,
-      b: (hex & 0xFF) as u8,
+      r: ((p_hex >> 16) & 0xFF) as u8,
+      g: ((p_hex >> 8) & 0xFF) as u8,
+      b: (p_hex & 0xFF) as u8,
       a: 255,
     }
   }
   /// Creates a color from a hexadecimal string (e.g., "#RRGGBB" or "#RRGGBBAA").
-  pub fn from_hex_string(hex: &str) -> Self {
-    let hex = hex.trim_start_matches('#');
-    let hex_value = u32::from_str_radix(hex, 16).unwrap_or(0);
-    match hex.len() {
+  pub fn from_hex_string(p_hex: &str) -> Self {
+    let p_hex = p_hex.trim_start_matches('#');
+    let hex_value = u32::from_str_radix(p_hex, 16).unwrap_or(0);
+    match p_hex.len() {
       6 => Self::from_hex(hex_value),
       8 => Self {
         r: ((hex_value >> 24) & 0xFF) as u8,
@@ -100,19 +260,23 @@ impl Color {
     }
   }
   /// Creates a color from HSL values (alpha set to 255).
-  pub fn from_hsl(h: f32, s: f32, l: f32) -> Self {
-    let (r, g, b) = hsl_to_rgb(h, s, l);
+  pub fn from_hsl(p_h: f32, p_s: f32, p_l: f32) -> Self {
+    let (r, g, b) = hsl_to_rgb(p_h, p_s, p_l);
     Self { r, g, b, a: 255 }
   }
-  /// Calculates the contrast ratio between this color and another color.
-  pub fn contrast_ratio(&self, other: Color) -> f32 {
-    let l1 = self.luminance();
-    let l2 = other.luminance();
-    if l1 > l2 {
-      (l1 + 0.05) / (l2 + 0.05)
+  /// Converts the color to a hexadecimal string (e.g., "#RRGGBB" or "#RRGGBBAA").
+  pub fn to_hex_string(&self) -> String {
+    if self.a == 255 {
+      format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
     } else {
-      (l2 + 0.05) / (l1 + 0.05)
+      format!("#{:02X}{:02X}{:02X}{:02X}", self.r, self.g, self.b, self.a)
     }
+  }
+  /// Calculates the contrast ratio between this color and another color.
+  pub fn contrast_ratio(&self, p_other: Color) -> f32 {
+    let l1 = self.luminance();
+    let l2 = p_other.luminance();
+    if l1 > l2 { (l1 + 0.05) / (l2 + 0.05) } else { (l2 + 0.05) / (l1 + 0.05) }
   }
   /// Returns the RGB values of the color as a tuple.
   pub fn rgb(&self) -> (u8, u8, u8) {
@@ -171,10 +335,6 @@ impl Color {
       b: (b / channel_count) as u8,
       a: 255,
     }
-  }
-  /// Calculates the mean color from a slice of colors represented as u8 values.
-  pub fn mean(p_colors: &[u8]) -> Self {
-    Color::average(p_colors)
   }
   /// Calculates the median color from a slice of colors represented as u8 values.
   pub fn median(p_colors: &[u8]) -> Self {
@@ -300,6 +460,14 @@ impl Color {
   pub fn violet() -> Self {
     Self::from_rgb(238, 130, 238)
   }
+  /// Tan color using RGB(210, 180, 140)
+  pub fn tan() -> Self {
+    Self::from_rgb(210, 180, 140)
+  }
+  /// Purple color using RGB(128, 0, 128)
+  pub fn purple() -> Self {
+    Self::from_rgb(128, 0, 128)
+  }
   /// White color using RGB(255, 255, 255)
   pub fn white() -> Self {
     Self::from_rgb(255, 255, 255)
@@ -311,10 +479,7 @@ impl Color {
   /// Random color generator (alpha=255)
   pub fn random() -> Self {
     // Lightweight LCG seeded from current system time to avoid adding rand dependency.
-    let nanos = std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
-      .unwrap()
-      .as_nanos() as u64;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64;
     let mut x: u64 = nanos.wrapping_mul(6364136223846793005).wrapping_add(1);
     x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
     let r = (x >> 24) as u8;
@@ -323,5 +488,55 @@ impl Color {
     x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
     let b = (x >> 16) as u8;
     Self::from_rgba(r, g, b, 255)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::Color;
+
+  #[test]
+  fn analogous_green_stays_between_chartreuse_and_mint() {
+    let colors: Vec<_> = Color::analogous(Color::green()).into_iter().map(|color| color.rgb()).collect();
+
+    assert_eq!(colors, vec![(128, 255, 0), (64, 255, 0), (0, 255, 0), (0, 255, 64), (0, 255, 128)]);
+  }
+
+  #[test]
+  fn harmony_colors_preserve_alpha() {
+    let source = Color::from_rgba(255, 0, 0, 73);
+    let mut colors = vec![Color::complementary(source)];
+    colors.extend(Color::triadic(source));
+    colors.extend(Color::square(source));
+    colors.extend(Color::compound(source));
+
+    let split_colors = Color::split_complementary(source);
+    assert_eq!(split_colors.len(), 5);
+    assert!(split_colors.iter().all(|color| color.a == source.a));
+    assert!(colors.iter().all(|color| color.a == source.a));
+    assert!(Color::analogous(source).iter().all(|color| color.a == source.a));
+  }
+
+  #[test]
+  fn shades_mix_the_source_evenly_toward_black() {
+    let source = Color::from_rgba(120, 255, 60, 73);
+    let shades = Color::shades(source, 5);
+
+    assert_eq!(shades.len(), 5);
+    assert_eq!(shades[0].rgba(), source.rgba());
+    assert_eq!(shades[4].rgba(), (30, 64, 15, 73));
+    assert!(shades.windows(2).all(|pair| pair[0].luminance() > pair[1].luminance()));
+  }
+
+  #[test]
+  fn monochromatic_colors_surround_and_include_source() {
+    let source = Color::from_rgba(0, 255, 0, 73);
+    let colors = Color::monochromatic(source, 5);
+
+    assert_eq!(colors.len(), 5);
+    assert_eq!(colors[2].rgba(), source.rgba());
+    assert!(colors[0].hsl().2 < source.hsl().2);
+    assert!(colors[4].hsl().2 > source.hsl().2);
+    assert!(colors.iter().all(|color| color.a == source.a));
   }
 }

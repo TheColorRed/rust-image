@@ -1,16 +1,18 @@
-use abra_core::blend::{self, RGBA, blend_images_at_with_opacity, normal};
-use abra_core::{Color, Fill, Image};
+use abra_core::blend::{RGBA, blend as blend_images, normal};
+use abra_core::{Color, Fill, Image, Point};
 
+use filters::Apply;
 use filters::blur::gaussian_blur;
 use rayon::prelude::*;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Clone, Debug)]
 /// Options for configuring a drop shadow effect.
-pub struct DropShadow {
+pub struct DropShadow<'a> {
   /// The color of the shadow in RGBA format.
-  pub fill: Fill,
+  pub fill: Fill<'a>,
   /// The blend mode used to combine the shadow with the layer.
   pub blend_mode: fn(RGBA, RGBA) -> RGBA,
   /// The opacity of the shadow (0.0 to 1.0).
@@ -25,7 +27,7 @@ pub struct DropShadow {
   pub size: f32,
 }
 
-impl DropShadow {
+impl<'a> DropShadow<'a> {
   /// Creates a new DropShadowOptions with default settings.
   /// Default values:
   /// - distance: 5.0 pixels
@@ -34,7 +36,7 @@ impl DropShadow {
   /// - color: black with 60% opacity (0, 0, 0, 153)
   pub fn new() -> Self {
     DropShadow {
-      fill: Fill::Solid(Color::black()),
+      fill: Fill::Solid(Cow::Owned(Color::black())),
       blend_mode: normal,
       opacity: 0.35,
       angle: 45.0,
@@ -45,59 +47,59 @@ impl DropShadow {
   }
 
   /// Sets the distance of the shadow from the object.
-  pub fn with_distance(mut self, distance: impl Into<f64>) -> Self {
-    self.distance = distance.into() as f32;
+  pub fn with_distance(mut self, p_distance: impl Into<f64>) -> Self {
+    self.distance = p_distance.into() as f32;
     self
   }
 
   /// Sets the angle of the shadow in degrees.
-  pub fn with_angle(mut self, angle: impl Into<f64>) -> Self {
-    self.angle = angle.into() as f32;
+  pub fn with_angle(mut self, p_angle: impl Into<f64>) -> Self {
+    self.angle = p_angle.into() as f32;
     self
   }
 
   /// Sets the size of the shadow blur.
-  pub fn with_size(mut self, size: impl Into<f64>) -> Self {
-    self.size = size.into() as f32;
+  pub fn with_size(mut self, p_size: impl Into<f64>) -> Self {
+    self.size = p_size.into() as f32;
     self
   }
 
   /// Sets the spread of the shadow between 0.0 and 1.0
-  pub fn with_spread(mut self, spread: impl Into<f64>) -> Self {
-    self.spread = spread.into().max(0.0).min(1.0) as f32;
+  pub fn with_spread(mut self, p_spread: impl Into<f64>) -> Self {
+    self.spread = p_spread.into().max(0.0).min(1.0) as f32;
     self
   }
 
   /// Sets the color of the shadow in RGBA format.
-  pub fn with_fill(mut self, fill: impl Into<Fill>) -> Self {
-    self.fill = fill.into();
+  pub fn with_fill(mut self, p_fill: impl Into<Fill<'a>>) -> Self {
+    self.fill = p_fill.into();
     self
   }
 
   /// Sets the opacity of the shadow (0.0 to 1.0).
-  pub fn with_opacity(mut self, opacity: impl Into<f64>) -> Self {
-    self.opacity = opacity.into() as f32;
+  pub fn with_opacity(mut self, p_opacity: impl Into<f64>) -> Self {
+    self.opacity = p_opacity.into() as f32;
     self
   }
 
   /// Sets the blend mode used to combine the shadow with the layer.
-  pub fn with_blend_mode(mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
-    self.blend_mode = blend_mode;
+  pub fn with_blend_mode(mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+    self.blend_mode = p_blend_mode;
     self
   }
 }
 
 /// Variant of apply_drop_shadow that returns both the final image and the padding offset
 /// used to position the original content within the padded image (padding_left, padding_top).
-pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropShadow) -> (Arc<Image>, (i32, i32)) {
+pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &DropShadow) -> (Arc<Image>, (i32, i32)) {
   let _duration = Instant::now();
 
   // Skip if blur radius is 0 (no visible shadow)
-  if options.size <= 0.0 {
-    return (image, (0, 0));
+  if p_options.size <= 0.0 {
+    return (p_image, (0, 0));
   }
 
-  let original_image = image.as_ref();
+  let original_image = p_image.as_ref();
   let (width, height) = original_image.dimensions::<usize>();
 
   // Create shadow by copying the original image
@@ -116,7 +118,7 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
     .collect();
 
   // Colorize to the shadow color with opacity applied
-  colorize_image(&mut shadow_image, options.fill.clone(), options.opacity);
+  colorize_image(&mut shadow_image, p_options.fill.clone(), p_options.opacity);
 
   // Apply the alpha channel to create the shadow shape
   // Write the alpha channel back into the shadow image using a mutable slice
@@ -129,19 +131,19 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   }
 
   // Apply spread if needed (spread expands or contracts the shadow)
-  if options.spread > 0.0 {
-    apply_spread(&mut shadow_image, options.spread);
+  if p_options.spread > 0.0 {
+    apply_spread(&mut shadow_image, p_options.spread);
   }
 
   // Calculate offset from distance and angle
-  let angle_rad = options.angle.to_radians();
-  let offset_x = (options.distance * angle_rad.cos()).round() as i32;
-  let offset_y = (options.distance * angle_rad.sin()).round() as i32;
+  let angle_rad = p_options.angle.to_radians();
+  let offset_x = (p_options.distance * angle_rad.cos()).round() as i32;
+  let offset_y = (p_options.distance * angle_rad.sin()).round() as i32;
 
   // Determine padding needed for the expanded canvas
   // Positive offset means shadow is displaced in that direction, so we need padding on the opposite side
   // Also add padding for the blur radius to prevent blur artifacts at the edges
-  let blur_padding = options.size as i32;
+  let blur_padding = p_options.size as i32;
   let padding_left = (-offset_x).max(0) + blur_padding;
   let padding_top = (-offset_y).max(0) + blur_padding;
   let padding_right = offset_x.max(0) + blur_padding;
@@ -161,20 +163,23 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
   composite.set_rgba_owned(empty_pixels);
 
   // Composite shadow at offset position with the configured blend mode and opacity
-  blend_images_at_with_opacity(&mut composite, &shadow_image, 0, 0, shadow_x, shadow_y, options.blend_mode, 1.0);
+  blend_images(&shadow_image)
+    .with_offset(Point::new(shadow_x, shadow_y))
+    .with_mode(p_options.blend_mode)
+    .apply(&mut composite);
 
   // Blur the shadow area in the composite
-  gaussian_blur(&mut composite, options.size as u32, None);
+  gaussian_blur(p_options.size).apply(&mut composite);
 
   // Reapply opacity to the blurred shadow (blur operation may have increased alpha)
   if let Some(composite_pixels) = composite.colors().as_slice_mut() {
     for chunk in composite_pixels.chunks_mut(4) {
-      chunk[3] = ((chunk[3] as f32) * options.opacity) as u8;
+      chunk[3] = ((chunk[3] as f32) * p_options.opacity) as u8;
     }
   }
 
   // Composite original at padding position
-  blend_images_at_with_opacity(&mut composite, &original_image, 0, 0, padding_left, padding_top, blend::normal, 1.0);
+  blend_images(&original_image).with_offset(Point::new(padding_left, padding_top)).apply(&mut composite);
 
   // DebugEffects::DropShadow(options.clone(), duration.elapsed()).log();
 
@@ -182,44 +187,44 @@ pub(crate) fn apply_drop_shadow_with_offset(image: Arc<Image>, options: &DropSha
 }
 
 /// Converts an image to a single color while preserving and applying opacity to the alpha channel.
-fn colorize_image(image: &mut Image, fill: impl Into<Fill>, opacity: impl Into<f64>) {
-  let pixels = image.rgba();
+fn colorize_image<'a>(p_image: &mut Image, p_fill: impl Into<Fill<'a>>, p_opacity: impl Into<f64>) {
+  let pixels = p_image.rgba();
 
-  let fill = fill.into();
-  let opacity = opacity.into();
+  let p_fill = p_fill.into();
+  let p_opacity = p_opacity.into();
   let colorized: Vec<u8> = pixels
     .par_chunks(4)
     .flat_map_iter(|pixel| {
-      let color = match fill {
-        Fill::Solid(c) => c,
+      let color = match &p_fill {
+        Fill::Solid(c) => c.as_ref().clone(),
         _ => Color::black(),
       };
       // Preserve the alpha channel from the original, apply opacity and color's alpha
       let original_alpha = pixel[3] as f32 / 255.0;
-      let shadow_alpha = (color.a as f32 / 255.0) * original_alpha * opacity as f32;
+      let shadow_alpha = (color.a as f32 / 255.0) * original_alpha * p_opacity as f32;
 
       vec![color.r, color.g, color.b, (shadow_alpha * 255.0) as u8]
     })
     .collect();
 
-  image.set_rgba_owned(colorized);
+  p_image.set_rgba_owned(colorized);
 }
 
 /// Applies spread to the shadow by dilating or eroding the alpha channel.
 /// Spread between 0.0 and 1.0 where values > 0.5 expand and values < 0.5 contract.
-fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
-  let spread = spread.into();
-  let (width, height) = image.dimensions::<u32>();
+fn apply_spread(p_image: &mut Image, p_spread: impl Into<f32>) {
+  let p_spread = p_spread.into();
+  let (width, height) = p_image.dimensions::<u32>();
   let width = width as usize;
   let height = height as usize;
-  let src = image.rgba();
+  let src = p_image.rgba();
   let pixels = src.to_vec();
 
   // Spread > 0.5 means dilate (expand), < 0.5 means erode (contract)
   // Strength is based on distance from 0.5, clamped to reasonable values
-  let strength = ((spread - 0.5).abs() * 2.0).ceil() as usize;
+  let strength = ((p_spread - 0.5).abs() * 2.0).ceil() as usize;
 
-  if spread > 0.5 {
+  if p_spread > 0.5 {
     // Dilate: expand opaque regions
     let mut result = pixels.clone();
     for _ in 0..strength {
@@ -248,8 +253,8 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
         }
       }
     }
-    image.set_rgba_owned(result);
-  } else if spread < 0.5 {
+    p_image.set_rgba_owned(result);
+  } else if p_spread < 0.5 {
     // Erode: contract opaque regions
     let mut result = pixels.clone();
     for _ in 0..strength {
@@ -278,6 +283,6 @@ fn apply_spread(image: &mut Image, spread: impl Into<f32>) {
         }
       }
     }
-    image.set_rgba_owned(result);
+    p_image.set_rgba_owned(result);
   }
 }

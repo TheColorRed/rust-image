@@ -41,12 +41,45 @@ pub struct Path {
   start: PointF,
   /// The segments that make up the path.
   segments: Vec<Segment>,
+  /// An unresolved direction angle, used by gradient fills.
+  angle_degrees: Option<f32>,
 }
 
 impl Path {
   /// Creates a new empty path.
   pub fn new() -> Path {
     Path::default()
+  }
+  /// Creates a rectangular path given the top-left corner, width, and height.
+  /// - `p_top_left`: The top-left corner of the rectangle.
+  /// - `p_width`: The width of the rectangle.
+  /// - `p_height`: The height of the rectangle.
+  pub fn rect(p_top_left: impl Into<PointF>, p_width: f32, p_height: f32) -> Path {
+    let top_left = p_top_left.into();
+    let mut path = Path::new();
+    path
+      .move_to(top_left)
+      .line_to(PointF::new(top_left.x + p_width, top_left.y))
+      .line_to(PointF::new(top_left.x + p_width, top_left.y + p_height))
+      .line_to(PointF::new(top_left.x, top_left.y + p_height))
+      .line_to(top_left);
+    path
+  }
+  pub fn ellipse(p_center: impl Into<PointF>, p_radius_x: f32, p_radius_y: f32, p_segments: usize) -> Path {
+    let center = p_center.into();
+    let mut path = Path::new();
+    for i in 0..p_segments {
+      let theta = (i as f32 / p_segments as f32) * std::f32::consts::TAU;
+      let x = center.x + p_radius_x * theta.cos();
+      let y = center.y + p_radius_y * theta.sin();
+      if i == 0 {
+        path.move_to(PointF::new(x, y));
+      } else {
+        path.line_to(PointF::new(x, y));
+      }
+    }
+    path.line_to(PointF::new(center.x + p_radius_x, center.y)); // Close the ellipse
+    path
   }
   /// Creates a simple line path from point A to point B.
   pub fn line(p_from: impl Into<PointF>, p_to: impl Into<PointF>) -> Path {
@@ -108,6 +141,11 @@ impl Path {
     &self.segments
   }
 
+  /// Returns the unresolved direction angle, if this path represents one.
+  pub fn angle_degrees(&self) -> Option<f32> {
+    self.angle_degrees
+  }
+
   /// Returns all points in the path as a flat list of PointF.
   /// This includes the start point and all segment endpoints.
   pub fn points(&self) -> Vec<PointF> {
@@ -135,11 +173,7 @@ impl Path {
     let segment_index = segment_index.min(self.segments.len() - 1);
     let local_t = (clamped_t * num_segments) - segment_index as f32;
 
-    let prev_point = if segment_index == 0 {
-      self.start
-    } else {
-      self.point_at_segment(segment_index - 1, 1.0)
-    };
+    let prev_point = if segment_index == 0 { self.start } else { self.point_at_segment(segment_index - 1, 1.0) };
 
     eval_segment(prev_point, &self.segments[segment_index], local_t)
   }
@@ -150,11 +184,7 @@ impl Path {
       return self.points().last().copied().unwrap_or(self.start);
     }
 
-    let prev_point = if p_segment_idx == 0 {
-      self.start
-    } else {
-      self.point_at_segment(p_segment_idx - 1, 1.0)
-    };
+    let prev_point = if p_segment_idx == 0 { self.start } else { self.point_at_segment(p_segment_idx - 1, 1.0) };
 
     eval_segment(prev_point, &self.segments[p_segment_idx], p_t)
   }
@@ -245,11 +275,17 @@ impl Path {
 
     let mut min_distance = f32::MAX;
     let mut closest_t = 0.0;
-    let total_segments = (flattened.len() - 1) as f32;
 
-    for i in 0..flattened.len() - 1 {
+    // If the path is closed (first == last) include the closing segment.
+    // Otherwise, iterate only over the forward segments (len - 1).
+    let len = flattened.len();
+    let is_closed = flattened.first() == flattened.last();
+    let segments = if is_closed { len } else { len - 1 };
+    let total_segments = segments as f32;
+
+    for i in 0..segments {
       let p1 = flattened[i];
-      let p2 = flattened[i + 1];
+      let p2 = if i + 1 < len { flattened[i + 1] } else { flattened[0] };
 
       let segment_vec = p2 - p1;
       let query_vec = query - p1;
@@ -265,7 +301,7 @@ impl Path {
 
       if distance < min_distance {
         min_distance = distance;
-        // Map to global t (0 to 1 across entire path)
+        // Map to global t (0 to 1 across the forward path segments)
         closest_t = (i as f32 + local_t) / total_segments;
       }
     }
@@ -276,7 +312,7 @@ impl Path {
   /// Finds the closest point on the path to the given coordinates, returning the point coordinates.
   pub fn closest_point(&self, p_x: f32, p_y: f32) -> PointF {
     let query = PointF::new(p_x, p_y);
-    let flattened = self.flatten(1.0);
+    let flattened = self.flatten(0.5); // Use finer tolerance for better accuracy
 
     if flattened.len() < 2 {
       return self.start;
@@ -285,15 +321,26 @@ impl Path {
     let mut min_distance = f32::MAX;
     let mut closest_point = flattened[0];
 
-    for i in 0..flattened.len() - 1 {
+    // If the path is closed include the closing segment, otherwise iterate forward segments only
+    let len = flattened.len();
+    let is_closed = flattened.first().map(|f| f.distance_to(*flattened.last().unwrap()) < 0.1).unwrap_or(false);
+    let segments = if is_closed { len } else { len - 1 };
+
+    for i in 0..segments {
       let p1 = flattened[i];
-      let p2 = flattened[i + 1];
+      let p2 = if i + 1 < len { flattened[i + 1] } else { flattened[0] };
 
       let segment_vec = p2 - p1;
       let query_vec = query - p1;
       let segment_len_sq = segment_vec.length_squared();
 
-      if segment_len_sq == 0.0 {
+      if segment_len_sq < 0.0001 {
+        // Degenerate segment (point), check distance to p1
+        let distance = query.distance_to(p1);
+        if distance < min_distance {
+          min_distance = distance;
+          closest_point = p1;
+        }
         continue;
       }
 
@@ -334,12 +381,14 @@ impl Path {
   /// // Render at 500x500 pixels
   /// let scaled = path.transform_to_viewport(&viewbox, 500.0, 500.0, AspectRatio::default());
   /// ```
+
   pub fn transform_to_viewport(
     &self, p_viewbox: &ViewBox, p_viewport_width: f32, p_viewport_height: f32, p_aspect_ratio: AspectRatio,
   ) -> Path {
     let mut transformed = Path {
       start: p_viewbox.map_point(self.start, p_viewport_width, p_viewport_height, p_aspect_ratio),
       segments: Vec::with_capacity(self.segments.len()),
+      angle_degrees: self.angle_degrees,
     };
 
     for segment in &self.segments {
@@ -427,10 +476,36 @@ impl Path {
   }
 }
 
+impl From<f32> for Path {
+  /// Creates a unit direction line from an angle in degrees.
+  ///
+  /// Zero degrees points right, and positive angles rotate clockwise in the
+  /// image coordinate system.
+  fn from(p_angle_degrees: f32) -> Self {
+    Path {
+      start: PointF::zero(),
+      segments: Vec::new(),
+      angle_degrees: Some(p_angle_degrees),
+    }
+  }
+}
+
+impl From<i32> for Path {
+  fn from(p_angle_degrees: i32) -> Self {
+    Path::from(p_angle_degrees as f32)
+  }
+}
+
+impl From<f64> for Path {
+  fn from(p_angle_degrees: f64) -> Self {
+    Path::from(p_angle_degrees as f32)
+  }
+}
+
 impl Display for Path {
   /// Displays the path as a string.
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "Path(start: {}, segments: {})", self.start, self.segments.len())
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(p_f, "Path(start: {}, segments: {})", self.start, self.segments.len())
   }
 }
 
@@ -439,6 +514,7 @@ impl Default for Path {
     Path {
       start: PointF::zero(),
       segments: Vec::new(),
+      angle_degrees: None,
     }
   }
 }
@@ -459,10 +535,25 @@ fn eval_segment(p_prev: PointF, p_segment: &Segment, p_t: f32) -> PointF {
       let u = 1.0 - p_t;
       let uu = u * u;
       let uuu = uu * u;
-      let tt = p_t * p_t;
-      let ttt = tt * p_t;
-      p_prev * uuu + *ctrl1 * (3.0 * uu * p_t) + *ctrl2 * (3.0 * u * tt) + *to * ttt
+      let ttt = p_t * p_t * p_t;
+      p_prev * uuu + *ctrl1 * (3.0 * uu * p_t) + *ctrl2 * (3.0 * u * p_t * p_t) + *to * ttt
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn closest_time_line_is_normalized() {
+    let path = Path::line((0.0, 0.0), (0.0, 100.0));
+    // top
+    assert!((path.closest_time(0.0, 0.0) - 0.0).abs() < 1e-6);
+    // middle
+    assert!((path.closest_time(0.0, 50.0) - 0.5).abs() < 1e-6);
+    // bottom
+    assert!((path.closest_time(0.0, 100.0) - 1.0).abs() < 1e-6);
   }
 }
 

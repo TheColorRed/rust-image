@@ -7,6 +7,25 @@
 use primitives::Image;
 use rayon::prelude::*;
 
+/// Sampling algorithm used by interpolation and resampling operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Interpolation {
+  Nearest,
+  Bilinear,
+  Bicubic,
+  Lanczos,
+}
+
+/// Sample a pixel with the selected interpolation algorithm.
+pub fn sample(p_image: &Image, p_x: f32, p_y: f32, p_interpolation: Interpolation) -> [u8; 4] {
+  match p_interpolation {
+    Interpolation::Nearest => sample_nearest(p_image, p_x, p_y),
+    Interpolation::Bilinear => sample_bilinear(p_image, p_x, p_y),
+    Interpolation::Bicubic => sample_bicubic(p_image, p_x, p_y),
+    Interpolation::Lanczos => sample_lanczos(p_image, p_x, p_y),
+  }
+}
+
 /// Sample a pixel using bilinear interpolation with premultiplied alpha.
 ///
 /// This function samples the image at a fractional (x, y) coordinate by performing
@@ -18,7 +37,7 @@ use rayon::prelude::*;
 /// - `p_y`: The y-coordinate (can be fractional).
 ///
 /// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-pub fn sample_bilinear(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_bilinear(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
   let (width, height) = p_image.dimensions::<u32>();
   let pixels = p_image.rgba();
 
@@ -114,7 +133,7 @@ pub fn sample_bilinear(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
 /// - `p_y`: The y-coordinate (can be fractional).
 ///
 /// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-pub fn sample_bicubic(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_bicubic(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
   let (width, height) = p_image.dimensions::<u32>();
   let pixels = p_image.rgba();
 
@@ -209,7 +228,7 @@ pub fn sample_bicubic(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
 /// - `p_y`: The y-coordinate (can be fractional).
 ///
 /// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-pub fn sample_lanczos(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_lanczos(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
   let (width, height) = p_image.dimensions::<u32>();
   let pixels = p_image.rgba();
 
@@ -307,7 +326,7 @@ pub fn sample_lanczos(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
 /// - `p_y`: The y-coordinate (will be rounded).
 ///
 /// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-pub fn sample_nearest(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_nearest(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
   let (width, height) = p_image.dimensions::<u32>();
   let pixels = p_image.rgba();
 
@@ -341,7 +360,14 @@ pub fn sample_nearest(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
 /// - `p_height`: The target height.
 ///
 /// Returns a vector of RGBA pixel data for the new image.
-pub fn resample_bilinear(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
+fn resample_bilinear(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
+  resample_interpolated(p_source, p_width, p_height, sample_bilinear)
+}
+
+fn resample_interpolated<F>(p_source: &Image, p_width: u32, p_height: u32, p_sample: F) -> Vec<u8>
+where
+  F: Fn(&Image, f32, f32) -> [u8; 4] + Sync,
+{
   let (old_width, old_height) = p_source.dimensions::<u32>();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
@@ -356,7 +382,7 @@ pub fn resample_bilinear(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u
     let src_x = (x as f32 + 0.5) * (old_width as f32 / p_width as f32) - 0.5;
     let src_y = (y as f32 + 0.5) * (old_height as f32 / p_height as f32) - 0.5;
 
-    let pixel = sample_bilinear(p_source, src_x, src_y);
+    let pixel = p_sample(p_source, src_x, src_y);
     chunk.copy_from_slice(&pixel);
   });
 
@@ -373,26 +399,8 @@ pub fn resample_bilinear(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u
 /// - `p_height`: The target height.
 ///
 /// Returns a vector of RGBA pixel data for the new image.
-pub fn resample_bicubic(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  let (old_width, old_height) = p_source.dimensions::<u32>();
-  let buffer_size = (p_width as u64)
-    .checked_mul(p_height as u64)
-    .and_then(|size| size.checked_mul(4))
-    .expect("Image dimensions too large") as usize;
-  let mut new_pixels = vec![0; buffer_size];
-
-  new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-    let x = i as u32 % p_width;
-    let y = i as u32 / p_width;
-
-    let src_x = (x as f32 + 0.5) * (old_width as f32 / p_width as f32) - 0.5;
-    let src_y = (y as f32 + 0.5) * (old_height as f32 / p_height as f32) - 0.5;
-
-    let pixel = sample_bicubic(p_source, src_x, src_y);
-    chunk.copy_from_slice(&pixel);
-  });
-
-  new_pixels
+fn resample_bicubic(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
+  resample_interpolated(p_source, p_width, p_height, sample_bicubic)
 }
 
 /// Resample an entire image using Lanczos resampling.
@@ -405,26 +413,8 @@ pub fn resample_bicubic(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8
 /// - `p_height`: The target height.
 ///
 /// Returns a vector of RGBA pixel data for the new image.
-pub fn resample_lanczos(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  let (old_width, old_height) = p_source.dimensions::<u32>();
-  let buffer_size = (p_width as u64)
-    .checked_mul(p_height as u64)
-    .and_then(|size| size.checked_mul(4))
-    .expect("Image dimensions too large") as usize;
-  let mut new_pixels = vec![0; buffer_size];
-
-  new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-    let x = i as u32 % p_width;
-    let y = i as u32 / p_width;
-
-    let src_x = (x as f32 + 0.5) * (old_width as f32 / p_width as f32) - 0.5;
-    let src_y = (y as f32 + 0.5) * (old_height as f32 / p_height as f32) - 0.5;
-
-    let pixel = sample_lanczos(p_source, src_x, src_y);
-    chunk.copy_from_slice(&pixel);
-  });
-
-  new_pixels
+fn resample_lanczos(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
+  resample_interpolated(p_source, p_width, p_height, sample_lanczos)
 }
 
 /// Resample an entire image using nearest neighbor (no interpolation).
@@ -437,7 +427,7 @@ pub fn resample_lanczos(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8
 /// - `p_height`: The target height.
 ///
 /// Returns a vector of RGBA pixel data for the new image.
-pub fn resample_nearest(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
+fn resample_nearest(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
   let (old_width, old_height) = p_source.dimensions::<u32>();
   let old_pixels = p_source.rgba();
   let buffer_size = (p_width as u64)
@@ -450,12 +440,8 @@ pub fn resample_nearest(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8
     let x = i as u32 % p_width;
     let y = i as u32 / p_width;
 
-    let old_x = ((x as f32 / p_width as f32) * (old_width as f32 - 1.0))
-      .max(0.0)
-      .min(old_width as f32 - 1.0) as u32;
-    let old_y = ((y as f32 / p_height as f32) * (old_height as f32 - 1.0))
-      .max(0.0)
-      .min(old_height as f32 - 1.0) as u32;
+    let old_x = ((x as f32 / p_width as f32) * (old_width as f32 - 1.0)).max(0.0).min(old_width as f32 - 1.0) as u32;
+    let old_y = ((y as f32 / p_height as f32) * (old_height as f32 - 1.0)).max(0.0).min(old_height as f32 - 1.0) as u32;
     let old_index = (old_y * old_width + old_x) as usize;
 
     if old_index * 4 + 3 < old_pixels.len() {
@@ -464,4 +450,14 @@ pub fn resample_nearest(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8
   });
 
   new_pixels
+}
+
+/// Resample an image with the selected interpolation algorithm.
+pub fn resample(p_source: &Image, p_width: u32, p_height: u32, p_interpolation: Interpolation) -> Vec<u8> {
+  match p_interpolation {
+    Interpolation::Nearest => resample_nearest(p_source, p_width, p_height),
+    Interpolation::Bilinear => resample_bilinear(p_source, p_width, p_height),
+    Interpolation::Bicubic => resample_bicubic(p_source, p_width, p_height),
+    Interpolation::Lanczos => resample_lanczos(p_source, p_width, p_height),
+  }
 }

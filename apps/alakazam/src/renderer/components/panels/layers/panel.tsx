@@ -7,11 +7,11 @@ import { Input } from '@/ui/input';
 import { Option } from '@/ui/option';
 import { Select } from '@/ui/select';
 import { Tooltip } from '@/ui/tooltip';
-import { LayerMetadata, ProjectMetadata } from '@alakazam/abra';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSquarePlus, faTrash } from '@fortawesome/sharp-light-svg-icons';
 import { faCircleHalfStroke, faEye, faEyeSlash } from '@fortawesome/sharp-solid-svg-icons';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { LayerMetadata, ProjectMetadata } from '../../../../../../../packages/node/alakazam';
 
 type NewLayerAction = 'layer-file' | 'layer-empty' | 'layer-adjustment' | 'group';
 
@@ -54,8 +54,7 @@ function LayersHeader() {
 
   return (
     <div className="flex flex-col justify-between border-b border-gray-700">
-      <h2 className="text-lg font-medium">Layers</h2>
-      <Select value={blendMode} onSelect={setBlendMode} disabled={activeLayers.length === 0}>
+      <Select value={blendMode} onChange={setBlendMode} disabled={activeLayers.length === 0}>
         <Option type="separator" title="Basic Blends" />
         <Option value="normal">Normal</Option>
         <Option value="average">Average</Option>
@@ -237,7 +236,6 @@ function LayerRow({ layer, setDraggable }: { layer: LayerMetadata; setDraggable:
 
 function Layers() {
   const { activeProject: project, projectMetadata } = useContext(LayersContext);
-  // const [layers, setLayers] = useState<LayerMetadata[]>([]);
   const [tooltipDisabled, setTooltipDisabled] = useState(false);
   const [draggable, setDraggable] = useState(true);
   const Projects = window.alakazam.projects;

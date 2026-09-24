@@ -29,20 +29,20 @@ impl AddCanvasOptions {
 
   /// Sets the anchor point for the canvas.
   /// The anchor point determines how the canvas is positioned within the parent canvas when drawn.
-  pub fn with_anchor(mut self, anchor: Anchor) -> Self {
-    self.anchor = Some(anchor);
+  pub fn with_anchor(mut self, p_anchor: Anchor) -> Self {
+    self.anchor = Some(p_anchor);
     self
   }
 
   /// Sets the position offset (x, y) for the canvas within the parent canvas.
-  pub fn with_position(mut self, x: i32, y: i32) -> Self {
-    self.position = Some((x, y));
+  pub fn with_position(mut self, p_x: i32, p_y: i32) -> Self {
+    self.position = Some((p_x, p_y));
     self
   }
 
   /// Sets the rotation in degrees for the canvas.
-  pub fn with_rotation(mut self, degrees: f32) -> Self {
-    self.rotation = Some(degrees);
+  pub fn with_rotation(mut self, p_degrees: f32) -> Self {
+    self.rotation = Some(p_degrees);
     self
   }
 }

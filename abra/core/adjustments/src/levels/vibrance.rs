@@ -1,5 +1,5 @@
 use abra_core::{Image, ImageRef};
-use options::Options;
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
@@ -48,19 +48,42 @@ fn apply_vibrance(p_image: &mut Image, p_vibrance: f32, p_saturation: f32) {
   p_image.set_rgba(&out);
 }
 
-/// Applies vibrance and saturation adjustments to the image.
-/// - `p_image`: The image to adjust.
-/// - `p_vibrance`: The vibrance value. Positive values increase vibrance, negative values decrease it.
-/// - `p_saturation`: The saturation value. Positive values increase saturation, negative values decrease it.
-/// - `p_options`: Options for applying the adjustment.
-pub fn vibrance<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_vibrance: impl Into<f64>, p_saturation: impl Into<f64>,
-  p_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  let vibrance = (p_vibrance.into() as f32).clamp(-100.0, 100.0);
-  let saturation = (p_saturation.into() as f32).clamp(-100.0, 100.0);
+/// A vibrance adjustment. Create one with [`vibrance`].
+pub struct Vibrance {
+  vibrance: f64,
+  saturation: f64,
+  options: Options,
+}
 
-  apply_adjustment!(apply_vibrance, image, p_options, 1, vibrance, saturation);
+impl Apply for Vibrance {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let vibrance = (self.vibrance as f32).clamp(-100.0, 100.0);
+    let saturation = (self.saturation as f32).clamp(-100.0, 100.0);
+    apply_adjustment!(apply_vibrance, image, self.options.as_ref(), 1, vibrance, saturation);
+  }
+}
+
+impl Vibrance {
+  /// Also adjusts saturation evenly across all colors, from `-100` to `100`. Defaults to `0`.
+  pub fn with_saturation(mut self, p_saturation: impl Into<f64>) -> Self {
+    self.saturation = p_saturation.into();
+    self
+  }
+}
+
+/// Adjusts vibrance, which boosts muted colors more than already saturated ones.
+/// # Arguments
+/// - `p_vibrance`: The vibrance, from `-100` to `100`. Positive values increase vibrance, negative values decrease it.
+pub fn vibrance(p_vibrance: impl Into<f64>) -> Vibrance {
+  Vibrance {
+    vibrance: p_vibrance.into(),
+    saturation: 0.0,
+    options: None,
+  }
 }

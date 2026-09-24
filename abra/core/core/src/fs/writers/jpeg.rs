@@ -7,21 +7,21 @@ use turbojpeg::PixelFormat::RGB;
 use turbojpeg::compress;
 
 /// Writes the image data to a JPEG file
-pub fn write_jpg(file: impl Into<String>, image: &Image, options: &Option<WriterOptions>) -> Result<(), String> {
-  let file = file.into();
-  let dir = dirname(file.as_str());
+pub fn write_jpg(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
+  let p_file = p_file.into();
+  let dir = dirname(p_file.as_str());
   mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
   // File::create(file.as_str()).map_err(|e| e.to_string())?;
-  let quality = match options {
+  let quality = match p_options {
     Some(o) => o.quality,
     None => 100,
   };
   println!("JPEG Quality set to {}", quality);
 
-  let (width, height) = image.dimensions::<u32>();
+  let (width, height) = p_image.dimensions::<u32>();
 
   // Convert our RGBA image to an RGB buffer (JPEG doesn't support alpha)
-  let rgb_pixels = image.rgb();
+  let rgb_pixels = p_image.rgb();
 
   // Build a turbojpeg Image<&[u8]> describing our RGB pixels
   let tj_image = turbojpeg::Image {
@@ -34,5 +34,5 @@ pub fn write_jpg(file: impl Into<String>, image: &Image, options: &Option<Writer
 
   // Compress into JPEG using TurboJPEG
   let jpeg_data = compress(tj_image, quality as i32, turbojpeg::Subsamp::Sub2x2).map_err(|e| e.to_string())?;
-  write(file.as_str(), &jpeg_data).map_err(|e| e.to_string())
+  write(p_file.as_str(), &jpeg_data).map_err(|e| e.to_string())
 }

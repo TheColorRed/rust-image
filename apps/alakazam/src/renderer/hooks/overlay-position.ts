@@ -59,14 +59,36 @@ export function useOverlayPosition() {
                   ? triggerRect.right - overlayRect.width
                   : triggerRect.left;
 
-      // Move the right side of the menu the the right of the trigger
+      // If centered and it overflows to the right, clamp to viewport
       if (adjustment === 'center' && left + overlayRect.width > viewportWidth) left = viewportWidth - overlayRect.width;
-      // Move the menu to the left if it overflows to the right
-      if (left + overlayRect.width > viewportWidth) left = viewportWidth - overlayRect.width;
-      // Move the left side of the menu the the left of the trigger
-      if (adjustment === 'center' && left < 0) left = overlayRect.left;
-      // Move the menu to the right if it overflows to the left
-      if (left < 0) left = triggerRect.right;
+
+      // If it overflows to the right, prefer to place to the left of the trigger when the desired
+      // adjustment was `right` (tooltip to the right) — this avoids overlapping the trigger.
+      if (left + overlayRect.width > viewportWidth) {
+        if (adjustment === 'right') {
+          // Place overlay to the left of the trigger and leave a small gap so it doesn't overlap
+          const horizontalGap = 8; // same as tooltip offset
+          left = triggerRect.left - overlayRect.width - 2 * horizontalGap; // account for tooltip offset + gap
+        } else {
+          // Otherwise clamp to viewport
+          left = viewportWidth - overlayRect.width;
+        }
+      }
+
+      // If centered and it overflows to the left, try to preserve the overlay's previous position
+      if (adjustment === 'center' && left < 0) left = 0;
+
+      // If it still overflows to the left, prefer to place to the right of the trigger when the
+      // desired adjustment was `left` (tooltip to the left). This avoids overlapping the trigger.
+      if (left < 0) {
+        if (adjustment === 'left') {
+          const horizontalGap = 8; // same as tooltip offset
+          left = triggerRect.right + 2 * horizontalGap;
+        } else {
+          // As a final fallback clamp to 0
+          left = 0;
+        }
+      }
 
       // Move the menu above the trigger if it overflows below
       if (top + overlayRect.height > viewportHeight) top = triggerRect.top - overlayRect.height;

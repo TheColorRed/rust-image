@@ -1,0 +1,16 @@
+# MewZoom V1 2X Super-Resolution Model
+#
+# Purpose: 2x upscale while removing blur, noise, and compression artifacts
+# Architecture: TrunkNet (5.3M parameters)
+
+name: MewZoom-V1-2X
+description: 2x upscale with MewZoom's V1 TrunkNet architecture
+source: https://huggingface.co/andrewdalpino/MewZoom-V1-2X
+sha256: 51bc995a0aa0d58717cef66d1ecad0de38272ac5fb87b842972d0f5081122c6e
+params:
+  scale_factor: 2.0
+  tile_size: 128
+  tile_overlap: 16
+
+# V1 accepts only the image tensor; it has no controllable enhancement input.
+control: null

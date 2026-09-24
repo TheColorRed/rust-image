@@ -5,7 +5,7 @@ use abra::prelude::*;
 const FILE: &str = "assets/skirt.png";
 
 pub fn main() {
-  let image = Image::new_from_path(FILE);
+  let image = Image::read(FILE).expect("Failed to load image");
   let mut mask = Mask::new_from_image(&image);
 
   let size = image.size();
@@ -15,10 +15,10 @@ pub fn main() {
   mask.draw_area(&heart.with_feather(30), Color::black(), (5, 200));
 
   // Save the mask image for debugging
-  mask.image().save("out/mask.png", None);
+  mask.image().write("out/mask.png", None).expect("Failed to save mask");
 
   // Apply the mask to the image and save the result
   let mut masked = image;
   mask.apply_to_image(&mut masked);
-  masked.save("out/masked.png", None);
+  masked.write("out/masked.png", None).expect("Failed to save masked image");
 }

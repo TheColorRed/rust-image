@@ -11,4 +11,4 @@ options = { workspace = true }
 adjustments = { workspace = true }
 
 [lib]
-crate-type = ["dylib", "rlib"]
+crate-type = ["rlib"]

@@ -4,7 +4,7 @@
 //! callback-based registry so an implementation in `packages/gpu` can register a
 //! provider at runtime and `process_image` can call it without importing `gpu`.
 use crate::image::apply_area::PreparedAreaMeta;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::sync::{Arc, RwLock};
 
 /// Minimal provider callbacks for GPU processing.
@@ -16,12 +16,12 @@ pub struct GpuCallback {
   pub process: Arc<dyn Fn(&PreparedAreaMeta, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>,
 }
 
-static GPU_PROVIDER: Lazy<RwLock<Option<Arc<GpuCallback>>>> = Lazy::new(|| RwLock::new(None));
+static GPU_PROVIDER: LazyLock<RwLock<Option<Arc<GpuCallback>>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Register a GPU provider callback. Replaces any previously registered provider.
-pub fn register_gpu_provider(provider: Arc<GpuCallback>) {
+pub fn register_gpu_provider(p_provider: Arc<GpuCallback>) {
   let mut w = GPU_PROVIDER.write().unwrap();
-  *w = Some(provider);
+  *w = Some(p_provider);
 }
 
 /// Clear the registered GPU provider (used in tests or to disable GPU at runtime).

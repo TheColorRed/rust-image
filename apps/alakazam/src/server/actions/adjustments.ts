@@ -7,7 +7,7 @@ import {
   setProjectPreview,
 } from '@/events/projects';
 import { getSelectionArea, getSelectionFeather } from '@/services/selection';
-import { LensBlurOptions } from '@alakazam/abra';
+import { type LensBlurOptions } from '@alakazam/core';
 import { ipcMain } from 'electron';
 
 export type AdjustmentTypes = 'autoColor' | 'autoTone' | 'invert' | 'grayscale';
@@ -121,12 +121,17 @@ export function previewAdjustment<T>(type: DialogFeatureType, options?: T) {
     // since the operation is performed on the image
     const adjustmentOptions = new abra.ApplyOptions();
     const selection = getSelectionArea(project.id);
-    const feather = getSelectionFeather(project.id);
-    const { x, y } = layer.position();
-    const adjustedSelection = selection.map(([sx, sy]) => [sx - x, sy - y] as [number, number]);
-    const area = abra.Area.fromPoints(adjustedSelection);
-    area.setFeather(feather);
-    adjustmentOptions.setArea([area]);
+
+    // Only set an area if a valid selection exists (at least 3 points to form a polygon)
+    // An empty or invalid selection means apply to the entire layer
+    if (selection.length >= 3) {
+      const feather = getSelectionFeather(project.id);
+      const { x, y } = layer.position();
+      const adjustedSelection = selection.map(([sx, sy]) => [sx - x, sy - y] as [number, number]);
+      const area = abra.Area.fromPoints(adjustedSelection);
+      area.setFeather(feather);
+      adjustmentOptions.setArea([area]);
+    }
 
     // Apply adjustments
     switch (type) {

@@ -1,9 +1,11 @@
 use std::fmt::Display;
 use std::ops::{Add, Div, Mul, Sub};
 
+use crate::{IntoNumber, LineSegment};
+
 use super::point::Point;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 /// A point in 2D space with floating-point coordinates.
 /// Used for precise geometric calculations before rasterization.
 pub struct PointF {
@@ -14,8 +16,8 @@ pub struct PointF {
 }
 
 impl Display for PointF {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "({}, {})", self.x, self.y)
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(p_f, "({}, {})", self.x, self.y)
   }
 }
 
@@ -25,81 +27,53 @@ impl Default for PointF {
   }
 }
 
-// Conversions from tuples
-impl From<(f32, f32)> for PointF {
-  fn from(p_tuple: (f32, f32)) -> Self {
+impl<A: IntoNumber, B: IntoNumber> From<(A, B)> for PointF {
+  fn from(p_tuple: (A, B)) -> Self {
     PointF {
-      x: p_tuple.0,
-      y: p_tuple.1,
-    }
-  }
-}
-
-impl From<(f64, f64)> for PointF {
-  fn from(p_tuple: (f64, f64)) -> Self {
-    PointF {
-      x: p_tuple.0 as f32,
-      y: p_tuple.1 as f32,
-    }
-  }
-}
-
-impl From<(i32, i32)> for PointF {
-  fn from(p_tuple: (i32, i32)) -> Self {
-    PointF {
-      x: p_tuple.0 as f32,
-      y: p_tuple.1 as f32,
-    }
-  }
-}
-
-impl From<(u32, u32)> for PointF {
-  fn from(p_tuple: (u32, u32)) -> Self {
-    PointF {
-      x: p_tuple.0 as f32,
-      y: p_tuple.1 as f32,
+      x: p_tuple.0.into::<f32>(),
+      y: p_tuple.1.into::<f32>(),
     }
   }
 }
 
 // Conversions to tuples
 impl From<PointF> for (f32, f32) {
-  fn from(p: PointF) -> Self {
-    (p.x, p.y)
+  fn from(p_p: PointF) -> Self {
+    (p_p.x, p_p.y)
   }
 }
 
 impl From<PointF> for (i32, i32) {
-  fn from(p: PointF) -> Self {
-    (p.x.round() as i32, p.y.round() as i32)
+  fn from(p_p: PointF) -> Self {
+    (p_p.x.round() as i32, p_p.y.round() as i32)
   }
 }
 
 impl From<PointF> for (u32, u32) {
-  fn from(p: PointF) -> Self {
-    (p.x.round() as u32, p.y.round() as u32)
+  fn from(p_p: PointF) -> Self {
+    (p_p.x.round() as u32, p_p.y.round() as u32)
   }
 }
 
 impl From<PointF> for (f64, f64) {
-  fn from(p: PointF) -> Self {
-    (p.x as f64, p.y as f64)
+  fn from(p_p: PointF) -> Self {
+    (p_p.x as f64, p_p.y as f64)
   }
 }
 
 // Conversions from/to Point (integer)
 impl From<Point> for PointF {
-  fn from(p: Point) -> Self {
+  fn from(p_p: Point) -> Self {
     PointF {
-      x: p.x() as f32,
-      y: p.y() as f32,
+      x: p_p.x() as f32,
+      y: p_p.y() as f32,
     }
   }
 }
 
 impl From<PointF> for Point {
-  fn from(p: PointF) -> Self {
-    Point::new(p.x.round() as i32, p.y.round() as i32)
+  fn from(p_p: PointF) -> Self {
+    Point::new(p_p.x.round() as i32, p_p.y.round() as i32)
   }
 }
 
@@ -161,10 +135,10 @@ impl Div<f32> for PointF {
 
 impl PointF {
   /// Creates a new point with the given coordinates.
-  pub fn new(p_x: impl Into<f64>, p_y: impl Into<f64>) -> PointF {
+  pub fn new(p_x: impl IntoNumber, p_y: impl IntoNumber) -> PointF {
     PointF {
-      x: p_x.into() as f32,
-      y: p_y.into() as f32,
+      x: p_x.into::<f32>(),
+      y: p_y.into::<f32>(),
     }
   }
 
@@ -219,5 +193,9 @@ impl PointF {
   /// Linear interpolation between this point and another.
   pub fn lerp(&self, p_other: PointF, p_t: f32) -> PointF {
     *self + (p_other - *self) * p_t
+  }
+
+  pub fn angle(&self, p_other: PointF) -> f32 {
+    LineSegment::new(*self, p_other).degrees() as f32
   }
 }

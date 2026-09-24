@@ -208,9 +208,7 @@ impl Area {
   pub fn transform_to_viewport(
     &self, p_viewbox: &ViewBox, p_viewport_width: f32, p_viewport_height: f32, p_aspect_ratio: AspectRatio,
   ) -> Path {
-    self
-      .path
-      .transform_to_viewport(p_viewbox, p_viewport_width, p_viewport_height, p_aspect_ratio)
+    self.path.transform_to_viewport(p_viewbox, p_viewport_width, p_viewport_height, p_aspect_ratio)
   }
   /// Convenience method to create a ViewBox from the area's bounds.
   pub fn to_viewbox(&self) -> ViewBox {
@@ -231,10 +229,7 @@ impl Area {
   /// - `p_aspect_ratio`: The aspect ratio policy to use.
   pub fn fit_with_aspect(&self, p_size: impl Into<Size>, p_aspect_ratio: AspectRatio) -> Area {
     let size = p_size.into();
-    self
-      .path
-      .fit_with_aspect(size.width, size.height, p_aspect_ratio)
-      .into()
+    self.path.fit_with_aspect(size.width, size.height, p_aspect_ratio).into()
   }
   /// Stretches this area's path non-uniformly to fill the viewport (no aspect ratio preservation).
   /// - `p_size`: The target size to stretch into.
@@ -250,8 +245,8 @@ impl Area {
 
 impl Display for Area {
   /// Displays the area as a string.
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "Area(start: {}, segments: {})", self.path.start(), self.path.segments().len())
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(p_f, "Area(start: {}, segments: {})", self.path.start(), self.path.segments().len())
   }
 }
 
@@ -271,14 +266,17 @@ impl Into<Path> for Area {
 }
 
 impl From<Path> for Area {
-  fn from(path: Path) -> Self {
-    Area { path, feather: 0 }
+  fn from(p_path: Path) -> Self {
+    Area {
+      path: p_path,
+      feather: 0,
+    }
   }
 }
 
 impl From<&Area> for Area {
-  fn from(area: &Area) -> Self {
-    area.clone()
+  fn from(p_area: &Area) -> Self {
+    p_area.clone()
   }
 }
 
@@ -303,9 +301,9 @@ impl Sub<Area> for Area {
 impl<T: Into<f32>> Sub<T> for Area {
   type Output = Area;
 
-  fn sub(self, rhs: T) -> Self::Output {
-    let rhs = rhs.into();
-    println!("Subtraction {}", rhs);
+  fn sub(self, p_rhs: T) -> Self::Output {
+    let p_rhs = p_rhs.into();
+    println!("Subtraction {}", p_rhs);
     Area {
       path: self.path.clone(),
       feather: self.feather,

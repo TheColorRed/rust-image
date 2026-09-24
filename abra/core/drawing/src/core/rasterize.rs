@@ -100,46 +100,46 @@ impl<'a> Rasterizer<'a> {
   /// rasterizer.rasterize(&mut image);
   /// ```
   pub fn rasterize(&self, p_image: &mut Image) {
-    let _start = std::time::Instant::now();
     let (width, height) = p_image.dimensions::<u32>();
-    let pixels = p_image
-      .colors()
-      .as_slice_mut()
-      .expect("Image colors must be contiguous");
+    if width == 0 || height == 0 {
+      return;
+    }
+
+    let pixels = p_image.colors().as_slice_mut().expect("Image colors must be contiguous");
     let total_samples = self.sample_grid.total_samples() as f32;
-    // Determine bounds from coverage (if available) so we only iterate pixels that may be affected.
     let (min_x_f, min_y_f, max_x_f, max_y_f) = match self.coverage.bounds() {
       Some((min_x, min_y, max_x, max_y)) => (min_x, min_y, max_x, max_y),
       None => (0.0, 0.0, width as f32, height as f32),
     };
-    let min_x = min_x_f.floor().max(0.0) as u32;
-    let min_y = min_y_f.floor().max(0.0) as u32;
-    let max_x = max_x_f.ceil().min(width as f32 - 1.0) as u32;
-    let max_y = max_y_f.ceil().min(height as f32 - 1.0) as u32;
+    if !min_x_f.is_finite() || !min_y_f.is_finite() || !max_x_f.is_finite() || !max_y_f.is_finite() {
+      return;
+    }
 
-    let width_usize = width as usize;
-    // Iterate by row in parallel. Each row is a slice of width_usize*4 bytes.
-    pixels
-      .par_chunks_mut(width_usize * 4)
-      .enumerate()
-      .for_each(|(row_idx, row)| {
-        let y = row_idx as u32;
-        if y < min_y || y > max_y {
-          return;
-        }
+    let min_x = min_x_f.floor().clamp(0.0, width as f32) as usize;
+    let min_y = min_y_f.floor().clamp(0.0, height as f32) as usize;
+    let max_x = max_x_f.ceil().clamp(0.0, width as f32) as usize;
+    let max_y = max_y_f.ceil().clamp(0.0, height as f32) as usize;
+    if min_x >= max_x || min_y >= max_y {
+      return;
+    }
 
-        for x in min_x..=max_x {
-          let px_idx = x as usize * 4;
-          let pixel = &mut row[px_idx..px_idx + 4];
+    let side_samples = self.sample_grid.side_samples;
+    let inv_side = self.sample_grid.inv_side();
+    let row_len = width as usize * 4;
 
-          // Accumulate coverage and color samples
-          let mut coverage_count = 0.0;
-          let mut r_sum = 0.0;
-          let mut g_sum = 0.0;
-          let mut b_sum = 0.0;
-          let mut a_sum = 0.0;
+    pixels.par_chunks_mut(row_len).enumerate().skip(min_y).take(max_y - min_y).for_each(|(y, row)| {
+      for x in min_x..max_x {
+        // Accumulate coverage and color samples
+        let mut coverage_count = 0.0;
+        let mut r_sum = 0.0;
+        let mut g_sum = 0.0;
+        let mut b_sum = 0.0;
+        let mut a_sum = 0.0;
 
-          for (sub_x, sub_y) in self.sample_grid.samples(x, y) {
+        for sample_y in 0..side_samples {
+          let sub_y = y as f32 + (sample_y as f32 + 0.5) * inv_side;
+          for sample_x in 0..side_samples {
+            let sub_x = x as f32 + (sample_x as f32 + 0.5) * inv_side;
             if self.coverage.contains(sub_x, sub_y) {
               coverage_count += 1.0;
               let (r, g, b, a) = self.shader.shade(sub_x, sub_y);
@@ -149,30 +149,32 @@ impl<'a> Rasterizer<'a> {
               a_sum += a as f32;
             }
           }
-
-          if coverage_count > 0.0 {
-            // Average the sampled colors
-            let avg_r = (r_sum / coverage_count) as u8;
-            let avg_g = (g_sum / coverage_count) as u8;
-            let avg_b = (b_sum / coverage_count) as u8;
-            let avg_a = (a_sum / coverage_count) as u8;
-
-            let coverage = coverage_count / total_samples;
-
-            // Composite with existing pixel
-            let (out_r, out_g, out_b, out_a) = self
-              .compositor
-              .composite(avg_r, avg_g, avg_b, avg_a, coverage, pixel[0], pixel[1], pixel[2], pixel[3]);
-
-            pixel[0] = out_r;
-            pixel[1] = out_g;
-            pixel[2] = out_b;
-            pixel[3] = out_a;
-          }
         }
-      });
 
-    // pixels mutated in-place on `p_image`, no need to call set_rgba
-    // DebugDrawing::Rasterization(start.elapsed()).log();
+        if coverage_count > 0.0 {
+          // Average the sampled colors
+          let avg_r = (r_sum / coverage_count) as u8;
+          let avg_g = (g_sum / coverage_count) as u8;
+          let avg_b = (b_sum / coverage_count) as u8;
+          let avg_a = (a_sum / coverage_count) as u8;
+
+          let coverage = coverage_count / total_samples;
+
+          let dst_idx = x * 4;
+          let dst_r = row[dst_idx];
+          let dst_g = row[dst_idx + 1];
+          let dst_b = row[dst_idx + 2];
+          let dst_a = row[dst_idx + 3];
+
+          let (out_r, out_g, out_b, out_a) =
+            self.compositor.composite(avg_r, avg_g, avg_b, avg_a, coverage, dst_r, dst_g, dst_b, dst_a);
+
+          row[dst_idx] = out_r;
+          row[dst_idx + 1] = out_g;
+          row[dst_idx + 2] = out_b;
+          row[dst_idx + 3] = out_a;
+        }
+      }
+    });
   }
 }

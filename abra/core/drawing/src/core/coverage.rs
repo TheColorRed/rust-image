@@ -60,6 +60,7 @@ pub trait CoverageMask: Sync {
 pub struct PolygonCoverage {
   /// Pre-flattened polygon vertices.
   polygon: Vec<(f32, f32)>,
+  bounds: Option<(f32, f32, f32, f32)>,
 }
 
 impl PolygonCoverage {
@@ -77,26 +78,18 @@ impl PolygonCoverage {
   /// let poly = PolygonCoverage::new(vec![PointF::new(0.0,0.0), PointF::new(20.0,0.0), PointF::new(20.0,20.0)]);
   /// ```
   pub fn new(p_points: Vec<PointF>) -> Self {
-    PolygonCoverage {
-      polygon: p_points.iter().map(|p| (p.x, p.y)).collect(),
+    let mut polygon = Vec::with_capacity(p_points.len());
+    let mut bounds: Option<(f32, f32, f32, f32)> = None;
+    for point in p_points {
+      bounds = Some(match bounds {
+        Some((min_x, min_y, max_x, max_y)) => {
+          (min_x.min(point.x), min_y.min(point.y), max_x.max(point.x), max_y.max(point.y))
+        }
+        None => (point.x, point.y, point.x, point.y),
+      });
+      polygon.push((point.x, point.y));
     }
-  }
-
-  fn compute_bounds(&self) -> (f32, f32, f32, f32) {
-    if self.polygon.is_empty() {
-      return (0.0, 0.0, 0.0, 0.0);
-    }
-    let mut min_x = self.polygon[0].0;
-    let mut min_y = self.polygon[0].1;
-    let mut max_x = self.polygon[0].0;
-    let mut max_y = self.polygon[0].1;
-    for &(x, y) in &self.polygon {
-      min_x = min_x.min(x);
-      min_y = min_y.min(y);
-      max_x = max_x.max(x);
-      max_y = max_y.max(y);
-    }
-    (min_x, min_y, max_x, max_y)
+    PolygonCoverage { polygon, bounds }
   }
 
   /// Ray-casting point-in-polygon test using the non-zero winding rule.
@@ -142,6 +135,6 @@ impl CoverageMask for PolygonCoverage {
     self.point_in_polygon((p_x, p_y))
   }
   fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
-    Some(self.compute_bounds())
+    self.bounds
   }
 }

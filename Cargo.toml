@@ -8,7 +8,7 @@ members = [
   "abra/plugins/*",
   "apps/examples/*",
   "apps/examples/ai/super-resolution",
-  "packages/node/*",
+  "packages/node/alakazam",
 ]
 exclude = ["apps/examples/ai"]
 default-members = [
@@ -27,23 +27,23 @@ opt-level = 1
 opt-level = 3
 
 [workspace.dependencies]
-rayon = "1.11.0"
-rand = "0.9.2"
+rayon = { version = "1.12.0" }
+rand = { version = "0.10.3" }
 tensorflow = { version = "0.21.0" }
-burn = { version = "0.19.1" }
-ndarray = { version = "0.17.1", features = ["rayon"] }
-wgpu = { version = "27.0.1" }
-pollster = { version = "0.4.0" }
-bytemuck = { version = "1.17" }
-futures = { version = "0.3.31" }
-anyhow = { version = "1.0" }
-saphyr = { version = "0.0.6" }
-ctor = { version = "0.6.1" }
-paste = { version = "1.0.14" }
-once_cell = { version = "1.21" }
-ort = { version = "2.0.0-rc.10" }
-napi = { version = "3.7.0", default-features = false, features = ["napi4"] }
-napi-derive = "3.4.0"
+burn = { version = "0.21.0" }
+ndarray = { version = "0.17.2", features = ["rayon"] }
+wgpu = { version = "30.0.1" }
+pollster = { version = "1.0.1" }
+bytemuck = { version = "1.25.2" }
+futures = { version = "0.3.34" }
+anyhow = { version = "1.0.104" }
+saphyr = { version = "0.1.0" }
+ctor = { version = "1.0.13" }
+paste = { version = "1.0.15" }
+ort = { version = "2.0.0-rc.13" }
+napi = { version = "3.12.7", default-features = false, features = ["napi4"] }
+napi-derive = { version = "3.6.8" }
+swash = { version = "0.2.10" }
 
 # Packages
 abra = { path = "./abra/abra" }
@@ -55,9 +55,11 @@ filters = { path = "./abra/core/filters" }
 mask = { path = "./abra/core/mask" }
 options = { path = "./abra/core/options" }
 primitives = { path = "./abra/core/primitives" }
+tools = { path = "./abra/core/tools" }
 
 gpu = { path = "./abra/core/gpu" }
 gpu_integration = { path = "./abra/core/gpu_integration" }
+typography = { path = "./abra/core/typography" }
 
 # Abra Plugins
 collage = { path = "./abra/plugins/collage" }
@@ -66,6 +68,9 @@ collage = { path = "./abra/plugins/collage" }
 abra-ai-core = { path = "./abra/ai/core" }
 abra-super-resolution = { path = "./abra/ai/super-resolution" }
 
+# Node Packages
+alakazam = { path = "./packages/node/alakazam" }
+
 [workspace.dependencies.uuid]
-version = "1.19.0"
+version = "1.24.0"
 features = ["v4"]

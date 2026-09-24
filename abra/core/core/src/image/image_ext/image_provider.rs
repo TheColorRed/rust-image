@@ -7,11 +7,11 @@ use primitives::Image as PrimitiveImage;
 /// an `Image` without introducing an additional circular dependency.
 pub trait WithImageMut {
   /// Execute the provided closure with a mutable borrow of the image.
-  fn with_image_mut<R>(&mut self, f: impl FnOnce(&mut PrimitiveImage) -> R) -> R;
+  fn with_image_mut<R>(&mut self, p_f: impl FnOnce(&mut PrimitiveImage) -> R) -> R;
 }
 
 impl WithImageMut for PrimitiveImage {
-  fn with_image_mut<R>(&mut self, f: impl FnOnce(&mut PrimitiveImage) -> R) -> R {
-    f(self)
+  fn with_image_mut<R>(&mut self, p_f: impl FnOnce(&mut PrimitiveImage) -> R) -> R {
+    p_f(self)
   }
 }

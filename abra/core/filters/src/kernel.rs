@@ -5,10 +5,10 @@ use rayon::prelude::*;
 /// A kernel is a matrix used for convolution operations in image processing.
 /// This function applies the given kernel to each pixel of the image,
 /// modifying the pixel values based on the kernel weights and neighboring pixels.
-pub fn apply_kernel(image: &mut Image, kernel: &[f32]) {
-  let (width, height) = image.dimensions::<u32>();
+pub fn apply_kernel(p_image: &mut Image, p_kernel: &[f32]) {
+  let (width, height) = p_image.dimensions::<u32>();
   let mut new_pixels = vec![0; (width * height * 4) as usize];
-  let old_pixels = image.rgba();
+  let old_pixels = p_image.rgba();
 
   new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
     let x = i as u32 % width;
@@ -22,7 +22,7 @@ pub fn apply_kernel(image: &mut Image, kernel: &[f32]) {
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
           let old_index = (ny as u32 * width + nx as u32) as usize;
           for c in 0..4 {
-            new_pixel[c] += old_pixels[old_index * 4 + c] as f32 * kernel[kernel_index];
+            new_pixel[c] += old_pixels[old_index * 4 + c] as f32 * p_kernel[kernel_index];
           }
         }
         kernel_index += 1;
@@ -33,5 +33,5 @@ pub fn apply_kernel(image: &mut Image, kernel: &[f32]) {
     }
   });
 
-  image.set_rgba_owned(new_pixels);
+  p_image.set_rgba_owned(new_pixels);
 }

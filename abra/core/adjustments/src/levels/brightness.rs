@@ -1,28 +1,46 @@
 use abra_core::{Image, ImageRef};
 
-use options::Options;
+use options::{Apply, Options};
 
 use crate::apply_adjustment;
 use abra_core::image::gpu_op::{GpuOp, clear_gpu_op, set_gpu_op};
 
 /// Adjust the brightness of an image.
-/// * `image` - The image.
-/// * `amount` - The amount in which to increase or decrease the brightness.
-fn apply_brightness(image: &mut Image, amount: f32) {
+/// * `p_image` - The image.
+/// * `p_amount` - The amount in which to increase or decrease the brightness.
+fn apply_brightness(p_image: &mut Image, p_amount: f32) {
   // amount = amount.clamp(-150f32, 150f32);
-  let _ = image * amount;
+  let _ = p_image * p_amount;
 }
 
-pub fn brightness<'a>(image: impl Into<ImageRef<'a>>, amount: i32, p_apply_options: impl Into<Options>) {
-  let mut image_ref: ImageRef = image.into();
-  let image = &mut image_ref as &mut Image;
-  // Convert integer amount to a multiplicative brightness factor for the shader.
-  // CPU path uses additive amount; here we convert to a scale factor where
-  // 0 means black and 1.0 means no change. A positive amount increases brightness.
-  let amount = ((amount as f32) / 100.0) + 1.0;
-  set_gpu_op(include_str!("./brightness.wgsl"), GpuOp::Brightness(amount));
-  apply_adjustment!(apply_brightness, image, p_apply_options, 0, amount);
-  clear_gpu_op();
+pub struct Brightness {
+  amount: i32,
+  options: Options,
+}
+
+impl Apply for Brightness {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    // Convert integer amount to a multiplicative brightness factor for the shader.
+    // CPU path uses additive amount; here we convert to a scale factor where
+    // 0 means black and 1.0 means no change. A positive amount increases brightness.
+    let amount = ((self.amount as f32) / 100.0) + 1.0;
+    set_gpu_op(include_str!("./brightness.wgsl"), GpuOp::Brightness(amount));
+    apply_adjustment!(apply_brightness, image, self.options.as_ref(), 0, amount);
+    clear_gpu_op();
+  }
+}
+
+pub fn brightness(p_amount: i32) -> Brightness {
+  Brightness {
+    amount: p_amount,
+    options: None,
+  }
 }
 
 #[cfg(test)]
@@ -40,7 +58,7 @@ mod tests {
 
     let mut img = Image::new_from_color(8, 8, Color::from_rgba(100, 0, 0, 255));
     // Apply brightness +50
-    brightness(&mut img, 50, None);
+    brightness(50).apply(&mut img);
     // Expect red component increased (since factor = 1.5)
     let r = img.rgba()[0];
     assert!(r > 100);

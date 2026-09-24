@@ -3,18 +3,18 @@ use abra_core::{
   image::gpu_op::{GpuOp, clear_gpu_op, set_gpu_op},
 };
 
-use options::Options;
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
 use crate::apply_adjustment;
 
 /// Adjusts the contrast of an image.
-fn apply_contrast(image: &mut Image, amount: impl Into<f64>) {
-  let amount = amount.into().clamp(-100.0, 100.0) as f32;
+fn apply_contrast(p_image: &mut Image, p_amount: impl Into<f64>) {
+  let p_amount = p_amount.into().clamp(-100.0, 100.0) as f32;
   // Use floating point math for the contrast factor to avoid integer truncation.
-  let factor = (259.0 * (amount + 255.0)) / (255.0 * (259.0 - amount));
-  let colors = image.colors();
+  let factor = (259.0 * (p_amount + 255.0)) / (255.0 * (259.0 - p_amount));
+  let colors = p_image.colors();
   let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
   slice.par_chunks_exact_mut(4096).for_each(|chunk| {
     for i in (0..chunk.len()).step_by(4) {
@@ -26,13 +26,30 @@ fn apply_contrast(image: &mut Image, amount: impl Into<f64>) {
   });
 }
 
-pub fn contrast<'a>(image: impl Into<ImageRef<'a>>, amount: impl Into<f64>, p_apply_options: impl Into<Options>) {
-  let mut image_ref: ImageRef = image.into();
-  let image = &mut image_ref as &mut Image;
-  let amount = amount.into();
-  set_gpu_op(include_str!("./contrast.wgsl"), GpuOp::Contrast(amount as f32));
-  apply_adjustment!(apply_contrast, image, p_apply_options, 1, amount);
-  clear_gpu_op();
+pub struct Contrast {
+  amount: f64,
+  options: Options,
+}
+
+impl Apply for Contrast {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    set_gpu_op(include_str!("./contrast.wgsl"), GpuOp::Contrast(self.amount as f32));
+    apply_adjustment!(apply_contrast, image, self.options.as_ref(), 1, self.amount);
+    clear_gpu_op();
+  }
+}
+
+pub fn contrast(p_amount: impl Into<f64>) -> Contrast {
+  Contrast {
+    amount: p_amount.into(),
+    options: None,
+  }
 }
 
 #[cfg(test)]

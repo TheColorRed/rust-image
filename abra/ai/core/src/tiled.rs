@@ -31,29 +31,29 @@ impl Default for TileConfig {
 
 impl TileConfig {
   /// Creates a new tile config.
-  pub fn new(tile_size: u32, overlap: u32) -> Self {
+  pub fn new(p_tile_size: u32, p_overlap: u32) -> Self {
     Self {
-      tile_size,
-      overlap,
+      tile_size: p_tile_size,
+      overlap: p_overlap,
       scale_factor: 1.0,
     }
   }
 
   /// Sets the tile size.
-  pub fn with_tile_size(mut self, size: u32) -> Self {
-    self.tile_size = size;
+  pub fn with_tile_size(mut self, p_size: u32) -> Self {
+    self.tile_size = p_size;
     self
   }
 
   /// Sets the overlap.
-  pub fn with_overlap(mut self, overlap: u32) -> Self {
-    self.overlap = overlap;
+  pub fn with_overlap(mut self, p_overlap: u32) -> Self {
+    self.overlap = p_overlap;
     self
   }
 
   /// Sets the scale factor.
-  pub fn with_scale_factor(mut self, scale: f32) -> Self {
-    self.scale_factor = scale;
+  pub fn with_scale_factor(mut self, p_scale: f32) -> Self {
+    self.scale_factor = p_scale;
     self
   }
 
@@ -83,12 +83,12 @@ pub struct TileInfo {
 /// Generates tile information for processing an image.
 ///
 /// Returns an iterator of `TileInfo` structs describing each tile's position.
-pub fn generate_tiles(image_width: u32, image_height: u32, config: &TileConfig) -> Vec<TileInfo> {
-  let tile_size = config.tile_size;
-  let stride = config.stride();
+pub fn generate_tiles(p_image_width: u32, p_image_height: u32, p_config: &TileConfig) -> Vec<TileInfo> {
+  let tile_size = p_config.tile_size;
+  let stride = p_config.stride();
 
-  let tiles_x = ((image_width + stride - 1) / stride).max(1);
-  let tiles_y = ((image_height + stride - 1) / stride).max(1);
+  let tiles_x = ((p_image_width + stride - 1) / stride).max(1);
+  let tiles_y = ((p_image_height + stride - 1) / stride).max(1);
   let total = tiles_x * tiles_y;
 
   let mut tiles = Vec::with_capacity(total as usize);
@@ -100,15 +100,15 @@ pub fn generate_tiles(image_width: u32, image_height: u32, config: &TileConfig) 
       let mut y = ty * stride;
 
       // Align last tile to image edge to avoid small tiles
-      if x + tile_size > image_width && image_width > tile_size {
-        x = image_width - tile_size;
+      if x + tile_size > p_image_width && p_image_width > tile_size {
+        x = p_image_width - tile_size;
       }
-      if y + tile_size > image_height && image_height > tile_size {
-        y = image_height - tile_size;
+      if y + tile_size > p_image_height && p_image_height > tile_size {
+        y = p_image_height - tile_size;
       }
 
-      let width = tile_size.min(image_width - x);
-      let height = tile_size.min(image_height - y);
+      let width = tile_size.min(p_image_width - x);
+      let height = tile_size.min(p_image_height - y);
 
       tiles.push(TileInfo {
         x,
@@ -140,11 +140,11 @@ pub struct TileAccumulator {
 
 impl TileAccumulator {
   /// Creates a new accumulator for the given output dimensions.
-  pub fn new(width: u32, height: u32) -> Self {
-    let num_pixels = (width * height) as usize;
+  pub fn new(p_width: u32, p_height: u32) -> Self {
+    let num_pixels = (p_width * p_height) as usize;
     Self {
-      width,
-      height,
+      width: p_width,
+      height: p_height,
       sum_r: vec![0.0; num_pixels],
       sum_g: vec![0.0; num_pixels],
       sum_b: vec![0.0; num_pixels],
@@ -156,27 +156,27 @@ impl TileAccumulator {
   ///
   /// # Arguments
   ///
-  /// - `x`: Destination X position
-  /// - `y`: Destination Y position
-  /// - `tile_width`: Width of the tile output
-  /// - `tile_height`: Height of the tile output
-  /// - `data`: Float data in NCHW layout [R..., G..., B...]
-  pub fn accumulate(&mut self, x: u32, y: u32, tile_width: u32, tile_height: u32, data: &[f32]) {
-    let hw = (tile_width * tile_height) as usize;
+  /// - `p_x`: Destination X position
+  /// - `p_y`: Destination Y position
+  /// - `p_tile_width`: Width of the tile output
+  /// - `p_tile_height`: Height of the tile output
+  /// - `p_data`: Float data in NCHW layout [R..., G..., B...]
+  pub fn accumulate(&mut self, p_x: u32, p_y: u32, p_tile_width: u32, p_tile_height: u32, p_data: &[f32]) {
+    let hw = (p_tile_width * p_tile_height) as usize;
 
-    for py in 0..tile_height {
-      for px in 0..tile_width {
-        let dest_x = x + px;
-        let dest_y = y + py;
+    for py in 0..p_tile_height {
+      for px in 0..p_tile_width {
+        let dest_x = p_x + px;
+        let dest_y = p_y + py;
 
         if dest_x < self.width && dest_y < self.height {
           let dest_idx = (dest_y * self.width + dest_x) as usize;
-          let src_idx = (py * tile_width + px) as usize;
+          let src_idx = (py * p_tile_width + px) as usize;
 
           // NCHW layout: R at [0..hw], G at [hw..2*hw], B at [2*hw..3*hw]
-          self.sum_r[dest_idx] += data.get(src_idx).copied().unwrap_or(0.0);
-          self.sum_g[dest_idx] += data.get(hw + src_idx).copied().unwrap_or(0.0);
-          self.sum_b[dest_idx] += data.get(2 * hw + src_idx).copied().unwrap_or(0.0);
+          self.sum_r[dest_idx] += p_data.get(src_idx).copied().unwrap_or(0.0);
+          self.sum_g[dest_idx] += p_data.get(hw + src_idx).copied().unwrap_or(0.0);
+          self.sum_b[dest_idx] += p_data.get(2 * hw + src_idx).copied().unwrap_or(0.0);
           self.weights[dest_idx] += 1.0;
         }
       }
@@ -212,46 +212,46 @@ impl TileAccumulator {
 
 impl TileAccumulator {
   /// Merge another accumulator into this one (element-wise).
-  pub fn merge(&mut self, other: TileAccumulator) {
-    debug_assert_eq!(self.width, other.width);
-    debug_assert_eq!(self.height, other.height);
+  pub fn merge(&mut self, p_other: TileAccumulator) {
+    debug_assert_eq!(self.width, p_other.width);
+    debug_assert_eq!(self.height, p_other.height);
     for i in 0..self.sum_r.len() {
-      self.sum_r[i] += other.sum_r[i];
-      self.sum_g[i] += other.sum_g[i];
-      self.sum_b[i] += other.sum_b[i];
-      self.weights[i] += other.weights[i];
+      self.sum_r[i] += p_other.sum_r[i];
+      self.sum_g[i] += p_other.sum_g[i];
+      self.sum_b[i] += p_other.sum_b[i];
+      self.weights[i] += p_other.weights[i];
     }
   }
 }
 
-/// Process tiles using the provided `process_tile` callback.
+/// Process tiles using the provided `p_process_tile` callback.
 ///
-/// The `process_tile` callback is given the `TileInfo` and a mutable scratch
+/// The `p_process_tile` callback is given the `TileInfo` and a mutable scratch
 /// buffer (NCHW float layout) sized to hold the tile's output and should fill
 /// the buffer with R,G,B channels packed as `[R..., G..., B...]`.
 ///
 /// The implementation uses Rayon for parallel processing when the `parallel`
 /// feature is enabled and falls back to a sequential implementation otherwise.
-pub fn process_tiles<F>(image: &Image, config: &TileConfig, process_tile: F) -> Image
+pub fn process_tiles<F>(p_image: &Image, p_config: &TileConfig, p_process_tile: F) -> Image
 where
   F: Fn(&TileInfo, &mut [f32]) + Sync + Send,
 {
-  let (width, height) = image.dimensions::<u32>();
-  let tiles = generate_tiles(width, height, config);
-  let out_width = ((width as f32) * config.scale_factor).round() as u32;
-  let out_height = ((height as f32) * config.scale_factor).round() as u32;
+  let (width, height) = p_image.dimensions::<u32>();
+  let tiles = generate_tiles(width, height, p_config);
+  let out_width = ((width as f32) * p_config.scale_factor).round() as u32;
+  let out_height = ((height as f32) * p_config.scale_factor).round() as u32;
 
   let accs = tiles
     .par_iter()
     .map(|tile| {
-      let tile_out_w = ((tile.width as f32) * config.scale_factor).round() as u32;
-      let tile_out_h = ((tile.height as f32) * config.scale_factor).round() as u32;
+      let tile_out_w = ((tile.width as f32) * p_config.scale_factor).round() as u32;
+      let tile_out_h = ((tile.height as f32) * p_config.scale_factor).round() as u32;
       let buf_len = (3 * tile_out_w * tile_out_h) as usize;
       let mut buf = vec![0f32; buf_len];
-      process_tile(tile, &mut buf);
+      p_process_tile(tile, &mut buf);
       let mut local_acc = TileAccumulator::new(out_width, out_height);
-      let dest_x = ((tile.x as f32) * config.scale_factor).round() as u32;
-      let dest_y = ((tile.y as f32) * config.scale_factor).round() as u32;
+      let dest_x = ((tile.x as f32) * p_config.scale_factor).round() as u32;
+      let dest_y = ((tile.y as f32) * p_config.scale_factor).round() as u32;
       local_acc.accumulate(dest_x, dest_y, tile_out_w, tile_out_h, &buf);
       local_acc
     })
@@ -268,13 +268,13 @@ where
 mod tests {
   use super::*;
 
-  fn dummy_process(tile: &TileInfo, buf: &mut [f32]) {
+  fn dummy_process(p_tile: &TileInfo, p_buf: &mut [f32]) {
     // fill with gradient based on tile index to make outputs deterministic
-    let hw = (buf.len() / 3) as usize;
+    let hw = (p_buf.len() / 3) as usize;
     for i in 0..hw {
-      buf[i] = (tile.index as f32) / (tile.total as f32); // R
-      buf[hw + i] = 0.0; // G
-      buf[2 * hw + i] = 0.0; // B
+      p_buf[i] = (p_tile.index as f32) / (p_tile.total as f32); // R
+      p_buf[hw + i] = 0.0; // G
+      p_buf[2 * hw + i] = 0.0; // B
     }
   }
 

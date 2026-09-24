@@ -65,12 +65,12 @@ pub trait Shader: Sync {
 /// ```ignore
 /// let shader = shader_from_fill(&Fill::Solid(Color::from_rgba(255,255,255,255)));
 /// ```
-pub fn shader_from_fill(p_fill: impl Into<Fill>) -> Box<dyn Shader + Send + Sync> {
+pub fn shader_from_fill<'a, F: Into<Fill<'a>>>(p_fill: F) -> Box<dyn Shader + Send + Sync> {
   match p_fill.into() {
-    Fill::Solid(color) => Box::new(SolidShader::new(color)),
+    Fill::Solid(color) => Box::new(SolidShader::new(color.into_owned())),
     Fill::Gradient(gradient) => {
       let path = gradient.direction().unwrap_or_else(|| Path::new());
-      Box::new(LinearGradientShader::new(path, gradient.clone()))
+      Box::new(LinearGradientShader::new(path, gradient.into_owned()))
     }
     Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
   }
@@ -79,20 +79,48 @@ pub fn shader_from_fill(p_fill: impl Into<Fill>) -> Box<dyn Shader + Send + Sync
 /// Creates a shader from a Fill variant with the provided fallback path to be used when
 /// the fill has no explicit gradient direction. The fallback path is only used when
 /// the gradient has no direction.
-pub fn shader_from_fill_with_path(
-  p_fill: impl Into<Fill>, fallback_path: Option<Path>,
+pub fn shader_from_fill_with_path<'a, F: Into<Fill<'a>>>(
+  p_fill: F, p_fallback_path: Option<Path>,
 ) -> Box<dyn Shader + Send + Sync> {
   match p_fill.into() {
-    Fill::Solid(color) => Box::new(SolidShader::new(color)),
+    Fill::Solid(color) => Box::new(SolidShader::new(color.into_owned())),
     Fill::Gradient(gradient) => {
-      let path = gradient
-        .direction()
-        .unwrap_or_else(|| fallback_path.unwrap_or_else(|| Path::new()));
-      let gradient_clone = gradient.clone();
+      let path = match gradient.direction() {
+        Some(path) => path,
+        None => p_fallback_path
+          .clone()
+          .map(|path| {
+            let (min_x, min_y, max_x, _) = path.bounds();
+            Path::line((min_x, min_y), (max_x, min_y))
+          })
+          .unwrap_or_else(Path::new),
+      };
+      let path = resolve_angle_path(path, p_fallback_path.as_ref());
+      let gradient_clone = gradient.clone().into_owned().with_direction(path.clone());
       // Ensure gradient has a direction so gradient::get_color uses path parameterization
-      gradient_clone.with_direction(path.clone());
-      Box::new(LinearGradientShader::new(path, gradient.clone()))
+      Box::new(LinearGradientShader::new(path, gradient_clone))
     }
     Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
   }
+}
+
+fn resolve_angle_path(p_path: Path, p_fallback_path: Option<&Path>) -> Path {
+  let Some(angle_degrees) = p_path.angle_degrees() else {
+    return p_path;
+  };
+  let Some(bounds_path) = p_fallback_path else {
+    return p_path;
+  };
+
+  let (min_x, min_y, max_x, max_y) = bounds_path.bounds();
+  let angle = angle_degrees.to_radians();
+  let direction = (angle.cos(), angle.sin());
+  let center = ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+  let length = (max_x - min_x).abs() * direction.0.abs() + (max_y - min_y).abs() * direction.1.abs();
+  let half_length = length * 0.5;
+
+  Path::line(
+    (center.0 - direction.0 * half_length, center.1 - direction.1 * half_length),
+    (center.0 + direction.0 * half_length, center.1 + direction.1 * half_length),
+  )
 }

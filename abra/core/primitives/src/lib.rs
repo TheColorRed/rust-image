@@ -4,7 +4,9 @@
 pub mod channels;
 pub mod color;
 pub mod image;
+pub mod resolution;
 
 pub use self::channels::Channels;
 pub use self::color::Color;
 pub use self::image::Image;
+pub use self::resolution::Resolution;

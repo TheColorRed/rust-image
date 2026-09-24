@@ -30,7 +30,7 @@ export interface SelectProps<T extends SelectValue = SelectValue> {
   className?: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg';
-  onSelect?: (value: T) => void;
+  onChange?: (value: T) => void;
 }
 
 export interface SelectContextValue<T = unknown> {
@@ -59,7 +59,7 @@ export function Select<T extends string | number>({
   children,
   placeholder,
   size = 'md',
-  onSelect,
+  onChange,
 }: SelectProps<T>) {
   const wrapperRef = useRef<HTMLButtonElement>(null);
   const [value, setValue] = useState<T | undefined>(propValue);
@@ -113,9 +113,9 @@ export function Select<T extends string | number>({
     (v: T) => {
       // If uncontrolled, update local state. If controlled, parent owns the value.
       if (!isControlled) setValue(v);
-      onSelect?.(v);
+      onChange?.(v);
     },
-    [isControlled, onSelect],
+    [isControlled, onChange],
   );
 
   useEffect(() => {

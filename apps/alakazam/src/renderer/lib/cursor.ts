@@ -6,3 +6,13 @@ export function toSvgCursor(def: IconDefinition) {
         <path d="${data}" stroke="white" stroke-width="15" stroke-linejoin="round" stroke-linecap="round" />
       </svg>`)}`;
 }
+
+export function toPngCursor(data: ImageData) {
+  const imageData = new ImageData(new Uint8ClampedArray(data.data), data.width, data.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+}

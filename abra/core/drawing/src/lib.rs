@@ -19,6 +19,7 @@ mod core {
   pub mod painter;
   pub mod rasterize;
   pub mod sampling;
+  pub mod sdf;
   pub mod shader;
 }
 mod shaders {
@@ -34,6 +35,7 @@ mod brush {
   pub mod brush;
 }
 mod fill;
+mod performance;
 
 pub use brush::brush::Brush;
 pub use core::compositor::{Compositor, SourceOverCompositor};
@@ -41,5 +43,7 @@ pub use core::coverage::{CoverageMask, PolygonCoverage};
 pub use core::painter::*;
 pub use core::rasterize::Rasterizer;
 pub use core::sampling::SampleGrid;
+pub use core::sdf::{draw_area_fill, draw_area_stroke, draw_ellipse_stroke};
 pub use core::shader::{Shader, shader_from_fill, shader_from_fill_with_path};
-pub use fill::fill;
+pub use fill::*;
+pub use performance::DrawingAlgorithm;

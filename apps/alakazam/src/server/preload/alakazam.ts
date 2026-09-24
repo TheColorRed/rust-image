@@ -1,8 +1,8 @@
 import { type AddLayerOptions } from '@/events/projects';
 import { OpenDialogProperties, SaveDialogProperties } from '@/native-dialogs';
-import { LayerMetadata, ProjectMetadata } from '@alakazam/abra';
 import { contextBridge, ipcRenderer } from 'electron';
 import { auditTime, Subject } from 'rxjs';
+import { LayerMetadata, ProjectMetadata } from '../../../../../packages/node/alakazam';
 
 export type DialogConsoleMessage = {
   message: string;
@@ -85,6 +85,13 @@ export interface AlakazamApi {
      * @returns The ImageData of the layer's composite.
      */
     getLayerComposite: (projectId: string, layerId: string, maxSize: number) => Promise<ImageData>;
+    /**
+     * Gets a transparent checkerboard image of the specified size.
+     * @param width The width of the image.
+     * @param height The height of the image.
+     * @returns An ImageData representing a transparent checkerboard pattern.
+     */
+    getTransparentImage: (width: number, height: number) => Promise<ImageData>;
   };
 
   projects: {
@@ -269,6 +276,21 @@ export interface AlakazamApi {
      * @param area The area within the layers to get pixel data from, defined as [x, y, width, height].
      */
     getPixels: (projectId: string, area: [number, number, number, number]) => Promise<ImageData>;
+    /**
+     * Samples the color at the specified canvas coordinates using the given sampling mode.
+     * @param x The x coordinate on the canvas.
+     * @param y The y coordinate on the canvas.
+     * @param mode The sampling mode (e.g., 'point', '3x3', '5x5').
+     * @param style The sampling style ('all' for all layers, 'current-layer' for the current layer only).
+     */
+    sampleColor: (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      style: 'all' | 'current-layer',
+      layerId?: string,
+    ) => Promise<string>;
   };
 
   transform: {
@@ -325,6 +347,7 @@ contextBridge.exposeInMainWorld('alakazam', {
       ipcRenderer.invoke('project-get-layer-image', { projectId, layerId, size }),
     getLayerComposite: (projectId, layerId, maxSize) =>
       ipcRenderer.invoke('project-get-layer-composite', { projectId, layerId, maxSize }),
+    getTransparentImage: (width, height) => ipcRenderer.invoke('get-transparent-image', { width, height }),
   },
   developer: {
     isDev: () => ipcRenderer.invoke('is-dev'),
@@ -388,6 +411,8 @@ contextBridge.exposeInMainWorld('alakazam', {
   imageData: {
     getPixels: (projectId, area: [number, number, number, number]) =>
       ipcRenderer.invoke('image-data-get-pixels', { projectId, area }),
+    sampleColor: (x, y, width, height, style, layerId) =>
+      ipcRenderer.invoke('image-data-sample-color', { x, y, width, height, style, layerId }),
   },
   transform: {
     resizeLayer: (projectId: string, layerId: string, size: { width: number; height: number }) =>

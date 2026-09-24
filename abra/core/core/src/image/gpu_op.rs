@@ -26,9 +26,9 @@ thread_local! {
 }
 
 /// Set the current GPU operation (used by adjustments/filters)
-pub fn set_gpu_op(shader: impl Into<String>, op: GpuOp) {
-  CURRENT_GPU_SHADER.with(|c| c.set(Some(shader.into())));
-  CURRENT_GPU_OP.with(|c| c.set(op));
+pub fn set_gpu_op(p_shader: impl Into<String>, p_op: GpuOp) {
+  CURRENT_GPU_SHADER.with(|c| c.set(Some(p_shader.into())));
+  CURRENT_GPU_OP.with(|c| c.set(p_op));
 }
 
 /// Clear the current GPU operation (set to None)

@@ -5,15 +5,30 @@
   "version": "0.2.0",
   "configurations": [
     {
-        "type": "cppvsdbg",
-        "request": "launch",
-        "name": "Debug",
-        "program": "${workspaceFolder}/target/debug/${workspaceRootFolderName}.exe",
-        "args": [],
-        "cwd": "${workspaceRoot}",
-        "sourceLanguages": [
-            "rust"
-        ]
+      "type": "cppvsdbg",
+      "request": "launch",
+      "name": "Debug",
+      "program": "${workspaceFolder}/target/debug/${workspaceRootFolderName}.exe",
+      "args": [],
+      "cwd": "${workspaceRoot}",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Attach to Hermes application",
+      "type": "reactnativedirect",
+      "request": "attach",
+      "cwd": "${workspaceFolder}/apps/mobile",
+      "projectRoot": "${workspaceFolder}/apps/mobile",
+      "sourceMaps": true
+    },
+    {
+      "name": "Debug Android Hermes",
+      "type": "reactnativedirect",
+      "request": "launch",
+      "platform": "android",
+      "cwd": "${workspaceFolder}/apps/mobile",
+      "projectRoot": "${workspaceFolder}/apps/mobile",
+      "sourceMaps": true
     }
   ]
 }

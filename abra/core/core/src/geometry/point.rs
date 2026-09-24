@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::ops::{Add, Mul};
 
+use crate::IntoNumber;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// A point in a 2D space.
 pub struct Point {
@@ -11,8 +13,17 @@ pub struct Point {
 }
 
 impl Display for Point {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "({}, {})", self.x, self.y)
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(p_f, "({}, {})", self.x, self.y)
+  }
+}
+
+impl<A: IntoNumber, B: IntoNumber> From<(A, B)> for Point {
+  fn from(p_tuple: (A, B)) -> Self {
+    Point {
+      x: p_tuple.0.into::<i32>(),
+      y: p_tuple.1.into::<i32>(),
+    }
   }
 }
 
@@ -28,40 +39,28 @@ impl Into<(f32, f32)> for Point {
   }
 }
 
-impl From<(i32, i32)> for Point {
-  fn from(coords: (i32, i32)) -> Point {
-    Point::new(coords.0, coords.1)
-  }
-}
-
-impl From<(f32, f32)> for Point {
-  fn from(coords: (f32, f32)) -> Point {
-    Point::new(coords.0 as i32, coords.1 as i32)
-  }
-}
-
 /// Multiply a point by a scalar
 impl Mul<f32> for Point {
   type Output = Point;
 
-  fn mul(self, rhs: f32) -> Point {
-    Point::new((self.x() as f32 * rhs) as i32, (self.y() as f32 * rhs) as i32)
+  fn mul(self, p_rhs: f32) -> Point {
+    Point::new((self.x() as f32 * p_rhs) as i32, (self.y() as f32 * p_rhs) as i32)
   }
 }
 
 impl Add<Point> for Point {
   type Output = Point;
 
-  fn add(self, rhs: Point) -> Point {
-    Point::new(self.x() + rhs.x(), self.y() + rhs.y())
+  fn add(self, p_rhs: Point) -> Point {
+    Point::new(self.x() + p_rhs.x(), self.y() + p_rhs.y())
   }
 }
 
 impl Add<i32> for Point {
   type Output = Point;
 
-  fn add(self, rhs: i32) -> Point {
-    Point::new(self.x() + rhs, self.y() + rhs)
+  fn add(self, p_rhs: i32) -> Point {
+    Point::new(self.x() + p_rhs, self.y() + p_rhs)
   }
 }
 
@@ -69,19 +68,19 @@ impl Add<i32> for Point {
 impl Mul<Point> for Point {
   type Output = Point;
 
-  fn mul(self, rhs: Point) -> Point {
-    Point::new(self.x() * rhs.x(), self.y() * rhs.y())
+  fn mul(self, p_rhs: Point) -> Point {
+    Point::new(self.x() * p_rhs.x(), self.y() * p_rhs.y())
   }
 }
 
 impl Point {
   /// Creates a new point with the given coordinates.
-  pub fn new(x: i32, y: i32) -> Point {
-    Point { x, y }
+  pub fn new(p_x: i32, p_y: i32) -> Point {
+    Point { x: p_x, y: p_y }
   }
   /// Creates an array of points from a vector of points or tuples.
-  pub fn array(points: Vec<impl Into<Point>>) -> Vec<Point> {
-    points.into_iter().map(|p| p.into()).collect()
+  pub fn array(p_points: Vec<impl Into<Point>>) -> Vec<Point> {
+    p_points.into_iter().map(|p| p.into()).collect()
   }
 
   /// Creates a new point at the origin (0, 0).

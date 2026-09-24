@@ -6,7 +6,8 @@
 //! # Available Models
 //!
 //! - **SCUNet-GAN**: 1x restoration (removes artifacts, noise, blur)
-//! - **UltraZoom-2X-Ctrl**: 2x upscale with controllable enhancement
+//! - **MewZoom-V0-2X-Ctrl**: 2x upscale with controllable enhancement
+//! - **MewZoom-V1-2X**: 2x upscale with the current MewZoom architecture
 //!
 //! # Usage
 //!
@@ -17,11 +18,11 @@
 //! use abra_super_resolution::prelude::*;
 //!
 //! // Load image
-//! let image = Image::new_from_path("input.jpg");
+//! let image = Image::read("input.jpg")?;
 //! // Load and run super resolution model
-//! let output = SuperResolution::load("UltraZoom-2X-Ctrl")?.process(&image);
+//! let output = SuperResolution::load("MewZoom-V1-2X")?.process(&image);
 //! // Save output
-//! output.save("output.png", None);
+//! output.write("output.png", None)?;
 //! ```
 //!
 //! # Adding New Models
@@ -30,7 +31,7 @@
 //! 2. Create a `.yml` manifest with the same base name
 //! 3. The model will be automatically discovered
 //!
-//! See `models/UltraZoom-2X-Ctrl.yml` for an example manifest format.
+//! See `models/MewZoom-V1-2X.yml` for an example manifest format.
 
 use abra_ai_core::{discover_models, prelude::*};
 use abra_core::Image;
@@ -50,16 +51,14 @@ impl AiModel for SuperResolution {
   ///
   /// # Arguments
   ///
-  /// - `p_name`: The name of the model to load (e.g., "UltraZoom-2X-Ctrl").
+  /// - `p_name`: The name of the model to load (e.g., "MewZoom-V1-2X").
   fn load(p_name: impl AsRef<str>) -> Self {
     // Find models in the super-resolution package.
     let models = discover_models("abra/ai/super-resolution/models")
       .expect("Could not find associated models for Super Resolution");
 
     // Load the model by name.
-    let model = ImageModel::new(models)
-      .load_by_name(&p_name)
-      .expect("Failed to load the model for Super Resolution");
+    let model = ImageModel::new(models).load_by_name(&p_name).expect("Failed to load the model for Super Resolution");
     Self { model }
   }
 }
@@ -71,10 +70,7 @@ impl AiProcessModel for SuperResolution {
   ///
   /// - `p_image`: The input image to be processed.
   fn process(&self, p_image: &Image) -> Image {
-    self
-      .model
-      .process(p_image)
-      .expect("Image processing failed for Super Resolution")
+    self.model.process(p_image).expect("Image processing failed for Super Resolution")
   }
 }
 
@@ -86,9 +82,6 @@ impl AiProcessModelWithControl for SuperResolution {
   /// - `p_image`: The input image to be processed.
   /// - `p_ctrl`: Control parameters.
   fn process_with_control(&self, p_image: &Image, p_ctrl: &ControlParams) -> Image {
-    self
-      .model
-      .process_with_control(p_image, p_ctrl)
-      .expect("Image processing with control failed for Super Resolution")
+    self.model.process_with_control(p_image, p_ctrl).expect("Image processing with control failed for Super Resolution")
   }
 }

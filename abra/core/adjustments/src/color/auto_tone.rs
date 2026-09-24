@@ -1,5 +1,5 @@
-use abra_core::{Histogram, Image, image::image_ext::ImageRef};
-use options::Options;
+use abra_core::{Histogram, HistogramChannel, Image, image::image_ext::ImageRef};
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
@@ -17,9 +17,9 @@ fn apply_auto_tone(p_image: &mut Image) {
   let hist = Histogram::from_image_skip_transparent(p_image);
 
   // Build per-channel levels LUTs using histogram helpers
-  let lut_r = hist.red_levels_lut(clip_fraction);
-  let lut_g = hist.green_levels_lut(clip_fraction);
-  let lut_b = hist.blue_levels_lut(clip_fraction);
+  let lut_r = hist.levels_lut(HistogramChannel::Red, clip_fraction);
+  let lut_g = hist.levels_lut(HistogramChannel::Green, clip_fraction);
+  let lut_b = hist.levels_lut(HistogramChannel::Blue, clip_fraction);
 
   // Apply the per-channel LUT transform in parallel
   out.par_chunks_mut(4).enumerate().for_each(|(idx, dst_px)| {
@@ -44,10 +44,25 @@ fn apply_auto_tone(p_image: &mut Image) {
   p_image.set_rgba(&out);
 }
 
-pub fn auto_tone<'a>(p_image: impl Into<ImageRef<'a>>, p_options: impl Into<Options>) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_adjustment!(apply_auto_tone, image, p_options, 1);
+#[derive(Default)]
+pub struct AutoTone {
+  options: Options,
+}
+
+impl Apply for AutoTone {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    apply_adjustment!(apply_auto_tone, image, self.options.as_ref(), 1);
+  }
+}
+
+pub fn auto_tone() -> AutoTone {
+  AutoTone::default()
 }
 
 #[cfg(test)]
@@ -70,7 +85,7 @@ mod tests {
       }
     }
     // Apply auto tone - should stretch channel endpoints to 0 and 255
-    auto_tone(&mut img, None);
+    auto_tone().apply(&mut img);
     let (r1, _g1, _b1, _) = img.get_pixel(0, 0).unwrap();
     let (r2, _g2, _b2, _) = img.get_pixel(0, 9).unwrap();
     assert!(r1 <= 5, "low value not mapped to near 0: {}", r1);

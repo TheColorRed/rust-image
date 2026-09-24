@@ -12,6 +12,8 @@ adjustments = { workspace = true }
 filters = { workspace = true }
 mask = { workspace = true }
 options = { workspace = true }
+typography = { workspace = true }
+tools = { workspace = true }
 gpu_integration = { workspace = true, optional = true }
 
 rayon = { workspace = true }
@@ -25,6 +27,5 @@ regex = "1.9"
 gpu = ["gpu_integration"]
 
 [lib]
-# dylib: for FFI/C consumers
-# rlib: for Rust consumers (like nodejs bindings) to link statically
 crate-type = ["rlib"]
+# Build the internal Rust graph consistently as dynamic libraries.

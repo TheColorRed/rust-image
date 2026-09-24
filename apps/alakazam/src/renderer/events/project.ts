@@ -21,7 +21,12 @@ export const canvasMouse = new Subject<{
 /**
  * Events related to the project cursor state.
  */
-export const projectCursor = new Subject<{ cursor: string; origin: [number, number] }>();
+export const projectCursor = new Subject<{
+  cursor: string;
+  isNativeCursor?: boolean;
+  origin?: [number, number];
+  size?: [number, number] | number;
+}>();
 /**
  * Observable streams for external subscription.
  */

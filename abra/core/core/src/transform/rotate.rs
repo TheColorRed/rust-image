@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
-use crate::Image;
+use crate::{Image, IntoNumber};
 use primitives::Image as PrimitiveImage;
 
 use rayon::prelude::*;
 
-use super::{TransformAlgorithm, resize::get_resize_algorithm};
+use super::{FlipAxis, TransformAlgorithm, interpolation, interpolation::Interpolation, resize::get_resize_algorithm};
 
 /// Trait for rotating images.
 pub trait Rotate {
@@ -13,11 +13,8 @@ pub trait Rotate {
   /// Positive values rotate clockwise, negative values rotate counter-clockwise.
   /// Accepts any numeric type that can losslessly or approximately convert into `f64` (e.g. `i32`, `u32`, `f32`, `f64`).
   /// Internally coerces to `f32` for computation.
-  fn rotate(&mut self, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  /// Flips the image horizontally.
-  fn flip_horizontal(&mut self);
-  /// Flips the image vertically.
-  fn flip_vertical(&mut self);
+  fn rotate(&mut self, p_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>);
+  fn flip(&mut self, p_axis: FlipAxis);
 }
 
 /// Calculate the new size of the image after rotation.
@@ -67,214 +64,20 @@ fn fetch_pixel(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: i32, p_y: 
   ]
 }
 
-fn sample_nearest_neighbor(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
-  let src_x = p_x.floor() as i32;
-  let src_y = p_y.floor() as i32;
-  fetch_pixel(p_pixels, p_width, p_height, src_x, src_y)
-}
-
-fn sample_bilinear(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let x1 = x0 + 1;
-  let y1 = y0 + 1;
-
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  let p00 = fetch_pixel(p_pixels, p_width, p_height, x0, y0);
-  let p10 = fetch_pixel(p_pixels, p_width, p_height, x1, y0);
-  let p01 = fetch_pixel(p_pixels, p_width, p_height, x0, y1);
-  let p11 = fetch_pixel(p_pixels, p_width, p_height, x1, y1);
-
-  // Premultiply RGB by alpha for correct interpolation at transparent edges
-  let a00 = p00[3] as f32 / 255.0;
-  let a10 = p10[3] as f32 / 255.0;
-  let a01 = p01[3] as f32 / 255.0;
-  let a11 = p11[3] as f32 / 255.0;
-
-  let r00 = p00[0] as f32 * a00;
-  let g00 = p00[1] as f32 * a00;
-  let b00 = p00[2] as f32 * a00;
-  let r10 = p10[0] as f32 * a10;
-  let g10 = p10[1] as f32 * a10;
-  let b10 = p10[2] as f32 * a10;
-  let r01 = p01[0] as f32 * a01;
-  let g01 = p01[1] as f32 * a01;
-  let b01 = p01[2] as f32 * a01;
-  let r11 = p11[0] as f32 * a11;
-  let g11 = p11[1] as f32 * a11;
-  let b11 = p11[2] as f32 * a11;
-
-  // Interpolate premultiplied RGB and alpha
-  let a0 = a00 * (1.0 - fx) + a10 * fx;
-  let a1 = a01 * (1.0 - fx) + a11 * fx;
-  let a = a0 * (1.0 - fy) + a1 * fy;
-
-  let r0 = r00 * (1.0 - fx) + r10 * fx;
-  let r1 = r01 * (1.0 - fx) + r11 * fx;
-  let rp = r0 * (1.0 - fy) + r1 * fy;
-
-  let g0 = g00 * (1.0 - fx) + g10 * fx;
-  let g1 = g01 * (1.0 - fx) + g11 * fx;
-  let gp = g0 * (1.0 - fy) + g1 * fy;
-
-  let b0 = b00 * (1.0 - fx) + b10 * fx;
-  let b1 = b01 * (1.0 - fx) + b11 * fx;
-  let bp = b0 * (1.0 - fy) + b1 * fy;
-
-  let mut out = [0u8; 4];
-  if a > 0.0 {
-    out[0] = (rp / a).clamp(0.0, 255.0).round() as u8;
-    out[1] = (gp / a).clamp(0.0, 255.0).round() as u8;
-    out[2] = (bp / a).clamp(0.0, 255.0).round() as u8;
-  } else {
-    out[0] = 0;
-    out[1] = 0;
-    out[2] = 0;
-  }
-  out[3] = (a * 255.0).clamp(0.0, 255.0).round() as u8;
-  out
-}
-
-fn sample_bicubic(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
-  let cubic_kernel = |t: f32| -> f32 {
-    let t = t.abs();
-    if t < 1.0 {
-      1.0 - 2.0 * t * t + t * t * t
-    } else if t < 2.0 {
-      -4.0 + 8.0 * t - 5.0 * t * t + t * t * t
-    } else {
-      0.0
-    }
-  };
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Accumulate premultiplied RGB and alpha
-  let mut acc_r = 0.0;
-  let mut acc_g = 0.0;
-  let mut acc_b = 0.0;
-  let mut acc_a = 0.0;
-  let mut weight_sum = 0.0;
-
-  for dy in -1..=2 {
-    for dx in -1..=2 {
-      let p = fetch_pixel(p_pixels, p_width, p_height, x0 + dx, y0 + dy);
-      let a = p[3] as f32 / 255.0;
-      let w = cubic_kernel(dx as f32 - fx) * cubic_kernel(dy as f32 - fy);
-
-      acc_r += (p[0] as f32 * a) * w;
-      acc_g += (p[1] as f32 * a) * w;
-      acc_b += (p[2] as f32 * a) * w;
-      acc_a += a * w;
-      weight_sum += w;
-    }
-  }
-
-  if weight_sum > 0.0 {
-    acc_r /= weight_sum;
-    acc_g /= weight_sum;
-    acc_b /= weight_sum;
-    acc_a /= weight_sum;
-  }
-
-  let mut out = [0u8; 4];
-  if acc_a > 0.0 {
-    out[0] = (acc_r / acc_a).clamp(0.0, 255.0).round() as u8;
-    out[1] = (acc_g / acc_a).clamp(0.0, 255.0).round() as u8;
-    out[2] = (acc_b / acc_a).clamp(0.0, 255.0).round() as u8;
-  } else {
-    out[0] = 0;
-    out[1] = 0;
-    out[2] = 0;
-  }
-  out[3] = (acc_a * 255.0).clamp(0.0, 255.0).round() as u8;
-  out
-}
-
-fn sample_lanczos(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
-  const LANCZOS_SIZE: i32 = 3;
-
-  let lanczos_kernel = |t: f32| -> f32 {
-    let t = t.abs();
-    if t == 0.0 {
-      1.0
-    } else if t < LANCZOS_SIZE as f32 {
-      let pi_t = std::f32::consts::PI * t;
-      let pi_t_a = std::f32::consts::PI * t / LANCZOS_SIZE as f32;
-      (pi_t.sin() / pi_t) * (pi_t_a.sin() / pi_t_a)
-    } else {
-      0.0
-    }
-  };
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Accumulate premultiplied RGB and alpha
-  let mut acc_r = 0.0;
-  let mut acc_g = 0.0;
-  let mut acc_b = 0.0;
-  let mut acc_a = 0.0;
-  let mut weight_sum = 0.0;
-
-  for dy in -LANCZOS_SIZE + 1..=LANCZOS_SIZE {
-    for dx in -LANCZOS_SIZE + 1..=LANCZOS_SIZE {
-      let p = fetch_pixel(p_pixels, p_width, p_height, x0 + dx, y0 + dy);
-      let a = p[3] as f32 / 255.0;
-      let w = lanczos_kernel(dx as f32 - fx) * lanczos_kernel(dy as f32 - fy);
-
-      acc_r += (p[0] as f32 * a) * w;
-      acc_g += (p[1] as f32 * a) * w;
-      acc_b += (p[2] as f32 * a) * w;
-      acc_a += a * w;
-      weight_sum += w;
-    }
-  }
-
-  if weight_sum > 0.0 {
-    acc_r /= weight_sum;
-    acc_g /= weight_sum;
-    acc_b /= weight_sum;
-    acc_a /= weight_sum;
-  }
-
-  let mut out = [0u8; 4];
-  if acc_a > 0.0 {
-    out[0] = (acc_r / acc_a).clamp(0.0, 255.0).round() as u8;
-    out[1] = (acc_g / acc_a).clamp(0.0, 255.0).round() as u8;
-    out[2] = (acc_b / acc_a).clamp(0.0, 255.0).round() as u8;
-  } else {
-    out[0] = 0;
-    out[1] = 0;
-    out[2] = 0;
-  }
-  out[3] = (acc_a * 255.0).clamp(0.0, 255.0).round() as u8;
-  out
-}
-
 // Implement Rotate trait for primitives::Image so the methods are available on re-exported abra_core::Image.
 impl Rotate for PrimitiveImage {
-  fn rotate(&mut self, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::rotate(self, p_degrees, p_algorithm);
+  fn rotate(&mut self, p_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
+    crate::transform::rotate(p_degrees).with_algorithm(p_algorithm).apply(self);
   }
 
-  fn flip_horizontal(&mut self) {
-    crate::transform::horizontal(self);
-  }
-
-  fn flip_vertical(&mut self) {
-    crate::transform::vertical(self);
+  fn flip(&mut self, p_axis: FlipAxis) {
+    crate::transform::flip(p_axis).apply(self);
   }
 }
 
-fn sample_edge_direct_nedi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_edge_direct_nedi(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+  let (p_width, p_height) = p_image.dimensions::<usize>();
+  let p_pixels = p_image.rgba();
   let get_pixel = |px: i32, py: i32| -> [f32; 4] {
     let p = fetch_pixel(p_pixels, p_width, p_height, px, py);
     let a = p[3] as f32 / 255.0;
@@ -304,13 +107,8 @@ fn sample_edge_direct_nedi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x
       let p_top = get_pixel(px, py - 1);
       let p_bottom = get_pixel(px, py + 1);
 
-      let luma = |p: [f32; 4]| -> f32 {
-        if p[3] > 0.0 {
-          (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3]
-        } else {
-          0.0
-        }
-      };
+      let luma =
+        |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
 
       let gx = (luma(p_right) - luma(p_left)) * 0.5;
       let gy = (luma(p_bottom) - luma(p_top)) * 0.5;
@@ -351,21 +149,13 @@ fn sample_edge_direct_nedi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x
   let discriminant = (trace * trace * 0.25 - det).max(0.0).sqrt();
   let lambda1 = trace * 0.5 + discriminant;
   let lambda2 = trace * 0.5 - discriminant;
-  let use_lambda = if lambda1.abs() > lambda2.abs() {
-    lambda1
-  } else {
-    lambda2
-  };
+  let use_lambda = if lambda1.abs() > lambda2.abs() { lambda1 } else { lambda2 };
 
   let (edge_x, edge_y) = if b.abs() > 1e-6 {
     let v_x = use_lambda - c;
     let v_y = b;
     let norm = (v_x * v_x + v_y * v_y).sqrt();
-    if norm > 0.0 {
-      (v_x / norm, v_y / norm)
-    } else {
-      (1.0, 0.0)
-    }
+    if norm > 0.0 { (v_x / norm, v_y / norm) } else { (1.0, 0.0) }
   } else if (a - c).abs() > 1e-6 {
     if a > c { (1.0, 0.0) } else { (0.0, 1.0) }
   } else {
@@ -433,11 +223,13 @@ fn sample_edge_direct_nedi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x
     out
   } else {
     // Fall back to bicubic
-    sample_bicubic(p_pixels, p_width, p_height, p_x, p_y)
+    interpolation::sample(p_image, p_x, p_y, Interpolation::Bicubic)
   }
 }
 
-fn sample_edge_direct_edi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32) -> [u8; 4] {
+fn sample_edge_direct_edi(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
+  let (p_width, p_height) = p_image.dimensions::<usize>();
+  let p_pixels = p_image.rgba();
   let get_pixel = |px: i32, py: i32| -> [f32; 4] {
     let p = fetch_pixel(p_pixels, p_width, p_height, px, py);
     let a = p[3] as f32 / 255.0;
@@ -459,13 +251,8 @@ fn sample_edge_direct_edi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x:
   let p21 = get_pixel(x0, y0 + 1);
   let p22 = get_pixel(x0 + 1, y0 + 1);
 
-  let luma = |p: [f32; 4]| -> f32 {
-    if p[3] > 0.0 {
-      (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3]
-    } else {
-      0.0
-    }
-  };
+  let luma =
+    |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
 
   let gx = -luma(p00) - 2.0 * luma(p10) - luma(p20) + luma(p02) + 2.0 * luma(p12) + luma(p22);
   let gy = -luma(p00) - 2.0 * luma(p01) - luma(p02) + luma(p20) + 2.0 * luma(p21) + luma(p22);
@@ -475,11 +262,7 @@ fn sample_edge_direct_edi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x:
 
   if magnitude > 10.0 {
     // Strong edge - use directional interpolation
-    let norm_angle = if angle < 0.0 {
-      angle + std::f32::consts::PI
-    } else {
-      angle
-    };
+    let norm_angle = if angle < 0.0 { angle + std::f32::consts::PI } else { angle };
     let direction = ((norm_angle / std::f32::consts::PI * 4.0).round() as i32) % 4;
 
     let (p0, p1) = match direction {
@@ -532,21 +315,23 @@ fn sample_edge_direct_edi(p_pixels: &[u8], p_width: usize, p_height: usize, p_x:
     out
   } else {
     // Weak edge - use bilinear
-    sample_bilinear(p_pixels, p_width, p_height, p_x, p_y)
+    interpolation::sample(p_image, p_x, p_y, Interpolation::Bilinear)
   }
 }
 
-fn sample_pixel(
-  p_pixels: &[u8], p_width: usize, p_height: usize, p_x: f32, p_y: f32, p_algorithm: TransformAlgorithm,
-) -> [u8; 4] {
+fn sample_pixel(p_image: &Image, p_x: f32, p_y: f32, p_algorithm: TransformAlgorithm) -> [u8; 4] {
   match p_algorithm {
-    TransformAlgorithm::NearestNeighbor => sample_nearest_neighbor(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::Bilinear => sample_bilinear(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::Bicubic => sample_bicubic(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::Lanczos => sample_lanczos(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::EdgeDirectNEDI => sample_edge_direct_nedi(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::EdgeDirectEDI => sample_edge_direct_edi(p_pixels, p_width, p_height, p_x, p_y),
-    TransformAlgorithm::Auto => sample_bicubic(p_pixels, p_width, p_height, p_x, p_y),
+    // Rotation has always taken the pixel a point falls in, while the shared nearest-neighbor sampler takes the
+    // pixel whose center is closest. Flooring first keeps the behavior rotation has always had.
+    TransformAlgorithm::NearestNeighbor => {
+      interpolation::sample(p_image, p_x.floor(), p_y.floor(), Interpolation::Nearest)
+    }
+    TransformAlgorithm::EdgeDirectNEDI => sample_edge_direct_nedi(p_image, p_x, p_y),
+    TransformAlgorithm::EdgeDirectEDI => sample_edge_direct_edi(p_image, p_x, p_y),
+    TransformAlgorithm::Bilinear
+    | TransformAlgorithm::Bicubic
+    | TransformAlgorithm::Lanczos
+    | TransformAlgorithm::Auto => interpolation::sample(p_image, p_x, p_y, p_algorithm.interpolation()),
   }
 }
 
@@ -566,17 +351,22 @@ fn apply_rotation(p_image: &mut Image, p_degrees: f32, p_width: u32, p_height: u
   let dest_center_x = p_width as f32 / 2.0;
   let dest_center_y = p_height as f32 / 2.0;
 
-  let src_pixels = p_image.rgba();
+  let source: &Image = p_image;
   let mut pixels = vec![0; p_width as usize * p_height as usize * 4];
+
+  let (sin, cos) = radians.sin_cos();
 
   pixels.par_chunks_mut(4).enumerate().for_each(|(index, pixel)| {
     let x = index as u32 % p_width;
     let y = index as u32 / p_width;
 
-    let src_x = (x as f32 - dest_center_x) * radians.cos() + (y as f32 - dest_center_y) * radians.sin() + src_center_x;
-    let src_y = -(x as f32 - dest_center_x) * radians.sin() + (y as f32 - dest_center_y) * radians.cos() + src_center_y;
+    // Inverse mapping: rotate the destination pixel back around the image center into the source image.
+    let dx = x as f32 - dest_center_x;
+    let dy = y as f32 - dest_center_y;
+    let src_x = dx * cos + dy * sin + src_center_x;
+    let src_y = -dx * sin + dy * cos + src_center_y;
 
-    let sample = sample_pixel(&src_pixels, src_width, src_height, src_x, src_y, p_algorithm);
+    let sample = sample_pixel(source, src_x, src_y, p_algorithm);
     pixel.copy_from_slice(&sample);
   });
 
@@ -598,41 +388,62 @@ fn rotate_internal(
   (resolved_algorithm, old_width, old_height, new_width, new_height, start.elapsed())
 }
 
-/// Rotates the image by the specified number of degrees.\
-/// The image will be resized to fit the rotated image without cropping.\
-/// * `image` - The image to rotate.
-/// * `degrees` - The number of degrees to rotate the image. Positive values rotate clockwise, negative values rotate counter-clockwise.
-/// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
-pub fn rotate(p_image: &mut Image, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let degrees = p_degrees.into() as f32;
-  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
-    rotate_internal(p_image, degrees, p_algorithm);
-  // DebugTransform::Rotate(resolved_algorithm, degrees, old_width, old_height, new_width, new_height, duration).log();
+pub struct RotateImage {
+  pub degrees: f32,
+  pub algorithm: Option<TransformAlgorithm>,
 }
 
-/// Rotates the image 90 degrees clockwise.
-/// * `image` - The image to rotate.
-/// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
-pub fn rotate_90(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
-    rotate_internal(p_image, 90.0, p_algorithm);
-  // DebugTransform::Rotate(resolved_algorithm, 90.0, old_width, old_height, new_width, new_height, duration).log();
+impl RotateImage {
+  pub fn with_algorithm(mut self, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> Self {
+    self.algorithm = p_algorithm.into();
+    self
+  }
+  pub fn apply(&self, p_image: &mut Image) {
+    let degrees = self.degrees;
+    let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
+      rotate_internal(p_image, degrees, self.algorithm);
+  }
 }
 
-/// Rotates the image 90 degrees counter-clockwise.
-/// * `image` - The image to rotate.
-/// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
-pub fn rotate_90_ccw(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
-    rotate_internal(p_image, -90.0, p_algorithm);
-  // DebugTransform::Rotate(resolved_algorithm, -90.0, old_width, old_height, new_width, new_height, duration).log();
+/// Rotates the image around its center by the given number of degrees. The canvas grows to fit the rotated image.
+/// # Arguments
+/// - `p_degrees`: The number of degrees to rotate the image. Positive values rotate clockwise, negative values rotate counter-clockwise.
+///
+/// The interpolation algorithm is chosen automatically unless set with [`RotateImage::with_algorithm`].
+pub fn rotate(p_degrees: impl IntoNumber) -> RotateImage {
+  RotateImage {
+    degrees: p_degrees.into::<f32>(),
+    algorithm: None,
+  }
 }
 
-/// Rotates the image 180 degrees.
-/// * `image` - The image to rotate.
-/// * `algorithm` - The interpolation algorithm to use. When `None`, an appropriate algorithm is selected automatically.
-pub fn rotate_180(p_image: &mut Image, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-  let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
-    rotate_internal(p_image, 180.0, p_algorithm);
-  // DebugTransform::Rotate(resolved_algorithm, 180.0, old_width, old_height, new_width, new_height, duration).log();
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn rotating_by_nothing_changes_nothing() {
+    let bytes: Vec<u8> = (0..16 * 12).flat_map(|i| [(i % 16 * 16) as u8, (i / 16 * 20) as u8, 128, 255]).collect();
+    for algorithm in [
+      TransformAlgorithm::NearestNeighbor,
+      TransformAlgorithm::Bilinear,
+      TransformAlgorithm::Bicubic,
+      TransformAlgorithm::Lanczos,
+      TransformAlgorithm::Auto,
+    ] {
+      let mut image = Image::from_rgba_bytes(16, 12, &bytes);
+      rotate(0.0).with_algorithm(algorithm).apply(&mut image);
+      assert_eq!(image.dimensions::<u32>(), (16, 12), "{algorithm}");
+      assert_eq!(image.rgba(), bytes.as_slice(), "{algorithm}");
+    }
+  }
+
+  #[test]
+  fn a_quarter_turn_swaps_the_width_and_height() {
+    for algorithm in [TransformAlgorithm::NearestNeighbor, TransformAlgorithm::Bilinear, TransformAlgorithm::Lanczos] {
+      let mut image = Image::from_rgba_bytes(6, 4, &[9, 9, 9, 255].repeat(24));
+      rotate(90.0).with_algorithm(algorithm).apply(&mut image);
+      assert_eq!(image.dimensions::<u32>(), (4, 6), "{algorithm}");
+    }
+  }
 }

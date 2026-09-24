@@ -15,8 +15,7 @@ use abra_core::{Path, PointF};
 pub(crate) struct StrokeBrushShader {
   /// Inner shader providing base RGBA values.
   inner: Box<dyn Shader + Send + Sync>,
-  /// Path forming the stroke centerline.
-  path: Path,
+  fallback_point: PointF,
   /// Maximum influence distance from the centerline.
   max_distance: f32,
   /// Falloff hardness in [0.0, 1.0].
@@ -40,13 +39,13 @@ impl StrokeBrushShader {
   /// let s = StrokeBrushShader::new(inner, path.clone(), 6.0, 0.7);
   /// ```
   pub fn new(
-    p_inner: Box<dyn Shader + Send + Sync>, p_path: Path, p_max_distance: impl Into<f64>, p_hardness: impl Into<f64>,
+    p_inner: Box<dyn Shader + Send + Sync>, p_path: &Path, p_max_distance: impl Into<f64>, p_hardness: impl Into<f64>,
   ) -> Self {
     // Pre-flatten the path to a set of points; choose a tolerance that balances accuracy and performance.
     let flattened = p_path.flatten(1.0);
     StrokeBrushShader {
       inner: p_inner,
-      path: p_path,
+      fallback_point: p_path.start(),
       max_distance: p_max_distance.into() as f32,
       hardness: p_hardness.into().clamp(0.0, 1.0) as f32,
       flattened,
@@ -80,14 +79,8 @@ impl StrokeBrushShader {
 impl Shader for StrokeBrushShader {
   fn shade(&self, p_x: f32, p_y: f32) -> (u8, u8, u8, u8) {
     let (r, g, b, mut a) = self.inner.shade(p_x, p_y);
-    // Compute closest point on the path and distance to it
-    let center_point = self.closest_point_on_flattened(p_x, p_y);
-
-    let dx = p_x - center_point.x;
-    let dy = p_y - center_point.y;
-    let dist = (dx * dx + dy * dy).sqrt();
-    let falloff = self.compute_alpha_falloff_from_distance(dist);
-    // (Debug prints removed)
+    let distance = self.closest_distance_squared(p_x, p_y).sqrt();
+    let falloff = self.compute_alpha_falloff_from_distance(distance);
     a = ((a as f32) * falloff) as u8;
     (r, g, b, a)
   }
@@ -104,30 +97,30 @@ impl StrokeBrushShader {
   /// - `p_x`, `p_y`: the query point in device coordinates.
   ///
   /// Returns a `PointF` representing the point on the path closest to the query.
-  fn closest_point_on_flattened(&self, p_x: f32, p_y: f32) -> PointF {
+  fn closest_distance_squared(&self, p_x: f32, p_y: f32) -> f32 {
     if self.flattened.len() < 2 {
-      return self.path.start();
+      let dx = p_x - self.fallback_point.x;
+      let dy = p_y - self.fallback_point.y;
+      return dx * dx + dy * dy;
     }
-    let query = PointF::new(p_x, p_y);
-    let mut min_distance = f32::MAX;
-    let mut closest = self.flattened[0];
+    let mut min_distance_sq = f32::MAX;
     for i in 0..self.flattened.len() - 1 {
       let p1 = self.flattened[i];
       let p2 = self.flattened[i + 1];
-      let seg_vec = PointF::new(p2.x - p1.x, p2.y - p1.y);
-      let seg_len_sq = seg_vec.length_squared();
+      let seg_x = p2.x - p1.x;
+      let seg_y = p2.y - p1.y;
+      let seg_len_sq = seg_x * seg_x + seg_y * seg_y;
       if seg_len_sq == 0.0 {
         continue;
       }
-      let query_vec = PointF::new(query.x - p1.x, query.y - p1.y);
-      let t = (query_vec.dot(seg_vec) / seg_len_sq).clamp(0.0, 1.0);
-      let candidate = p1.lerp(p2, t);
-      let dist = query.distance_to(candidate);
-      if dist < min_distance {
-        min_distance = dist;
-        closest = candidate;
+      let t = (((p_x - p1.x) * seg_x + (p_y - p1.y) * seg_y) / seg_len_sq).clamp(0.0, 1.0);
+      let dx = p_x - (p1.x + seg_x * t);
+      let dy = p_y - (p1.y + seg_y * t);
+      let distance_sq = dx * dx + dy * dy;
+      if distance_sq < min_distance_sq {
+        min_distance_sq = distance_sq;
       }
     }
-    closest
+    min_distance_sq
   }
 }

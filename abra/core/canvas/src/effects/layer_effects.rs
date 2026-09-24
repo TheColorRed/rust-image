@@ -8,10 +8,10 @@ use crate::{
 
 /// Options for various layer effects.
 #[derive(Clone)]
-pub struct LayerEffects {
-  pub drop_shadow: Option<DropShadow>,
-  pub stroke: Option<Stroke>,
-  pub layer_inner: Option<Arc<Mutex<LayerInner>>>,
+pub struct LayerEffects<'a> {
+  pub drop_shadow: Option<DropShadow<'a>>,
+  pub stroke: Option<Stroke<'a>>,
+  pub layer_inner: Option<Arc<Mutex<LayerInner<'a>>>>,
 }
 
 /// Result of applying effects which may include an offset and changed canvas size.
@@ -27,7 +27,7 @@ impl EffectResult {
   }
 }
 
-impl LayerEffects {
+impl<'a> LayerEffects<'a> {
   pub fn new() -> Self {
     LayerEffects {
       drop_shadow: None,
@@ -36,14 +36,14 @@ impl LayerEffects {
     }
   }
 
-  pub(crate) fn with_layer(mut self, layer: Arc<Mutex<LayerInner>>) -> Self {
-    self.layer_inner = Some(layer);
+  pub(crate) fn with_layer(mut self, p_layer: Arc<Mutex<LayerInner<'a>>>) -> Self {
+    self.layer_inner = Some(p_layer);
     self
   }
 
-  pub(crate) fn apply_with_offset(&self, image: Arc<Image>) -> EffectResult {
-    let original_dimensions = image.dimensions::<u32>();
-    let mut result_image = image.clone();
+  pub(crate) fn apply_with_offset(&self, p_image: Arc<Image>) -> EffectResult {
+    let original_dimensions = p_image.dimensions::<u32>();
+    let mut result_image = p_image.clone();
     let mut offset = (0i32, 0i32);
 
     if let Some(stroke_opts) = &self.stroke {
@@ -63,20 +63,20 @@ impl LayerEffects {
     }
   }
 
-  pub fn with_drop_shadow(mut self, options: DropShadow) -> Self {
-    self.drop_shadow = Some(options);
+  pub fn with_drop_shadow(mut self, p_options: DropShadow<'a>) -> Self {
+    self.drop_shadow = Some(p_options);
     self
   }
 
-  pub fn with_stroke(mut self, options: Stroke) -> Self {
-    self.stroke = Some(options);
+  pub fn with_stroke(mut self, p_options: Stroke<'a>) -> Self {
+    self.stroke = Some(p_options);
     self
   }
 }
 
-impl Drop for LayerEffects {
+impl<'a> Drop for LayerEffects<'a> {
   fn drop(&mut self) {
-    if let Some(layer) = &self.layer_inner {
+    if let Some(layer) = self.layer_inner.take() {
       if let Ok(mut inner) = layer.lock() {
         inner.set_effects(self.clone());
       }

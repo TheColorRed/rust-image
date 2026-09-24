@@ -84,7 +84,7 @@ export function Tooltip({
         createPortal(
           <div
             ref={tooltipRef}
-            style={{ position: 'absolute', top: position.top, left: position.left }}
+            style={{ position: 'absolute', top: position.top, left: position.left, zIndex: 1000 }}
             className={cn('pointer-events-none rounded-lg bg-black p-2 text-sm text-white', className)}
           >
             {content}

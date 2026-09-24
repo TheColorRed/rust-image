@@ -34,14 +34,14 @@ impl OnnxConfig {
   }
 
   /// Sets the optimization level.
-  pub fn with_optimization_level(mut self, level: GraphOptimizationLevel) -> Self {
-    self.optimization_level = level;
+  pub fn with_optimization_level(mut self, p_level: GraphOptimizationLevel) -> Self {
+    self.optimization_level = p_level;
     self
   }
 
   /// Sets the number of threads (None = auto-detect).
-  pub fn with_threads(mut self, threads: usize) -> Self {
-    self.num_threads = Some(threads);
+  pub fn with_threads(mut self, p_threads: usize) -> Self {
+    self.num_threads = Some(p_threads);
     self
   }
 }
@@ -60,8 +60,8 @@ impl OnnxSession {
   ///
   /// # Arguments
   ///
-  /// - `path`: Path to the ONNX model file.
-  /// - `config`: Optional configuration (uses defaults if None).
+  /// - `p_path`: Path to the ONNX model file.
+  /// - `p_config`: Optional configuration (uses defaults if None).
   ///
   /// # Example
   ///
@@ -70,33 +70,32 @@ impl OnnxSession {
   ///
   /// let session = OnnxSession::from_file("model.onnx", None)?;
   /// ```
-  pub fn from_file(path: impl AsRef<Path>, config: Option<OnnxConfig>) -> Result<Self, AiError> {
-    let model_bytes = std::fs::read(path.as_ref())
+  pub fn from_file(p_path: impl AsRef<Path>, p_config: Option<OnnxConfig>) -> Result<Self, AiError> {
+    let model_bytes = std::fs::read(p_path.as_ref())
       .map_err(|e| AiError::model_load_failed(format!("Failed to read model file: {}", e)))?;
 
-    Self::from_bytes(&model_bytes, config)
+    Self::from_bytes(&model_bytes, p_config)
   }
 
   /// Loads a model from bytes in memory.
   ///
   /// # Arguments
   ///
-  /// - `bytes`: The ONNX model bytes.
-  /// - `config`: Optional configuration (uses defaults if None).
-  pub fn from_bytes(bytes: &[u8], config: Option<OnnxConfig>) -> Result<Self, AiError> {
-    let config = config.unwrap_or_default();
+  /// - `p_bytes`: The ONNX model bytes.
+  /// - `p_config`: Optional configuration (uses defaults if None).
+  pub fn from_bytes(p_bytes: &[u8], p_config: Option<OnnxConfig>) -> Result<Self, AiError> {
+    let p_config = p_config.unwrap_or_default();
 
-    let num_threads = config
-      .num_threads
-      .unwrap_or_else(|| std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4));
+    let num_threads =
+      p_config.num_threads.unwrap_or_else(|| std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4));
 
     let session = Session::builder()
       .map_err(|e| AiError::model_load_failed(format!("Failed to create session builder: {}", e)))?
-      .with_optimization_level(config.optimization_level)
+      .with_optimization_level(p_config.optimization_level)
       .map_err(|e| AiError::model_load_failed(format!("Failed to set optimization level: {}", e)))?
       .with_intra_threads(num_threads)
       .map_err(|e| AiError::model_load_failed(format!("Failed to set thread count: {}", e)))?
-      .commit_from_memory(bytes)
+      .commit_from_memory(p_bytes)
       .map_err(|e| AiError::model_load_failed(format!("Failed to load ONNX model: {}", e)))?;
 
     Ok(Self {
@@ -114,22 +113,20 @@ impl OnnxSession {
   ///
   /// # Arguments
   ///
-  /// - `input`: The input tensor data as a contiguous slice.
-  /// - `shape`: The shape of the input tensor (e.g., `[1, 3, 256, 256]`).
+  /// - `p_input`: The input tensor data as a contiguous slice.
+  /// - `p_shape`: The shape of the input tensor (e.g., `[1, 3, 256, 256]`).
   ///
   /// # Returns
   ///
   /// A tuple of (output_shape, output_data).
-  pub fn run_single(&self, input: &[f32], shape: &[usize]) -> Result<(Vec<usize>, Vec<f32>), AiError> {
+  pub fn run_single(&self, p_input: &[f32], p_shape: &[usize]) -> Result<(Vec<usize>, Vec<f32>), AiError> {
     use ort::value::TensorRef;
 
-    let input_value = TensorRef::from_array_view((shape, input))
+    let input_value = TensorRef::from_array_view((p_shape, p_input))
       .map_err(|e| AiError::inference_failed(format!("Failed to create input tensor: {}", e)))?;
 
-    let mut session = self
-      .session
-      .lock()
-      .map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
+    let mut session =
+      self.session.lock().map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
 
     let outputs = session
       .run(ort::inputs![input_value])
@@ -150,33 +147,31 @@ impl OnnxSession {
 
   /// Runs inference with an image input and a control vector.
   ///
-  /// Used for models like UltraZoom that take both image data and control parameters.
+  /// Used for models that take both image data and control parameters.
   ///
   /// # Arguments
   ///
-  /// - `image`: The image tensor data as a contiguous slice.
-  /// - `image_shape`: The shape of the image tensor (e.g., `[1, 3, 256, 256]`).
-  /// - `control`: The control vector data as a contiguous slice.
-  /// - `control_shape`: The shape of the control tensor (e.g., `[1, 3]`).
+  /// - `p_image`: The image tensor data as a contiguous slice.
+  /// - `p_image_shape`: The shape of the image tensor (e.g., `[1, 3, 256, 256]`).
+  /// - `p_control`: The control vector data as a contiguous slice.
+  /// - `p_control_shape`: The shape of the control tensor (e.g., `[1, 3]`).
   ///
   /// # Returns
   ///
   /// A tuple of (output_shape, output_data).
   pub fn run_with_control(
-    &self, image: &[f32], image_shape: &[usize], control: &[f32], control_shape: &[usize],
+    &self, p_image: &[f32], p_image_shape: &[usize], p_control: &[f32], p_control_shape: &[usize],
   ) -> Result<(Vec<usize>, Vec<f32>), AiError> {
     use ort::value::TensorRef;
 
-    let image_value = TensorRef::from_array_view((image_shape, image))
+    let image_value = TensorRef::from_array_view((p_image_shape, p_image))
       .map_err(|e| AiError::inference_failed(format!("Failed to create image tensor: {}", e)))?;
 
-    let control_value = TensorRef::from_array_view((control_shape, control))
+    let control_value = TensorRef::from_array_view((p_control_shape, p_control))
       .map_err(|e| AiError::inference_failed(format!("Failed to create control tensor: {}", e)))?;
 
-    let mut session = self
-      .session
-      .lock()
-      .map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
+    let mut session =
+      self.session.lock().map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
 
     let outputs = session
       .run(ort::inputs![image_value, control_value])

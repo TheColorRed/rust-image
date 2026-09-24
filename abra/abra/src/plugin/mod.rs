@@ -9,19 +9,19 @@ use canvas::{Canvas, Layer};
 /// Plugins implementing this trait can be integrated into the Abra framework.
 /// They can manipulate/generate images, canvases, and layers.
 /// The apply method is the main entry point for plugin logic.
-pub trait Plugin {
+pub trait Plugin<'a> {
   /// The name of the plugin.
   fn name(&self) -> &str;
   /// A brief description about the plugin.
   fn description(&self) -> &str;
   /// Applies the plugin logic to the given context.
-  fn apply(&mut self) -> Result<PluginResult, PluginError>;
+  fn apply(&mut self) -> Result<PluginResult<'a>, PluginError>;
 }
 
 /// Context passed to plugins containing the tools they can use.
-pub struct PluginContext {
+pub struct PluginContext<'a> {
   /// The canvas the plugin is operating on (if any).
-  pub canvas: Option<Canvas>,
+  pub canvas: Option<Canvas<'a>>,
   /// The images the plugin can access.
   pub images: Vec<Image>,
   /// The parameters passed to the plugin.
@@ -47,16 +47,16 @@ pub enum ParameterValue {
 }
 
 /// Output from a plugin execution.
-pub struct PluginResult {
+pub struct PluginResult<'a> {
   /// The resulting canvas.
-  canvases: Vec<Canvas>,
+  canvases: Vec<Canvas<'a>>,
   /// The resulting images.
   images: Vec<Image>,
   /// The resulting layers.
-  layers: Vec<Layer>,
+  layers: Vec<Layer<'a>>,
 }
 
-impl PluginResult {
+impl<'a> PluginResult<'a> {
   /// Creates a new PluginResult with empty vectors.
   pub fn new() -> Self {
     Self {
@@ -71,7 +71,7 @@ impl PluginResult {
   }
   /// Adds a canvas to the result.
   /// - `p_canvas`: The canvas to add to the result.
-  pub fn add_canvas(&mut self, p_canvas: Canvas) -> &mut Self {
+  pub fn add_canvas(&mut self, p_canvas: Canvas<'a>) -> &mut Self {
     self.canvases.push(p_canvas);
     self
   }
@@ -83,14 +83,20 @@ impl PluginResult {
   }
   /// Adds a layer to the result.
   /// - `p_layer`: The layer to add to the result.
-  pub fn add_layer(&mut self, p_layer: Layer) -> &mut Self {
+  pub fn add_layer(&mut self, p_layer: Layer<'a>) -> &mut Self {
     self.layers.push(p_layer);
     self
   }
-  /// Retrieves a canvas at the specified index.
+  /// Retrieves a canvas at the specified index by reference.
   /// - `p_index`: The index of the canvas to retrieve.
-  pub fn canvas_at(&self, p_index: usize) -> Option<&Canvas> {
+  pub fn canvas_at(&self, p_index: usize) -> Option<&Canvas<'a>> {
     self.canvases.get(p_index)
+  }
+
+  /// Takes (removes) a canvas from the result by index and returns it owned.
+  /// This avoids lifetime-borrow issues when consuming a canvas from a `PluginResult`.
+  pub fn take_canvas_at(&mut self, p_index: usize) -> Option<Canvas<'a>> {
+    if p_index < self.canvases.len() { Some(self.canvases.remove(p_index)) } else { None }
   }
   /// Retrieves an image at the specified index.
   /// - `p_index`: The index of the image to retrieve.
@@ -99,7 +105,7 @@ impl PluginResult {
   }
   /// Retrieves a layer at the specified index.
   /// - `p_index`: The index of the layer to retrieve.
-  pub fn layer_at(&self, p_index: usize) -> Option<&Layer> {
+  pub fn layer_at(&self, p_index: usize) -> Option<&Layer<'a>> {
     self.layers.get(p_index)
   }
 }
@@ -124,23 +130,23 @@ impl PluginError {
   /// Example:
   /// - `PluginError::execution_failed("something went wrong")`
   /// - `PluginError::execution_failed(String::from("something"))`
-  pub fn execution_failed(s: impl Into<String>) -> Self {
-    PluginError::ExecutionFailed(s.into())
+  pub fn execution_failed(p_s: impl Into<String>) -> Self {
+    PluginError::ExecutionFailed(p_s.into())
   }
   /// Helper constructor for invalid parameters.
   ///
   /// Example:
   /// - `PluginError::invalid_parameters("missing required field")`
   /// - `PluginError::invalid_parameters(String::from("invalid value"))`
-  pub fn invalid_parameters(s: impl Into<String>) -> Self {
-    PluginError::InvalidParameters(s.into())
+  pub fn invalid_parameters(p_s: impl Into<String>) -> Self {
+    PluginError::InvalidParameters(p_s.into())
   }
   /// Helper constructor for file not found errors.
   ///
   /// Example:
   /// - `PluginError::file_not_found("config.json not found")`
   /// - `PluginError::file_not_found(String::from("data.csv missing"))`
-  pub fn file_not_found(s: impl Into<String>) -> Self {
-    PluginError::FileNotFound(s.into())
+  pub fn file_not_found(p_s: impl Into<String>) -> Self {
+    PluginError::FileNotFound(p_s.into())
   }
 }

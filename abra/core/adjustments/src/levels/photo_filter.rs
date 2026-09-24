@@ -1,9 +1,10 @@
 use abra_core::{Color, Image, hsl_to_rgb_f, linear_f32_to_srgb_u8, rgb_to_hsl_f, srgb_u8_to_linear_f32};
-use options::Options;
+use options::{Apply, Options};
 
 use rayon::prelude::*;
 
 use crate::apply_adjustment;
+
 /// Types of preset photo filters.
 #[derive(Clone, Copy)]
 pub enum FilterType {
@@ -35,6 +36,42 @@ pub enum FilterType {
   DeepEmerald,
   DeepYellow,
   Underwater,
+}
+
+/// Selects either a custom filter color or a named preset.
+#[derive(Clone, Copy)]
+pub enum PhotoFilter {
+  Color(Color),
+  Preset(FilterType),
+}
+
+impl From<Color> for PhotoFilter {
+  fn from(p_color: Color) -> Self {
+    Self::Color(p_color)
+  }
+}
+
+fn preset_color(p_preset: FilterType) -> Color {
+  match p_preset {
+    FilterType::WarmingDark => Color::from_rgb(255, 101, 0),
+    FilterType::WarmingLight => Color::from_rgb(236, 138, 0),
+    FilterType::CoolingDark => Color::from_rgb(0, 109, 255),
+    FilterType::CoolingLight => Color::from_rgb(0, 181, 255),
+    FilterType::Red => Color::from_rgb(234, 26, 26),
+    FilterType::Orange => Color::from_rgb(243, 132, 23),
+    FilterType::Yellow => Color::from_rgb(249, 227, 28),
+    FilterType::Green => Color::from_rgb(25, 201, 25),
+    FilterType::Cyan => Color::from_rgb(29, 203, 234),
+    FilterType::Blue => Color::from_rgb(29, 53, 234),
+    FilterType::Violet => Color::from_rgb(155, 29, 234),
+    FilterType::Magenta => Color::from_rgb(227, 24, 227),
+    FilterType::Sepia => Color::from_rgb(172, 122, 51),
+    FilterType::DeepRed => Color::from_rgb(255, 0, 0),
+    FilterType::DeepBlue => Color::from_rgb(0, 34, 205),
+    FilterType::DeepEmerald => Color::from_rgb(80, 141, 0),
+    FilterType::DeepYellow => Color::from_rgb(255, 213, 0),
+    FilterType::Underwater => Color::from_rgb(0, 194, 177),
+  }
 }
 
 fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32, p_preserve_l: bool) {
@@ -116,51 +153,51 @@ fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32
 
   p_image.set_rgba(&out);
 }
-/// Applies a photo filter to the image.
-/// - `p_image`: The image to adjust.
-/// - `p_filter_color`: The color of the photo filter.
-/// - `p_density`: The density of the filter (0.0 to 1.0).
-/// - `p_options`: Options to apply the adjustment.
-pub fn photo_filter(
-  p_image: &mut Image, p_filter_color: impl Into<Color>, p_density: impl Into<f64>, p_options: impl Into<Options>,
-) {
-  let filter_color = p_filter_color.into();
-  let density = (p_density.into() as f32).clamp(0.0, 1.0);
+/// A photo filter adjustment. Create one with [`photo_filter`].
+pub struct PhotoFilterAdjustment {
+  filter: PhotoFilter,
+  density: f64,
+  options: Options,
+}
 
-  apply_adjustment!(apply_photo_filter, p_image, p_options, 1, filter_color, density, true);
+impl Apply for PhotoFilterAdjustment {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<abra_core::ImageRef<'a>>) {
+    let mut image_ref: abra_core::ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let (filter_color, preserve_l) = match self.filter {
+      PhotoFilter::Color(color) => (color, true),
+      PhotoFilter::Preset(preset) => (preset_color(preset), false),
+    };
+    let density = (self.density as f32).clamp(0.0, 1.0);
+    apply_adjustment!(apply_photo_filter, image, self.options.as_ref(), 1, filter_color, density, preserve_l);
+  }
+}
+
+impl PhotoFilterAdjustment {
+  /// Sets how strongly the filter is applied, from `0.0` to `1.0`. Defaults to `0.25`.
+  pub fn with_density(mut self, p_density: impl Into<f64>) -> Self {
+    self.density = p_density.into();
+    self
+  }
+}
+
+/// Tints the image as if shot through a colored lens filter.
+/// # Arguments
+/// - `p_filter`: A custom color or a preset filter.
+pub fn photo_filter(p_filter: impl Into<PhotoFilter>) -> PhotoFilterAdjustment {
+  PhotoFilterAdjustment {
+    filter: p_filter.into(),
+    density: 0.25,
+    options: None,
+  }
 }
 /// Applies a warming photo filter to the image using a warm orange color (236,138,0).
 /// - `p_image`: The image to adjust.
 /// - `p_options`: Options to apply the adjustment.
-pub fn photo_filter_preset(
-  p_image: &mut Image, p_preset: FilterType, p_density: impl Into<f64>, p_options: impl Into<Options>,
-) {
-  let density = (p_density.into() as f32).clamp(0.0, 1.0);
-  let color = match p_preset {
-    FilterType::WarmingDark => Color::from_rgb(255, 101, 0),
-    FilterType::WarmingLight => Color::from_rgb(236, 138, 0),
-    FilterType::CoolingDark => Color::from_rgb(0, 109, 255),
-    FilterType::CoolingLight => Color::from_rgb(0, 181, 255),
-    FilterType::Red => Color::from_rgb(234, 26, 26),
-    FilterType::Orange => Color::from_rgb(243, 132, 23),
-    FilterType::Yellow => Color::from_rgb(249, 227, 28),
-    FilterType::Green => Color::from_rgb(25, 201, 25),
-    FilterType::Cyan => Color::from_rgb(29, 203, 234),
-    FilterType::Blue => Color::from_rgb(29, 53, 234),
-    FilterType::Violet => Color::from_rgb(155, 29, 234),
-    FilterType::Magenta => Color::from_rgb(227, 24, 227),
-    FilterType::Sepia => Color::from_rgb(172, 122, 51),
-    FilterType::DeepRed => Color::from_rgb(255, 0, 0),
-    FilterType::DeepBlue => Color::from_rgb(0, 34, 205),
-    FilterType::DeepEmerald => Color::from_rgb(80, 141, 0),
-    FilterType::DeepYellow => Color::from_rgb(255, 213, 0),
-    FilterType::Underwater => Color::from_rgb(0, 194, 177),
-  };
-  // Match Photoshop-like color behavior: allow the filter L to affect
-  // tonal mapping (do not strictly preserve source L) to emulate
-  // the expected results in tests that replicate Photoshop mappings.
-  apply_adjustment!(apply_photo_filter, p_image, p_options, 1, color, density, false);
-}
 
 #[cfg(test)]
 mod tests {
@@ -175,7 +212,7 @@ mod tests {
     // original color #886d4f -> (136,109,79)
     img.clear_color(Color::from_rgba(136, 109, 79, 255));
     // Apply the warming 81 filter at full density to assert the mapping.
-    photo_filter_preset(&mut img, FilterType::WarmingLight, 0.8, None);
+    photo_filter(PhotoFilter::Preset(FilterType::WarmingLight)).with_density(0.8).apply(&mut img);
     let (r, g, b, _a) = img.get_pixel(1, 1).unwrap();
     // expected #77521c -> (119,82,28)
     let (er, eg, eb) = (119u8, 82u8, 28u8);
@@ -196,7 +233,7 @@ mod tests {
     // original color #886d4f -> (136,109,79)
     img.clear_color(Color::from_rgba(136, 109, 79, 255));
     // Apply the warming 85 filter at 25% density
-    photo_filter_preset(&mut img, FilterType::WarmingDark, 0.25, None);
+    photo_filter(PhotoFilter::Preset(FilterType::WarmingDark)).apply(&mut img);
     let (r, g, b, _a) = img.get_pixel(1, 1).unwrap();
     // expected #836343 -> (131,99,67)
     let (er, eg, eb) = (131u8, 99u8, 67u8);

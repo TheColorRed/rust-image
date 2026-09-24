@@ -1,6 +1,9 @@
 import { AppContext } from '@/app';
+import { BrushTool } from '@/components/tools/brush/brush';
+import { EyeDropperTool } from '@/components/tools/eye-dropper/eye-dropper';
+import { GradientTool } from '@/components/tools/gradient/gradient';
 import { MoveToolOptions } from '@/components/tools/move';
-import { SelectionTool } from '@/components/tools/selection';
+import { SelectionTool } from '@/components/tools/selection/selection';
 import { useContext, useMemo } from 'react';
 
 export function TopToolBar() {
@@ -12,6 +15,12 @@ export function TopToolBar() {
         return <MoveToolOptions />;
       case 'selection':
         return <SelectionTool />;
+      case 'paint-brush':
+        return <BrushTool />;
+      case 'eye-dropper':
+        return <EyeDropperTool />;
+      case 'gradient':
+        return <GradientTool />;
       default:
         return <div>No Options Available</div>;
     }

@@ -1,5 +1,6 @@
 pub mod levels;
 pub use levels::FilterType;
+pub use options::Apply;
 
 /// Adjustments that affect an image's color.
 pub mod color;
@@ -30,16 +31,10 @@ pub mod color;
 /// ```
 #[macro_export]
 macro_rules! apply_adjustment {
-  ($cpu_func:ident, $image:ident, $apply_opts:ident, $kernel_padding:expr $(, $rest:expr )* ) => {
-    let options = $apply_opts.into();
-    let ctx = options::get_ctx(options.as_ref());
-    // Print each extra argument's value for debugging in a safe, common case.
-    // This uses `{:?}` (Debug) — arguments must implement `Debug`.
-    // If the extra arguments are references (e.g. `&mut something`) then printing
-    // them may borrow them immutably and conflict with later mutable uses.
-    $( println!("Parameter: {:?}", $rest); )*
+  ($cpu_func:ident, $image:ident, $apply_opts:expr, $kernel_padding:expr $(, $rest:expr )* ) => {
+    let ctx = options::get_ctx($apply_opts);
 
-    abra_core::image::apply_area::process_image($image, ctx, $kernel_padding, |img| {
+    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, |img| {
       $cpu_func(img $(, $rest )*);
     });
   };

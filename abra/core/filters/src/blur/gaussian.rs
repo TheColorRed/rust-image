@@ -1,22 +1,17 @@
 use crate::common::*;
-use abra_core::if_pick;
-use abra_core::{Channels, Resize};
+use abra_core::{Channels, Resize, ResizeTarget, Size};
+use abra_core::{IntoNumber, if_pick};
 
-use std::time::Instant;
-
-use abra_core::image::apply_area::process_image;
-use options::get_ctx;
-
-fn gaussian_kernel_1d(radius: u32) -> Vec<f32> {
-  let mut kernel = vec![0.0; (2 * radius + 1) as usize];
-  let sigma = radius as f32 / 2.0;
+fn gaussian_kernel_1d(p_radius: u32) -> Vec<f32> {
+  let mut kernel = vec![0.0; (2 * p_radius + 1) as usize];
+  let sigma = p_radius as f32 / 2.0;
   let pi = std::f32::consts::PI;
 
   // Fill kernel symmetrically
-  for x in 0..=radius {
+  for x in 0..=p_radius {
     let value = (-(x as f32 * x as f32) / (2.0 * sigma * sigma)).exp() / (2.0 * pi * sigma * sigma);
-    kernel[radius as usize + x as usize] = value;
-    kernel[radius as usize - x as usize] = value;
+    kernel[p_radius as usize + x as usize] = value;
+    kernel[p_radius as usize - x as usize] = value;
   }
 
   // Compute full kernel sum and normalize so the kernel sums to 1.0.
@@ -32,32 +27,32 @@ fn gaussian_kernel_1d(radius: u32) -> Vec<f32> {
 /// Uses two passes: horizontal and vertical for O(r) complexity instead of O(r²).
 /// * `p_image` - A mutable reference to the image to be blurred.
 /// * `p_radius` - The radius of the Gaussian kernel.
-fn separable_gaussian_blur_pixels(pixels: &[u8], width: usize, height: usize, p_radius: u32) -> Vec<u8> {
+fn separable_gaussian_blur_pixels(p_pixels: &[u8], p_width: usize, p_height: usize, p_radius: u32) -> Vec<u8> {
   let kernel = gaussian_kernel_1d(p_radius);
   let kernel_radius = p_radius as i32;
   // kernel_radius is no longer used here; separable implementation computes its kernel locally.
-  let width_i32 = width as i32;
-  let height_i32 = height as i32;
+  let width_i32 = p_width as i32;
+  let height_i32 = p_height as i32;
 
   // Preallocate two buffers (horizontal then vertical) to avoid repeated allocations when processing rows.
-  let mut horizontal = vec![0u8; width * height * 4];
-  let mut vertical = vec![0u8; width * height * 4];
+  let mut horizontal = vec![0u8; p_width * p_height * 4];
+  let mut vertical = vec![0u8; p_width * p_height * 4];
 
   // Horizontal pass (parallel per-row writing into horizontal buffer)
-  horizontal.par_chunks_mut(width * 4).enumerate().for_each(|(y, chunk)| {
-    for x in 0..width {
+  horizontal.par_chunks_mut(p_width * 4).enumerate().for_each(|(y, chunk)| {
+    for x in 0..p_width {
       let mut r = 0.0f32;
       let mut g = 0.0f32;
       let mut b = 0.0f32;
       let mut a = 0.0f32;
       for kx in -kernel_radius..=kernel_radius {
         let px = (x as i32 + kx).clamp(0, width_i32 - 1) as usize;
-        let src_idx = (y * width + px) * 4;
+        let src_idx = (y * p_width + px) * 4;
         let weight = kernel[(kx + kernel_radius) as usize];
-        r += pixels[src_idx] as f32 * weight;
-        g += pixels[src_idx + 1] as f32 * weight;
-        b += pixels[src_idx + 2] as f32 * weight;
-        a += pixels[src_idx + 3] as f32 * weight;
+        r += p_pixels[src_idx] as f32 * weight;
+        g += p_pixels[src_idx + 1] as f32 * weight;
+        b += p_pixels[src_idx + 2] as f32 * weight;
+        a += p_pixels[src_idx + 3] as f32 * weight;
       }
       let rr = r.clamp(0.0, 255.0) as u8;
       let gg = g.clamp(0.0, 255.0) as u8;
@@ -72,15 +67,15 @@ fn separable_gaussian_blur_pixels(pixels: &[u8], width: usize, height: usize, p_
   });
 
   // Vertical pass: read from horizontal buffer, write into vertical buffer
-  vertical.par_chunks_mut(width * 4).enumerate().for_each(|(y, chunk)| {
-    for x in 0..width {
+  vertical.par_chunks_mut(p_width * 4).enumerate().for_each(|(y, chunk)| {
+    for x in 0..p_width {
       let mut r = 0.0f32;
       let mut g = 0.0f32;
       let mut b = 0.0f32;
       let mut a = 0.0f32;
       for ky in -kernel_radius..=kernel_radius {
         let py = (y as i32 + ky).clamp(0, height_i32 - 1) as usize;
-        let src_idx = (py * width + x) * 4;
+        let src_idx = (py * p_width + x) * 4;
         let weight = kernel[(ky + kernel_radius) as usize];
         r += horizontal[src_idx] as f32 * weight;
         g += horizontal[src_idx + 1] as f32 * weight;
@@ -105,85 +100,80 @@ fn separable_gaussian_blur_pixels(pixels: &[u8], width: usize, height: usize, p_
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the Gaussian kernel.
 /// - `p_options`: Additional options for applying the blur.
-pub fn gaussian_blur<'a>(p_image: impl Into<ImageRef<'a>>, p_radius: u32, p_apply_options: impl Into<Options>) {
+fn apply_gaussian_blur(p_image: &mut Image, p_radius: u32) {
   if p_radius == 0 {
     return;
   }
 
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  let start = std::time::Instant::now();
-  let _duration = Instant::now();
-  let kernel_radius = p_radius as i32;
-  let (image_w, image_h) = image.dimensions::<u32>();
-  let image_w = image_w as i32;
-  let image_h = image_h as i32;
-  let options = p_apply_options.into();
+  let (width, height) = p_image.dimensions::<u32>();
+  let pixels = p_image.to_rgba_vec();
 
-  let areas = options.as_ref().and_then(|o| o.area());
-  for area in areas.unwrap() {
-    let ctx = get_ctx(options.as_ref());
-    // Precompute area-based downsampling decision so the closure stays small and focused.
-    // let large_area_ratio = options
-    //   .as_ref()
-    //   .and_then(|o| o.area())
-    //   .map(|a| {
-    //     let (min_x, min_y, max_x, max_y) = a.bounds::<i32>();
-    //     let area_w = (max_x - min_x) as i64;
-    //     let area_h = (max_y - min_y) as i64;
-    //     (area_w * area_h) > (image_w as i64 * image_h as i64 / 4)
-    //   })
-    //   .unwrap_or(false);
-    let large_area_ratio = {
-      let (min_x, min_y, max_x, max_y) = area.bounds::<i32>();
-      let area_w = (max_x - min_x) as i64;
-      let area_h = (max_y - min_y) as i64;
-      (area_w * area_h) > (image_w as i64 * image_h as i64 / 4)
-    };
+  // For large radii on sufficiently large areas, downsample, blur, then upsample for speed.
+  let vertical = if p_radius >= 24 && (width >= 128 || height >= 128) {
+    let scale = if_pick!(p_radius >= 96 => 8, p_radius >= 48 => 4, else => 2);
+    let down_w = (width / scale).max(1);
+    let down_h = (height / scale).max(1);
+    let new_radius = (p_radius as f32 / scale as f32).max(1.0).round() as u32;
 
-    // Let apply_processing prepare the pixels and handle area/feather/mask+blending.
-    process_image(image, ctx, kernel_radius, |img| {
-      let pixels = img.to_rgba_vec();
-      let (width, height) = img.dimensions::<u32>();
+    let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
+    tmp_img.resize(ResizeTarget::Exact(Size::new(down_w, down_h)), None);
+    let blurred_small = separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
+    tmp_img.set_rgba_owned(blurred_small);
+    tmp_img.resize(ResizeTarget::Exact(Size::new(width, height)), None);
+    tmp_img.into_rgba_vec()
+  } else {
+    separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)
+  };
 
-      // If radius is very large and area is sufficiently large, downsample and approximate
-      let vertical = if p_radius >= 24 && large_area_ratio && (width >= 128 || height >= 128) {
-        // choose a scale that reduces the radius to a reasonable size
-        let scale = if_pick!(p_radius >= 96 => 8, p_radius >= 48 => 4, else => 2);
-        let down_w = (width / scale).max(1);
-        let down_h = (height / scale).max(1);
+  p_image.set_rgba_owned(vertical);
+}
 
-        // Build a temporary sub-image and downscale
-        let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
-        tmp_img.resize(down_w, down_h, None);
-        let new_radius = (p_radius as f32 / scale as f32).max(1.0).round() as u32;
+#[derive(Clone)]
+pub struct GaussianBlur {
+  radius: u32,
+  options: Options,
+}
 
-        // Apply separable gaussian on the small image (no area), this is faster because of far fewer pixels.
-        let blurred_small =
-          separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
-        tmp_img.set_rgba_owned(blurred_small);
-
-        // Upscale back to original processing size
-        tmp_img.resize(width as u32, height as u32, None);
-        tmp_img.into_rgba_vec()
-      } else {
-        separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)
-      };
-
-      // Write processed pixels back to the provided sub-image. apply_processing will handle blending.
-      img.set_rgba_owned(vertical);
-    });
+impl Apply for GaussianBlur {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
   }
-  println!("Gaussian blur took: {:?}", start.elapsed());
-  // DebugFilters::GaussianBlur(radius as f32, duration.elapsed()).log();
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let options = self.options.clone();
+    apply_filter!(apply_gaussian_blur, image, options, self.radius as i32, self.radius);
+  }
+}
+
+pub fn gaussian_blur(p_radius: impl IntoNumber) -> GaussianBlur {
+  GaussianBlur {
+    radius: p_radius.into(),
+    options: None,
+  }
 }
 
 #[cfg(test)]
 mod tests {
-  use options::ApplyOptions;
+  use options::{Apply, ApplyOptions};
 
   use super::gaussian_blur;
   use abra_core::{Area, Image};
+
+  #[test]
+  fn gaussian_blur_without_area_does_not_panic() {
+    let mut img = Image::new(8, 8);
+    for y in 0..8u32 {
+      for x in 0..8u32 {
+        img.set_pixel(x, y, (0u8, 0u8, 0u8, 255));
+      }
+    }
+
+    gaussian_blur(2).apply(&mut img);
+
+    assert_eq!(img.dimensions::<u32>(), (8, 8));
+  }
 
   #[test]
   fn gaussian_blur_area_writes_back_only_area() {
@@ -199,7 +189,7 @@ mod tests {
     let orig = img.to_rgba_vec();
 
     // Apply blur to center 4x4 area (white pixel should spread)
-    gaussian_blur(&mut img, 2, ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0))));
+    gaussian_blur(2).with_options(ApplyOptions::new().with_area(Area::rect((2.0, 2.0), (4.0, 4.0)))).apply(&mut img);
 
     // Ensure dimensions unchanged
     assert_eq!(img.dimensions::<u32>(), (8, 8));

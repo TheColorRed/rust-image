@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::IntoNumber;
 
 use crate::noise::NoiseDistribution;
 
@@ -32,114 +33,91 @@ impl ApertureShape {
   }
 }
 
+/// Iris (aperture) settings.
 #[derive(Clone, Copy, Debug)]
-/// Iris configuration
-pub struct IrisOptions {
+struct IrisSettings {
   /// Aperture polygon shape: triangle through octagon
-  pub shape: ApertureShape,
+  shape: ApertureShape,
   /// Radius in pixels of the blur kernel
-  pub radius: u32,
+  radius: u32,
   /// Blade curvature (0.0 polygon, 1.0 circle)
-  pub blade_curvature: f32,
+  blade_curvature: f32,
   /// Rotation of the aperture in radians
-  pub rotation: f32,
+  rotation: f32,
 }
 
+/// Specular highlight settings.
 #[derive(Clone, Copy, Debug)]
-/// Specular highlight configuration
-pub struct SpecularOptions {
+struct SpecularSettings {
   /// Multiplier applied to samples above threshold (>= 1.0)
-  pub brightness: f32,
+  brightness: f32,
   /// Luminance threshold in [0.0, 1.0]
-  pub threshold: f32,
+  threshold: f32,
 }
 
+/// Output noise settings.
 #[derive(Clone, Copy, Debug)]
-/// Noise configuration
-pub struct NoiseOptions {
+struct NoiseSettings {
   /// Strength of noise in [0.0, 1.0] relative to 255 range
-  pub amount: f32,
+  amount: f32,
   /// Noise distribution
-  pub distribution: NoiseDistribution,
+  distribution: NoiseDistribution,
 }
 
+/// Everything the lens blur needs, gathered so it can be handed to the pixel loop in one piece.
 #[derive(Clone, Copy, Debug)]
-/// Options for lens blur filter
-pub struct LensBlurOptions {
-  /// Iris (aperture) configuration
-  pub iris: IrisOptions,
+struct LensSettings {
+  iris: IrisSettings,
   /// Specular highlight boost; None to disable
-  pub specular: Option<SpecularOptions>,
+  specular: Option<SpecularSettings>,
   /// Output noise/dither; None to disable
-  pub noise: Option<NoiseOptions>,
+  noise: Option<NoiseSettings>,
   /// Number of samples per pixel. Higher is smoother but slower.
-  pub samples: u32,
-}
-
-impl Default for IrisOptions {
-  fn default() -> Self {
-    Self {
-      shape: ApertureShape::Hexagon,
-      radius: 8,
-      blade_curvature: 0.5,
-      rotation: 0.0,
-    }
-  }
-}
-
-impl Default for LensBlurOptions {
-  fn default() -> Self {
-    Self {
-      iris: IrisOptions::default(),
-      specular: None,
-      noise: None,
-      samples: 32,
-    }
-  }
+  samples: u32,
 }
 
 #[inline]
-fn luminance_rgb(r: f32, g: f32, b: f32) -> f32 {
-  0.2126 * r + 0.7152 * g + 0.0722 * b
+fn luminance_rgb(p_r: f32, p_g: f32, p_b: f32) -> f32 {
+  0.2126 * p_r + 0.7152 * p_g + 0.0722 * p_b
 }
 
 // Regular polygon radius for given angle theta.
 // N: number of sides, R: circumradius.
 #[inline]
-fn polygon_radius(theta: f32, blades: u32, r: f32) -> f32 {
-  let n = blades as f32;
+fn polygon_radius(p_theta: f32, p_blades: u32, p_r: f32) -> f32 {
+  let n = p_blades as f32;
   let k = (std::f32::consts::PI / n).cos();
-  let a = (theta % (2.0 * std::f32::consts::PI / n)) - (std::f32::consts::PI / n);
-  (k * r) / a.cos()
+  let a = (p_theta % (2.0 * std::f32::consts::PI / n)) - (std::f32::consts::PI / n);
+  (k * p_r) / a.cos()
 }
 
 // Boundary radius blending from polygon to circle based on blade_curvature in [0,1].
 #[inline]
-fn iris_boundary(theta: f32, iris: &IrisOptions) -> f32 {
-  let r = iris.radius as f32;
-  let rp = polygon_radius(theta, iris.shape.blades(), r);
+fn iris_boundary(p_theta: f32, p_iris: &IrisSettings) -> f32 {
+  let r = p_iris.radius as f32;
+  let rp = polygon_radius(p_theta, p_iris.shape.blades(), r);
   let rc = r;
-  rp * (1.0 - iris.blade_curvature) + rc * iris.blade_curvature
+  rp * (1.0 - p_iris.blade_curvature) + rc * p_iris.blade_curvature
 }
 
 // Generate a low-discrepancy sample in [0,1]^2 using Vogel spiral approximation
 #[inline]
-fn ld_sample(i: u32, n: u32) -> (f32, f32) {
+fn ld_sample(p_i: u32, p_n: u32) -> (f32, f32) {
   // Golden angle ratio sequence
   let g = 0.61803398875_f32; // (sqrt(5)-1)/2
-  let u = (i as f32 + 0.5) / n as f32;
-  let v = ((i as f32) * g).fract();
+  let u = (p_i as f32 + 0.5) / p_n as f32;
+  let v = ((p_i as f32) * g).fract();
   (u, v)
 }
 
 // Map unit square sample to the iris shape area-uniformly.
 #[inline]
-fn iris_sample_offset(i: u32, n: u32, iris: &IrisOptions) -> (f32, f32) {
-  let (u, v) = ld_sample(i, n);
+fn iris_sample_offset(p_i: u32, p_n: u32, p_iris: &IrisSettings) -> (f32, f32) {
+  let (u, v) = ld_sample(p_i, p_n);
   let r_unit = u.sqrt(); // area-uniform radius in [0,1]
   let mut theta = 2.0 * std::f32::consts::PI * v;
-  theta += iris.rotation;
-  let r_boundary = iris_boundary(theta, iris);
+  theta += p_iris.rotation;
+  let r_boundary = iris_boundary(theta, p_iris);
   let r = r_unit * r_boundary;
   let (dx, dy) = (r * theta.cos(), r * theta.sin());
   (dx, dy)
@@ -148,7 +126,7 @@ fn iris_sample_offset(i: u32, n: u32, iris: &IrisOptions) -> (f32, f32) {
 /// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
 /// - `image`: target image buffer
 /// - `p_options`: lens blur configuration
-fn apply_lens_blur(p_image: &mut Image, p_options: LensBlurOptions) {
+fn apply_lens_blur(p_image: &mut Image, p_options: LensSettings) {
   let samples = p_options.samples.max(1);
   let (width, height) = p_image.dimensions::<u32>();
   if p_options.iris.radius == 0 || width == 0 || height == 0 {
@@ -156,9 +134,7 @@ fn apply_lens_blur(p_image: &mut Image, p_options: LensBlurOptions) {
   }
 
   // Precompute offsets
-  let offsets: Vec<(f32, f32)> = (0..samples)
-    .map(|i| iris_sample_offset(i, samples, &p_options.iris))
-    .collect();
+  let offsets: Vec<(f32, f32)> = (0..samples).map(|i| iris_sample_offset(i, samples, &p_options.iris)).collect();
 
   // Snapshot source pixels once (borrow slice to avoid copying)
   let src = p_image.rgba();
@@ -242,18 +218,98 @@ fn apply_lens_blur(p_image: &mut Image, p_options: LensBlurOptions) {
 
   if let Some(noise) = p_options.noise {
     if noise.amount > 0.0 {
-      crate::noise::noise(p_image, noise.amount, noise.distribution, None);
+      crate::noise::noise(noise.amount).with_distribution(noise.distribution).apply(p_image);
     }
   }
 }
-/// Applies a lens blur to an image with polygonal/circular iris, specular highlights and optional noise.
-/// - `p_image`: target image buffer
-/// - `p_options`: lens blur configuration
-/// - `p_apply_options`: additional options for applying the blur
-pub fn lens_blur<'a>(
-  p_image: impl Into<ImageRef<'a>>, p_options: LensBlurOptions, p_apply_options: impl Into<Options>,
-) {
-  let mut image_ref: ImageRef = p_image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_filter!(apply_lens_blur, image, p_apply_options, 1, p_options);
+/// A lens blur. Create one with [`lens_blur`], adjust it with the `with_*` methods, then run it with
+/// [`Apply::apply`].
+#[derive(Clone)]
+pub struct LensBlur {
+  settings: LensSettings,
+  options: Options,
+}
+
+impl LensBlur {
+  /// Sets the aperture shape, which shapes the bokeh. Defaults to [`ApertureShape::Hexagon`].
+  pub fn with_shape(mut self, p_shape: ApertureShape) -> Self {
+    self.settings.iris.shape = p_shape;
+    self
+  }
+
+  /// Sets how round the aperture blades are, from `0.0` (straight polygon) to `1.0` (circle). Defaults to `0.5`.
+  pub fn with_blade_curvature(mut self, p_curvature: f32) -> Self {
+    self.settings.iris.blade_curvature = p_curvature.clamp(0.0, 1.0);
+    self
+  }
+
+  /// Sets the clockwise rotation of the aperture in degrees. Defaults to `0.0`.
+  pub fn with_rotation(mut self, p_degrees: f32) -> Self {
+    self.settings.iris.rotation = p_degrees.to_radians();
+    self
+  }
+
+  /// Brightens highlights to make bokeh stand out. Samples brighter than `p_threshold` (luminance, `0.0..=1.0`)
+  /// are multiplied by `p_brightness` (at least `1.0`). Off by default.
+  pub fn with_specular(mut self, p_brightness: f32, p_threshold: f32) -> Self {
+    self.settings.specular = Some(SpecularSettings {
+      brightness: p_brightness.max(1.0),
+      threshold: p_threshold.clamp(0.0, 1.0),
+    });
+    self
+  }
+
+  /// Adds noise after blurring, to match the grain of the rest of the image. `p_amount` is `0.0..=1.0`.
+  /// Off by default.
+  pub fn with_noise(mut self, p_amount: f32, p_distribution: NoiseDistribution) -> Self {
+    self.settings.noise = Some(NoiseSettings {
+      amount: p_amount.clamp(0.0, 1.0),
+      distribution: p_distribution,
+    });
+    self
+  }
+
+  /// Sets the number of samples per pixel. Higher is smoother but slower. Defaults to `32`.
+  pub fn with_samples(mut self, p_samples: u32) -> Self {
+    self.settings.samples = p_samples.max(1);
+    self
+  }
+}
+
+impl Apply for LensBlur {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    let apply_options = self.options.clone();
+    let settings = self.settings;
+    let padding = settings.iris.radius as i32 + 1;
+    apply_filter!(apply_lens_blur, image, apply_options, padding, settings);
+  }
+}
+
+/// Simulates a camera lens blur, where the aperture shape gives out-of-focus highlights their shape.
+/// # Arguments
+/// - `p_radius`: The radius of the blur in pixels.
+///
+/// By default the aperture is a hexagon with half-rounded blades, sampled 32 times per pixel, with no specular
+/// boost or noise.
+pub fn lens_blur(p_radius: impl IntoNumber) -> LensBlur {
+  LensBlur {
+    settings: LensSettings {
+      iris: IrisSettings {
+        shape: ApertureShape::Hexagon,
+        radius: p_radius.into(),
+        blade_curvature: 0.5,
+        rotation: 0.0,
+      },
+      specular: None,
+      noise: None,
+      samples: 32,
+    },
+    options: None,
+  }
 }

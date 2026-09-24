@@ -32,6 +32,15 @@ pub enum AdjustmentLayerType {
   Pattern,
 }
 
+/// A relative or absolute layer-stack movement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerMove {
+  Up,
+  Down,
+  Top,
+  Bottom,
+}
+
 impl AdjustmentLayerType {
   pub fn to_string(&self) -> String {
     let s = match self {
@@ -54,8 +63,8 @@ impl AdjustmentLayerType {
 }
 
 impl From<String> for AdjustmentLayerType {
-  fn from(s: String) -> Self {
-    match s.as_str() {
+  fn from(p_s: String) -> Self {
+    match p_s.as_str() {
       "brightness-contrast" => AdjustmentLayerType::BrightnessContrast,
       "exposure" => AdjustmentLayerType::Exposure,
       "hue-saturation" => AdjustmentLayerType::HueSaturation,
@@ -77,16 +86,16 @@ impl From<String> for AdjustmentLayerType {
 /// A layer in a project.
 /// This is the public API struct that wraps `Arc<Mutex<LayerInner>>`.
 #[derive(Debug)]
-pub struct Layer {
+pub struct Layer<'a> {
   /// Reference to the inner layer.
-  inner_layer: Arc<Mutex<LayerInner>>,
+  inner: Arc<Mutex<LayerInner<'a>>>,
 }
 
-impl Layer {
+impl<'a> Layer<'a> {
   /// Creates a new layer with the given name and image.
-  pub fn new(name: impl Into<String>, image: Arc<Image>) -> Self {
+  pub fn new(p_name: impl Into<String>, p_image: Arc<Image>) -> Self {
     Layer {
-      inner_layer: Arc::new(Mutex::new(LayerInner::new(name, image))),
+      inner: Arc::new(Mutex::new(LayerInner::new(p_name, p_image))),
     }
   }
 
@@ -94,31 +103,48 @@ impl Layer {
   /// inner mutex guard alive for as long as the ImageRef is alive.
   /// This avoids cloning the underlying image data and ensures the lock is
   /// held while callers access the image.
-  pub fn image(&self) -> ImageRef<'_> {
+  pub fn image(&'a self) -> ImageRef<'a> {
     ImageRef::from(self)
   }
 
   /// Sets a new image for the layer.
-  pub fn set_image(&self, image: Arc<Image>) {
-    let (width, height) = image.dimensions();
+  pub fn set_image(&self, p_image: Arc<Image>) {
+    let (width, height) = p_image.dimensions();
     let mut borrow_mut = self.borrow_mut();
     let image_mut = borrow_mut.image_mut();
-    image_mut.set_new_pixels(image.rgba(), width, height);
+    image_mut.set_new_pixels(p_image.rgba(), width, height);
+  }
+
+  /// Return a cloned owned `Image` (cheap clone of the internal Arc/Image).
+  pub fn clone_image<'b>(&'b self) -> Image
+  where
+    'b: 'a,
+  {
+    self.image().clone()
   }
 
   /// Creates a new Layer wrapper from an `Arc<Mutex<LayerInner>>`.
-  pub(crate) fn from_inner(inner_layer: Arc<Mutex<LayerInner>>) -> Self {
-    Layer { inner_layer }
+  pub(crate) fn from_inner(p_inner_layer: Arc<Mutex<LayerInner<'a>>>) -> Self {
+    Layer { inner: p_inner_layer }
   }
 
   /// Borrows the layer immutably.
-  pub(crate) fn borrow(&self) -> std::sync::MutexGuard<'_, LayerInner> {
-    self.inner_layer.lock().unwrap()
+  pub(crate) fn borrow(&self) -> std::sync::MutexGuard<'_, LayerInner<'a>> {
+    self.inner.lock().unwrap()
   }
 
   /// Borrows the layer mutably.
-  pub(crate) fn borrow_mut(&self) -> std::sync::MutexGuard<'_, LayerInner> {
-    self.inner_layer.lock().unwrap()
+  pub(crate) fn borrow_mut(&self) -> std::sync::MutexGuard<'_, LayerInner<'a>> {
+    self.inner.lock().unwrap()
+  }
+
+  /// Run a closure with a mutable reference to the underlying image.
+  /// This acquires the inner mutex, provides a `&mut Image` to the closure
+  /// and ensures the lock is released immediately after the closure returns.
+  pub fn with_image_mut<R>(&self, p_f: impl FnOnce(&mut Image) -> R) -> R {
+    let mut g = self.borrow_mut();
+    let img = g.image_mut();
+    p_f(img)
   }
 }
 
@@ -152,7 +178,7 @@ macro_rules! layer_method_mut {
   };
 }
 
-impl Layer {
+impl<'a> Layer<'a> {
   layer_method_mut!(
     /// Sets the blend mode of the layer.
     set_blend_mode(blend_mode: fn(RGBA, RGBA) -> RGBA)
@@ -168,18 +194,26 @@ impl Layer {
     self.borrow_mut().mark_dirty();
   }
 
+  pub fn save(&self, p_file: impl Into<String>, p_options: impl Into<Option<abra_core::WriterOptions>>) {
+    self.borrow_mut().save(p_file, p_options);
+  }
+
+  pub fn as_image(&self) -> Image {
+    self.borrow().as_image()
+  }
+
   /// Returns a handler for applying transform operations to the layer.
-  pub fn transform(&self) -> LayerTransform {
-    LayerTransform::new(self.inner_layer.clone())
+  pub fn transform(&self) -> LayerTransform<'a> {
+    LayerTransform::new(self.inner.clone())
   }
 
   /// Returns the effects builder for queuing effects to be applied during rendering.
-  pub fn effects(&self) -> LayerEffects {
-    LayerEffects::new().with_layer(self.inner_layer.clone())
+  pub fn effects(&self) -> LayerEffects<'a> {
+    LayerEffects::new().with_layer(self.inner.clone())
   }
   /// Sets all effects for the layer.
-  pub fn set_effects(&self, effects: LayerEffects) {
-    self.borrow_mut().set_effects(effects);
+  pub fn set_effects(&self, p_effects: LayerEffects<'a>) {
+    self.borrow_mut().set_effects(p_effects);
   }
 
   layer_method_mut!(
@@ -197,9 +231,9 @@ impl Layer {
   );
 
   /// Sets the position of the layer relative to another `Layer`.
-  pub fn set_relative_position(&self, x: i32, y: i32, layer: &Layer) {
-    let other_layer = layer.borrow();
-    self.borrow_mut().set_relative_position(x, y, &*other_layer);
+  pub fn set_relative_position(&self, p_x: i32, p_y: i32, p_layer: &Layer) {
+    let other_layer = p_layer.borrow();
+    self.borrow_mut().set_relative_position(p_x, p_y, &*other_layer);
     drop(other_layer);
   }
 
@@ -260,34 +294,14 @@ impl Layer {
   }
 
   /// Gets the dimensions of the layer.
-  pub fn dimensions<T>(&self) -> (T, T)
-  where
-    T: TryFrom<u64>,
-    <T as TryFrom<u64>>::Error: std::fmt::Debug,
-  {
-    self.borrow().dimensions::<T>()
+  pub fn dimensions(&self) -> (u32, u32) {
+    self.borrow().dimensions::<u32>()
   }
 
   layer_method_mut!(
-    /// Moves the layer up one position in the stack (increases its index by 1).
-    /// Does nothing if the layer is already at the top.
-    move_up()
-  );
-
-  layer_method_mut!(
-    /// Moves the layer down one position in the stack (decreases its index by 1).
-    /// Does nothing if the layer is already at the bottom.
-    move_down()
-  );
-
-  layer_method_mut!(
-    /// Moves the layer to the top of the stack.
-    move_to_top()
-  );
-
-  layer_method_mut!(
-    /// Moves the layer to the bottom of the stack.
-    move_to_bottom()
+    /// Moves the layer according to a relative or absolute stack action.
+    /// Operations at the corresponding boundary have no effect.
+    move_to(action: LayerMove)
   );
 
   layer_method_mut!(
@@ -296,7 +310,7 @@ impl Layer {
   );
 
   /// Duplicates the layer and returns a new `Layer` instance.
-  pub fn duplicate(&self) -> Layer {
+  pub fn duplicate(&self) -> Self {
     self.borrow().duplicate()
   }
 
@@ -309,19 +323,19 @@ impl Layer {
   // convert the `Layer` into a `MutexGuard` and operate on the `Image`.
 }
 
-impl Clone for Layer {
+impl<'a> Clone for Layer<'a> {
   fn clone(&self) -> Self {
     Layer {
-      inner_layer: self.inner_layer.clone(),
+      inner: self.inner.clone(),
     }
   }
 }
 
 /// Convert a `&mut Layer` into a `MutexGuard<'_, LayerInner>` so callers can
 /// access the interior `Image` safely for as long as they need it.
-impl<'a> From<&'a mut Layer> for MutexGuard<'a, LayerInner> {
-  fn from(layer: &'a mut Layer) -> Self {
-    layer.borrow_mut()
+impl<'a> From<&'a mut Layer<'a>> for MutexGuard<'a, LayerInner<'a>> {
+  fn from(p_layer: &'a mut Layer<'a>) -> Self {
+    p_layer.borrow_mut()
   }
 }
 
@@ -338,17 +352,17 @@ impl<'a> From<&'a mut Layer> for MutexGuard<'a, LayerInner> {
 /// dropped while the `ImageRef` exists. The underscore prefix avoids an "unused
 /// field" lint/warning while making the intent clear.
 struct LayerGuardOwner<'a> {
-  _guard: MutexGuard<'a, LayerInner>,
+  _guard: MutexGuard<'a, LayerInner<'a>>,
 }
 
 impl<'a> GuardedOwner for LayerGuardOwner<'a> {}
 
 /// Convert a `&mut Layer` into an `ImageRef` that owns the guard for as long as the ImageRef
 /// is alive. This allows filters to take `impl Into<ImageRef>` and do `let mut image = p_image.into();`.
-impl<'a> From<&'a mut Layer> for ImageRef<'a> {
-  fn from(layer: &'a mut Layer) -> Self {
+impl<'a> From<&'a mut Layer<'a>> for ImageRef<'a> {
+  fn from(p_layer: &'a mut Layer<'a>) -> Self {
     // Acquire the guard from the layer (this keeps the mutex locked)
-    let mut guard = layer.borrow_mut();
+    let mut guard = p_layer.borrow_mut();
     // Get raw pointer to the image
     let ptr = guard.image_mut() as *mut Image;
     // Box the guard and erase the type via GuardedOwner trait object so ImageRef can own it
@@ -361,9 +375,9 @@ impl<'a> From<&'a mut Layer> for ImageRef<'a> {
 /// for as long as the `ImageRef` exists. This allows callers to borrow the
 /// `Image` by reference without cloning the underlying data while the lock is
 /// held.
-impl<'a> From<&'a Layer> for ImageRef<'a> {
-  fn from(layer: &'a Layer) -> Self {
-    let guard = layer.borrow();
+impl<'a> From<&'a Layer<'a>> for ImageRef<'a> {
+  fn from(p_layer: &'a Layer<'a>) -> Self {
+    let guard = p_layer.borrow();
     // Obtain a raw pointer to the image; convert from const to mut for the
     // ImageRef which expects *mut — the guard/owner enforces safety at runtime.
     let ptr = guard.image() as *const Image as *mut Image;

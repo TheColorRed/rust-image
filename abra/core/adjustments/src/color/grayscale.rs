@@ -1,11 +1,11 @@
 use abra_core::{Image, ImageRef};
-use options::Options;
+use options::{Apply, Options};
 
 use crate::apply_adjustment;
 
 /// Converts an image to grayscale
-fn apply_grayscale(image_ref: &mut Image) {
-  image_ref.mut_pixels(|mut pixel| {
+fn apply_grayscale(p_image_ref: &mut Image) {
+  p_image_ref.mut_pixels(|mut pixel| {
     let r = pixel[0] as f32;
     let g = pixel[1] as f32;
     let b = pixel[2] as f32;
@@ -20,8 +20,23 @@ fn apply_grayscale(image_ref: &mut Image) {
   });
 }
 
-pub fn grayscale<'a>(image: impl Into<ImageRef<'a>>, p_options: impl Into<Options>) {
-  let mut image_ref: ImageRef = image.into();
-  let image = &mut image_ref as &mut Image;
-  apply_adjustment!(apply_grayscale, image, p_options, 1);
+#[derive(Default)]
+pub struct Grayscale {
+  options: Options,
+}
+
+impl Apply for Grayscale {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    apply_adjustment!(apply_grayscale, image, self.options.as_ref(), 1);
+  }
+}
+
+pub fn grayscale() -> Grayscale {
+  Grayscale::default()
 }

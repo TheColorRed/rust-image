@@ -15,12 +15,12 @@ pub struct FileInfo {
 }
 impl FileInfo {
   /// Creates a new FileInfo with the given dimensions, channels, and pixel data
-  pub fn new(width: u32, height: u32, channels: Channels, pixels: Vec<u8>) -> FileInfo {
+  pub fn new(p_width: u32, p_height: u32, p_channels: Channels, p_pixels: Vec<u8>) -> FileInfo {
     FileInfo {
-      width,
-      height,
-      channels,
-      pixels,
+      width: p_width,
+      height: p_height,
+      channels: p_channels,
+      pixels: p_pixels,
     }
   }
 }

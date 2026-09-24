@@ -25,10 +25,10 @@ pub trait AiProcessModel {
   /// # Example
   ///
   /// ```ignore
-  /// let image = Image::new_from_path("input.png");
+  /// let image = Image::read("input.png")?;
   /// let model = MyAiModel::load("my-model");
   /// let output = model.process(&image);
-  /// output.save("output.png", None);
+  /// output.write("output.png", None)?;
   /// ```
   fn process(&self, p_image: &Image) -> Image;
 }
@@ -45,11 +45,11 @@ pub trait AiProcessModelWithControl {
   /// # Example
   ///
   /// ```ignore
-  /// let image = Image::new_from_path("input.png");
+  /// let image = Image::read("input.png")?;
   /// let ctrl = ControlParams::new(&[0.3, 0.5, 0.7]);
   /// let model = MyAiModel::load("my-model");
   /// let output = model.process_with_control(&image, &ctrl);
-  /// output.save("output.png", None);
+  /// output.write("output.png", None)?;
   /// ```
   fn process_with_control(&self, p_image: &Image, p_ctrl: &ControlParams) -> Image;
 }

@@ -6,6 +6,7 @@ pub use crate::abra_core::Channels;
 pub use crate::abra_core::Color;
 pub use crate::abra_core::Image;
 pub use crate::abra_core::ImageLoader;
+pub use crate::abra_core::LoadMode;
 pub use crate::abra_core::LoadedImages;
 pub use crate::abra_core::Settings;
 pub use crate::abra_core::WriterOptions;
@@ -21,13 +22,14 @@ pub use crate::abra_core::Area;
 pub use crate::abra_core::AspectRatio;
 pub use crate::abra_core::Fill;
 pub use crate::abra_core::LineJoin;
+pub use crate::abra_core::LineSegment;
 pub use crate::abra_core::Path;
 pub use crate::abra_core::Point;
 pub use crate::abra_core::PointF;
 pub use crate::abra_core::Polygon;
 
 // Gradient and drawing helpers
-pub use crate::abra_core::Gradient;
+pub use crate::abra_core::{ColorStop, Gradient};
 // pub use crate::drawing::fill;
 
 // TransformAlgorithm enum

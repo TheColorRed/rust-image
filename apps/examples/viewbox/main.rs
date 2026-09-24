@@ -21,7 +21,8 @@ fn main() {
   let heart_300 = heart.fit_with_aspect((300.0, 300.0), aspect);
   let heart_600 = heart.fit_with_aspect((600.0, 600.0), aspect);
 
-  let color = Fill::Gradient(Gradient::hue().reverse());
+  let gradient = Gradient::hue().reverse();
+  let color = Fill::Gradient(gradient.into());
   // let color = Fill::Solid(Color::from_rgba(255, 50, 100, 255));
 
   // Areas return from fit/stretch, which are closed shapes (no caps needed, only joins)
@@ -38,9 +39,9 @@ fn main() {
   image_large.draw_image_at(&filled_600, (0, 0));
 
   // Save at different sizes
-  image_small.save("out/heart_100.png", None);
-  image_medium.save("out/heart_300.png", None);
-  image_large.save("out/heart_600.png", None);
+  image_small.write("out/heart_100.png", None).expect("Failed to save small image");
+  image_medium.write("out/heart_300.png", None).expect("Failed to save medium image");
+  image_large.write("out/heart_600.png", None).expect("Failed to save large image");
 
   println!("✅ Generated 3 heart images at different sizes:");
   println!("   - heart_100.png (100x100)");
@@ -54,9 +55,9 @@ fn main() {
   let mut image_stretch = Image::new(800, 400); // Wide viewport
   let heart_stretched = heart.stretch((800.0, 400.0));
   let stroke_stretched = heart_stretched.stroke(3.0, LineJoin::Miter);
-  let filled_stretched = fill(stroke_stretched, Fill::Solid(Color::from_rgba(100, 150, 255, 255)));
+  let filled_stretched = fill(stroke_stretched, Fill::Solid(Color::from_rgba(100, 150, 255, 255).into()));
   image_stretch.draw_image_at(&filled_stretched, (0, 0));
-  image_stretch.save("out/heart_stretched.png", None);
+  image_stretch.write("out/heart_stretched.png", None).expect("Failed to save stretched image");
 
   println!();
   println!("✅ Generated heart_stretched.png (800x400)");

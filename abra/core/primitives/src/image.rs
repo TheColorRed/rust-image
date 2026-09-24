@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::channels::Channels;
 use crate::color::Color;
+use crate::resolution::Resolution;
 
 /// Minimal Image type with RGBA buffer representation (Arc-backed for cheap cloning).
 ///
@@ -25,6 +26,7 @@ pub struct Image {
   color_len: u32,
   colors: Arc<Array1<u8>>,
   pub anti_aliasing_level: u32,
+  resolution: Resolution,
 }
 
 impl Image {
@@ -44,6 +46,7 @@ impl Image {
       color_len: width * height * 4,
       colors,
       anti_aliasing_level: 4,
+      resolution: Resolution::default(),
     }
   }
 
@@ -65,18 +68,31 @@ impl Image {
     img
   }
 
+  /// Create a new image from a slice of RGBA bytes.
+  ///
+  /// - `p_width`: The width of the image in pixels.
+  /// - `p_height`: The height of the image in pixels.
+  /// - `p_data`: The RGBA pixel data slice.
+  ///
+  /// This function copies the data from the slice into the internal buffer.
+  pub fn from_rgba_bytes(p_width: u32, p_height: u32, p_data: &[u8]) -> Image {
+    let mut img = Image::new(p_width, p_height);
+    img.set_rgba(p_data);
+    img
+  }
+
   /// Create a new image with a solid color fill.
   ///
   /// - `p_width`: The width of the image in pixels.
   /// - `p_height`: The height of the image in pixels.
-  /// - `color`: The color to fill the image with.
+  /// - `p_color`: The color to fill the image with.
   ///
   /// ```ignore
   /// let img = Image::new_from_color(100, 100, Color::from_rgba(255, 0, 0, 255));
   /// ```
-  pub fn new_from_color(p_width: u32, p_height: u32, color: Color) -> Image {
+  pub fn new_from_color(p_width: u32, p_height: u32, p_color: Color) -> Image {
     let mut img = Image::new(p_width, p_height);
-    img.clear_color(color);
+    img.clear_color(p_color);
     img
   }
 
@@ -85,6 +101,16 @@ impl Image {
   /// Useful when you need a scratch buffer for pixel operations.
   pub fn empty_pixel_vec(&self) -> Vec<u8> {
     vec![0; (self.width * self.height) as usize * 4]
+  }
+
+  /// Returns the physical pixel density metadata.
+  pub fn resolution(&self) -> Resolution {
+    self.resolution
+  }
+
+  /// Updates physical pixel density metadata without resizing the image.
+  pub fn set_resolution(&mut self, p_resolution: Resolution) {
+    self.resolution = p_resolution;
   }
 
   /// Fill the entire image with a solid color.
@@ -205,18 +231,34 @@ impl Image {
     Some((self.colors[index], self.colors[index + 1], self.colors[index + 2], self.colors[index + 3]))
   }
 
+  /// Get the RGBA pixel data for a specified rectangular area.
+  pub fn get_pixels(&self, p_area: (u32, u32, u32, u32)) -> Vec<(u8, u8, u8, u8)> {
+    let (x, y, width, height) = p_area;
+    let mut pixels = Vec::with_capacity((width * height) as usize);
+    for j in 0..height {
+      for i in 0..width {
+        if let Some(pixel) = self.get_pixel(x + i, y + j) {
+          pixels.push(pixel);
+        } else {
+          pixels.push((0, 0, 0, 0));
+        }
+      }
+    }
+    pixels
+  }
+
   /// Set the pixel at the specified coordinates to the given RGBA value.
   ///
   /// # Panics
   /// Panics if the coordinates are out of bounds (attempts to write past the
   /// underlying buffer will cause a panic through indexing).
-  pub fn set_pixel(&mut self, p_x: u32, p_y: u32, pixel: (u8, u8, u8, u8)) {
+  pub fn set_pixel(&mut self, p_x: u32, p_y: u32, p_pixel: (u8, u8, u8, u8)) {
     let index = (p_y * self.width + p_x) as usize * 4;
     let arr = Arc::make_mut(&mut self.colors);
-    arr[index] = pixel.0;
-    arr[index + 1] = pixel.1;
-    arr[index + 2] = pixel.2;
-    arr[index + 3] = pixel.3;
+    arr[index] = p_pixel.0;
+    arr[index + 1] = p_pixel.1;
+    arr[index + 2] = p_pixel.2;
+    arr[index + 3] = p_pixel.3;
   }
 
   /// Draw the pixels of the image from another image into their respective channels at a specific position.
@@ -315,12 +357,9 @@ impl Image {
   where
     F: Fn(u8) -> u8 + Send + Sync,
   {
-    Arc::make_mut(&mut self.colors)
-      .axis_chunks_iter_mut(Axis(0), 4)
-      .into_par_iter()
-      .for_each(|mut row| {
-        row.iter_mut().take(3).for_each(|pixel| *pixel = p_callback(*pixel));
-      });
+    Arc::make_mut(&mut self.colors).axis_chunks_iter_mut(Axis(0), 4).into_par_iter().for_each(|mut row| {
+      row.iter_mut().take(3).for_each(|pixel| *pixel = p_callback(*pixel));
+    });
   }
 
   /// Iterate over a specific channel of the image to apply a function on each pixel of that channel.
@@ -334,28 +373,15 @@ impl Image {
     F: Fn(u8) -> u8 + Send + Sync,
   {
     let channel = p_channel.into();
-    Arc::make_mut(&mut self.colors)
-      .axis_chunks_iter_mut(Axis(0), 4)
-      .into_par_iter()
-      .for_each(|mut row| match channel.as_str() {
-        "r" => row.iter_mut().take(1).for_each(|pixel| *pixel = p_callback(*pixel)),
-        "g" => row
-          .iter_mut()
-          .skip(1)
-          .take(1)
-          .for_each(|pixel| *pixel = p_callback(*pixel)),
-        "b" => row
-          .iter_mut()
-          .skip(2)
-          .take(1)
-          .for_each(|pixel| *pixel = p_callback(*pixel)),
-        "a" => row
-          .iter_mut()
-          .skip(3)
-          .take(1)
-          .for_each(|pixel| *pixel = p_callback(*pixel)),
-        _ => (),
-      });
+    Arc::make_mut(&mut self.colors).axis_chunks_iter_mut(Axis(0), 4).into_par_iter().for_each(|mut row| match channel
+      .as_str()
+    {
+      "r" => row.iter_mut().take(1).for_each(|pixel| *pixel = p_callback(*pixel)),
+      "g" => row.iter_mut().skip(1).take(1).for_each(|pixel| *pixel = p_callback(*pixel)),
+      "b" => row.iter_mut().skip(2).take(1).for_each(|pixel| *pixel = p_callback(*pixel)),
+      "a" => row.iter_mut().skip(3).take(1).for_each(|pixel| *pixel = p_callback(*pixel)),
+      _ => (),
+    });
   }
 
   /// Iterate over each pixel and apply a callback with an ndarray `ArrayViewMut1<u8>`.
@@ -380,23 +406,16 @@ impl Image {
   where
     F: Fn(ndarray::ArrayViewMut1<u8>) + Send + Sync,
   {
-    Arc::make_mut(&mut self.colors)
-      .axis_chunks_iter_mut(Axis(0), 4)
-      .into_par_iter()
-      .for_each(|row| {
-        p_callback(row);
-      });
+    Arc::make_mut(&mut self.colors).axis_chunks_iter_mut(Axis(0), 4).into_par_iter().for_each(|row| {
+      p_callback(row);
+    });
   }
 
   #[cfg(test)]
   /// For tests: return a raw pointer to the underlying buffer for pointer comparison
   /// between clones to verify copy-on-write behavior.
   pub fn buffer_ptr(&self) -> *const u8 {
-    self
-      .colors
-      .as_slice()
-      .expect("Image colors must be contiguous")
-      .as_ptr()
+    self.colors.as_slice().expect("Image colors must be contiguous").as_ptr()
   }
 }
 
@@ -406,15 +425,15 @@ impl<T: Into<f32>> Mul<T> for &mut Image {
   /// Multiply each pixel channel by a scalar factor.
   ///
   /// This performs per-channel multiplication and clamps the results to [0,255].
-  fn mul(self, rhs: T) {
-    let rhs = rhs.into();
+  fn mul(self, p_rhs: T) {
+    let p_rhs = p_rhs.into();
     let colors = Arc::make_mut(&mut self.colors);
     let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
 
     slice.par_chunks_exact_mut(4).for_each(|pixel| {
-      pixel[0] = ((pixel[0] as f32 * rhs).min(255.0).max(0.0)) as u8;
-      pixel[1] = ((pixel[1] as f32 * rhs).min(255.0).max(0.0)) as u8;
-      pixel[2] = ((pixel[2] as f32 * rhs).min(255.0).max(0.0)) as u8;
+      pixel[0] = ((pixel[0] as f32 * p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[1] = ((pixel[1] as f32 * p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[2] = ((pixel[2] as f32 * p_rhs).min(255.0).max(0.0)) as u8;
     });
   }
 }
@@ -425,15 +444,15 @@ impl<T: Into<f32>> Sub<T> for &mut Image {
   /// Subtract a scalar value from each pixel channel.
   ///
   /// This performs per-channel subtraction and clamps the results to [0,255].
-  fn sub(self, rhs: T) {
-    let rhs = rhs.into();
+  fn sub(self, p_rhs: T) {
+    let p_rhs = p_rhs.into();
     let colors = Arc::make_mut(&mut self.colors);
     let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
 
     slice.par_chunks_exact_mut(4).for_each(|pixel| {
-      pixel[0] = ((pixel[0] as f32 - rhs).max(0.0).min(255.0)) as u8;
-      pixel[1] = ((pixel[1] as f32 - rhs).max(0.0).min(255.0)) as u8;
-      pixel[2] = ((pixel[2] as f32 - rhs).max(0.0).min(255.0)) as u8;
+      pixel[0] = ((pixel[0] as f32 - p_rhs).max(0.0).min(255.0)) as u8;
+      pixel[1] = ((pixel[1] as f32 - p_rhs).max(0.0).min(255.0)) as u8;
+      pixel[2] = ((pixel[2] as f32 - p_rhs).max(0.0).min(255.0)) as u8;
     });
   }
 }
@@ -444,15 +463,15 @@ impl<T: Into<f32>> Div<T> for &mut Image {
   /// Divide each pixel channel by a scalar value.
   ///
   /// This performs per-channel division and clamps the results to [0,255].
-  fn div(self, rhs: T) {
-    let rhs = rhs.into();
+  fn div(self, p_rhs: T) {
+    let p_rhs = p_rhs.into();
     let colors = Arc::make_mut(&mut self.colors);
     let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
 
     slice.par_chunks_exact_mut(4).for_each(|pixel| {
-      pixel[0] = ((pixel[0] as f32 / rhs).min(255.0).max(0.0)) as u8;
-      pixel[1] = ((pixel[1] as f32 / rhs).min(255.0).max(0.0)) as u8;
-      pixel[2] = ((pixel[2] as f32 / rhs).min(255.0).max(0.0)) as u8;
+      pixel[0] = ((pixel[0] as f32 / p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[1] = ((pixel[1] as f32 / p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[2] = ((pixel[2] as f32 / p_rhs).min(255.0).max(0.0)) as u8;
     });
   }
 }
@@ -463,15 +482,15 @@ impl<T: Into<f32>> Add<T> for &mut Image {
   /// Add a scalar value to each pixel channel.
   ///
   /// This performs per-channel addition and clamps the results to [0,255].
-  fn add(self, rhs: T) {
-    let rhs = rhs.into();
+  fn add(self, p_rhs: T) {
+    let p_rhs = p_rhs.into();
     let colors = Arc::make_mut(&mut self.colors);
     let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
 
     slice.par_chunks_exact_mut(4).for_each(|pixel| {
-      pixel[0] = ((pixel[0] as f32 + rhs).min(255.0).max(0.0)) as u8;
-      pixel[1] = ((pixel[1] as f32 + rhs).min(255.0).max(0.0)) as u8;
-      pixel[2] = ((pixel[2] as f32 + rhs).min(255.0).max(0.0)) as u8;
+      pixel[0] = ((pixel[0] as f32 + p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[1] = ((pixel[1] as f32 + p_rhs).min(255.0).max(0.0)) as u8;
+      pixel[2] = ((pixel[2] as f32 + p_rhs).min(255.0).max(0.0)) as u8;
     });
   }
 }

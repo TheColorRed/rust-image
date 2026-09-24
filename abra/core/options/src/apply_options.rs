@@ -6,8 +6,8 @@
 //!   white = full effect, grayscale = partial effect).
 //! - `Area`: restricts the operation to a particular region (optionally feathered).
 
-use abra_core::Area;
 use abra_core::image::apply_area::ApplyContext;
+use abra_core::{Area, ImageRef};
 use mask::Mask;
 
 pub type Options = Option<ApplyOptions>;
@@ -16,7 +16,7 @@ pub type Options = Option<ApplyOptions>;
 /// ```ignore
 /// use abra::{Area, Image, Heart, mask::Mask, options::ApplyOptions};
 ///
-/// let mut image = Image::new_from_path("images/input.png");
+/// let mut image = Image::read("images/input.png")?;
 /// let mask = Heart::new().fit(200, 200);
 /// let area = Area::rect(10, 10, 100, 50);
 ///
@@ -38,6 +38,28 @@ pub struct ApplyOptions {
   /// If an area has a feather on its edges, then the filter will be applied
   /// gradually from the edge of the area to the feathered region.
   area: Option<Vec<Area>>,
+}
+
+/// Contract for configurable operations that apply in place to an image.
+///
+/// Implementors must provide both configuration and application, so builder
+/// APIs cannot accidentally omit either operation.
+pub trait Apply: Sized {
+  /// Returns the builder's application options storage.
+  /// Returns a mutable reference to the current `Options` for this builder.
+  #[doc(hidden)]
+  fn options_mut(&mut self) -> &mut Options;
+
+  /// Restricts the operation with an optional area or mask.
+  /// - `p_options`: The `ApplyOptions` containing the area and/or mask to use.
+  fn with_options(mut self, p_options: impl Into<Options>) -> Self {
+    *self.options_mut() = p_options.into();
+    self
+  }
+
+  /// Applies the operation to the given image.
+  /// - `p_image`: The image to apply the operation to.
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>);
 }
 
 impl Default for ApplyOptions {
@@ -88,8 +110,8 @@ impl ApplyOptions {
 
 /// Convert an optional ApplyOptions into the lightweight core ApplyContext used by core helpers.
 /// This helper lives in the `options` crate to avoid a circular dependency (core -> options -> core).
-pub fn get_ctx<'a>(opts: Option<&'a ApplyOptions>) -> Option<ApplyContext<'a>> {
-  opts.map(|o| ApplyContext {
+pub fn get_ctx<'a>(p_opts: Option<&'a ApplyOptions>) -> Option<ApplyContext<'a>> {
+  p_opts.map(|o| ApplyContext {
     area: o.area().map(|v| v.iter().collect()),
     mask_image: o.mask().map(|m| m.image().rgba()),
   })

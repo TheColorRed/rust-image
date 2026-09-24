@@ -52,6 +52,7 @@ thread_local! {
 pub struct YamlSettings {
   gpu_enabled: bool,
   api_model_paths: Vec<String>,
+  drawing_performance: String,
 }
 
 #[derive(Clone)]
@@ -66,6 +67,7 @@ impl Default for Settings {
       settings: YamlSettings {
         gpu_enabled: true,
         api_model_paths: Vec::new(),
+        drawing_performance: "balanced".to_string(),
       },
     }
   }
@@ -101,6 +103,12 @@ impl Settings {
             .and_then(|v| v.as_vec())
             .map(|v| v.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_else(|| vec!["packages/ai/models".to_string()]),
+          drawing_performance: doc
+            .as_mapping_get("drawing")
+            .and_then(|drawing| drawing.as_mapping_get("performance"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("balanced")
+            .to_string(),
         },
         ..Default::default()
       };
@@ -114,6 +122,7 @@ impl Settings {
 
   yaml_settings_getters!(
     gpu_enabled => bool,
-    api_model_paths => Vec<String>
+    api_model_paths => Vec<String>,
+    drawing_performance => String
   );
 }

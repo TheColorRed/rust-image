@@ -105,9 +105,9 @@ impl ModelSpec {
   ///
   /// The manifest should be alongside the ONNX file with the same base name
   /// and a `.yml` extension.
-  pub fn load(onnx_path: impl AsRef<Path>) -> Result<Self, AiError> {
-    let onnx_path = onnx_path.as_ref();
-    let yaml_path = onnx_path.with_extension("yml");
+  pub fn load(p_onnx_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    let p_onnx_path = p_onnx_path.as_ref();
+    let yaml_path = p_onnx_path.with_extension("yml");
 
     if !yaml_path.exists() {
       return Err(AiError::model_load_failed(format!("Model manifest not found: {}", yaml_path.display())));
@@ -119,46 +119,33 @@ impl ModelSpec {
     let docs =
       Yaml::load_from_str(&yaml_str).map_err(|e| AiError::model_load_failed(format!("Invalid YAML: {}", e)))?;
 
-    let doc = docs
-      .first()
-      .ok_or_else(|| AiError::model_load_failed("Empty YAML document"))?;
+    let doc = docs.first().ok_or_else(|| AiError::model_load_failed("Empty YAML document"))?;
 
-    Self::from_yaml(doc, onnx_path.to_string_lossy().to_string())
+    Self::from_yaml(doc, p_onnx_path.to_string_lossy().to_string())
   }
 
   /// Creates a ModelSpec from a parsed YAML document.
-  fn from_yaml(doc: &Yaml, onnx_path: String) -> Result<Self, AiError> {
-    let name = doc["name"].as_str().unwrap_or("Unknown Model").to_string();
-    let description = doc["description"].as_str().unwrap_or("No description").to_string();
+  fn from_yaml(p_doc: &Yaml, p_onnx_path: String) -> Result<Self, AiError> {
+    let name = p_doc["name"].as_str().unwrap_or("Unknown Model").to_string();
+    let description = p_doc["description"].as_str().unwrap_or("No description").to_string();
 
-    let params = if doc["params"].is_badvalue() || doc["params"].is_null() {
-      doc
-    } else {
-      &doc["params"]
-    };
+    let params = if p_doc["params"].is_badvalue() || p_doc["params"].is_null() { p_doc } else { &p_doc["params"] };
 
-    let scale_factor = params["scale_factor"]
-      .as_floating_point()
-      .map(|f| f as f32)
-      .unwrap_or(1.0);
+    let scale_factor = params["scale_factor"].as_floating_point().map(|f| f as f32).unwrap_or(1.0);
 
     let tile_size = params["tile_size"].as_integer().map(|i| i as u32).unwrap_or(256);
     let tile_overlap = params["tile_overlap"].as_integer().map(|i| i as u32).unwrap_or(32);
 
     // Parse control specification if present
-    let control = if doc["control"].is_badvalue() || doc["control"].is_null() {
+    let control = if p_doc["control"].is_badvalue() || p_doc["control"].is_null() {
       None
     } else {
-      let ctrl = &doc["control"];
+      let ctrl = &p_doc["control"];
       let size = ctrl["size"].as_integer().unwrap_or(0) as usize;
 
       let defaults: Vec<f32> = ctrl["defaults"]
         .as_vec()
-        .map(|v| {
-          v.iter()
-            .filter_map(|x| x.as_floating_point().map(|f| f as f32))
-            .collect()
-        })
+        .map(|v| v.iter().filter_map(|x| x.as_floating_point().map(|f| f as f32)).collect())
         .unwrap_or_else(|| vec![0.5; size]);
 
       let parameters: Vec<ControlParameter> = ctrl["parameters"]
@@ -188,7 +175,7 @@ impl ModelSpec {
     };
 
     Ok(Self {
-      path: onnx_path,
+      path: p_onnx_path,
       name,
       description,
       scale_factor,
@@ -200,9 +187,9 @@ impl ModelSpec {
   /// Creates a minimal spec for a model without a manifest.
   ///
   /// Use this as a fallback when no YAML manifest exists.
-  pub fn minimal(path: impl Into<String>) -> Self {
+  pub fn minimal(p_path: impl Into<String>) -> Self {
     Self {
-      path: path.into(),
+      path: p_path.into(),
       name: "Unknown Model".into(),
       description: "No manifest found".into(),
       scale_factor: 1.0,
@@ -252,9 +239,9 @@ impl ControlParams {
   /// Creates control parameters from a slice of values.
   ///
   /// Values are clamped to the 0.0-1.0 range.
-  pub fn new(params: &[f32]) -> Self {
+  pub fn new(p_params: &[f32]) -> Self {
     Self {
-      params: params.iter().map(|v| v.clamp(0.0, 1.0)).collect(),
+      params: p_params.iter().map(|v| v.clamp(0.0, 1.0)).collect(),
     }
   }
 
@@ -274,15 +261,15 @@ impl ControlParams {
   }
 
   /// Sets a parameter by index.
-  pub fn set(&mut self, index: usize, value: f32) {
-    if index < self.params.len() {
-      self.params[index] = value.clamp(0.0, 1.0);
+  pub fn set(&mut self, p_index: usize, p_value: f32) {
+    if p_index < self.params.len() {
+      self.params[p_index] = p_value.clamp(0.0, 1.0);
     }
   }
 
   /// Gets a parameter by index.
-  pub fn get(&self, index: usize) -> Option<f32> {
-    self.params.get(index).copied()
+  pub fn get(&self, p_index: usize) -> Option<f32> {
+    self.params.get(p_index).copied()
   }
 }
 
@@ -318,11 +305,11 @@ pub struct ImageModel {
 }
 
 impl ImageModel {
-  pub fn new(available_models: impl Into<Option<Vec<ModelSpec>>>) -> ImageModel {
+  pub fn new(p_available_models: impl Into<Option<Vec<ModelSpec>>>) -> ImageModel {
     ImageModel {
       session: None,
       spec: None,
-      available_models: available_models.into().unwrap_or_default(),
+      available_models: p_available_models.into().unwrap_or_default(),
     }
   }
   /// Loads an image model from an ONNX file.
@@ -357,19 +344,19 @@ impl ImageModel {
   /// Loads an image model from an ONNX file without requiring a manifest.
   ///
   /// Uses minimal defaults for the specification.
-  pub fn load_minimal(path: impl AsRef<Path>) -> Result<Self, AiError> {
-    let path = path.as_ref();
-    let spec = ModelSpec::minimal(path.to_string_lossy());
+  pub fn load_minimal(p_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    let p_path = p_path.as_ref();
+    let spec = ModelSpec::minimal(p_path.to_string_lossy());
     Self::from_spec(spec)
   }
   /// Creates an image model from a pre-built specification.
-  pub fn from_spec(spec: ModelSpec) -> Result<Self, AiError> {
-    let session = OnnxSession::from_file(&spec.path, None)?;
+  pub fn from_spec(p_spec: ModelSpec) -> Result<Self, AiError> {
+    let session = OnnxSession::from_file(&p_spec.path, None)?;
 
-    println!("✅ Loaded {} (CPU, {} threads)", spec.name, session.num_threads());
-    println!("   {}", spec.description);
-    println!("   Scale: {}x", spec.scale_factor);
-    if let Some(ctrl) = &spec.control {
+    println!("✅ Loaded {} (CPU, {} threads)", p_spec.name, session.num_threads());
+    println!("   {}", p_spec.description);
+    println!("   Scale: {}x", p_spec.scale_factor);
+    if let Some(ctrl) = &p_spec.control {
       println!("   Control: {} parameters", ctrl.size);
       for param in &ctrl.parameters {
         println!("     - {}: {}", param.name, param.description);
@@ -378,7 +365,7 @@ impl ImageModel {
 
     Ok(Self {
       session: Some(session),
-      spec: Some(spec),
+      spec: Some(p_spec),
       available_models: Vec::new(),
     })
   }
@@ -411,9 +398,9 @@ impl ImageModel {
   /// Processes an image.
   ///
   /// If the model has control input, uses the default control values.
-  pub fn process(&self, input: &Image) -> Result<Image, AiError> {
+  pub fn process(&self, p_input: &Image) -> Result<Image, AiError> {
     let control = self.spec.as_ref().expect("Model spec is not loaded").default_control();
-    self.process_tiles(input, control.as_ref())
+    self.process_tiles(p_input, control.as_ref())
   }
 
   /// Processes an image with custom control parameters.
@@ -423,7 +410,7 @@ impl ImageModel {
   /// Returns an error if:
   /// - The model doesn't support control input
   /// - The control parameter count doesn't match the model's expectations
-  pub fn process_with_control(&self, input: &Image, control: &ControlParams) -> Result<Image, AiError> {
+  pub fn process_with_control(&self, p_input: &Image, p_control: &ControlParams) -> Result<Image, AiError> {
     if !self.spec.as_ref().expect("Model spec is not loaded").has_control() {
       return Err(AiError::inference_failed(format!(
         "Model '{}' does not support control parameters",
@@ -432,22 +419,22 @@ impl ImageModel {
     }
 
     let expected = self.spec.as_ref().expect("Model spec is not loaded").control_size();
-    if control.len() != expected {
+    if p_control.len() != expected {
       return Err(AiError::inference_failed(format!(
         "Model '{}' expects {} control parameters, got {}",
         self.spec.as_ref().expect("Model spec is not loaded").name,
         expected,
-        control.len()
+        p_control.len()
       )));
     }
 
-    self.process_tiles(input, Some(control))
+    self.process_tiles(p_input, Some(p_control))
   }
 
   /// Internal method to process image in tiles.
-  fn process_tiles(&self, input: &Image, control: Option<&ControlParams>) -> Result<Image, AiError> {
+  fn process_tiles(&self, p_input: &Image, p_control: Option<&ControlParams>) -> Result<Image, AiError> {
     let start = Instant::now();
-    let (orig_w, orig_h) = input.dimensions::<u32>();
+    let (orig_w, orig_h) = p_input.dimensions::<u32>();
     let scale = self.spec.as_ref().expect("Model spec is not loaded").scale_factor;
 
     let out_w = (orig_w as f32 * scale) as u32;
@@ -462,7 +449,7 @@ impl ImageModel {
       self.spec.as_ref().expect("Model spec is not loaded").name
     );
 
-    if let Some(ctrl) = control {
+    if let Some(ctrl) = p_control {
       println!("  Control: {:?}", ctrl.as_slice());
     }
 
@@ -478,42 +465,32 @@ impl ImageModel {
       }
 
       // Crop tile from input
-      let tile_image = cropped(input, tile_info.x, tile_info.y, tile_info.width, tile_info.height);
+      let tile_image = cropped(p_input, tile_info.x, tile_info.y, tile_info.width, tile_info.height);
 
       // Convert to tensor
       let tensor = image_to_nchw(&tile_image);
       let tensor_data = tensor.as_standard_layout();
-      let image_slice = tensor_data
-        .as_slice()
-        .ok_or_else(|| AiError::inference_failed("Failed to get tensor slice"))?;
+      let image_slice =
+        tensor_data.as_slice().ok_or_else(|| AiError::inference_failed("Failed to get tensor slice"))?;
 
       let image_shape = [1, 3, tile_info.height as usize, tile_info.width as usize];
 
       // Run inference
-      let (out_shape, out_data) = if let Some(ctrl) = control {
+      let (out_shape, out_data) = if let Some(ctrl) = p_control {
         let ctrl_shape = [ctrl.len()];
-        self
-          .session
-          .as_ref()
-          .expect("ONNX session is not loaded")
-          .run_with_control(image_slice, &image_shape, ctrl.as_slice(), &ctrl_shape)?
+        self.session.as_ref().expect("ONNX session is not loaded").run_with_control(
+          image_slice,
+          &image_shape,
+          ctrl.as_slice(),
+          &ctrl_shape,
+        )?
       } else {
-        self
-          .session
-          .as_ref()
-          .expect("ONNX session is not loaded")
-          .run_single(image_slice, &image_shape)?
+        self.session.as_ref().expect("ONNX session is not loaded").run_single(image_slice, &image_shape)?
       };
 
       // Accumulate output
-      let out_tile_h = out_shape
-        .get(2)
-        .copied()
-        .unwrap_or((tile_info.height as f32 * scale) as usize) as u32;
-      let out_tile_w = out_shape
-        .get(3)
-        .copied()
-        .unwrap_or((tile_info.width as f32 * scale) as usize) as u32;
+      let out_tile_h = out_shape.get(2).copied().unwrap_or((tile_info.height as f32 * scale) as usize) as u32;
+      let out_tile_w = out_shape.get(3).copied().unwrap_or((tile_info.width as f32 * scale) as usize) as u32;
 
       let out_x = (tile_info.x as f32 * scale) as u32;
       let out_y = (tile_info.y as f32 * scale) as u32;
@@ -534,12 +511,12 @@ impl ImageModel {
 /// Discovers all models in a directory.
 ///
 /// Scans for `.onnx` files with accompanying `.yml` manifests.
-pub fn discover_models(dir: impl AsRef<Path>) -> Result<Vec<ModelSpec>, AiError> {
-  let dir = dir.as_ref();
+pub fn discover_models(p_dir: impl AsRef<Path>) -> Result<Vec<ModelSpec>, AiError> {
+  let p_dir = p_dir.as_ref();
   let mut models = Vec::new();
 
   let entries =
-    std::fs::read_dir(dir).map_err(|e| AiError::model_load_failed(format!("Failed to read directory: {}", e)))?;
+    std::fs::read_dir(p_dir).map_err(|e| AiError::model_load_failed(format!("Failed to read directory: {}", e)))?;
 
   for entry in entries.flatten() {
     let path = entry.path();

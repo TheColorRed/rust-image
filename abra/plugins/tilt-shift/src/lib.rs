@@ -2,7 +2,7 @@ use abra::plugin::{Plugin, PluginError, PluginResult};
 
 pub struct TiltShift;
 
-impl Plugin for TiltShift {
+impl<'a> Plugin<'a> for TiltShift {
   fn name(&self) -> &str {
     "Tilt Shift"
   }
@@ -11,7 +11,7 @@ impl Plugin for TiltShift {
     "Applies a tilt-shift effect to the image, simulating a miniature scene by blurring areas outside a defined focus region and increasing saturation and contrast."
   }
 
-  fn apply(&mut self) -> Result<PluginResult, PluginError> {
+  fn apply(&mut self) -> Result<PluginResult<'a>, PluginError> {
     let start = std::time::Instant::now();
     let result = PluginResult::new();
 

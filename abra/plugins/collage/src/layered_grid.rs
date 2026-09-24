@@ -3,19 +3,16 @@ use std::sync::Arc;
 use abra::canvas::prelude::*;
 use abra::prelude::*;
 
-use rand::{Rng, prelude::SliceRandom};
+use rand::prelude::{RngExt, SliceRandom};
 use rayon::prelude::*;
 
 use crate::{CollagePlugin, CollageStyle};
 
-impl CollagePlugin {
-  pub(crate) fn layered_grid_collage(&mut self) -> Canvas {
+impl<'a> CollagePlugin<'a> {
+  pub(crate) fn layered_grid_collage(&mut self) -> Canvas<'a> {
     // Get grid dimensions (columns, rows) and total number of cells.
-    let (columns, rows, cell_count) = if let CollageStyle::LayeredGrid(c, r) = self.style {
-      (c, r, c * r)
-    } else {
-      (1, 1, 1)
-    };
+    let (columns, rows, cell_count) =
+      if let CollageStyle::LayeredGrid(c, r) = self.style { (c, r, c * r) } else { (1, 1, 1) };
     // The width of each cell in the grid.
     let cell_width = self.size.0 / columns;
     // The height of each cell in the grid.
@@ -32,11 +29,7 @@ impl CollagePlugin {
     let mut selected_data = vec![];
     for _ in 0..cell_count {
       let image = self.select_random_image();
-      let rotation = self
-        .options
-        .as_ref()
-        .map(|opts| opts.rotation)
-        .map(|rot| self.select_range(rot));
+      let rotation = self.options.as_ref().map(|opts| opts.rotation).map(|rot| self.select_range(rot));
       let scale = self
         .options
         .as_ref()
@@ -57,15 +50,13 @@ impl CollagePlugin {
 
         // Create canvas and apply transformations in parallel
         let transform_image = Arc::new(Image::new_from_color(scale_width, scale_height, Color::transparent()));
-        let canvas = Canvas::new("Cell")
-          .add_layer_from_image("empty", transform_image, None)
-          .add_layer_from_image(
-            "image",
-            image,
-            NewLayerOptions::new()
-              .with_anchor(Anchor::Center)
-              .with_size(LayerSize::Cover(None)),
-          );
+        let canvas = Canvas::new("Cell");
+        canvas.add_layer_from_image("empty", transform_image, None);
+        canvas.add_layer_from_image(
+          "image",
+          image,
+          NewLayerOptions::new().with_anchor(Anchor::Center).with_size(LayerSize::Cover(None)),
+        );
 
         let mut canvas_options = AddCanvasOptions::new().with_position(position.0, position.1);
 
@@ -77,11 +68,8 @@ impl CollagePlugin {
       })
       .collect();
 
-    let collage_effects = self
-      .options
-      .as_ref()
-      .and_then(|opts| opts.effects.clone())
-      .unwrap_or(LayerEffects::new());
+    // Clone owned options to avoid borrowing lifetimes tied to `&self`.
+    let collage_effects = self.options.clone().and_then(|opts| opts.effects).unwrap_or(LayerEffects::new());
     // Apply collage-level effects to each image layer.
     for (canvas, _) in &processed_canvases {
       canvas.set_effects(collage_effects.clone());

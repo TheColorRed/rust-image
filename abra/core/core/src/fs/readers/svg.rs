@@ -7,17 +7,15 @@ use crate::Channels;
 use crate::fs::file_info::FileInfo;
 
 /// Reads an SVG file and returns the image data
-pub fn read_svg(file: impl Into<String>) -> Result<FileInfo, String> {
-  let file = file.into();
-  let file = file.as_str();
+pub fn read_svg(p_file: impl Into<String>) -> Result<FileInfo, String> {
+  let p_file = p_file.into();
+  let p_file = p_file.as_str();
   let tree = {
     let mut opt = Options::default();
     // Get file's absolute directory.
-    opt.resources_dir = fs::canonicalize(file)
-      .ok()
-      .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+    opt.resources_dir = fs::canonicalize(p_file).ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
     opt.fontdb_mut().load_system_fonts();
-    let svg_data = read(file).unwrap();
+    let svg_data = read(p_file).unwrap();
     usvg::Tree::from_data(&svg_data, &opt).unwrap()
   };
 

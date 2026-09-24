@@ -36,24 +36,24 @@ impl Origin {
   /// Returns the (x, y) offset where the anchor point is located within the layer.
   ///
   /// # Arguments
-  /// * `width` - The width of the layer
-  /// * `height` - The height of the layer
+  /// * `p_width` - The width of the layer
+  /// * `p_height` - The height of the layer
   ///
   /// # Returns
   /// A tuple (x, y) representing the offset from top-left to the origin point
   #[allow(dead_code)]
-  pub(crate) fn calculate_offset(self, width: i32, height: i32) -> (i32, i32) {
+  pub(crate) fn calculate_offset(self, p_width: i32, p_height: i32) -> (i32, i32) {
     let x = match self {
       Origin::TopLeft | Origin::CenterLeft | Origin::BottomLeft => 0,
-      Origin::TopCenter | Origin::Center | Origin::BottomCenter => width / 2,
-      Origin::TopRight | Origin::CenterRight | Origin::BottomRight => width,
-      Origin::Custom(px, _) => ((width as f32) * px) as i32,
+      Origin::TopCenter | Origin::Center | Origin::BottomCenter => p_width / 2,
+      Origin::TopRight | Origin::CenterRight | Origin::BottomRight => p_width,
+      Origin::Custom(px, _) => ((p_width as f32) * px) as i32,
     };
     let y = match self {
       Origin::TopLeft | Origin::TopCenter | Origin::TopRight => 0,
-      Origin::CenterLeft | Origin::Center | Origin::CenterRight => height / 2,
-      Origin::BottomLeft | Origin::BottomCenter | Origin::BottomRight => height,
-      Origin::Custom(_, py) => ((height as f32) * py) as i32,
+      Origin::CenterLeft | Origin::Center | Origin::CenterRight => p_height / 2,
+      Origin::BottomLeft | Origin::BottomCenter | Origin::BottomRight => p_height,
+      Origin::Custom(_, py) => ((p_height as f32) * py) as i32,
     };
     (x, y)
   }

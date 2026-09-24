@@ -67,11 +67,11 @@ pub enum DebugTransform {
   Rotate(TransformAlgorithm, f32, u32, u32, u32, u32, Duration),
 }
 /// Enum representing different effect debug entries.
-pub enum DebugEffects {
+pub enum DebugEffects<'a> {
   /// Drop shadow effect applied.
-  DropShadow(DropShadow, Duration),
+  DropShadow(DropShadow<'a>, Duration),
   /// Stroke effect applied.
-  Stroke(Stroke, Duration),
+  Stroke(Stroke<'a>, Duration),
 }
 /// Enum representing different filter debug entries.
 pub enum DebugFilters {
@@ -167,7 +167,7 @@ impl DebugTransform {
   }
 }
 /// Implementations for logging effect debug information.
-impl DebugEffects {
+impl<'a> DebugEffects<'a> {
   /// Logs the debug information to the console for the given Effects variant.
   #[allow(unused_variables)]
   pub fn log(self) {
@@ -180,7 +180,7 @@ impl DebugEffects {
         options.angle,
         options.size,
         options.spread,
-        blend_mode_name(options.blend_mode),
+        blend_mode_name(options.blend_mode).1,
         options.fill,
         duration
       ),

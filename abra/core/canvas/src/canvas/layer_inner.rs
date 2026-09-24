@@ -1,23 +1,41 @@
 //! The internal layer implementation.
 
-use abra_core::Image;
 use abra_core::blend;
 use abra_core::blend::RGBA;
+use abra_core::image::image_ext::CoreImageFsExt;
+use abra_core::{Crop, FlipAxis, Image, Resize, ResizeTarget, Resolution, Rotate, TransformAlgorithm};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::Anchor;
 use crate::Origin;
 use crate::canvas::canvas_inner::CanvasInner;
 use crate::effects::LayerEffects;
+use crate::{Anchor, LayerMove};
+use typography::Text;
+
+#[derive(Clone, Copy)]
+pub(crate) enum LayerOperation {
+  Resize(ResizeTarget, Option<TransformAlgorithm>),
+  Crop(u32, u32, u32, u32),
+  Rotate(f64, Option<TransformAlgorithm>),
+  Flip(FlipAxis),
+}
 
 /// The internal layer implementation - provides the mutable reference API.
-pub struct LayerInner {
+pub struct LayerInner<'a> {
   /// The name of the layer.
   name: String,
   /// The image data of the layer.
   image: Arc<Image>,
+  /// Source text retained so document-resolution changes can re-rasterize it.
+  text_source: Option<Text>,
+  /// Whether the retained text source needs to be rasterized before composition.
+  text_needs_rasterization: bool,
+  /// Pixel operations recorded by the fluent layer transform API.
+  operations: Vec<LayerOperation>,
+  /// Number of queued operations already materialized into `image`.
+  applied_operations: usize,
   /// Whether the layer is visible.
   visible: bool,
   /// The opacity of the layer.
@@ -31,7 +49,7 @@ pub struct LayerInner {
   /// A UUID for the layer.
   id: String,
   /// Reference to the canvas.
-  canvas: Arc<Mutex<CanvasInner>>,
+  canvas: Arc<Mutex<CanvasInner<'a>>>,
   /// The anchor point for positioning relative to the canvas.
   anchor: Option<Anchor>,
   /// The origin point within the layer that the anchor refers to.
@@ -42,14 +60,15 @@ pub struct LayerInner {
   /// The positional offset applied when anchoring so effects like drop shadow don't shift placement.
   anchor_offset: (i32, i32),
   /// The effects that will be applied to this layer during rendering.
-  effects: LayerEffects,
+  effects: LayerEffects<'a>,
   /// The type of adjustment layer, if this is an adjustment layer.
   adjustment_layer_type: Option<crate::AdjustmentLayerType>,
 }
 
-impl Debug for LayerInner {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.debug_struct("LayerInner")
+impl Debug for LayerInner<'_> {
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    p_f
+      .debug_struct("LayerInner")
       .field("id", &self.id())
       .field("name", &self.name)
       .field("dimensions", &self.image.dimensions::<u32>())
@@ -61,12 +80,16 @@ impl Debug for LayerInner {
   }
 }
 
-impl Default for LayerInner {
+impl Default for LayerInner<'_> {
   fn default() -> Self {
     LayerInner {
       id: uuid::Uuid::new_v4().to_string(),
       name: "Layer".to_string(),
       image: Arc::new(Image::new(1, 1)),
+      text_source: None,
+      text_needs_rasterization: false,
+      operations: Vec::new(),
+      applied_operations: 0,
       visible: true,
       opacity: 1.0,
       blend_mode: blend::normal,
@@ -83,29 +106,42 @@ impl Default for LayerInner {
   }
 }
 
-impl LayerInner {
+impl<'a> LayerInner<'a> {
   /// Creates a new layer with the given name, image, and canvas
-  pub fn new(name: impl Into<String>, image: Arc<Image>) -> LayerInner {
+  pub fn new(p_name: impl Into<String>, p_image: Arc<Image>) -> LayerInner<'a> {
     LayerInner {
-      name: name.into(),
-      image,
+      name: p_name.into(),
+      image: p_image,
       ..Default::default()
     }
   }
 
-  pub fn new_adjustment_layer(name: impl Into<String>, layer_type: crate::AdjustmentLayerType) -> LayerInner {
+  /// Creates a layer backed by text that can be rasterized again at a new DPI.
+  pub(crate) fn new_text(p_name: impl Into<String>, p_text: Text, p_resolution: Resolution) -> LayerInner<'a> {
+    let mut image = Image::new(1, 1);
+    image.set_resolution(p_resolution);
+    LayerInner {
+      name: p_name.into(),
+      image: Arc::new(image),
+      text_source: Some(p_text),
+      text_needs_rasterization: true,
+      ..Default::default()
+    }
+  }
+
+  pub fn new_adjustment_layer(p_name: impl Into<String>, p_layer_type: crate::AdjustmentLayerType) -> LayerInner<'a> {
     let image = Arc::new(Image::new_from_color(1, 1, abra_core::Color::transparent()));
     LayerInner {
-      name: name.into(),
+      name: p_name.into(),
       image,
-      adjustment_layer_type: Some(layer_type),
+      adjustment_layer_type: Some(p_layer_type),
       ..Default::default()
     }
   }
 
   /// Sets the canvas reference for the layer.
-  pub(crate) fn set_canvas(&mut self, canvas: Arc<Mutex<CanvasInner>>) {
-    self.canvas = canvas.clone();
+  pub(crate) fn set_canvas(&mut self, p_canvas: Arc<Mutex<CanvasInner<'a>>>) {
+    self.canvas = p_canvas.clone();
   }
 
   /// Gets the UUID of the layer.
@@ -124,53 +160,53 @@ impl LayerInner {
   }
 
   /// Sets the blend mode of the layer.
-  pub fn set_blend_mode(&mut self, blend_mode: fn(RGBA, RGBA) -> RGBA) {
-    self.blend_mode = blend_mode;
+  pub fn set_blend_mode(&mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) {
+    self.blend_mode = p_blend_mode;
     self.mark_dirty();
   }
 
   /// Sets the opacity of the layer.
-  pub fn set_opacity(&mut self, opacity: f32) {
-    self.opacity = opacity;
+  pub fn set_opacity(&mut self, p_opacity: f32) {
+    self.opacity = p_opacity;
     self.mark_dirty();
   }
 
   /// Sets the visibility of the layer.
-  pub fn set_visible(&mut self, visible: bool) {
-    self.visible = visible;
+  pub fn set_visible(&mut self, p_visible: bool) {
+    self.visible = p_visible;
     self.mark_dirty();
   }
 
   /// Sets the position of the layer.
-  pub fn set_global_position(&mut self, x: i32, y: i32) {
-    self.x = x;
-    self.y = y;
+  pub fn set_global_position(&mut self, p_x: i32, p_y: i32) {
+    self.x = p_x;
+    self.y = p_y;
     self.mark_dirty();
   }
 
   /// Sets the anchor point for the layer.
-  pub fn set_anchor(&mut self, anchor: Option<Anchor>) {
-    self.anchor = anchor;
+  pub fn set_anchor(&mut self, p_anchor: Option<Anchor>) {
+    self.anchor = p_anchor;
     self.mark_dirty();
   }
 
   /// Sets the position of the layer relative to another layer
-  pub fn set_relative_position(&mut self, x: i32, y: i32, layer: &LayerInner) {
-    self.x = layer.x + x;
-    self.y = layer.y + y;
+  pub fn set_relative_position(&mut self, p_x: i32, p_y: i32, p_layer: &LayerInner) {
+    self.x = p_layer.x + p_x;
+    self.y = p_layer.y + p_y;
     self.mark_dirty();
   }
 
   /// Sets the effects configuration for this layer and marks canvas dirty.
-  pub fn set_effects(&mut self, effects: LayerEffects) {
-    self.effects = effects;
+  pub fn set_effects(&mut self, p_effects: LayerEffects<'a>) {
+    self.effects = p_effects;
     self.mark_dirty();
   }
 
   /// Sets the position of the layer to the given anchor point
   /// The anchor is stored and will be applied during render time (update_canvas)
-  pub fn anchor_to_canvas(&mut self, anchor: Anchor) {
-    self.anchor = Some(anchor);
+  pub fn anchor_to_canvas(&mut self, p_anchor: Anchor) {
+    self.anchor = Some(p_anchor);
   }
 
   /// Checks if the layer has an anchor set.
@@ -179,8 +215,8 @@ impl LayerInner {
   }
 
   /// Sets the origin point within the layer for anchor positioning.
-  pub fn set_origin(&mut self, origin: Origin) {
-    self.origin = origin;
+  pub fn set_origin(&mut self, p_origin: Origin) {
+    self.origin = p_origin;
   }
 
   /// Gets the current origin point for anchor positioning.
@@ -204,8 +240,8 @@ impl LayerInner {
   }
 
   /// Sets the anchor dimensions to use for anchoring calculations.
-  pub fn set_anchor_dimensions(&mut self, width: u32, height: u32) {
-    self.anchor_dimensions = Some((width, height));
+  pub fn set_anchor_dimensions(&mut self, p_width: u32, p_height: u32) {
+    self.anchor_dimensions = Some((p_width, p_height));
   }
 
   /// Clears the anchor dimensions, reverting to using image dimensions for anchoring.
@@ -215,10 +251,10 @@ impl LayerInner {
 
   /// Applies the stored anchor to position the layer, given canvas dimensions
   /// This version directly updates x and y to avoid nested borrows of the canvas
-  pub fn apply_anchor_with_canvas_dimensions(&mut self, canvas_width: i32, canvas_height: i32) {
+  pub fn apply_anchor_with_canvas_dimensions(&mut self, p_canvas_width: i32, p_canvas_height: i32) {
     if let Some(anchor) = self.anchor {
       let (self_width, self_height) = self.anchor_dimensions();
-      let (x, y) = anchor.calculate_position(canvas_width, canvas_height, self_width as i32, self_height as i32);
+      let (x, y) = anchor.calculate_position(p_canvas_width, p_canvas_height, self_width as i32, self_height as i32);
       // Position the layer directly at the calculated anchor position
       // The anchor calculation already handles proper centering/positioning
       self.x = x + self.anchor_offset.0;
@@ -246,8 +282,8 @@ impl LayerInner {
   }
 
   /// Sets the name of the layer
-  pub fn set_name(&mut self, name: impl Into<String>) {
-    self.name = name.into();
+  pub fn set_name(&mut self, p_name: impl Into<String>) {
+    self.name = p_name.into();
   }
 
   /// Gets the opacity of the layer
@@ -273,34 +309,76 @@ impl LayerInner {
   /// Gets a mutable reference to the image using copy-on-write semantics.
   /// If the Arc has multiple owners, this will clone the image.
   pub fn image_mut(&mut self) -> &mut Image {
+    self.text_source = None;
+    self.text_needs_rasterization = false;
+    self.operations.clear();
+    self.applied_operations = 0;
     Arc::make_mut(&mut self.image)
   }
 
-  /// Applies any pending effects to the layer's image, updating anchor dimensions and offset as needed.
-  pub fn apply_pending_effects(&mut self) {
+  /// Records a transform to be materialized during canvas composition.
+  pub(crate) fn queue_operation(&mut self, p_operation: LayerOperation) {
+    self.operations.push(p_operation);
+  }
+
+  /// Marks retained text for re-rasterization at the supplied document resolution.
+  pub fn set_resolution(&mut self, p_resolution: Resolution) {
+    if self.text_source.is_some() {
+      self.text_needs_rasterization = true;
+      self.applied_operations = 0;
+    }
+    Arc::make_mut(&mut self.image).set_resolution(p_resolution);
+  }
+
+  /// Resolves pending text and pixel operations only when the canvas is ready to compose.
+  pub fn prepare_for_composition(&mut self, p_resolution: Resolution) {
+    if self.text_needs_rasterization {
+      if let Some(text) = self.text_source.clone() {
+        let mut image = Image::from(text.with_dpi(p_resolution.y_dpi));
+        image.set_resolution(p_resolution);
+        self.image = Arc::new(image);
+        self.text_needs_rasterization = false;
+        self.applied_operations = 0;
+      }
+    }
+
+    if self.applied_operations == self.operations.len() {
+      return;
+    }
+    let image = Arc::make_mut(&mut self.image);
+    for operation in self.operations[self.applied_operations..].iter().copied() {
+      match operation {
+        LayerOperation::Resize(target, algorithm) => image.resize(target, algorithm),
+        LayerOperation::Crop(x, y, width, height) => image.crop(x, y, width, height),
+        LayerOperation::Rotate(angle, algorithm) => image.rotate(angle, algorithm),
+        LayerOperation::Flip(axis) => image.flip(axis),
+      }
+    }
+    self.applied_operations = self.operations.len();
+  }
+
+  /// Renders the layer effects without replacing the layer's source image.
+  pub fn apply_pending_effects(&mut self) -> Arc<Image> {
     let image_arc = self.image.clone();
-    // Use the new apply_with_offset to get both the new image and padding offset
     let result = self.effects.apply_with_offset(image_arc);
-    // Record anchor dimensions (content dims prior to padding) and set anchor offset
     let (orig_w, orig_h) = result.content_dimensions;
     self.set_anchor_dimensions(orig_w, orig_h);
-    // offset is padding left/top; the anchor offset must be negative padding to keep content in place
     let (pad_left, pad_top) = result.offset;
     self.set_anchor_offset(-pad_left, -pad_top);
-    self.image = result.image;
+    result.image
   }
 
   /// Sets the index of the layer within the canvas's layer stack
-  pub fn set_index(&mut self, index: usize) {
+  pub fn set_index(&mut self, p_index: usize) {
     // To avoid borrow conflicts, we need to find the current layer's index by ID
     let current_index = self.current_index();
 
     if let Some(current_idx) = current_index {
       let mut canvas = self.canvas.lock().unwrap();
       // Directly manipulate layers vec
-      if current_idx != index && index <= canvas.layers.len() {
+      if current_idx != p_index && p_index <= canvas.layers.len() {
         let layer = canvas.layers.remove(current_idx);
-        canvas.layers.insert(index, layer);
+        canvas.layers.insert(p_index, layer);
       }
       // Mark canvas as needing recomposition since layer order changed
       canvas.mark_dirty();
@@ -324,89 +402,63 @@ impl LayerInner {
     self.adjustment_layer_type.clone()
   }
 
-  /// Moves the layer up one position in the stack (increases its index by 1)
-  /// Does nothing if the layer is already at the top
-  pub fn move_up(&mut self) {
-    let current_index = self.current_index();
-
-    if let Some(current_idx) = current_index {
-      let len = self.canvas.lock().unwrap().layers.len();
-      if current_idx < len - 1 {
-        self.set_index(current_idx + 1);
+  /// Moves this layer according to a relative or absolute stack action.
+  pub fn move_to(&mut self, p_action: LayerMove) {
+    let Some(current_index) = self.current_index() else { return };
+    let target_index = match p_action {
+      LayerMove::Up => {
+        let len = self.canvas.lock().unwrap().layers.len();
+        (current_index + 1 < len).then_some(current_index + 1)
       }
-    }
-  }
-
-  /// Moves the layer down one position in the stack (decreases its index by 1)
-  /// Does nothing if the layer is already at the bottom
-  pub fn move_down(&mut self) {
-    let current_index = self.current_index();
-
-    if let Some(current_idx) = current_index {
-      if current_idx > 0 {
-        self.set_index(current_idx - 1);
+      LayerMove::Down => current_index.checked_sub(1),
+      LayerMove::Top => {
+        let top = self.canvas.lock().unwrap().layers.len().saturating_sub(1);
+        (current_index != top).then_some(top)
       }
-    }
-  }
+      LayerMove::Bottom => (current_index != 0).then_some(0),
+    };
 
-  /// Moves the layer to the top of the stack
-  pub fn move_to_top(&mut self) {
-    let current_index = self.current_index();
-
-    if let Some(current_idx) = current_index {
-      let len = self.canvas.lock().unwrap().layers.len();
-      if current_idx < len - 1 {
-        self.set_index(len - 1);
-      }
-    }
-  }
-
-  /// Moves the layer to the bottom of the stack
-  pub fn move_to_bottom(&mut self) {
-    let current_index = self.current_index();
-
-    if let Some(current_idx) = current_index {
-      if current_idx > 0 {
-        self.set_index(0);
-      }
+    if let Some(target_index) = target_index {
+      self.set_index(target_index);
     }
   }
 
   /// Sets the position of the layer without triggering a recompose.
   /// This is used internally when resizing/cropping the canvas.
-  pub fn set_position_internal(&mut self, x: i32, y: i32) {
-    self.x = x;
-    self.y = y;
+  pub fn set_position_internal(&mut self, p_x: i32, p_y: i32) {
+    self.x = p_x;
+    self.y = p_y;
   }
 
   /// Duplicates the layer within the same canvas.
   /// This returns a Layer (the public wrapper), not the raw Rc<Mutex<LayerInner>>.
-  pub fn duplicate(&self) -> super::Layer {
-    let canvas = self.canvas.lock().unwrap();
-    let layer = canvas
-      .layers
-      .iter()
-      .find(|layer| layer.lock().unwrap().id() == self.id());
-    let layer_ref = layer.unwrap().lock().unwrap();
-
-    let mut new_layer = layer_ref.clone();
+  pub fn duplicate(&self) -> super::Layer<'a> {
+    let mut new_layer = self.clone();
     new_layer.set_name(format!("{} clone", new_layer.name()).as_str());
 
-    drop(layer_ref);
-    drop(canvas);
+    let layer_rc = {
+      let mut canvas = self.canvas.lock().unwrap();
+      canvas.add_layer(new_layer).clone()
+    };
 
-    let mut canvas = self.canvas.lock().unwrap();
-
-    let layer_rc = canvas.add_layer(new_layer);
     super::Layer::from_inner(layer_rc)
+  }
+
+  pub fn save(&self, p_file: impl Into<String>, p_options: impl Into<Option<abra_core::WriterOptions>>) {
+    self.image.write(p_file.into(), p_options).expect("Failed to save layer");
+  }
+
+  pub fn as_image(&self) -> Image {
+    self.image.as_image()
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Canvas;
   use crate::effects::DropShadow;
-  use abra_core::Image;
+  use abra_core::{Image, Resize};
   use std::sync::Arc;
 
   #[test]
@@ -427,14 +479,54 @@ mod tests {
     assert_eq!(layer.anchor_dimensions(), (1, 1));
     assert_eq!(layer.anchor_offset, (-pad_left, -pad_top));
   }
+
+  #[test]
+  fn duplicate_returns_a_new_layer() {
+    let canvas = Canvas::new("test");
+    let layer = canvas.add_layer_from_image("source", Arc::new(Image::new(1, 1)), None);
+
+    let duplicate = layer.duplicate();
+
+    assert_eq!(duplicate.name(), "source clone");
+    assert_ne!(duplicate.id(), layer.id());
+    assert_eq!(canvas.layer_count(), 2);
+  }
+
+  #[test]
+  fn repeated_effect_rendering_keeps_the_source_image_unchanged() {
+    let mut layer = LayerInner::new("test", Arc::new(Image::new(1, 1)));
+    layer.set_effects(LayerEffects::new().with_drop_shadow(DropShadow::new().with_size(3.0)));
+
+    let first_render = layer.apply_pending_effects();
+    let second_render = layer.apply_pending_effects();
+
+    assert_eq!(layer.dimensions::<u32>(), (1, 1));
+    assert_eq!(first_render.dimensions::<u32>(), second_render.dimensions::<u32>());
+  }
+
+  #[test]
+  fn layer_transforms_materialize_during_canvas_composition() {
+    let canvas = Canvas::new_blank("test", 40, 40);
+    let layer = canvas.add_layer_from_image("source", Image::new(10, 10), None);
+
+    layer.transform().resize(ResizeTarget::Exact(abra_core::Size::new(20, 20)), None);
+    assert_eq!(layer.dimensions(), (10, 10));
+
+    canvas.as_image();
+    assert_eq!(layer.dimensions(), (20, 20));
+  }
 }
 
-impl Clone for LayerInner {
+impl<'a> Clone for LayerInner<'a> {
   fn clone(&self) -> Self {
     LayerInner {
       id: uuid::Uuid::new_v4().to_string(),
       name: self.name.clone(),
       image: self.image.clone(),
+      text_source: self.text_source.clone(),
+      text_needs_rasterization: self.text_needs_rasterization,
+      operations: self.operations.clone(),
+      applied_operations: self.applied_operations,
       blend_mode: self.blend_mode,
       opacity: self.opacity,
       visible: self.visible,

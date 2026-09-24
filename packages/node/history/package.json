@@ -16,13 +16,16 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.0",
-    "ts-node": "^10.9.2",
+    "ts-node": "^1.7.1",
     "ts-patch": "^3.3.0",
     "tsc-alias": "^1.8.16",
     "typescript-transform-paths": "^3.5.5"
   },
   "scripts": {
-    "build": "npx napi build --release --output-dir tmp",
+    "build:old": "npx napi build --release --output-dir tmp",
     "build:debug": "npx napi build --output-dir tmp"
+  },
+  "dependencies": {
+    "tailwind": "2.2.0"
   }
 }

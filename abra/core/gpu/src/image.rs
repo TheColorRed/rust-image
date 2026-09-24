@@ -22,15 +22,15 @@ pub struct GpuImage {
 
 impl GpuImage {
   /// Upload an `abra_core::Image` into a GPU texture.
-  pub fn from_image(ctx: &GpuContext, image: &abra_core::Image) -> Result<Self> {
-    let (width, height) = image.dimensions::<u32>();
+  pub fn from_image(p_ctx: &GpuContext, p_image: &abra_core::Image) -> Result<Self> {
+    let (width, height) = p_image.dimensions::<u32>();
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let size = wgpu::Extent3d {
       width,
       height,
       depth_or_array_layers: 1,
     };
-    let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+    let texture = p_ctx.device.create_texture(&wgpu::TextureDescriptor {
       label: Some("gpu::upload_texture"),
       size,
       mip_level_count: 1,
@@ -40,9 +40,9 @@ impl GpuImage {
       usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
     });
-    let rgba = image.rgba();
+    let rgba = p_image.rgba();
     let bytes_per_row = 4 * width as u32;
-    ctx.queue.write_texture(
+    p_ctx.queue.write_texture(
       wgpu::TexelCopyTextureInfo {
         texture: &texture,
         mip_level: 0,
@@ -68,20 +68,20 @@ impl GpuImage {
   }
 
   /// Download the GPU image as a `abra_core::Image`. This function blocks using `pollster`.
-  pub fn to_image_blocking(&self, ctx: &GpuContext) -> Result<abra_core::Image> {
+  pub fn to_image_blocking(&self, p_ctx: &GpuContext) -> Result<abra_core::Image> {
     let unpadded_bytes_per_row = 4 * self.width as u32;
     let align: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // WebGPU required alignment for buffer rows
     let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
     let buffer_size = (padded_bytes_per_row as u64) * (self.height as u64);
 
-    let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+    let buffer = p_ctx.device.create_buffer(&wgpu::BufferDescriptor {
       label: Some("gpu::readback_buffer"),
       size: buffer_size,
       usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
       mapped_at_creation: false,
     });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    let mut encoder = p_ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
       label: Some("gpu::copy_texture_to_buffer"),
     });
     encoder.copy_texture_to_buffer(
@@ -106,9 +106,9 @@ impl GpuImage {
       },
     );
 
-    ctx.queue.submit(Some(encoder.finish()));
+    p_ctx.queue.submit(Some(encoder.finish()));
     // wait until device is idle
-    ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
+    p_ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
 
     let slice = buffer.slice(..);
     // map_async is callback based in wgpu 0.27
@@ -117,7 +117,7 @@ impl GpuImage {
       let _ = tx.send(res);
     });
     // Ensure the device polls so the map async callback can run.
-    ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
+    p_ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
     let res = rx.recv().map_err(|_| anyhow::anyhow!("map_async callback failed"))?;
     res?;
     let data = slice.get_mapped_range();

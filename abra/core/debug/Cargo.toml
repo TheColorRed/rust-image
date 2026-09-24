@@ -9,4 +9,4 @@ canvas = { workspace = true }
 rayon = { workspace = true }
 
 [lib]
-crate-type = ["dylib", "rlib"]
+crate-type = ["rlib"]

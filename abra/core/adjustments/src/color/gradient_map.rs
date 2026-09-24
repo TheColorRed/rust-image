@@ -1,11 +1,10 @@
 use abra_core::{Gradient, Image, ImageRef};
+use options::{Apply, Options};
 
-/// Apply a gradient map to an image. This will map the colors of the image to the colors of the gradient.
-/// Darker colors will be mapped to the first color in the gradient, and lighter colors will be mapped to the last color in the gradient.
-pub fn gradient_map<'a>(image: impl Into<ImageRef<'a>>, gradient: Gradient) {
-  let mut image_ref: ImageRef = image.into();
-  let image = &mut image_ref as &mut Image;
-  image.mut_pixels(|mut pixel| {
+use crate::apply_adjustment;
+
+fn apply_gradient_map(p_image: &mut Image, p_gradient: &Gradient) {
+  p_image.mut_pixels(|mut pixel| {
     let r = pixel[0] as f32;
     let g = pixel[1] as f32;
     let b = pixel[2] as f32;
@@ -15,7 +14,7 @@ pub fn gradient_map<'a>(image: impl Into<ImageRef<'a>>, gradient: Gradient) {
     // Normalize the grayscale value to a value between 0 and 1.
     let time = gray / 255.0;
     // Get the color from the gradient at the normalized time.
-    let (r, g, b, _) = gradient.get_color(time);
+    let (r, g, b, _) = p_gradient.get_color(time);
 
     pixel[0] = r;
     pixel[1] = g;
@@ -23,7 +22,27 @@ pub fn gradient_map<'a>(image: impl Into<ImageRef<'a>>, gradient: Gradient) {
   });
 }
 
-/// Apply a gradient map to an image, but reverse the gradient.
-pub fn gradient_map_reverse(image: &mut Image, gradient: Gradient) {
-  gradient_map(image, gradient.clone().reverse());
+pub struct GradientMap {
+  gradient: Gradient,
+  options: Options,
+}
+
+impl Apply for GradientMap {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    let mut image_ref: ImageRef = p_image.into();
+    let image = &mut image_ref as &mut Image;
+    apply_adjustment!(apply_gradient_map, image, self.options.as_ref(), 1, &self.gradient);
+  }
+}
+
+/// Maps image luminance to the supplied gradient.
+pub fn gradient_map(p_gradient: impl Into<Gradient>) -> GradientMap {
+  GradientMap {
+    gradient: p_gradient.into(),
+    options: None,
+  }
 }

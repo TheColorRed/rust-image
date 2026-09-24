@@ -4,6 +4,7 @@ use crate::blur::gaussian_blur;
 use abra_core::Channels;
 use abra_core::color::rgb_to_hsv;
 use mask::Mask;
+use options::Apply;
 
 const H_MIN: f32 = 0.0;
 const H_MAX: f32 = 50.0;
@@ -17,9 +18,9 @@ const RADIUS_PX: u32 = 8;
 
 /// Compute a per-pixel HSV-based skin alpha mask for the given image.
 /// Returns a Vec<f32> with values in [0.0, 1.0], the same size as the image pixels (w*h).
-fn compute_skin_mask_hsv(img: &Image, feather: u32) -> Vec<f32> {
-  let (w, h) = img.dimensions::<usize>();
-  let rgba = img.rgba();
+fn compute_skin_mask_hsv(p_img: &Image, p_feather: u32) -> Vec<f32> {
+  let (w, h) = p_img.dimensions::<usize>();
+  let rgba = p_img.rgba();
   let mut mask: Vec<f32> = vec![0.0f32; w * h];
 
   for y in 0..h {
@@ -34,8 +35,8 @@ fn compute_skin_mask_hsv(img: &Image, feather: u32) -> Vec<f32> {
     }
   }
 
-  if feather > 0 {
-    box_blur_f32_inplace(&mut mask, w, h, feather as usize);
+  if p_feather > 0 {
+    box_blur_f32_inplace(&mut mask, w, h, p_feather as usize);
     // clamp
     for v in mask.iter_mut() {
       if *v < 0.0 {
@@ -51,45 +52,45 @@ fn compute_skin_mask_hsv(img: &Image, feather: u32) -> Vec<f32> {
 }
 
 /// Simple separable box blur on a float mask (in-place). Radius is the feather radius.
-fn box_blur_f32_inplace(mask: &mut [f32], width: usize, height: usize, radius: usize) {
-  if radius == 0 {
+fn box_blur_f32_inplace(p_mask: &mut [f32], p_width: usize, p_height: usize, p_radius: usize) {
+  if p_radius == 0 {
     return;
   }
-  let mut tmp = vec![0.0f32; mask.len()];
-  let kernel = 2 * radius + 1;
+  let mut tmp = vec![0.0f32; p_mask.len()];
+  let kernel = 2 * p_radius + 1;
 
   // Horizontal pass
-  for y in 0..height {
+  for y in 0..p_height {
     let mut sum = 0.0f32;
-    for x in 0..width + radius {
+    for x in 0..p_width + p_radius {
       // add right
-      if x < width {
-        sum += mask[y * width + x];
+      if x < p_width {
+        sum += p_mask[y * p_width + x];
       }
       // subtract left
       if x >= kernel {
-        sum -= mask[y * width + x - kernel];
+        sum -= p_mask[y * p_width + x - kernel];
       }
-      if x >= radius {
-        let idx = y * width + (x - radius);
+      if x >= p_radius {
+        let idx = y * p_width + (x - p_radius);
         tmp[idx] = sum / kernel as f32;
       }
     }
   }
 
   // Vertical pass
-  for x in 0..width {
+  for x in 0..p_width {
     let mut sum = 0.0f32;
-    for y in 0..height + radius {
-      if y < height {
-        sum += tmp[y * width + x];
+    for y in 0..p_height + p_radius {
+      if y < p_height {
+        sum += tmp[y * p_width + x];
       }
       if y >= kernel {
-        sum -= tmp[(y - kernel) * width + x];
+        sum -= tmp[(y - kernel) * p_width + x];
       }
-      if y >= radius {
-        let idx = (y - radius) * width + x;
-        mask[idx] = sum / kernel as f32;
+      if y >= p_radius {
+        let idx = (y - p_radius) * p_width + x;
+        p_mask[idx] = sum / kernel as f32;
       }
     }
   }
@@ -104,16 +105,16 @@ fn apply_smooth_skin(p_image: &mut Image, p_amount: f32) {
   // Adapt radius for the working area based on p_image size to avoid no-op blurs on very small images.
   let (w, h) = p_image.dimensions::<usize>();
   let radius_px = std::cmp::min(RADIUS_PX as usize, std::cmp::max(1usize, std::cmp::max(w, h) / 8)) as u32;
-  gaussian_blur(p_image, radius_px, None::<ApplyOptions>);
+  gaussian_blur(radius_px).apply(p_image);
 }
 /// Smooths the skin in the image.
 /// - `p_image`: The image to be processed.
 /// - `p_amount`: The amount of smoothing to apply (0.0 to 1.0).
 /// - `p_options`: Additional options for the smoothing operation.
-pub fn smooth_skin<'a>(p_image: impl Into<ImageRef<'a>>, p_amount: impl Into<f64>, p_options: impl Into<Options>) {
+fn apply_smooth_skin_with_options<'a>(p_image: impl Into<ImageRef<'a>>, p_amount: f32, p_options: impl Into<Options>) {
   let mut image_ref: ImageRef = p_image.into();
   let image = &mut image_ref as &mut Image;
-  let amount = p_amount.into().clamp(0.0, 1.0) as f32;
+  let amount = p_amount;
   let pad = std::cmp::max(RADIUS_PX, FEATHER_PX) as i32;
 
   // Build a mask image based on HSV detection
@@ -149,15 +150,32 @@ pub fn smooth_skin<'a>(p_image: impl Into<ImageRef<'a>>, p_amount: impl Into<f64
       combined[i * 4 + 3] = 255;
     }
     let mask_img = Image::new_from_pixels(w as u32, h as u32, combined, Channels::RGBA);
-    mask_img.save("out/skin.png", None);
     opts = opts.with_mask(Mask::from_image(mask_img));
   }
 
-  // Prepare ApplyContext and call process_image directly to avoid macro type inference issues
-  let ctx = opts.ctx();
-  abra_core::image::apply_area::process_image(image, Some(ctx), pad, |img| {
-    apply_smooth_skin(img, amount);
-  });
+  apply_filter!(apply_smooth_skin, image, opts, pad, amount);
+}
+
+pub struct SmoothSkin {
+  amount: f32,
+  options: Options,
+}
+
+impl Apply for SmoothSkin {
+  fn options_mut(&mut self) -> &mut Options {
+    &mut self.options
+  }
+
+  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+    apply_smooth_skin_with_options(p_image, self.amount, self.options.clone());
+  }
+}
+
+pub fn smooth_skin(p_amount: impl Into<f64>) -> SmoothSkin {
+  SmoothSkin {
+    amount: p_amount.into().clamp(0.0, 1.0) as f32,
+    options: None,
+  }
 }
 
 #[cfg(test)]
@@ -214,7 +232,7 @@ mod tests {
 
     // compute mask (no debug print)
     let _ = compute_skin_mask_hsv(&img, 1);
-    smooth_skin(&mut img, 1.0, ApplyOptions::new());
+    smooth_skin(1.0).with_options(ApplyOptions::new()).apply(&mut img);
     let out = img.to_rgba_vec();
     // center should have changed towards neighbors after smoothing (some component changes expected)
     // Ensure something in the image changed by applying smoothing using the computed mask

@@ -8,6 +8,6 @@ ndarray = { workspace = true, features = ["rayon"] }
 rayon = { workspace = true }
 
 [lib]
+crate-type = ["rlib"]
 name = "primitives"
 path = "src/lib.rs"
-crate-type = ["dylib", "rlib"]

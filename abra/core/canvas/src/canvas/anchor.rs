@@ -34,10 +34,10 @@ impl Anchor {
   /// based on the anchor point and the dimensions of both the parent and child.
   ///
   /// # Arguments
-  /// * `parent_width` - The width of the parent container
-  /// * `parent_height` - The height of the parent container
-  /// * `child_width` - The width of the child element
-  /// * `child_height` - The height of the child element
+  /// * `p_parent_width` - The width of the parent container
+  /// * `p_parent_height` - The height of the parent container
+  /// * `p_child_width` - The width of the child element
+  /// * `p_child_height` - The height of the child element
   ///
   /// # Returns
   /// A tuple (x, y) representing the position of the child within the parent
@@ -48,17 +48,17 @@ impl Anchor {
   /// // x = 450, y = 375 (centers the 100x50 element in a 1000x800 parent)
   /// ```
   pub(crate) fn calculate_position(
-    self, parent_width: i32, parent_height: i32, child_width: i32, child_height: i32,
+    self, p_parent_width: i32, p_parent_height: i32, p_child_width: i32, p_child_height: i32,
   ) -> (i32, i32) {
     let x = match self {
       Anchor::TopLeft | Anchor::CenterLeft | Anchor::BottomLeft => 0,
-      Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => (parent_width - child_width) / 2,
-      Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => parent_width - child_width,
+      Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => (p_parent_width - p_child_width) / 2,
+      Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => p_parent_width - p_child_width,
     };
     let y = match self {
       Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => 0,
-      Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => (parent_height - child_height) / 2,
-      Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => parent_height - child_height,
+      Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => (p_parent_height - p_child_height) / 2,
+      Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => p_parent_height - p_child_height,
     };
     (x, y)
   }
