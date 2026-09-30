@@ -1,5 +1,0 @@
-gpu:
-  enabled: false
-
-drawing:
-  performance: balanced

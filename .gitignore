@@ -3,6 +3,7 @@
 .pytest_cache*
 .agents
 .claude
+.tmp*
 
 # Build and dependency directories to ignore
 /target
@@ -17,3 +18,4 @@ cache
 # Files to ignore
 TODO.md
 *.node
+settings.yml
