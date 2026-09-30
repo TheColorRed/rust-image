@@ -15,15 +15,32 @@ metadata:
 
 # Alakazam App
 
-The Alakazam App is located in the `/apps/alakazam` directory of the repository. It is an Electron-based desktop application that uses React for the frontend. The app provides a user interface for image manipulation using the Abra library as its backend.
+The app is split into two different apps, a desktop app located at `/apps/alakazam` and a mobile app located at `/apps/mobile`.
+
+- The desktop app is an Electron-based desktop application that uses React for the frontend. The app provides a user interface for image manipulation using the Abra library as its backend.
+- The mobile app is located at `/apps/mobile` and uses React Native for the frontend. It provides a user interface for image manipulation using the Abra library as its backend.
 
 ## Structure
 
-See the [structure document](./references/structure.md) for a detailed breakdown of the directories and files that make up the Alakazam App.
+### Desktop
 
-## Node Bindings
+See the [structure document](./references/desktop-structure.md) for a detailed breakdown of the directories and files that make up the Alakazam desktop app.
 
-See the [bindings document](./references/bindings.md) for information on how the Alakazam App integrates with the Abra library using Node bindings generated with `napi-rs`.
+### Mobile
+
+See the [structure document](./references/mobile-structure.md) for a detailed breakdown of the directories and files that make up the Alakazam mobile app.
+
+## Bindings
+
+The Alakazam App integrates with the Abra library using both Node and uniffi bindings. The Node bindings are used for the desktop app, while the uniffi bindings are used for the mobile app.
+
+### Node
+
+See the [bindings document](./references/node-bindings.md) for information on how the Alakazam App integrates with the Abra library using Node bindings generated with `napi-rs` for usage in the desktop app.
+
+### Uniffi
+
+See the [uniffi bindings document](./references/uniffi-bindings.md) for information on how the Alakazam App integrates with the Abra library using uniffi for usage in the mobile app.
 
 ## Development
 

@@ -1,10 +1,10 @@
-use crate::{Channels, fs::file_info::FileInfo};
+use crate::{Channels, Image};
 use png::Decoder;
 use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a PNG file and returns the image data
-pub fn read_png(p_file: impl Into<String>) -> Result<FileInfo, String> {
+pub fn read_png(p_file: impl Into<String>) -> Result<Image, String> {
   let p_file = File::open(p_file.into()).map_err(|e| e.to_string())?;
   // Larger buffer for better IO performance on large PNGs
   let reader = BufReader::with_capacity(1 << 20, p_file); // 1 MiB
@@ -25,7 +25,7 @@ pub fn read_png(p_file: impl Into<String>) -> Result<FileInfo, String> {
     _ => panic!("Unsupported color type"),
   };
 
-  let info = FileInfo::new(width, height, channels, pixels);
+  let info = Image::new_from_pixels(width, height, pixels, channels);
 
   Ok(info)
 }

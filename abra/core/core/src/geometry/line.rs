@@ -1,16 +1,19 @@
-use super::point::Point;
+use super::pointf::PointF;
 
-/// Bresenham's line algorithm
-pub fn bresenham(p_x0: i32, p_y0: i32, p_x1: i32, p_y1: i32) -> Vec<(i32, i32)> {
+/// The pixels on the straight line between two points, using Bresenham's line algorithm. Both ends are included.
+/// Points are rounded to the nearest pixel.
+/// - `p_from`: The start point.
+/// - `p_to`: The end point.
+pub fn bresenham(p_from: impl Into<PointF>, p_to: impl Into<PointF>) -> Vec<(i32, i32)> {
+  let ((x0, y0), (x1, y1)): ((i32, i32), (i32, i32)) = (p_from.into().into(), p_to.into().into());
   let mut result = Vec::new();
-  let dx = (p_x1 - p_x0).abs();
-  let dy = -(p_y1 - p_y0).abs();
-  let sx = if p_x0 < p_x1 { 1 } else { -1 };
-  let sy = if p_y0 < p_y1 { 1 } else { -1 };
+  let dx = (x1 - x0).abs();
+  let dy = -(y1 - y0).abs();
+  let sx = if x0 < x1 { 1 } else { -1 };
+  let sy = if y0 < y1 { 1 } else { -1 };
   let mut err = dx + dy;
-  let mut x = p_x0;
-  let mut y = p_y0;
-  while x != p_x1 || y != p_y1 {
+  let (mut x, mut y) = (x0, y0);
+  while x != x1 || y != y1 {
     result.push((x, y));
     let e2 = 2 * err;
     if e2 >= dy {
@@ -24,9 +27,4 @@ pub fn bresenham(p_x0: i32, p_y0: i32, p_x1: i32, p_y1: i32) -> Vec<(i32, i32)> 
   }
   result.push((x, y));
   result
-}
-
-/// Bresenham's line algorithm from points
-pub fn bresenham_from_points(p_p0: Point, p_p1: Point) -> Vec<(i32, i32)> {
-  bresenham(p_p0.x(), p_p0.y(), p_p1.x(), p_p1.y())
 }

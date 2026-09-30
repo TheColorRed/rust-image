@@ -23,7 +23,7 @@ impl<'a> FillArea<'a> {
   /// Rasterizes the area into a new image the size of its bounds.
   pub fn to_image(&self) -> Image {
     let area = &self.area;
-    let (min_x, min_y, max_x, max_y) = area.bounds::<f32>();
+    let (min_x, min_y, max_x, max_y) = area.bounds().edges::<f32>();
     let width = (max_x - min_x).ceil();
     let height = (max_y - min_y).ceil();
 
@@ -44,7 +44,7 @@ impl<'a> FillArea<'a> {
     // Build shader from fill. If the gradient has no explicit direction, use the
     // area bounding box to create a horizontal gradient path so the gradient
     // is visible across the area.
-    let fallback_path = Some(Path::rect((0.0, 0.0), width, height));
+    let fallback_path = Some(Path::from(Area::rect((0.0, 0.0), (width, height))));
     let mut shader = shader_from_fill_with_path(self.fill.clone(), fallback_path);
     // Apply area feathering by wrapping the shader when area has feather set
     if area.feather() > 0 {
@@ -69,7 +69,7 @@ impl<'a> FillArea<'a> {
   pub fn apply(&self, p_image: &mut Image) {
     let filled = self.to_image();
     let position = self.position.unwrap_or_else(|| {
-      let (min_x, min_y, _, _) = self.area.bounds::<f32>();
+      let (min_x, min_y, _, _) = self.area.bounds().edges::<f32>();
       PointF::new(min_x, min_y)
     });
     let position: (i32, i32) = position.into();
@@ -133,7 +133,9 @@ mod fill_area_tests {
   #[test]
   fn with_position_moves_the_area() {
     let mut image = Image::new_from_color(8, 8, Color::from_rgba(0, 0, 0, 255));
-    fill(Area::rect((4.0, 4.0), (2.0, 2.0)), Color::from_rgba(255, 0, 0, 255)).with_position((0.0, 0.0)).apply(&mut image);
+    fill(Area::rect((4.0, 4.0), (2.0, 2.0)), Color::from_rgba(255, 0, 0, 255))
+      .with_position((0.0, 0.0))
+      .apply(&mut image);
     assert_eq!(image.get_pixel(0, 0), Some((255, 0, 0, 255)));
     assert_eq!(image.get_pixel(4, 4), Some((0, 0, 0, 255)));
   }

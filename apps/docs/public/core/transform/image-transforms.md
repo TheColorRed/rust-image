@@ -6,7 +6,7 @@ outline: deep
 
 # Image transforms
 
-The `Resize`, `Crop`, and `Rotate` traits provide image transformations as in-place methods.
+Each transform is a builder function (`resize`, `crop`, `rotate`, `flip`, `zoom`, `warp`) that is configured and then run with `apply`. The `Transform` trait adds one-call shortcuts (`resize`, `crop`, `rotate`, `flip`) directly on `Image`, and the same trait is implemented by layer and canvas transforms.
 
 ## Resize
 
@@ -44,43 +44,82 @@ Choose an algorithm based on the quality and speed needed:
 | `Bilinear`        | Smooth and inexpensive; useful for general resizing.      |
 | `Bicubic`         | Higher quality using a broader cubic neighborhood.        |
 | `Lanczos`         | Highest-quality standard interpolation; more expensive.   |
-| `EdgeDirectEDI`   | Edge-directed resizing with lower cost than NEDI.         |
-| `EdgeDirectNEDI`  | Edge-directed resizing with stronger detail preservation. |
+| `EdgeDirectEDI`   | Edge-directed interpolation with lower cost than NEDI.    |
+| `EdgeDirectNEDI`  | Edge-directed interpolation with stronger detail preservation. |
 | `Auto`            | Select an algorithm based on the image and target size.   |
 
-Pass `None` to let the implementation choose automatically.
+Pass `None` to let the implementation choose automatically. The same algorithms apply to rotation and warping, since all geometric transforms sample the source through the same `remap` loop.
 
 ## Crop
 
 Crop from an origin and replace the image with the selected rectangle:
 
 ```rust
-use abra::transform::prelude::Crop;
-
 image.crop(100, 60, 800, 500);
+// or, with the builder:
+crop(100, 60, 800, 500).apply(&mut image);
 ```
 
-The arguments are `x`, `y`, `width`, and `height` in source-image pixels. Use `cropped` when a new image is preferred:
+The arguments are `x`, `y`, `width`, and `height` in source-image pixels. The rectangle is clipped to the image; a rectangle entirely outside the image leaves it unchanged. To keep the original, crop a clone:
 
 ```rust
-use abra::transform::prelude::cropped;
-
-let result = cropped(&image, 100, 60, 800, 500);
+let mut result = image.clone();
+result.crop(100, 60, 800, 500);
 ```
-
-Choose coordinates and dimensions within the source image bounds.
 
 ## Rotate
 
 Rotate clockwise by a positive angle and counter-clockwise by a negative angle:
 
 ```rust
-use abra::transform::prelude::Rotate;
-
 image.rotate(12.0, Some(TransformAlgorithm::Bilinear));
 ```
 
 Rotation expands the image to contain the rotated result. Transparent pixels are used outside the source bounds, which avoids opaque borders during interpolation.
+
+Use the `rotate` builder to choose how the canvas is sized with `with_fit`:
+
+```rust
+rotate(12.0).with_fit(TransformFit::Crop).apply(&mut image);
+rotate(12.0).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut image);
+```
+
+| Value               | Result                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `TransformFit::Expand` | Grow the canvas to fit the whole rotated image, with transparent corners. Default.                                                 |
+| `TransformFit::Crop`   | Keep the largest rectangle with no transparent corners. The result is smaller than the original.                                   |
+| `TransformFit::Fill`   | Keep the largest rectangle with the original aspect ratio and scale it back up to the original size, in a single resampling pass. |
+
+To preview the area `Crop` or `Fill` will keep, for example to draw a crop overlay, use `Size::inscribed_after_rotation`. It returns the kept size, centered on the rotated image, and can also find the largest rectangle of any other aspect ratio:
+
+```rust
+let size = Size::new(4000, 3000);
+let crop = size.inscribed_after_rotation(12.0, None);                // TransformFit::Crop
+let fill = size.inscribed_after_rotation(12.0, size.aspect_ratio()); // TransformFit::Fill
+let wide = size.inscribed_after_rotation(12.0, 16.0 / 9.0);          // a 16:9 crop
+```
+
+## Warp
+
+Move four points of the image onto four other points with a perspective transform. Straight lines stay straight, the way a flat surface changes when seen from another angle:
+
+```rust
+let from = Quad::new((120, 80), (900, 140), (880, 700), (100, 760));
+let to = Quad::rect((0, 0), (800, 600));
+warp(from, to).with_fit(TransformFit::Crop).apply(&mut image);
+```
+
+Both arguments accept anything that converts into a `Quad`, including a `Rect` such as `quad.bounds()`.
+
+`with_fit` works as it does for rotation:
+
+| Value                  | Result                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `TransformFit::Expand` | The whole warped image, with transparent gaps. The canvas grows at most half the image's size past each edge. Default. |
+| `TransformFit::Crop`   | Only the upright box around the `to` quad.                                                                   |
+| `TransformFit::Fill`   | The original frame, zoomed in just enough that every pixel comes from the source.                            |
+
+`Homography::from_quads(&from, &to)` gives the underlying transform, with `map` to move single points.
 
 ## Flip
 
@@ -115,7 +154,7 @@ A factor of `1.0` or less leaves the image unchanged. The algorithm is chosen au
 | `resize(ResizeTarget::RelativeWidth(...), algorithm)` | Change width by a pixel delta.     |
 | `resize(ResizeTarget::RelativeHeight(...), algorithm)` | Change height by a pixel delta.   |
 | `crop(x, y, width, height)`                | Crop in place.                               |
-| `cropped(image, ...)`                      | Return a cropped image.                      |
 | `rotate(degrees, algorithm)`               | Rotate and expand to fit.                    |
+| `warp(from, to).apply(image)`              | Move four points onto four others.           |
 | `flip(FlipAxis).apply(image)`              | Mirror the image.                            |
 | `zoom(anchor, factor).apply(image)`        | Zoom toward a point, keeping the size.       |

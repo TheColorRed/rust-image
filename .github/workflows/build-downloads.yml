@@ -1,0 +1,93 @@
+name: Build downloadable apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Desktop (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build native desktop binding
+        run: npm run build-bindings
+
+      - name: Build desktop application
+        run: |
+          node apps/alakazam/scripts/move-bindings.mjs
+          npm run build -w apps/alakazam
+          Copy-Item apps/alakazam/dist/renderer apps/alakazam/dist/client -Recurse
+
+      # npm workspaces hoists dependencies to the repository root. Stage them next
+      # to the Electron app so the packaged executable can resolve them at runtime.
+      - name: Package Windows application
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item apps/alakazam release/desktop-source -Recurse
+          Copy-Item node_modules release/desktop-source/node_modules -Recurse
+          npx --yes @electron/packager release/desktop-source Alakazam --platform=win32 --arch=x64 --out=release/desktop --overwrite --prune=false
+          Compress-Archive -Path release/desktop/Alakazam-win32-x64 -DestinationPath release/Alakazam-windows-x64.zip
+
+      - name: Upload desktop build
+        uses: actions/upload-artifact@v4
+        with:
+          name: alakazam-desktop-windows-x64
+          path: release/Alakazam-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  mobile:
+    name: Mobile (Android)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.1.12297006" "cmake;3.31.6"
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build native Android binding
+        run: npm run build-bindings:android -- --release
+
+      - name: Build Android APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease
+
+      - name: Upload mobile build
+        uses: actions/upload-artifact@v4
+        with:
+          name: alakazam-mobile-android-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

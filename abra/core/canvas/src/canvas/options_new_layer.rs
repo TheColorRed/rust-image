@@ -1,9 +1,6 @@
 //! Options for creating a new layer in a canvas.
 
-use abra_core::{
-  TransformAlgorithm,
-  blend::{self, RGBA},
-};
+use abra_core::{BlendMode, TransformAlgorithm};
 
 use super::anchor::Anchor;
 
@@ -45,7 +42,7 @@ pub struct NewLayerOptions {
   /// The opacity of the layer.
   pub opacity: Option<f32>,
   /// The blend mode for the layer.
-  pub blend_mode: Option<fn(RGBA, RGBA) -> RGBA>,
+  pub blend_mode: Option<BlendMode>,
   /// How the image will be sized when added as a layer.
   /// The image can be left at its original size, stretched, or constrained to fit within the canvas.
   pub size: Option<LayerSize>,
@@ -56,7 +53,7 @@ impl Default for NewLayerOptions {
     NewLayerOptions {
       anchor: Some(Anchor::Center),
       opacity: Some(1.0),
-      blend_mode: Some(blend::normal),
+      blend_mode: Some(BlendMode::Normal),
       size: Some(LayerSize::Maintain),
     }
   }
@@ -93,7 +90,7 @@ impl NewLayerOptions {
   /// The blend mode determines how the layer's pixels are combined with the pixels of the layers below it.
   /// This can be any of the predefined blend modes in the `blend` module.
   /// Or a custom blend function can be provided that takes two `RGBA` colors and returns a blended `RGBA` color.
-  pub fn with_blend_mode(mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+  pub fn with_blend_mode(mut self, p_blend_mode: BlendMode) -> Self {
     self.blend_mode = Some(p_blend_mode);
     self
   }

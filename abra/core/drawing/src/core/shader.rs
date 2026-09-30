@@ -67,7 +67,7 @@ pub trait Shader: Sync {
 /// ```
 pub fn shader_from_fill<'a, F: Into<Fill<'a>>>(p_fill: F) -> Box<dyn Shader + Send + Sync> {
   match p_fill.into() {
-    Fill::Solid(color) => Box::new(SolidShader::new(color.into_owned())),
+    Fill::Solid(color) => Box::new(SolidShader::new(color)),
     Fill::Gradient(gradient) => {
       let path = gradient.direction().unwrap_or_else(|| Path::new());
       Box::new(LinearGradientShader::new(path, gradient.into_owned()))
@@ -83,14 +83,14 @@ pub fn shader_from_fill_with_path<'a, F: Into<Fill<'a>>>(
   p_fill: F, p_fallback_path: Option<Path>,
 ) -> Box<dyn Shader + Send + Sync> {
   match p_fill.into() {
-    Fill::Solid(color) => Box::new(SolidShader::new(color.into_owned())),
+    Fill::Solid(color) => Box::new(SolidShader::new(color)),
     Fill::Gradient(gradient) => {
       let path = match gradient.direction() {
         Some(path) => path,
         None => p_fallback_path
           .clone()
           .map(|path| {
-            let (min_x, min_y, max_x, _) = path.bounds();
+            let (min_x, min_y, max_x, _) = path.bounds().edges::<f32>();
             Path::line((min_x, min_y), (max_x, min_y))
           })
           .unwrap_or_else(Path::new),
@@ -112,7 +112,7 @@ fn resolve_angle_path(p_path: Path, p_fallback_path: Option<&Path>) -> Path {
     return p_path;
   };
 
-  let (min_x, min_y, max_x, max_y) = bounds_path.bounds();
+  let (min_x, min_y, max_x, max_y) = bounds_path.bounds().edges::<f32>();
   let angle = angle_degrees.to_radians();
   let direction = (angle.cos(), angle.sin());
   let center = ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);

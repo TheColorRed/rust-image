@@ -33,6 +33,6 @@ impl LinearGradientShader {
 impl Shader for LinearGradientShader {
   fn shade(&self, p_x: f32, p_y: f32) -> (u8, u8, u8, u8) {
     let t = self.path.closest_time(p_x, p_y);
-    self.gradient.get_color(t)
+    self.gradient.color_at(t).rgba()
   }
 }

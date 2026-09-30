@@ -13,14 +13,21 @@ fn apply_sharpen(p_image: &mut Image) {
   apply_kernel(p_image, kernel.as_slice());
 }
 
+#[derive(Clone)]
 pub struct Sharpen {
   options: Options,
 }
+options::cpu_processor!(Sharpen);
+
 impl Apply for Sharpen {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

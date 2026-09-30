@@ -19,14 +19,14 @@ image.write("out/output.webp", None)?;
 
 Supported high-level input formats are PNG, JPEG, GIF, WebP, and SVG. High-level output currently supports PNG, JPEG, GIF, and WebP.
 
-Use `ImageFormat` when an output name does not contain an extension:
+Missing output folders are created. Unsupported formats return an error. `ImageFormat` reports what a path supports before reading or writing it:
 
 ```rust
-let image = Image::read("assets/photo.jpg")?;
-image.write_as("out/photo", ImageFormat::Webp, None)?;
-```
+use abra::abra_core::ImageFormat;
 
-Supported input formats are PNG, JPEG, GIF, WebP, and SVG. Output supports PNG, JPEG, GIF, and WebP. Unsupported formats return an error.
+let format = ImageFormat::from_path("out/photo.webp"); // Some(ImageFormat::Webp)
+let writable = format.is_some_and(|format| format.can_write());
+```
 
 ## Writer options
 
@@ -71,20 +71,20 @@ let mut images = ImageLoader::FromGlob(vec!["assets/**/*.jpg"]).load(LoadMode::S
 
 ## Manage loaded images
 
-`LoadedImages` stores loaded images behind `Arc<Image>` values:
+`LoadedImages` stores loaded images behind `Arc<Image>` values. Its methods come from the `LoadedCollection` trait, which is in the prelude:
 
 ```rust
 if let Some(first) = images.at(0) {
   println!("first image: {:?}", first.dimensions::<u32>());
 }
 
-images.add("assets/extra.png");
+images.add(Image::read("assets/extra.png")?);
 let first = images.shift();
 let last = images.pop();
-images.drop(0);
+images.remove(0);
 ```
 
-Use `at` to read without removing an image, `shift` or `pop` to consume from either end, and `drop` to remove an index.
+Use `at` to read without removing an image, `shift` or `pop` to consume from either end, and `remove` to remove an index. `len`, `is_empty`, `first`, `last`, and `all` read the collection.
 
 ## API summary
 
@@ -92,11 +92,11 @@ Use `at` to read without removing an image, `shift` or `pop` to consume from eit
 | ------------------------------------------------- | ------------------------------------------------- |
 | `Image::read(path)`                               | Fallibly construct an image from a file.          |
 | `Image::write(path, options)`                     | Fallibly write based on the path extension.       |
-| `Image::write_as(path, format, options)`          | Fallibly write with an explicit format.           |
+| `ImageFormat::from_path(path)`                    | The format of a path, with `can_read`/`can_write`. |
 | `WriterOptions { quality }`                       | Configure supported writer quality.               |
 | `ImageLoader::FromPaths`                          | Load a list of paths.                             |
 | `ImageLoader::FromGlob`                           | Load paths matching glob patterns.                |
 | `ImageLoader::FromFolders`                        | Load images from folders, optionally recursively. |
 | `ImageLoader::FromImages`                         | Wrap existing images.                             |
 | `load(LoadMode)`                                  | Load in parallel or synchronously.                |
-| `LoadedImages::add`, `at`, `shift`, `pop`, `drop` | Manage a loaded image collection.                 |
+| `add`, `at`, `shift`, `pop`, `remove`             | Manage a loaded image collection.                 |

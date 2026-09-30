@@ -3,8 +3,6 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use crate::{IntoNumber, LineSegment};
 
-use super::point::Point;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// A point in 2D space with floating-point coordinates.
 /// Used for precise geometric calculations before rasterization.
@@ -58,22 +56,6 @@ impl From<PointF> for (u32, u32) {
 impl From<PointF> for (f64, f64) {
   fn from(p_p: PointF) -> Self {
     (p_p.x as f64, p_p.y as f64)
-  }
-}
-
-// Conversions from/to Point (integer)
-impl From<Point> for PointF {
-  fn from(p_p: Point) -> Self {
-    PointF {
-      x: p_p.x() as f32,
-      y: p_p.y() as f32,
-    }
-  }
-}
-
-impl From<PointF> for Point {
-  fn from(p_p: PointF) -> Self {
-    Point::new(p_p.x.round() as i32, p_p.y.round() as i32)
   }
 }
 

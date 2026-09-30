@@ -50,7 +50,7 @@ use crate::onnx::OnnxSession;
 use crate::tensor::image_to_nchw;
 use crate::tiled::{TileAccumulator, TileConfig, generate_tiles};
 use abra_core::Image;
-use abra_core::transform::cropped;
+use abra_core::crop;
 use saphyr::{LoadableYamlNode, Yaml};
 use std::path::Path;
 use std::time::Instant;
@@ -465,7 +465,8 @@ impl ImageModel {
       }
 
       // Crop tile from input
-      let tile_image = cropped(p_input, tile_info.x, tile_info.y, tile_info.width, tile_info.height);
+      let mut tile_image = p_input.clone();
+      crop(tile_info.x, tile_info.y, tile_info.width, tile_info.height).apply(&mut tile_image);
 
       // Convert to tensor
       let tensor = image_to_nchw(&tile_image);

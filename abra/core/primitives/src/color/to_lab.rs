@@ -1,5 +1,3 @@
-use crate::color::{hsl_to_rgb, hsv_to_rgb};
-
 fn srgb_to_linear(p_c: f32) -> f32 {
   if p_c <= 0.04045 { p_c / 12.92 } else { ((p_c + 0.055) / 1.055).powf(2.4) }
 }
@@ -40,24 +38,6 @@ pub fn rgb_to_lab(p_r: u8, p_g: u8, p_b: u8) -> (f32, f32, f32) {
   let b_lin = srgb_to_linear(p_b as f32 / 255.0);
 
   linear_rgb_to_lab(r_lin, g_lin, b_lin)
-}
-/// Converts HSL color to Lab color space.
-/// - `p_h`: The hue component (0-360).
-/// - `p_s`: The saturation component (0-1).
-/// - `p_l`: The lightness component (0-1).
-/// Returns a tuple `(L, a, b)` representing the Lab color.
-pub fn hsl_to_lab(p_h: f32, p_s: f32, p_l: f32) -> (f32, f32, f32) {
-  let (r, g, b) = hsl_to_rgb(p_h, p_s, p_l);
-  rgb_to_lab(r, g, b)
-}
-/// Converts HSV color to Lab color space.
-/// - `p_h`: The hue component (0-360).
-/// - `p_s`: The saturation component (0-1).
-/// - `p_v`: The value component (0-1).
-/// Returns a tuple `(L, a, b)` representing the Lab color.
-pub fn hsv_to_lab(p_h: f32, p_s: f32, p_v: f32) -> (f32, f32, f32) {
-  let (r, g, b) = hsv_to_rgb(p_h, p_s, p_v);
-  rgb_to_lab(r, g, b)
 }
 /// Converts an sRGB channel represented as u8 (0-255) to linear f32 (0-1).
 /// - `p_v`: The sRGB channel value (0-255).

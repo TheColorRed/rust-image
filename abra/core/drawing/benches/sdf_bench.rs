@@ -1,4 +1,4 @@
-use abra_core::{Color, Image, Path};
+use abra_core::{Area, Color, Image, Path};
 use criterion::{Criterion, criterion_group, criterion_main};
 use drawing::{Brush, Painter};
 
@@ -8,7 +8,7 @@ fn bench_stroke_fast_vs_raster(p_c: &mut Criterion) {
   let mut img_slow = img_fast.clone();
 
   // Ellipse path (should trigger fast-path)
-  let path_ellipse = Path::ellipse((600.0, 600.0), 500.0, 500.0, 128);
+  let path_ellipse = Path::from(Area::ellipse((600.0, 600.0), (2.0 * 500.0, 2.0 * 500.0)));
   // Perturbed path (slightly offset points) to avoid ellipse detection
   let path_poly = path_ellipse.clone();
   // Modify one point to break perfect ellipse

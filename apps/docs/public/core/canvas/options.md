@@ -74,14 +74,13 @@ let options = NewLayerOptions::new().with_opacity(0.6);
 
 ## Blend mode
 
-Pass a blend function with `with_blend_mode`:
+Pass a `BlendMode` with `with_blend_mode`:
 
 ```rust
-use abra::abra_core::blend;
+use abra::abra_core::BlendMode;
 use abra::canvas::NewLayerOptions;
 
-let options = NewLayerOptions::new()
-  .with_blend_mode(blend::multiply);
+let options = NewLayerOptions::new().with_blend_mode(BlendMode::Multiply);
 ```
 
 ## Adding a configured layer
@@ -107,4 +106,4 @@ canvas.save("out/poster.png", None);
 | `with_size(LayerSize)`                    | Set the layer resizing strategy.       |
 | `with_anchor(Anchor)`                     | Set the layer's canvas anchor.         |
 | `with_opacity(f32)`                       | Set opacity, clamped to `0.0..=1.0`.   |
-| `with_blend_mode(fn(RGBA, RGBA) -> RGBA)` | Set the compositing function.          |
+| `with_blend_mode(BlendMode)`              | Set the compositing mode.              |

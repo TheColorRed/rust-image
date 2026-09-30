@@ -1,6 +1,4 @@
 use crate::Image;
-use crate::fs::mkdirp;
-use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
 use std::fs::write;
 use turbojpeg::PixelFormat::RGB;
@@ -9,14 +7,11 @@ use turbojpeg::compress;
 /// Writes the image data to a JPEG file
 pub fn write_jpg(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let p_file = p_file.into();
-  let dir = dirname(p_file.as_str());
-  mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
   // File::create(file.as_str()).map_err(|e| e.to_string())?;
   let quality = match p_options {
     Some(o) => o.quality,
     None => 100,
   };
-  println!("JPEG Quality set to {}", quality);
 
   let (width, height) = p_image.dimensions::<u32>();
 

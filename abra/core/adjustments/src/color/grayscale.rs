@@ -20,17 +20,23 @@ fn apply_grayscale(p_image_ref: &mut Image) {
   });
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Grayscale {
   options: Options,
 }
 
+options::cpu_processor!(Grayscale);
+
 impl Apply for Grayscale {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_grayscale, image, self.options.as_ref(), 1);

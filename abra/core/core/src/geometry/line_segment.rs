@@ -3,25 +3,18 @@ use crate::Path;
 use super::pointf::PointF;
 
 /// The direction a line segment can be turned to.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Orientation {
   /// Level with the x-axis (0°).
   Horizontal,
   /// Level with the y-axis (90°).
   Vertical,
+  /// Whichever of [`Orientation::Horizontal`] or [`Orientation::Vertical`] the line is closer to, so it turns as
+  /// little as possible. See [`LineSegment::nearest_orientation`]. Default.
+  #[default]
+  Nearest,
   /// A specific angle in degrees, using the same convention as `LineSegment::degrees`.
   Angle(f64),
-}
-
-impl Orientation {
-  /// The target angle in degrees.
-  fn degrees(self) -> f64 {
-    match self {
-      Orientation::Horizontal => 0.0,
-      Orientation::Vertical => 90.0,
-      Orientation::Angle(degrees) => degrees,
-    }
-  }
 }
 
 /// A straight line segment running from one point to another, with helpers for its angle, length and points along it.
@@ -93,13 +86,26 @@ impl LineSegment {
   /// A line and its reverse are the same line, so the target only matters modulo 180 and the
   /// result is wrapped into `(-90, 90]`.
   pub fn correction_to(&self, p_orientation: Orientation) -> f64 {
-    let mut correction = p_orientation.degrees() - self.degrees();
+    let target = match p_orientation {
+      Orientation::Horizontal => 0.0,
+      Orientation::Vertical => 90.0,
+      Orientation::Nearest => return self.correction_to(self.nearest_orientation()),
+      Orientation::Angle(degrees) => degrees,
+    };
+    let mut correction = target - self.degrees();
     if correction > 90.0 {
       correction -= 180.0;
     } else if correction <= -90.0 {
       correction += 180.0;
     }
     correction
+  }
+
+  /// Whichever of [`Orientation::Horizontal`] or [`Orientation::Vertical`] the line is closer to, so turning it
+  /// there takes the smallest rotation. A line at exactly 45°, or with no length, counts as vertical.
+  pub fn nearest_orientation(&self) -> Orientation {
+    let delta = self.delta();
+    if delta.x.abs() > delta.y.abs() { Orientation::Horizontal } else { Orientation::Vertical }
   }
 
   /// The distance between the start and end points.
@@ -110,6 +116,21 @@ impl LineSegment {
   /// The squared distance between the start and end points. Cheaper than `distance` for comparisons.
   pub fn distance_squared(&self) -> f64 {
     self.delta().length_squared() as f64
+  }
+
+  /// The squared distance from `p_point` to the nearest point on the segment, between its two ends. Cheaper than
+  /// the distance itself for comparisons.
+  pub fn distance_squared_to(&self, p_point: impl Into<PointF>) -> f32 {
+    let point = p_point.into();
+    let delta = self.delta();
+    let length_squared = delta.x * delta.x + delta.y * delta.y;
+    let t = if length_squared > 0.0 {
+      (((point.x - self.start.x) * delta.x + (point.y - self.start.y) * delta.y) / length_squared).clamp(0.0, 1.0)
+    } else {
+      0.0
+    };
+    let (dx, dy) = (point.x - (self.start.x + delta.x * t), point.y - (self.start.y + delta.y * t));
+    dx * dx + dy * dy
   }
 
   /// Whether the start and end points are the same, so the line has no direction.
@@ -206,6 +227,36 @@ mod tests {
       let vertical = (line.degrees() + line.correction_to(Orientation::Vertical)).rem_euclid(180.0);
       assert!(horizontal < 1e-4 || (180.0 - horizontal) < 1e-4, "horizontal {end:?}: {horizontal}");
       assert!((vertical - 90.0).abs() < 1e-4, "vertical {end:?}: {vertical}");
+    }
+  }
+
+  #[test]
+  fn distance_to_a_segment_is_measured_to_its_nearest_point() {
+    let line = LineSegment::new((0, 0), (10, 0));
+    assert_eq!(line.distance_squared_to((5, 3)), 9.0);
+    // Past either end, the distance is to that end.
+    assert_eq!(line.distance_squared_to((-3, 4)), 25.0);
+    assert_eq!(line.distance_squared_to((13, 4)), 25.0);
+    // A segment with no length is a point.
+    assert_eq!(LineSegment::new((2, 2), (2, 2)).distance_squared_to((5, 6)), 25.0);
+  }
+
+  #[test]
+  fn the_nearest_orientation_is_the_smaller_turn() {
+    assert_eq!(LineSegment::new((0, 0), (10, 3)).nearest_orientation(), Orientation::Horizontal);
+    assert_eq!(LineSegment::new((0, 0), (-10, 3)).nearest_orientation(), Orientation::Horizontal);
+    assert_eq!(LineSegment::new((0, 0), (3, 10)).nearest_orientation(), Orientation::Vertical);
+    assert_eq!(LineSegment::new((0, 0), (3, -10)).nearest_orientation(), Orientation::Vertical);
+    assert_eq!(LineSegment::new((0, 0), (10, 10)).nearest_orientation(), Orientation::Vertical);
+  }
+
+  #[test]
+  fn correcting_to_nearest_takes_the_smaller_turn() {
+    for end in [(10, 3), (-7, 4), (2, -9), (-5, -5), (0, 10), (10, 0)] {
+      let line = LineSegment::new((0, 0), end);
+      let nearest = line.correction_to(Orientation::Nearest);
+      assert_eq!(nearest, line.correction_to(line.nearest_orientation()), "{end:?}");
+      assert!(nearest.abs() <= 45.0, "{end:?}: {nearest}");
     }
   }
 

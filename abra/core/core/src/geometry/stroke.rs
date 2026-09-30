@@ -414,9 +414,9 @@ mod tests {
   #[test]
   fn caps_set_how_far_the_line_reaches() {
     let line = polyline(&[(0.0, 0.0), (10.0, 0.0)]);
-    assert_bounds(line.stroke(4.0).to_path().bounds(), (0.0, -2.0, 10.0, 2.0));
-    assert_bounds(line.stroke(4.0).with_cap(LineCap::Square).to_path().bounds(), (-2.0, -2.0, 12.0, 2.0));
-    assert_bounds(line.stroke(4.0).with_cap(LineCap::Round).to_path().bounds(), (-2.0, -2.0, 12.0, 2.0));
+    assert_bounds(line.stroke(4.0).to_path().bounds().edges(), (0.0, -2.0, 10.0, 2.0));
+    assert_bounds(line.stroke(4.0).with_cap(LineCap::Square).to_path().bounds().edges(), (-2.0, -2.0, 12.0, 2.0));
+    assert_bounds(line.stroke(4.0).with_cap(LineCap::Round).to_path().bounds().edges(), (-2.0, -2.0, 12.0, 2.0));
   }
 
   #[test]
@@ -451,9 +451,9 @@ mod tests {
   #[test]
   fn sharp_miters_are_beveled_past_the_limit() {
     let spike = polyline(&[(0.0, 0.0), (10.0, 0.0), (0.0, 1.0)]);
-    let (_, _, max_x, _) = spike.stroke(2.0).to_path().bounds();
+    let (_, _, max_x, _) = spike.stroke(2.0).to_path().bounds().edges::<f32>();
     assert!(max_x < 12.0, "miter reached {max_x}");
-    let (_, _, max_x, _) = spike.stroke(2.0).with_miter_limit(100.0).to_path().bounds();
+    let (_, _, max_x, _) = spike.stroke(2.0).with_miter_limit(100.0).to_path().bounds().edges::<f32>();
     assert!(max_x > 20.0, "miter reached {max_x}");
   }
 
@@ -461,7 +461,7 @@ mod tests {
   fn area_stroke_is_a_ring() {
     let square = Area::rect((0.0, 0.0), (10.0, 10.0));
     let ring = square.stroke(2.0).to_area();
-    assert_bounds(ring.bounds::<f32>(), (-1.0, -1.0, 11.0, 11.0));
+    assert_bounds(ring.bounds().edges(), (-1.0, -1.0, 11.0, 11.0));
     assert!(ring.contains((0.0, 5.0)));
     assert!(ring.contains((10.0, 5.0)));
     assert!(!ring.contains((5.0, 5.0)));

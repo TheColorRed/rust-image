@@ -1,12 +1,14 @@
 //! The internal layer implementation.
 
-use abra_core::blend;
-use abra_core::blend::RGBA;
-use abra_core::image::image_ext::CoreImageFsExt;
-use abra_core::{Crop, FlipAxis, Image, Resize, ResizeTarget, Resolution, Rotate, TransformAlgorithm};
+use abra_core::BlendMode;
+use abra_core::image::image_ext::ImageExt;
+use abra_core::{FlipAxis, Image, ResizeTarget, Resolution, Transform, TransformAlgorithm};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Mutex;
+
+use abra_core::Channels;
+use abra_core::image::gpu::{ChainRenderer, GpuSession, Hardware, LiveEffect, ready_gpu_provider};
 
 use crate::Origin;
 use crate::canvas::canvas_inner::CanvasInner;
@@ -20,6 +22,33 @@ pub(crate) enum LayerOperation {
   Crop(u32, u32, u32, u32),
   Rotate(f64, Option<TransformAlgorithm>),
   Flip(FlipAxis),
+}
+
+/// Live, re-renderable effects on a layer. The source image is never modified: the effects are evaluated over it
+/// whenever the layer is composed, on the GPU when available. The GPU session holds the source uploaded once.
+#[derive(Default)]
+struct LiveState {
+  effects: Vec<Arc<dyn LiveEffect>>,
+  session: Option<ChainRenderer<Box<dyn GpuSession>>>,
+  rendered: Option<Arc<Image>>,
+}
+
+impl Clone for LiveState {
+  fn clone(&self) -> Self {
+    LiveState {
+      effects: self.effects.clone(),
+      session: None,
+      rendered: None,
+    }
+  }
+}
+
+impl LiveState {
+  /// The source pixels changed: the uploaded copy and the rendered result are both stale.
+  fn invalidate_source(&mut self) {
+    self.session = None;
+    self.rendered = None;
+  }
 }
 
 /// The internal layer implementation - provides the mutable reference API.
@@ -41,7 +70,7 @@ pub struct LayerInner<'a> {
   /// The opacity of the layer.
   opacity: f32,
   /// The blend mode of the layer.
-  blend_mode: fn(RGBA, RGBA) -> RGBA,
+  blend_mode: BlendMode,
   /// The x position of the image within the layer.
   x: i32,
   /// The y position of the image within the layer.
@@ -63,6 +92,8 @@ pub struct LayerInner<'a> {
   effects: LayerEffects<'a>,
   /// The type of adjustment layer, if this is an adjustment layer.
   adjustment_layer_type: Option<crate::AdjustmentLayerType>,
+  /// Effects evaluated over the source image at composition time.
+  live: LiveState,
 }
 
 impl Debug for LayerInner<'_> {
@@ -92,7 +123,7 @@ impl Default for LayerInner<'_> {
       applied_operations: 0,
       visible: true,
       opacity: 1.0,
-      blend_mode: blend::normal,
+      blend_mode: BlendMode::Normal,
       x: 0,
       y: 0,
       canvas: Arc::new(Mutex::new(CanvasInner::new("Temporary"))),
@@ -102,6 +133,7 @@ impl Default for LayerInner<'_> {
       anchor_offset: (0, 0),
       effects: LayerEffects::new(),
       adjustment_layer_type: None,
+      live: LiveState::default(),
     }
   }
 }
@@ -160,7 +192,7 @@ impl<'a> LayerInner<'a> {
   }
 
   /// Sets the blend mode of the layer.
-  pub fn set_blend_mode(&mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) {
+  pub fn set_blend_mode(&mut self, p_blend_mode: BlendMode) {
     self.blend_mode = p_blend_mode;
     self.mark_dirty();
   }
@@ -292,7 +324,7 @@ impl<'a> LayerInner<'a> {
   }
 
   /// Gets the blend mode of the layer
-  pub fn blend_mode(&self) -> fn(RGBA, RGBA) -> RGBA {
+  pub fn blend_mode(&self) -> BlendMode {
     self.blend_mode
   }
 
@@ -313,6 +345,7 @@ impl<'a> LayerInner<'a> {
     self.text_needs_rasterization = false;
     self.operations.clear();
     self.applied_operations = 0;
+    self.live.invalidate_source();
     Arc::make_mut(&mut self.image)
   }
 
@@ -327,6 +360,7 @@ impl<'a> LayerInner<'a> {
       self.text_needs_rasterization = true;
       self.applied_operations = 0;
     }
+    self.live.invalidate_source();
     Arc::make_mut(&mut self.image).set_resolution(p_resolution);
   }
 
@@ -337,6 +371,7 @@ impl<'a> LayerInner<'a> {
         let mut image = Image::from(text.with_dpi(p_resolution.y_dpi));
         image.set_resolution(p_resolution);
         self.image = Arc::new(image);
+        self.live.invalidate_source();
         self.text_needs_rasterization = false;
         self.applied_operations = 0;
       }
@@ -345,6 +380,7 @@ impl<'a> LayerInner<'a> {
     if self.applied_operations == self.operations.len() {
       return;
     }
+    self.live.invalidate_source();
     let image = Arc::make_mut(&mut self.image);
     for operation in self.operations[self.applied_operations..].iter().copied() {
       match operation {
@@ -359,13 +395,66 @@ impl<'a> LayerInner<'a> {
 
   /// Renders the layer effects without replacing the layer's source image.
   pub fn apply_pending_effects(&mut self) -> Arc<Image> {
-    let image_arc = self.image.clone();
+    let image_arc = self.render_live();
     let result = self.effects.apply_with_offset(image_arc);
     let (orig_w, orig_h) = result.content_dimensions;
     self.set_anchor_dimensions(orig_w, orig_h);
     let (pad_left, pad_top) = result.offset;
     self.set_anchor_offset(-pad_left, -pad_top);
     result.image
+  }
+
+  /// Replaces the live effects evaluated over this layer's image and marks the canvas dirty. Only the effects are
+  /// re-run on the next composition; the source is not re-uploaded or modified.
+  pub fn set_live_effects(&mut self, p_effects: Vec<Arc<dyn LiveEffect>>) {
+    self.live.effects = p_effects;
+    self.live.rendered = None;
+    self.mark_dirty();
+  }
+
+  /// The live effects on this layer.
+  pub fn live_effects(&self) -> &[Arc<dyn LiveEffect>] {
+    &self.live.effects
+  }
+
+  /// The source image with the live effects applied, cached until the effects or the source change.
+  fn render_live(&mut self) -> Arc<Image> {
+    if self.live.effects.is_empty() {
+      return self.image.clone();
+    }
+    if let Some(rendered) = &self.live.rendered {
+      return rendered.clone();
+    }
+    let rendered = Arc::new(self.render_live_uncached());
+    self.live.rendered = Some(rendered.clone());
+    rendered
+  }
+
+  fn render_live_uncached(&mut self) -> Image {
+    if let Some(provider) = ready_gpu_provider(Hardware::Auto) {
+      let (width, height) = self.image.dimensions::<u32>();
+      if self.live.session.is_none() {
+        self.live.session = (provider.new_session)()
+          .and_then(|session| ChainRenderer::new(session, width, height, &self.image.to_rgba_vec()))
+          .ok();
+      }
+      if let Some(session) = self.live.session.as_mut() {
+        let effects: Vec<&dyn LiveEffect> = self.live.effects.iter().map(|e| e.as_ref()).collect();
+        match session.render_blocking(&effects) {
+          Ok(pixels) => {
+            let mut image = Image::new_from_pixels(width, height, pixels, Channels::RGBA);
+            image.set_resolution(self.image.resolution());
+            return image;
+          }
+          Err(_) => self.live.session = None,
+        }
+      }
+    }
+    let mut image = (*self.image).clone();
+    for effect in &self.live.effects {
+      effect.apply_cpu(&mut image);
+    }
+    image
   }
 
   /// Sets the index of the layer within the canvas's layer stack
@@ -449,7 +538,7 @@ impl<'a> LayerInner<'a> {
   }
 
   pub fn as_image(&self) -> Image {
-    self.image.as_image()
+    (*self.image).clone()
   }
 }
 
@@ -458,7 +547,7 @@ mod tests {
   use super::*;
   use crate::Canvas;
   use crate::effects::DropShadow;
-  use abra_core::{Image, Resize};
+  use abra_core::{Image, Transform};
   use std::sync::Arc;
 
   #[test]
@@ -539,6 +628,7 @@ impl<'a> Clone for LayerInner<'a> {
       anchor_offset: self.anchor_offset,
       effects: self.effects.clone(),
       adjustment_layer_type: self.adjustment_layer_type.clone(),
+      live: self.live.clone(),
     }
   }
 }

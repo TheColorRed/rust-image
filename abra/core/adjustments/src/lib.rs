@@ -14,6 +14,9 @@ pub mod color;
 /// - `$kernel_padding`: The padding around the kernel.
 /// - `..$rest`: Additional arguments to pass `$func`.
 ///
+/// Start with `gpu = <&impl GpuEffect>;` to give the adjustment a GPU version, which runs instead of `$cpu_func` when the
+/// GPU is enabled and available.
+///
 /// ## Example
 ///
 /// ```ignore
@@ -31,10 +34,15 @@ pub mod color;
 /// ```
 #[macro_export]
 macro_rules! apply_adjustment {
+  (gpu = $gpu:expr; $cpu_func:ident, $image:ident, $apply_opts:expr, $kernel_padding:expr $(, $rest:expr )* ) => {
+    let ctx = options::get_ctx($apply_opts);
+    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, Some($gpu as &dyn abra_core::image::gpu::GpuEffect), |img| {
+      $cpu_func(img $(, $rest )*);
+    });
+  };
   ($cpu_func:ident, $image:ident, $apply_opts:expr, $kernel_padding:expr $(, $rest:expr )* ) => {
     let ctx = options::get_ctx($apply_opts);
-
-    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, |img| {
+    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, None, |img| {
       $cpu_func(img $(, $rest )*);
     });
   };

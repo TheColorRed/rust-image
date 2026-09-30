@@ -39,7 +39,7 @@ An `Image` can also be used as the fill source for an area:
 
 ```rust
 let texture = Image::read("assets/texture.png")?;
-let textured = fill(Star::new(), &texture).to_image();
+let textured = fill(Area::shape(Shape::Star), &texture).to_image();
 ```
 
 Use the correct shape constructor for your geometry; the example above is illustrative for any closed `Area`.

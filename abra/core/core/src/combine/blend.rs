@@ -1,11 +1,341 @@
-use crate::{Image, Point, hsl_to_rgb, rgb_to_hsl};
+//! Compositing one image onto another with a blend mode.
+
+use crate::{Image, IntoNumber, PointF, Rect, hsl_to_rgb, rgb_to_hsl};
 use rayon::prelude::*;
 
 /// A color with red, green, blue, and alpha channels.
 pub type RGBA = (u8, u8, u8, u8);
 
-/// A callback that computes the blend color from destination and source pixels.
-pub type BlendMode = fn(RGBA, RGBA) -> RGBA;
+/// How a source color combines with the destination color beneath it, before the source's alpha composites the
+/// result over the destination. The names and behavior follow the common image-editor blend modes.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum BlendMode {
+  /// The source color replaces the destination. Default.
+  #[default]
+  Normal,
+  /// The darker of each channel.
+  Darken,
+  /// The darker of the two colors, by lightness.
+  DarkerColor,
+  /// The mean of each channel.
+  Average,
+  /// Multiplies the channels. Always darker; white leaves the color unchanged.
+  Multiply,
+  /// Darkens the destination by increasing contrast toward the source. White leaves the color unchanged.
+  ColorBurn,
+  /// Darkens the destination by decreasing brightness. White leaves the color unchanged.
+  LinearBurn,
+  /// The lighter of each channel.
+  Lighten,
+  /// The lighter of the two colors, by lightness.
+  LighterColor,
+  /// Multiplies the inverses. Always lighter; black leaves the color unchanged.
+  Screen,
+  /// Brightens the destination by decreasing contrast toward the source. Black leaves the color unchanged.
+  ColorDodge,
+  /// Adds the channels. Black leaves the color unchanged.
+  LinearDodge,
+  /// Multiplies dark destination values and screens light ones, keeping the destination's highlights and shadows.
+  Overlay,
+  /// A gentle, diffused-light version of hard light.
+  SoftLight,
+  /// Multiplies or screens depending on the source, like a harsh spotlight.
+  HardLight,
+  /// Color burn for dark source values and color dodge for light ones.
+  VividLight,
+  /// Linear burn for dark source values and linear dodge for light ones.
+  LinearLight,
+  /// Darken for dark source values and lighten for light ones.
+  PinLight,
+  /// Vivid light snapped to 0 or 255 per channel.
+  HardMix,
+  /// The absolute difference of each channel.
+  Difference,
+  /// A lower-contrast difference.
+  Exclusion,
+  /// The source subtracted from the destination.
+  Subtract,
+  /// The destination divided by the source.
+  Divide,
+  /// The destination's saturation and lightness with the source's hue.
+  Hue,
+  /// The destination's hue and lightness with the source's saturation.
+  Saturation,
+  /// The destination's lightness with the source's hue and saturation.
+  Color,
+  /// The destination's hue and saturation with the source's lightness.
+  Luminosity,
+  /// Squares the destination over the inverted source, for shiny highlights.
+  Reflect,
+  /// Reflect with the layers swapped.
+  Glow,
+  /// Intense highlights and deep shadows.
+  Phoenix,
+  /// An inverted difference, like a film negative.
+  Negation,
+  /// Extracts film grain from the destination.
+  GrainExtract,
+  /// Merges grain from both layers.
+  GrainMerge,
+  /// A custom function taking `(destination, source)` and returning the blended color.
+  Custom(fn(RGBA, RGBA) -> RGBA),
+}
+
+impl BlendMode {
+  /// Every built-in mode, in menu order.
+  pub const ALL: [BlendMode; 33] = [
+    BlendMode::Normal,
+    BlendMode::Darken,
+    BlendMode::DarkerColor,
+    BlendMode::Average,
+    BlendMode::Multiply,
+    BlendMode::ColorBurn,
+    BlendMode::LinearBurn,
+    BlendMode::Lighten,
+    BlendMode::LighterColor,
+    BlendMode::Screen,
+    BlendMode::ColorDodge,
+    BlendMode::LinearDodge,
+    BlendMode::Overlay,
+    BlendMode::SoftLight,
+    BlendMode::HardLight,
+    BlendMode::VividLight,
+    BlendMode::LinearLight,
+    BlendMode::PinLight,
+    BlendMode::HardMix,
+    BlendMode::Difference,
+    BlendMode::Exclusion,
+    BlendMode::Subtract,
+    BlendMode::Divide,
+    BlendMode::Hue,
+    BlendMode::Saturation,
+    BlendMode::Color,
+    BlendMode::Luminosity,
+    BlendMode::Reflect,
+    BlendMode::Glow,
+    BlendMode::Phoenix,
+    BlendMode::Negation,
+    BlendMode::GrainExtract,
+    BlendMode::GrainMerge,
+  ];
+
+  /// The mode's identifier, such as `"color-burn"`. Custom modes are `"custom"`.
+  pub fn name(&self) -> &'static str {
+    self.names().0
+  }
+
+  /// The mode's display label, such as `"Color Burn"`. Custom modes are `"Custom"`.
+  pub fn label(&self) -> &'static str {
+    self.names().1
+  }
+
+  /// The built-in mode with the given [`BlendMode::name`], or `None` when there is none.
+  pub fn from_name(p_name: &str) -> Option<BlendMode> {
+    BlendMode::ALL.into_iter().find(|mode| mode.name() == p_name)
+  }
+
+  fn names(&self) -> (&'static str, &'static str) {
+    match self {
+      BlendMode::Normal => ("normal", "Normal"),
+      BlendMode::Darken => ("darken", "Darken"),
+      BlendMode::DarkerColor => ("darker-color", "Darker Color"),
+      BlendMode::Average => ("average", "Average"),
+      BlendMode::Multiply => ("multiply", "Multiply"),
+      BlendMode::ColorBurn => ("color-burn", "Color Burn"),
+      BlendMode::LinearBurn => ("linear-burn", "Linear Burn"),
+      BlendMode::Lighten => ("lighten", "Lighten"),
+      BlendMode::LighterColor => ("lighter-color", "Lighter Color"),
+      BlendMode::Screen => ("screen", "Screen"),
+      BlendMode::ColorDodge => ("color-dodge", "Color Dodge"),
+      BlendMode::LinearDodge => ("linear-dodge", "Linear Dodge"),
+      BlendMode::Overlay => ("overlay", "Overlay"),
+      BlendMode::SoftLight => ("soft-light", "Soft Light"),
+      BlendMode::HardLight => ("hard-light", "Hard Light"),
+      BlendMode::VividLight => ("vivid-light", "Vivid Light"),
+      BlendMode::LinearLight => ("linear-light", "Linear Light"),
+      BlendMode::PinLight => ("pin-light", "Pin Light"),
+      BlendMode::HardMix => ("hard-mix", "Hard Mix"),
+      BlendMode::Difference => ("difference", "Difference"),
+      BlendMode::Exclusion => ("exclusion", "Exclusion"),
+      BlendMode::Subtract => ("subtract", "Subtract"),
+      BlendMode::Divide => ("divide", "Divide"),
+      BlendMode::Hue => ("hue", "Hue"),
+      BlendMode::Saturation => ("saturation", "Saturation"),
+      BlendMode::Color => ("color", "Color"),
+      BlendMode::Luminosity => ("luminosity", "Luminosity"),
+      BlendMode::Reflect => ("reflect", "Reflect"),
+      BlendMode::Glow => ("glow", "Glow"),
+      BlendMode::Phoenix => ("phoenix", "Phoenix"),
+      BlendMode::Negation => ("negation", "Negation"),
+      BlendMode::GrainExtract => ("grain-extract", "Grain Extract"),
+      BlendMode::GrainMerge => ("grain-merge", "Grain Merge"),
+      BlendMode::Custom(_) => ("custom", "Custom"),
+    }
+  }
+
+  /// Blends a source color over a destination color, returning the blend color. The source's alpha is applied
+  /// afterwards by [`BlendImage::apply`].
+  /// - `p_destination`: The color underneath (the base).
+  /// - `p_source`: The color being blended in.
+  pub fn apply(&self, p_destination: RGBA, p_source: RGBA) -> RGBA {
+    let (a, b) = (p_destination, p_source);
+    match self {
+      BlendMode::Normal => b,
+      BlendMode::Custom(mode) => mode(a, b),
+      BlendMode::DarkerColor => {
+        if lightness(a) < lightness(b) {
+          a
+        } else {
+          b
+        }
+      }
+      BlendMode::LighterColor => {
+        if lightness(a) > lightness(b) {
+          a
+        } else {
+          b
+        }
+      }
+      BlendMode::Hue => hsl_mix(a, b, [true, false, false]),
+      BlendMode::Saturation => hsl_mix(a, b, [false, true, false]),
+      BlendMode::Color => hsl_mix(a, b, [true, true, false]),
+      BlendMode::Luminosity => hsl_mix(a, b, [false, false, true]),
+
+      // Channel modes that blend alpha the same way as color.
+      BlendMode::Darken => per_channel(a, b, true, |a, b| a.min(b)),
+      BlendMode::Lighten => per_channel(a, b, true, |a, b| a.max(b)),
+      BlendMode::Average => per_channel(a, b, true, |a, b| ((a as u16 + b as u16) / 2) as u8),
+      BlendMode::Multiply => per_channel(a, b, true, |a, b| (a as u16 * b as u16 / 255) as u8),
+      BlendMode::ColorBurn => per_channel(a, b, true, color_burn),
+      BlendMode::LinearBurn => per_channel(a, b, true, linear_burn),
+      BlendMode::Screen => {
+        per_channel(a, b, true, |a, b| (255.0 - (255.0 - a as f32) * (255.0 - b as f32) / 255.0) as u8)
+      }
+      BlendMode::ColorDodge => per_channel(a, b, true, color_dodge),
+      BlendMode::LinearDodge => per_channel(a, b, true, linear_dodge),
+      BlendMode::Overlay => per_channel(a, b, true, |a, b| {
+        if a < 128 { multiply_or_screen(a, b).round() as u8 } else { screen2(a, b).round() as u8 }
+      }),
+      BlendMode::SoftLight => per_channel(a, b, true, |a, b| {
+        let hard = if b < 128 { multiply_or_screen(a, b) } else { screen2(a, b) };
+        (hard * 0.5 + a as f32 * 0.5) as u8
+      }),
+      BlendMode::HardLight => {
+        per_channel(a, b, true, |a, b| if b < 128 { multiply_or_screen(a, b) as u8 } else { screen2(a, b) as u8 })
+      }
+      BlendMode::VividLight => per_channel(a, b, true, vivid_light),
+      BlendMode::LinearLight => per_channel(a, b, true, |a, b| {
+        if b < 128 { linear_burn(a, (2.0 * b as f32) as u8) } else { linear_dodge(a, (2.0 * (b as f32 - 128.0)) as u8) }
+      }),
+      BlendMode::PinLight => per_channel(a, b, true, |a, b| if b < 128 { a.min(b) } else { a.max(b) }),
+      BlendMode::HardMix => per_channel(a, b, true, |a, b| if vivid_light(a, b) < 128 { 0 } else { 255 }),
+      BlendMode::Reflect => per_channel(a, b, true, reflect),
+      BlendMode::Glow => per_channel(a, b, true, |a, b| reflect(b, a)),
+
+      // Channel modes that keep the destination's alpha.
+      BlendMode::Difference => per_channel(a, b, false, |a, b| a.abs_diff(b)),
+      BlendMode::Exclusion => {
+        per_channel(a, b, false, |a, b| (a as i32 + b as i32 - 2 * a as i32 * b as i32 / 255) as u8)
+      }
+      BlendMode::Subtract => per_channel(a, b, false, |a, b| a.saturating_sub(b)),
+      BlendMode::Divide => {
+        per_channel(a, b, false, |a, b| if b == 0 { 0 } else { (a as f32 / b as f32 * 255.0).round() as u8 })
+      }
+      BlendMode::Phoenix => per_channel(a, b, false, |a, b| {
+        let (a, b) = (a as f32, b as f32);
+        (a + b - 2.0 * a * b / 255.0).clamp(0.0, 255.0) as u8
+      }),
+      BlendMode::Negation => {
+        per_channel(a, b, false, |a, b| (255.0 - (a as f32 - b as f32).abs()).clamp(0.0, 255.0) as u8)
+      }
+      BlendMode::GrainExtract => {
+        per_channel(a, b, false, |a, b| ((a as i32 + b as i32 - 255) / 2 + 128).clamp(0, 255) as u8)
+      }
+      BlendMode::GrainMerge => per_channel(a, b, false, |a, b| ((a as i32 + b as i32 - 128) / 2).clamp(0, 255) as u8),
+    }
+  }
+}
+
+impl PartialEq for BlendMode {
+  /// Built-in modes are equal when they are the same mode; custom modes when they are the same function.
+  fn eq(&self, p_other: &Self) -> bool {
+    match (self, p_other) {
+      (BlendMode::Custom(a), BlendMode::Custom(b)) => std::ptr::fn_addr_eq(*a, *b),
+      _ => std::mem::discriminant(self) == std::mem::discriminant(p_other),
+    }
+  }
+}
+
+impl Eq for BlendMode {}
+
+impl From<fn(RGBA, RGBA) -> RGBA> for BlendMode {
+  fn from(p_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+    BlendMode::Custom(p_mode)
+  }
+}
+
+/// Applies `p_blend` to the red, green, and blue channels, and to alpha when `p_blend_alpha` is set; otherwise the
+/// destination's alpha is kept.
+#[inline]
+fn per_channel(p_a: RGBA, p_b: RGBA, p_blend_alpha: bool, p_blend: impl Fn(u8, u8) -> u8) -> RGBA {
+  let alpha = if p_blend_alpha { p_blend(p_a.3, p_b.3) } else { p_a.3 };
+  (p_blend(p_a.0, p_b.0), p_blend(p_a.1, p_b.1), p_blend(p_a.2, p_b.2), alpha)
+}
+
+/// Rebuilds the destination color in HSL, taking hue, saturation, and lightness from the source where
+/// `p_from_source` is set (in that order). The destination's alpha is kept.
+fn hsl_mix(p_a: RGBA, p_b: RGBA, p_from_source: [bool; 3]) -> RGBA {
+  let base = rgb_to_hsl(p_a.0, p_a.1, p_a.2);
+  let blend = rgb_to_hsl(p_b.0, p_b.1, p_b.2);
+  let pick = |i: usize, base: f32, blend: f32| if p_from_source[i] { blend } else { base };
+  let (r, g, b) = hsl_to_rgb(pick(0, base.0, blend.0), pick(1, base.1, blend.1), pick(2, base.2, blend.2));
+  (r, g, b, p_a.3)
+}
+
+/// HSL lightness of a color.
+fn lightness(p_color: RGBA) -> f32 {
+  rgb_to_hsl(p_color.0, p_color.1, p_color.2).2
+}
+
+/// `2ab/255`: the multiply half of overlay and the light modes.
+#[inline]
+fn multiply_or_screen(p_a: u8, p_b: u8) -> f32 {
+  2.0 * p_a as f32 * p_b as f32 / 255.0
+}
+
+/// `255 - 2(255-a)(255-b)/255`: the screen half of overlay and the light modes.
+#[inline]
+fn screen2(p_a: u8, p_b: u8) -> f32 {
+  255.0 - 2.0 * (255.0 - p_a as f32) * (255.0 - p_b as f32) / 255.0
+}
+
+fn color_burn(p_a: u8, p_b: u8) -> u8 {
+  if p_b == 0 { 0 } else { (255.0 - (255.0 - p_a as f32) * 255.0 / p_b as f32) as u8 }
+}
+
+fn color_dodge(p_a: u8, p_b: u8) -> u8 {
+  if p_b == 255 { 255 } else { (p_a as f32 * 255.0 / (255.0 - p_b as f32)).min(255.0) as u8 }
+}
+
+fn linear_burn(p_a: u8, p_b: u8) -> u8 {
+  (p_a as i32 + p_b as i32 - 255).max(0) as u8
+}
+
+fn linear_dodge(p_a: u8, p_b: u8) -> u8 {
+  p_a.saturating_add(p_b)
+}
+
+fn vivid_light(p_a: u8, p_b: u8) -> u8 {
+  if p_b < 128 {
+    color_burn(p_a, (2.0 * p_b as f32) as u8)
+  } else {
+    color_dodge(p_a, (2.0 * (p_b as f32 - 128.0)) as u8)
+  }
+}
+
+fn reflect(p_a: u8, p_b: u8) -> u8 {
+  if p_b == 255 { 255 } else { ((p_a as f32 * p_a as f32) / (255.0 - p_b as f32)).min(255.0) as u8 }
+}
 
 /// A blend that has been described but not yet run. Create one with [`blend`], optionally set the offset, opacity,
 /// and mode, then composite it onto a destination with [`BlendImage::apply`].
@@ -13,60 +343,71 @@ pub type BlendMode = fn(RGBA, RGBA) -> RGBA;
 pub struct BlendImage<'a> {
   /// The image composited onto the destination.
   pub source: &'a Image,
-  /// Position of the source image in destination pixels.
-  pub offset: Point,
+  /// Position of the source image in destination pixels. Rounded to whole pixels.
+  pub offset: PointF,
   /// Opacity applied to the source alpha before alpha-over compositing.
   pub opacity: f32,
-  /// Callback that computes the source blend color.
+  /// How the source color combines with the destination.
   pub mode: BlendMode,
 }
 
 impl<'a> BlendImage<'a> {
   /// Sets the position of the source in destination pixels. Defaults to `(0, 0)`.
-  pub fn with_offset(mut self, p_offset: impl Into<Point>) -> Self {
+  pub fn with_offset(mut self, p_offset: impl Into<PointF>) -> Self {
     self.offset = p_offset.into();
     self
   }
 
   /// Sets the opacity applied to the source, clamped to `0.0..=1.0`. Defaults to `1.0`.
-  pub fn with_opacity(mut self, p_opacity: f32) -> Self {
-    self.opacity = p_opacity;
+  pub fn with_opacity(mut self, p_opacity: impl IntoNumber) -> Self {
+    self.opacity = p_opacity.into::<f32>();
     self
   }
 
-  /// Sets the blend mode, such as [`multiply`] or [`screen`]. Defaults to [`normal`].
-  pub fn with_mode(mut self, p_mode: BlendMode) -> Self {
-    self.mode = p_mode;
+  /// Sets the blend mode, such as [`BlendMode::Multiply`]. Defaults to [`BlendMode::Normal`].
+  pub fn with_mode(mut self, p_mode: impl Into<BlendMode>) -> Self {
+    self.mode = p_mode.into();
     self
   }
 
   /// Composites the source onto the destination. The source's alpha, multiplied by the opacity, is composited over
-  /// the destination exactly once. Parts of the source outside the destination are ignored.
+  /// the destination exactly once. Parts of the source outside the destination are ignored, and only the
+  /// destination pixels under the source are touched.
   pub fn apply(&self, p_destination: &mut Image) {
     let opacity = self.opacity.clamp(0.0, 1.0);
-    let (destination_width, _) = p_destination.dimensions::<i32>();
-    let (source_width, source_height) = self.source.dimensions::<i32>();
-    let (offset_x, offset_y) = self.offset.dimensions();
-    let mut pixels = p_destination.empty_pixel_vec();
+    let (offset_x, offset_y) = (self.offset.x.round() as i64, self.offset.y.round() as i64);
+    let (destination_width, destination_height) = p_destination.dimensions::<u32>();
+    let (source_width, source_height) = self.source.dimensions::<u32>();
+    let overlap = Rect::new((offset_x as f32, offset_y as f32), (source_width, source_height))
+      .intersect(Rect::new((0, 0), (destination_width, destination_height)));
+    if overlap.is_empty() || opacity == 0.0 {
+      return;
+    }
+    let (left, top, right, bottom) = overlap.edges::<i64>();
 
-    pixels.par_chunks_mut(4).enumerate().for_each(|(index, chunk)| {
-      let x = index as i32 % destination_width;
-      let y = index as i32 / destination_width;
-      let destination = p_destination.get_pixel(x as u32, y as u32).expect("destination coordinates are in bounds");
-      let source = if x >= offset_x && y >= offset_y && x < offset_x + source_width && y < offset_y + source_height {
-        self.source.get_pixel((x - offset_x) as u32, (y - offset_y) as u32)
-      } else {
-        None
-      };
-
-      let color = match source {
-        Some(source) => alpha_over(destination, (self.mode)(destination, source), source.3 as f32 / 255.0 * opacity),
-        None => destination,
-      };
-      chunk.copy_from_slice(&[color.0, color.1, color.2, color.3]);
-    });
-
-    p_destination.set_rgba_owned(pixels);
+    let source = self.source.rgba();
+    let source_stride = source_width as usize * 4;
+    let destination_stride = destination_width as usize * 4;
+    let mode = self.mode;
+    p_destination
+      .colors()
+      .as_slice_mut()
+      .expect("Image colors must be contiguous")
+      .par_chunks_exact_mut(destination_stride)
+      .skip(top as usize)
+      .take((bottom - top) as usize)
+      .enumerate()
+      .for_each(|(row_index, row)| {
+        let source_y = (top + row_index as i64 - offset_y) as usize;
+        for x in left..right {
+          let d = x as usize * 4;
+          let s = source_y * source_stride + (x - offset_x) as usize * 4;
+          let destination = (row[d], row[d + 1], row[d + 2], row[d + 3]);
+          let source = (source[s], source[s + 1], source[s + 2], source[s + 3]);
+          let color = alpha_over(destination, mode.apply(destination, source), source.3 as f32 / 255.0 * opacity);
+          row[d..d + 4].copy_from_slice(&[color.0, color.1, color.2, color.3]);
+        }
+      });
   }
 }
 
@@ -74,14 +415,14 @@ impl<'a> BlendImage<'a> {
 /// # Arguments
 /// - `p_source`: The image to composite.
 ///
-/// By default the source is placed at `(0, 0)` at full opacity with the [`normal`] blend mode. Change these with
+/// By default the source is placed at `(0, 0)` at full opacity with [`BlendMode::Normal`]. Change these with
 /// [`BlendImage::with_offset`], [`BlendImage::with_opacity`], and [`BlendImage::with_mode`].
 pub fn blend(p_source: &Image) -> BlendImage<'_> {
   BlendImage {
     source: p_source,
-    offset: Point::default(),
+    offset: PointF::zero(),
     opacity: 1.0,
-    mode: normal,
+    mode: BlendMode::Normal,
   }
 }
 
@@ -105,478 +446,13 @@ fn alpha_over(p_destination: RGBA, p_source_color: RGBA, p_source_alpha: f32) ->
   )
 }
 
-/// Edits or paints each pixel to make it the result color.
-/// This is the default mode.
-pub fn normal(_p_destination: RGBA, p_source: RGBA) -> RGBA {
-  p_source
-}
-
-/// Looks at the color information in each channel and selects the base or blend color—whichever is darker—as the result color.
-/// Pixels lighter than the blend color are replaced, and pixels darker than the blend color do not change.
-pub fn darken(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = p_a.0.min(p_b.0);
-  let green = p_a.1.min(p_b.1);
-  let blue = p_a.2.min(p_b.2);
-  let alpha = p_a.3.min(p_b.3);
-  (red, green, blue, alpha)
-}
-
-/// Selects the darker of the two colors.
-pub fn darker_color(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let lum_a = rgb_to_hsl(p_a.0, p_a.1, p_a.2).2;
-  let lum_b = rgb_to_hsl(p_b.0, p_b.1, p_b.2).2;
-
-  if lum_a < lum_b { p_a } else { p_b }
-}
-
-/// Selects the lighter of the two colors.
-pub fn lighter_color(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let lum_a = rgb_to_hsl(p_a.0, p_a.1, p_a.2).2;
-  let lum_b = rgb_to_hsl(p_b.0, p_b.1, p_b.2).2;
-
-  if lum_a > lum_b { p_a } else { p_b }
-}
-
-/// Increases the lightness of the blend color to create a glowing effect.
-pub fn glow(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let glow_channel = |p_a: u8, p_b: u8| -> u8 {
-    if p_a == 255 { 255 } else { ((p_b as f32 * p_b as f32) / (255.0 - p_a as f32)).min(255.0) as u8 }
-  };
-
-  let red = glow_channel(p_a.0, p_b.0);
-  let green = glow_channel(p_a.1, p_b.1);
-  let blue = glow_channel(p_a.2, p_b.2);
-  let alpha = glow_channel(p_a.3, p_b.3);
-
-  (red, green, blue, alpha)
-}
-
-/// Creates a fiery, glowing effect similar to phoenix flames.
-/// The formula creates intense highlights and deep shadows.
-pub fn phoenix(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let phoenix_channel = |p_a: u8, p_b: u8| -> u8 {
-    let a_f = p_a as f32;
-    let b_f = p_b as f32;
-    (a_f + b_f - 2.0 * a_f * b_f / 255.0).min(255.0).max(0.0) as u8
-  };
-
-  let red = phoenix_channel(p_a.0, p_b.0);
-  let green = phoenix_channel(p_a.1, p_b.1);
-  let blue = phoenix_channel(p_a.2, p_b.2);
-  let alpha = p_a.3; // Preserve base layer alpha
-
-  (red, green, blue, alpha)
-}
-
-/// Creates a negative film effect by inverting the color relationship.
-/// Produces high-contrast, inverted color results.
-pub fn negation(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let negation_channel =
-    |p_a: u8, p_b: u8| -> u8 { (255.0 - (p_a as f32 - p_b as f32).abs()).min(255.0).max(0.0) as u8 };
-
-  let red = negation_channel(p_a.0, p_b.0);
-  let green = negation_channel(p_a.1, p_b.1);
-  let blue = negation_channel(p_a.2, p_b.2);
-  let alpha = p_a.3; // Preserve base layer alpha
-
-  (red, green, blue, alpha)
-}
-
-/// Extracts grain from the base layer using the blend layer.
-/// Useful for creating film grain effects and texture overlays.
-pub fn grain_extract(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let grain_channel = |p_a: u8, p_b: u8| -> u8 { ((p_a as i32 + p_b as i32 - 255) / 2 + 128).clamp(0, 255) as u8 };
-
-  let red = grain_channel(p_a.0, p_b.0);
-  let green = grain_channel(p_a.1, p_b.1);
-  let blue = grain_channel(p_a.2, p_b.2);
-  let alpha = p_a.3; // Preserve base layer alpha
-
-  (red, green, blue, alpha)
-}
-
-/// Merges grain patterns from both layers.
-/// Creates complex texture effects by combining grain from base and blend layers.
-pub fn grain_merge(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let grain_channel = |p_a: u8, p_b: u8| -> u8 { ((p_a as i32 + p_b as i32 - 128) / 2).clamp(0, 255) as u8 };
-
-  let red = grain_channel(p_a.0, p_b.0);
-  let green = grain_channel(p_a.1, p_b.1);
-  let blue = grain_channel(p_a.2, p_b.2);
-  let alpha = p_a.3; // Preserve base layer alpha
-
-  (red, green, blue, alpha)
-}
-
-/// Averages the two colors.
-pub fn average(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 + p_b.0 as i32) / 2;
-  let green = (p_a.1 as i32 + p_b.1 as i32) / 2;
-  let blue = (p_a.2 as i32 + p_b.2 as i32) / 2;
-  let alpha = (p_a.3 as i32 + p_b.3 as i32) / 2;
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and multiplies the base color by the blend color.
-/// The result color is always a darker color.
-/// Multiplying any color with black produces black.
-/// Multiplying any color with white leaves the color unchanged.
-/// When you’re painting with a color other than black or white, successive strokes with a painting tool produce progressively darker colors.
-/// The effect is similar to drawing on the image with multiple marking pens.
-pub fn multiply(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 * p_b.0 as i32) / 255;
-  let green = (p_a.1 as i32 * p_b.1 as i32) / 255;
-  let blue = (p_a.2 as i32 * p_b.2 as i32) / 255;
-  let alpha = (p_a.3 as i32 * p_b.3 as i32) / 255;
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and darkens the base color to reflect the blend color by increasing the contrast between the two.
-/// Blending with white produces no change.
-pub fn color_burn(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = if p_b.0 == 0 { 0.0 } else { 255.0 - ((255.0 - p_a.0 as f32) * 255.0 / p_b.0 as f32) };
-  let green = if p_b.1 == 0 { 0.0 } else { 255.0 - ((255.0 - p_a.1 as f32) * 255.0 / p_b.1 as f32) };
-  let blue = if p_b.2 == 0 { 0.0 } else { 255.0 - ((255.0 - p_a.2 as f32) * 255.0 / p_b.2 as f32) };
-  let alpha = if p_b.3 == 0 { 0.0 } else { 255.0 - ((255.0 - p_a.3 as f32) * 255.0 / p_b.3 as f32) };
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and darkens the base color to reflect the blend color by decreasing the brightness.
-/// Blending with white produces no change.
-pub fn linear_burn(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 + p_b.0 as i32 - 255).max(0);
-  let green = (p_a.1 as i32 + p_b.1 as i32 - 255).max(0);
-  let blue = (p_a.2 as i32 + p_b.2 as i32 - 255).max(0);
-  let alpha = (p_a.3 as i32 + p_b.3 as i32 - 255).max(0);
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and selects the base or blend color—whichever is lighter—as the result color.
-/// Pixels darker than the blend color are replaced, and pixels lighter than the blend color do not change.
-pub fn lighten(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = p_a.0.max(p_b.0);
-  let green = p_a.1.max(p_b.1);
-  let blue = p_a.2.max(p_b.2);
-  let alpha = p_a.3.max(p_b.3);
-  (red, green, blue, alpha)
-}
-
-/// Looks at each channel’s color information and multiplies the inverse of the blend and base colors.
-/// The result color is always a lighter color.
-/// Screening with black leaves the color unchanged.
-/// Screening with white produces white.
-/// The effect is similar to projecting multiple photographic slides on top of each other.
-pub fn screen(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = 255.0 - ((255.0 - p_a.0 as f32) * (255.0 - p_b.0 as f32) / 255.0);
-  let green = 255.0 - ((255.0 - p_a.1 as f32) * (255.0 - p_b.1 as f32) / 255.0);
-  let blue = 255.0 - ((255.0 - p_a.2 as f32) * (255.0 - p_b.2 as f32) / 255.0);
-  let alpha = 255.0 - ((255.0 - p_a.3 as f32) * (255.0 - p_b.3 as f32) / 255.0);
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and brightens the base color to reflect the blend color by decreasing contrast between the two.
-/// Blending with black produces no change.
-pub fn color_dodge(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = if p_b.0 == 255 { 255.0 } else { (p_a.0 as f32 * 255.0 / (255.0 - p_b.0 as f32)).min(255.0) };
-  let green = if p_b.1 == 255 { 255.0 } else { (p_a.1 as f32 * 255.0 / (255.0 - p_b.1 as f32)).min(255.0) };
-  let blue = if p_b.2 == 255 { 255.0 } else { (p_a.2 as f32 * 255.0 / (255.0 - p_b.2 as f32)).min(255.0) };
-  let alpha = if p_b.3 == 255 { 255.0 } else { (p_a.3 as f32 * 255.0 / (255.0 - p_b.3 as f32)).min(255.0) };
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Looks at the color information in each channel and brightens the base color to reflect the blend color by increasing the brightness.
-/// Blending with black produces no change.
-pub fn linear_dodge(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 + p_b.0 as i32).min(255);
-  let green = (p_a.1 as i32 + p_b.1 as i32).min(255);
-  let blue = (p_a.2 as i32 + p_b.2 as i32).min(255);
-  let alpha = (p_a.3 as i32 + p_b.3 as i32).min(255);
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Multiplies or screens the colors, depending on the base color.
-/// Patterns or colors overlay the existing pixels while preserving the highlights and shadows of the base color.
-/// The base color is not replaced, but mixed with the blend color to reflect the lightness or darkness of the original color.
-pub fn overlay(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = if p_a.0 < 128 {
-    (2.0 * p_a.0 as f32 * p_b.0 as f32 / 255.0).round() as u8
-  } else {
-    (255.0 - 2.0 * (255.0 - p_a.0 as f32) * (255.0 - p_b.0 as f32) / 255.0).round() as u8
-  };
-  let green = if p_a.1 < 128 {
-    (2.0 * p_a.1 as f32 * p_b.1 as f32 / 255.0).round() as u8
-  } else {
-    (255.0 - 2.0 * (255.0 - p_a.1 as f32) * (255.0 - p_b.1 as f32) / 255.0).round() as u8
-  };
-  let blue = if p_a.2 < 128 {
-    (2.0 * p_a.2 as f32 * p_b.2 as f32 / 255.0).round() as u8
-  } else {
-    (255.0 - 2.0 * (255.0 - p_a.2 as f32) * (255.0 - p_b.2 as f32) / 255.0).round() as u8
-  };
-  let alpha = if p_a.3 < 128 {
-    (2.0 * p_a.3 as f32 * p_b.3 as f32 / 255.0).round() as u8
-  } else {
-    (255.0 - 2.0 * (255.0 - p_a.3 as f32) * (255.0 - p_b.3 as f32) / 255.0).round() as u8
-  };
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Darkens or lightens the colors, depending on the blend color.
-/// The effect is similar to shining a diffused spotlight on the image.
-/// If the blend color (light source) is lighter than 50% gray, the image is lightened as if it were dodged.
-/// If the blend color is darker than 50% gray, the image is darkened as if it were burned in.
-/// Painting with pure black or white produces a distinctly darker or lighter area, but does not result in pure black or white.
-pub fn soft_light(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let blend_factor = 0.5; // Adjust this factor to control the blending intensity
-
-  let red = if p_b.0 < 128 {
-    ((2.0 * p_a.0 as f32 * p_b.0 as f32 / 255.0) * blend_factor + p_a.0 as f32 * (1.0 - blend_factor)) as u8
-  } else {
-    ((255.0 - 2.0 * (255.0 - p_a.0 as f32) * (255.0 - p_b.0 as f32) / 255.0) * blend_factor
-      + p_a.0 as f32 * (1.0 - blend_factor)) as u8
-  };
-  let green = if p_b.1 < 128 {
-    ((2.0 * p_a.1 as f32 * p_b.1 as f32 / 255.0) * blend_factor + p_a.1 as f32 * (1.0 - blend_factor)) as u8
-  } else {
-    ((255.0 - 2.0 * (255.0 - p_a.1 as f32) * (255.0 - p_b.1 as f32) / 255.0) * blend_factor
-      + p_a.1 as f32 * (1.0 - blend_factor)) as u8
-  };
-  let blue = if p_b.2 < 128 {
-    ((2.0 * p_a.2 as f32 * p_b.2 as f32 / 255.0) * blend_factor + p_a.2 as f32 * (1.0 - blend_factor)) as u8
-  } else {
-    ((255.0 - 2.0 * (255.0 - p_a.2 as f32) * (255.0 - p_b.2 as f32) / 255.0) * blend_factor
-      + p_a.2 as f32 * (1.0 - blend_factor)) as u8
-  };
-  let alpha = if p_b.3 < 128 {
-    ((2.0 * p_a.3 as f32 * p_b.3 as f32 / 255.0) * blend_factor + p_a.3 as f32 * (1.0 - blend_factor)) as u8
-  } else {
-    ((255.0 - 2.0 * (255.0 - p_a.3 as f32) * (255.0 - p_b.3 as f32) / 255.0) * blend_factor
-      + p_a.3 as f32 * (1.0 - blend_factor)) as u8
-  };
-
-  (red, green, blue, alpha)
-}
-
-/// Multiplies or screens the colors, depending on the blend color.
-/// The effect is similar to shining a harsh spotlight on the image.
-/// If the blend color (light source) is lighter than 50% gray, the image is lightened, as if it were screened.
-/// This is useful for adding highlights to an image.
-/// If the blend color is darker than 50% gray, the image is darkened, as if it were multiplied.
-/// This is useful for adding shadows to an image.
-/// Painting with pure black or white results in pure black or white.
-pub fn hard_light(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let blend_channel = |p_a: u8, p_b: u8| -> u8 {
-    if p_b < 128 {
-      (2.0 * p_a as f32 * p_b as f32 / 255.0) as u8
-    } else {
-      (255.0 - 2.0 * (255.0 - p_a as f32) * (255.0 - p_b as f32) / 255.0) as u8
-    }
-  };
-
-  let red = blend_channel(p_a.0, p_b.0);
-  let green = blend_channel(p_a.1, p_b.1);
-  let blue = blend_channel(p_a.2, p_b.2);
-  let alpha = blend_channel(p_a.3, p_b.3);
-
-  (red, green, blue, alpha)
-}
-
-/// Burns or dodges the colors by increasing or decreasing the contrast, depending on the blend color.
-/// If the blend color (light source) is lighter than 50% gray, the image is lightened by decreasing the contrast.
-/// If the blend color is darker than 50% gray, the image is darkened by increasing the contrast.
-pub fn vivid_light(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let b_burn =
-    ((2.0 * p_b.0 as f32) as u8, (2.0 * p_b.1 as f32) as u8, (2.0 * p_b.2 as f32) as u8, (2.0 * p_b.3 as f32) as u8);
-  let b_dodge = (
-    (2.0 * (p_b.0 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.1 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.2 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.3 as f32 - 128.0)) as u8,
-  );
-  let red = if p_b.0 < 128 { color_burn(p_a, b_burn).0 } else { color_dodge(p_a, b_dodge).0 };
-  let green = if p_b.1 < 128 { color_burn(p_a, b_burn).1 } else { color_dodge(p_a, b_dodge).1 };
-  let blue = if p_b.2 < 128 { color_burn(p_a, b_burn).2 } else { color_dodge(p_a, b_dodge).2 };
-  let alpha = if p_b.3 < 128 { color_burn(p_a, b_burn).3 } else { color_dodge(p_a, b_dodge).3 };
-  (red as u8, green as u8, blue as u8, alpha as u8)
-}
-
-/// Burns or dodges the colors by decreasing or increasing the brightness, depending on the blend color.
-/// If the blend color (light source) is lighter than 50% gray, the image is lightened by increasing the brightness.
-/// If the blend color is darker than 50% gray, the image is darkened by decreasing the brightness.
-pub fn linear_light(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let b_burn =
-    ((2.0 * p_b.0 as f32) as u8, (2.0 * p_b.1 as f32) as u8, (2.0 * p_b.2 as f32) as u8, (2.0 * p_b.3 as f32) as u8);
-  let b_dodge = (
-    (2.0 * (p_b.0 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.1 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.2 as f32 - 128.0)) as u8,
-    (2.0 * (p_b.3 as f32 - 128.0)) as u8,
-  );
-  let red = if p_b.0 < 128 { linear_burn(p_a, b_burn).0 } else { linear_dodge(p_a, b_dodge).0 };
-  let green = if p_b.1 < 128 { linear_burn(p_a, b_burn).1 } else { linear_dodge(p_a, b_dodge).1 };
-  let blue = if p_b.2 < 128 { linear_burn(p_a, b_burn).2 } else { linear_dodge(p_a, b_dodge).2 };
-  let alpha = if p_b.3 < 128 { linear_burn(p_a, b_burn).3 } else { linear_dodge(p_a, b_dodge).3 };
-  (red, green, blue, alpha)
-}
-
-/// Replaces the colors, depending on the blend color.
-/// If the blend color (light source) is lighter than 50% gray, pixels darker than the blend color are replaced, and pixels lighter than the blend color do not change.
-/// If the blend color is darker than 50% gray, pixels lighter than the blend color are replaced, and pixels darker than the blend color do not change.
-/// This is useful for adding special effects to an image.
-pub fn pin_light(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = if p_b.0 < 128 { darken(p_a, p_b).0 } else { lighten(p_a, p_b).0 };
-  let green = if p_b.1 < 128 { darken(p_a, p_b).1 } else { lighten(p_a, p_b).1 };
-  let blue = if p_b.2 < 128 { darken(p_a, p_b).2 } else { lighten(p_a, p_b).2 };
-  let alpha = if p_b.3 < 128 { darken(p_a, p_b).3 } else { lighten(p_a, p_b).3 };
-  (red, green, blue, alpha)
-}
-
-/// Adds the red, green and blue channel values of the blend color to the RGB values of the base color.
-/// If the resulting sum for a channel is 255 or greater, it receives a value of 255; if less than 255, a value of 0. Therefore, all blended pixels have red, green, and blue channel values of either 0 or 255.
-/// This changes all pixels to primary additive colors (red, green, or blue), white, or black.
-pub fn hard_mix(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let blended = vivid_light(p_a, p_b);
-  let red = if blended.0 < 128 { 0 } else { 255 };
-  let green = if blended.1 < 128 { 0 } else { 255 };
-  let blue = if blended.2 < 128 { 0 } else { 255 };
-  let alpha = if blended.3 < 128 { 0 } else { 255 };
-  (red, green, blue, alpha)
-}
-
-/// Looks at the color information in each channel and subtracts either the blend
-/// color from the base color or the base color from the blend color, depending on which has the greater brightness value.
-/// Blending with white inverts the base color values; blending with black produces no change.
-pub fn difference(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 - p_b.0 as i32).abs() as u8;
-  let green = (p_a.1 as i32 - p_b.1 as i32).abs() as u8;
-  let blue = (p_a.2 as i32 - p_b.2 as i32).abs() as u8;
-  (red, green, blue, p_a.3)
-}
-
-/// Creates an effect similar to but lower in contrast than the Difference mode.
-/// Blending with white inverts the base color values.
-/// Blending with black produces no change.
-pub fn exclusion(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = p_a.0 as i32 + p_b.0 as i32 - 2 * p_a.0 as i32 * p_b.0 as i32 / 255;
-  let green = p_a.1 as i32 + p_b.1 as i32 - 2 * p_a.1 as i32 * p_b.1 as i32 / 255;
-  let blue = p_a.2 as i32 + p_b.2 as i32 - 2 * p_a.2 as i32 * p_b.2 as i32 / 255;
-  (red as u8, green as u8, blue as u8, p_a.3)
-}
-
-/// Looks at the color information in each channel and subtracts the blend color from the base color.
-/// In 8- and 16-bit images, any resulting negative values are clipped to zero.
-pub fn subtract(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = (p_a.0 as i32 - p_b.0 as i32).max(0) as u8;
-  let green = (p_a.1 as i32 - p_b.1 as i32).max(0) as u8;
-  let blue = (p_a.2 as i32 - p_b.2 as i32).max(0) as u8;
-  (red, green, blue, p_a.3)
-}
-
-/// Looks at the color information in each channel and divides the blend color from the base color.
-/// If the blend color channel is zero, the result for that channel will be zero.
-pub fn divide(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let red = if p_b.0 == 0 { 0 } else { (p_a.0 as f32 / p_b.0 as f32 * 255.0).round() as u8 };
-  let green = if p_b.1 == 0 { 0 } else { (p_a.1 as f32 / p_b.1 as f32 * 255.0).round() as u8 };
-  let blue = if p_b.2 == 0 { 0 } else { (p_a.2 as f32 / p_b.2 as f32 * 255.0).round() as u8 };
-  (red, green, blue, p_a.3)
-}
-
-/// Creates a result color with the luminance and saturation of the base color and the hue of the blend color.
-pub fn hue(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let (_, s1, l1) = rgb_to_hsl(p_a.0, p_a.1, p_a.2);
-  let (h2, _, _) = rgb_to_hsl(p_b.0, p_b.1, p_b.2);
-  let (r, g, p_b) = hsl_to_rgb(h2, s1, l1);
-  (r, g, p_b, p_a.3)
-}
-
-/// Creates a result color with the luminance and hue of the base color and the saturation of the blend color.
-///  Painting with this mode in an area with no (0) saturation (gray) causes no change.
-pub fn saturation(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let (h1, _, l1) = rgb_to_hsl(p_a.0, p_a.1, p_a.2);
-  let (_, s2, _) = rgb_to_hsl(p_b.0, p_b.1, p_b.2);
-  let (r, g, p_b) = hsl_to_rgb(h1, s2, l1);
-  (r, g, p_b, p_a.3)
-}
-/// Creates a result color with the luminance of the base color and the hue and saturation of the blend color.
-/// This preserves the gray levels in the image and is useful for coloring monochrome images and for tinting color images.
-pub fn color(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let (_, _, l1) = rgb_to_hsl(p_a.0, p_a.1, p_a.2);
-  let (h2, s2, _) = rgb_to_hsl(p_b.0, p_b.1, p_b.2);
-  let (r, g, p_b) = hsl_to_rgb(h2, s2, l1);
-  (r, g, p_b, p_a.3)
-}
-
-/// Creates a result color with the hue and saturation of the base color and the luminance of the blend color.
-/// This mode creates the inverse effect of Color mode.
-pub fn luminosity(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let (h1, s1, _) = rgb_to_hsl(p_a.0, p_a.1, p_a.2);
-  let (_, _, l2) = rgb_to_hsl(p_b.0, p_b.1, p_b.2);
-  let (r, g, p_b) = hsl_to_rgb(h1, s1, l2);
-  (r, g, p_b, p_a.3)
-}
-
-/// Reflects the blend color over the base color, creating a shiny, metallic effect.
-/// The formula is base^2 / (1 - blend), which amplifies bright areas.
-pub fn reflect(p_a: RGBA, p_b: RGBA) -> RGBA {
-  let reflect_channel = |p_a: u8, p_b: u8| -> u8 {
-    if p_b == 255 { 255 } else { ((p_a as f32 * p_a as f32) / (255.0 - p_b as f32)).min(255.0) as u8 }
-  };
-
-  let red = reflect_channel(p_a.0, p_b.0);
-  let green = reflect_channel(p_a.1, p_b.1);
-  let blue = reflect_channel(p_a.2, p_b.2);
-  let alpha = reflect_channel(p_a.3, p_b.3);
-
-  (red, green, blue, alpha)
-}
-
-/// Returns the name of the blend mode function.
-#[allow(unpredictable_function_pointer_comparisons)]
-pub fn blend_mode_name(p_mode: fn(RGBA, RGBA) -> RGBA) -> (&'static str, &'static str) {
-  match () {
-    _ if p_mode == normal => ("normal", "Normal"),
-    _ if p_mode == darken => ("darken", "Darken"),
-    _ if p_mode == darker_color => ("darker-color", "Darker Color"),
-    _ if p_mode == average => ("average", "Average"),
-    _ if p_mode == multiply => ("multiply", "Multiply"),
-    _ if p_mode == color_burn => ("color-burn", "Color Burn"),
-    _ if p_mode == linear_burn => ("linear-burn", "Linear Burn"),
-    _ if p_mode == lighten => ("lighten", "Lighten"),
-    _ if p_mode == lighter_color => ("lighter-color", "Lighter Color"),
-    _ if p_mode == screen => ("screen", "Screen"),
-    _ if p_mode == color_dodge => ("color-dodge", "Color Dodge"),
-    _ if p_mode == linear_dodge => ("linear-dodge", "Linear Dodge"),
-    _ if p_mode == overlay => ("overlay", "Overlay"),
-    _ if p_mode == soft_light => ("soft-light", "Soft Light"),
-    _ if p_mode == hard_light => ("hard-light", "Hard Light"),
-    _ if p_mode == vivid_light => ("vivid-light", "Vivid Light"),
-    _ if p_mode == linear_light => ("linear-light", "Linear Light"),
-    _ if p_mode == pin_light => ("pin-light", "Pin Light"),
-    _ if p_mode == hard_mix => ("hard-mix", "Hard Mix"),
-    _ if p_mode == difference => ("difference", "Difference"),
-    _ if p_mode == exclusion => ("exclusion", "Exclusion"),
-    _ if p_mode == subtract => ("subtract", "Subtract"),
-    _ if p_mode == divide => ("divide", "Divide"),
-    _ if p_mode == hue => ("hue", "Hue"),
-    _ if p_mode == saturation => ("saturation", "Saturation"),
-    _ if p_mode == color => ("color", "Color"),
-    _ if p_mode == luminosity => ("luminosity", "Luminosity"),
-    _ if p_mode == reflect => ("reflect", "Reflect"),
-    _ if p_mode == glow => ("glow", "Glow"),
-    _ if p_mode == phoenix => ("phoenix", "Phoenix"),
-    _ if p_mode == negation => ("negation", "Negation"),
-    _ if p_mode == grain_extract => ("grain-extract", "Grain Extract"),
-    _ if p_mode == grain_merge => ("grain-merge", "Grain Merge"),
-    _ => ("unknown", "Unknown"),
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Channels;
 
   fn image(p_width: u32, p_height: u32, p_pixels: &[u8]) -> Image {
-    Image::from_rgba_bytes(p_width, p_height, p_pixels)
+    Image::new_from_pixels(p_width, p_height, p_pixels, Channels::RGBA)
   }
 
   #[test]
@@ -584,9 +460,19 @@ mod tests {
     let mut destination = image(3, 1, &[0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
     let source = image(1, 1, &[255, 255, 0, 255]);
 
-    blend(&source).with_offset(Point::new(1, 0)).apply(&mut destination);
+    blend(&source).with_offset((1, 0)).apply(&mut destination);
 
     assert_eq!(destination.rgba(), &[0, 0, 0, 255, 255, 255, 0, 255, 0, 0, 0, 255]);
+  }
+
+  #[test]
+  fn offsets_past_the_edges_clip_the_source() {
+    let mut destination = image(2, 2, &[0; 16]);
+    let source = image(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 255]);
+    blend(&source).with_offset((-1, 1)).apply(&mut destination);
+    assert_eq!(destination.get_pixel(0, 1), Some((0, 255, 0, 255)));
+    assert_eq!(destination.get_pixel(1, 1), Some((0, 0, 0, 0)));
+    assert_eq!(destination.get_pixel(0, 0), Some((0, 0, 0, 0)));
   }
 
   #[test]
@@ -617,5 +503,27 @@ mod tests {
     blend(&source).with_opacity(0.5).apply(&mut destination);
 
     assert_eq!(destination.rgba(), &[0, 255, 0, 64]);
+  }
+
+  #[test]
+  fn modes_round_trip_through_their_names() {
+    for mode in BlendMode::ALL {
+      assert_eq!(BlendMode::from_name(mode.name()), Some(mode));
+    }
+    assert_eq!(BlendMode::from_name("nope"), None);
+  }
+
+  #[test]
+  fn channel_modes_match_their_formulas() {
+    let (a, b) = ((200, 100, 50, 255), (100, 200, 25, 128));
+    assert_eq!(BlendMode::Multiply.apply(a, b), (78, 78, 4, 128));
+    assert_eq!(BlendMode::Darken.apply(a, b), (100, 100, 25, 128));
+    assert_eq!(BlendMode::Difference.apply(a, b), (100, 100, 25, 255));
+    assert_eq!(BlendMode::Subtract.apply(a, b), (100, 0, 25, 255));
+    assert_eq!(BlendMode::LinearDodge.apply(a, b), (255, 255, 75, 255));
+    assert_eq!(BlendMode::HardMix.apply((255, 0, 0, 255), (255, 0, 0, 255)).0, 255);
+    // Hue takes the source hue onto the destination's saturation and lightness.
+    assert_eq!(BlendMode::Hue.apply((255, 0, 0, 255), (0, 0, 255, 9)), (0, 0, 255, 255));
+    assert_eq!(BlendMode::Luminosity.apply((255, 0, 0, 255), (0, 0, 0, 255)), (0, 0, 0, 255));
   }
 }

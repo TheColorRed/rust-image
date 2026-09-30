@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::common::*;
 use abra::canvas::prelude::Layer as AbraLayer;
 use abra::{
-  abra_core::blend::{self, blend_mode_name},
+  abra_core::BlendMode,
   canvas::prelude::Anchor,
-  prelude::{Channels, Image, Rotate},
+  prelude::{Channels, Image, Transform},
   transform::prelude::resize,
 };
 
@@ -102,43 +102,7 @@ impl Layer {
   /// Sets the blend mode of the layer.
   /// @param blendMode The new blend mode of the layer.
   pub fn set_blend_mode(&mut self, blend_mode: String) -> &Self {
-    let blend_fn = match blend_mode.as_str() {
-      "normal" => blend::normal,
-      "darken" => blend::darken,
-      "reflect" => blend::reflect,
-      "glow" => blend::glow,
-      "phoenix" => blend::phoenix,
-      "negation" => blend::negation,
-      "grain-extract" => blend::grain_extract,
-      "grain-merge" => blend::grain_merge,
-      "darker-color" => blend::darker_color,
-      "average" => blend::average,
-      "multiply" => blend::multiply,
-      "color-burn" => blend::color_burn,
-      "linear-burn" => blend::linear_burn,
-      "lighten" => blend::lighten,
-      "lighter-color" => blend::lighter_color,
-      "screen" => blend::screen,
-      "color-dodge" => blend::color_dodge,
-      "linear-dodge" => blend::linear_dodge,
-      "overlay" => blend::overlay,
-      "soft-light" => blend::soft_light,
-      "hard-light" => blend::hard_light,
-      "vivid-light" => blend::vivid_light,
-      "linear-light" => blend::linear_light,
-      "pin-light" => blend::pin_light,
-      "hard-mix" => blend::hard_mix,
-      "difference" => blend::difference,
-      "exclusion" => blend::exclusion,
-      "subtract" => blend::subtract,
-      "divide" => blend::divide,
-      "hue" => blend::hue,
-      "saturation" => blend::saturation,
-      "color" => blend::color,
-      "luminosity" => blend::luminosity,
-      _ => blend::normal,
-    };
-    self.inner.set_blend_mode(blend_fn);
+    self.inner.set_blend_mode(BlendMode::from_name(&blend_mode).unwrap_or_default());
     self
   }
 
@@ -340,7 +304,7 @@ pub fn layer_metadata(layer: &AbraLayer, project_id: String) -> crate::metadata:
     id: layer.id().to_string(),
     project_id,
     name: layer.name().to_string(),
-    blend_mode: blend_mode_name(layer.blend_mode()).0.to_string(),
+    blend_mode: layer.blend_mode().name().to_string(),
     opacity: layer.opacity() as f64,
     visible: layer.is_visible(),
     order: layer.current_index().unwrap_or(0) as u32,

@@ -6,7 +6,7 @@ fn main() {
   let _ = std::fs::create_dir_all("out");
   // Define a heart shape in normalized 0-100 coordinate space
   // This is the "abstract" or "viewBox" coordinate system
-  let heart = Polygon::new(5);
+  let heart = Area::shape(Shape::Polygon(5));
 
   // Create three images at different sizes
   let mut image_small = Image::new(120, 120);
@@ -17,9 +17,9 @@ fn main() {
   let aspect = AspectRatio::meet(); // Preserve aspect ratio, fit within viewport
 
   // Transform to each viewport size (no explicit ViewBox needed)
-  let heart_100 = heart.fit_with_aspect((100.0, 100.0), aspect);
-  let heart_300 = heart.fit_with_aspect((300.0, 300.0), aspect);
-  let heart_600 = heart.fit_with_aspect((600.0, 600.0), aspect);
+  let heart_100 = heart.fit((100.0, 100.0), aspect);
+  let heart_300 = heart.fit((300.0, 300.0), aspect);
+  let heart_600 = heart.fit((600.0, 600.0), aspect);
 
   let gradient = Gradient::hue().reverse();
   let color = Fill::Gradient(gradient.into());
@@ -53,7 +53,7 @@ fn main() {
 
   // Demonstrate different aspect ratio modes
   let mut image_stretch = Image::new(800, 400); // Wide viewport
-  let heart_stretched = heart.stretch((800.0, 400.0));
+  let heart_stretched = heart.fit((800.0, 400.0), AspectRatio::none());
   let stroke_stretched = heart_stretched.stroke(3.0, LineJoin::Miter);
   let filled_stretched = fill(stroke_stretched, Fill::Solid(Color::from_rgba(100, 150, 255, 255).into()));
   image_stretch.draw_image_at(&filled_stretched, (0, 0));

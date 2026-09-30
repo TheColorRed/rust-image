@@ -8,7 +8,7 @@ pub fn main() {
 
   let ellipse_brush = Brush::new().with_size(32).with_color(&blue).with_hardness(1.0);
   let start = std::time::Instant::now();
-  let ellipse = Path::ellipse((1920.0, 1080.0), 1200.0, 760.0, 256);
+  let ellipse = Path::from(Area::ellipse((1920.0, 1080.0), (2.0 * 1200.0, 2.0 * 760.0)));
   Painter::new(&mut butterfly_image).stroke_with_brush(&ellipse, &ellipse_brush);
   println!("ellipse stroke: {:?}", start.elapsed());
 

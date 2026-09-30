@@ -1,16 +1,14 @@
 //! The internal canvas implementation.
 
-use abra_core::Channels;
+use abra_core::BlendMode;
 use abra_core::Image;
 use abra_core::IntoNumber;
 use abra_core::Resolution;
 use abra_core::WriterOptions;
-use abra_core::blend::RGBA;
+use abra_core::blend::blend as blend_images;
 use abra_core::image::image_ext::*;
 use abra_core::writer;
-use abra_core::{ResizeTarget, Rotate, Size, TransformAlgorithm};
-// no direct `abra_core::blend` name use; imports here are filtered as needed
-use abra_core::blend::blend as blend_images;
+use abra_core::{ResizeTarget, Size, Transform, TransformAlgorithm};
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -55,7 +53,7 @@ pub(crate) struct CanvasInner<'a> {
   rotation: Cell<Option<f32>>,
   /// The blend mode to use when compositing this canvas into its parent.
   /// This mirrors LayerInner::blend_mode, but for a canvas group.
-  pub blend_mode: fn(RGBA, RGBA) -> RGBA,
+  pub blend_mode: BlendMode,
   /// When true, this canvas passes children through to the parent, rather than treating
   /// the canvas as a single flattened composite.
   pub pass_through: bool,
@@ -86,7 +84,7 @@ impl<'a> CanvasInner<'a> {
       needs_recompose: Cell::new(true),
       anchor: None,
       rotation: Cell::new(None),
-      blend_mode: abra_core::blend::normal,
+      blend_mode: abra_core::BlendMode::Normal,
       pass_through: false,
       opacity: Cell::new(1.0),
       origin: Origin::default(),
@@ -272,16 +270,7 @@ impl<'a> CanvasInner<'a> {
       return;
     }
 
-    let empty_pixels = vec![0u8; (width * height * 4) as usize];
-    let mut canvas = {
-      let channels = Channels::RGBA;
-      let mut img = Image::new(width, height);
-      match channels {
-        Channels::RGBA => img.set_rgba_owned(empty_pixels),
-        Channels::RGB => img.set_rgb_owned(empty_pixels),
-      }
-      img
-    };
+    let mut canvas = Image::new(width, height);
 
     // First pass: Apply anchors and recursively update child canvases
     for child_inner_rc in self.canvases.iter() {
@@ -364,7 +353,8 @@ impl<'a> CanvasInner<'a> {
       layer_ref.apply_anchor_with_canvas_dimensions(canvas_dims.0, canvas_dims.1);
       if layer_ref.is_visible() {
         let opacity = layer_ref.opacity().clamp(0.0, 1.0);
-        let blend = if !dest_has_content && first_layer { abra_core::blend::normal } else { layer_ref.blend_mode() };
+        let blend =
+          if !dest_has_content && first_layer { abra_core::BlendMode::Normal } else { layer_ref.blend_mode() };
         let (x, y) = layer_ref.position();
         blend_images(&rendered_image)
           .with_offset((p_offset_x + x, p_offset_y + y))
@@ -430,13 +420,13 @@ impl<'a> CanvasInner<'a> {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(&mut self, p_blend: fn(RGBA, RGBA) -> RGBA) {
+  pub fn set_blend_mode(&mut self, p_blend: BlendMode) {
     self.blend_mode = p_blend;
     self.mark_dirty();
   }
 
   /// Gets the blend mode used for compositing this canvas.
-  pub fn blend_mode(&self) -> fn(RGBA, RGBA) -> RGBA {
+  pub fn blend_mode(&self) -> BlendMode {
     self.blend_mode
   }
 
@@ -501,7 +491,7 @@ impl<'a> CanvasInner<'a> {
       self.update_canvas();
     }
     println!("Canvas recomposed in {:?}", start.elapsed());
-    writer(p_path.into()).with_options(p_options).save(self.result.clone()).expect("Failed to save canvas");
+    writer(p_path.into()).with_options(p_options).save(&self.result).expect("Failed to save canvas");
   }
 
   pub fn set_effects(&mut self, p_effects: crate::LayerEffects<'a>) {

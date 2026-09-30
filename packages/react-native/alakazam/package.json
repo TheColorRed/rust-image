@@ -1,0 +1,33 @@
+{
+  "name": "@alakazam/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "React Native bindings for the Abra image library",
+  "main": "src/index.tsx",
+  "react-native": "src/index.tsx",
+  "types": "src/index.tsx",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheColorRed/rust-image.git"
+  },
+  "codegenConfig": {
+    "android": {
+      "javaPackageName": "com.alakazam.mobile.abra"
+    }
+  },
+  "scripts": {
+    "build:android": "node scripts/build-android.mjs",
+    "build:android:release": "node scripts/build-android.mjs --release"
+  },
+  "dependencies": {
+    "@ubjs/core": "0.31.0-6"
+  },
+  "peerDependencies": {
+    "@ubjs/react-native": "0.31.0-6",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "uniffi-bindgen-react-native": "0.31.0-6",
+    "@ubjs/react-native": "^0.31.0-6"
+  }
+}

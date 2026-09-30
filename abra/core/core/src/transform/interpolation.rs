@@ -1,463 +1,386 @@
 //! Interpolation algorithms for image sampling.
 //!
-//! This module provides various interpolation methods used for sampling pixels
-//! at non-integer coordinates. These are fundamental building blocks for image
-//! transformations like resizing, distortions, and warping.
+//! This module provides the interpolation methods used for sampling pixels at non-integer coordinates, and
+//! [`remap`], the shared loop every geometric transform (resize, rotate, warp, distortions) is built on: each output
+//! pixel is mapped back to a position in the source image and sampled there.
 
-use primitives::Image;
+use primitives::{Image, LumaStandard, luma};
 use rayon::prelude::*;
 
 /// Sampling algorithm used by interpolation and resampling operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interpolation {
+  /// The pixel whose center is closest. Fastest, blocky.
   Nearest,
+  /// Blends the 2x2 neighborhood.
   Bilinear,
+  /// Cubic kernel over the 4x4 neighborhood.
   Bicubic,
+  /// Lanczos-3 kernel over the 6x6 neighborhood. Sharpest, slowest.
   Lanczos,
+  /// New Edge-Directed Interpolation: follows the local edge direction found from the gradient covariance of a 5x5
+  /// window, and uses bicubic where there is no strong edge.
+  EdgeDirectedNedi,
+  /// Edge-Directed Interpolation: follows the Sobel edge direction snapped to 45 degrees, and uses bilinear where
+  /// there is no strong edge. Faster than NEDI.
+  EdgeDirectedEdi,
+}
+
+/// What a sampler reads for pixels past the edges of the image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum EdgeMode {
+  /// Pixels past the edges are fully transparent, so edges fade out rather than turning an opaque color. Default.
+  #[default]
+  Transparent,
+  /// Pixels past the edges repeat the nearest edge pixel, so edges keep their color and opacity.
+  Clamp,
 }
 
 /// Sample a pixel with the selected interpolation algorithm.
-pub fn sample(p_image: &Image, p_x: f32, p_y: f32, p_interpolation: Interpolation) -> [u8; 4] {
+/// # Arguments
+/// - `p_image`: The image to sample from.
+/// - `p_x`, `p_y`: The position to sample, where pixel `(0, 0)` is centered on `(0.0, 0.0)`.
+/// - `p_interpolation`: The interpolation algorithm.
+/// - `p_edge`: What the sampler reads past the edges of the image.
+pub fn sample(p_image: &Image, p_x: f32, p_y: f32, p_interpolation: Interpolation, p_edge: EdgeMode) -> [u8; 4] {
+  let source = Source::new(p_image, p_edge);
   match p_interpolation {
-    Interpolation::Nearest => sample_nearest(p_image, p_x, p_y),
-    Interpolation::Bilinear => sample_bilinear(p_image, p_x, p_y),
-    Interpolation::Bicubic => sample_bicubic(p_image, p_x, p_y),
-    Interpolation::Lanczos => sample_lanczos(p_image, p_x, p_y),
+    Interpolation::Nearest => source.fetch(p_x.round() as i32, p_y.round() as i32),
+    Interpolation::Bilinear => sample_kernel(&source, p_x, p_y, 0, 1, tent),
+    Interpolation::Bicubic => sample_kernel(&source, p_x, p_y, -1, 2, cubic),
+    Interpolation::Lanczos => sample_kernel(&source, p_x, p_y, -2, 3, lanczos3),
+    Interpolation::EdgeDirectedNedi => sample_nedi(&source, p_x, p_y),
+    Interpolation::EdgeDirectedEdi => sample_edi(&source, p_x, p_y),
   }
 }
 
-/// Sample a pixel using bilinear interpolation with premultiplied alpha.
+/// Builds a `p_width` x `p_height` RGBA buffer by mapping each output pixel back to a position in `p_source` and
+/// sampling it there.
 ///
-/// This function samples the image at a fractional (x, y) coordinate by performing
-/// a weighted average of the four nearest pixels. Premultiplied alpha is used to
-/// avoid dark fringes around transparent edges.
+/// `p_map` receives the center of an output pixel in continuous coordinates, where pixel `i` spans `i..i + 1` so
+/// its center is `i + 0.5`, and returns the matching continuous position in the source. Returning `None` leaves the
+/// pixel transparent, for positions the source does not cover.
 ///
-/// - `p_image`: The image to sample from.
-/// - `p_x`: The x-coordinate (can be fractional).
-/// - `p_y`: The y-coordinate (can be fractional).
-///
-/// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-fn sample_bilinear(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (width, height) = p_image.dimensions::<u32>();
-  let pixels = p_image.rgba();
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let x1 = x0 + 1;
-  let y1 = y0 + 1;
-
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Helper to safely get pixel
-  let get_pixel = |px: i32, py: i32| -> [u8; 4] {
-    if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
-      [0, 0, 0, 0]
-    } else {
-      let idx = (py as u32 * width + px as u32) as usize;
-      if idx * 4 + 3 < pixels.len() {
-        [
-          pixels[idx * 4],
-          pixels[idx * 4 + 1],
-          pixels[idx * 4 + 2],
-          pixels[idx * 4 + 3],
-        ]
-      } else {
-        [0, 0, 0, 0]
-      }
-    }
-  };
-
-  let p00 = get_pixel(x0, y0);
-  let p10 = get_pixel(x1, y0);
-  let p01 = get_pixel(x0, y1);
-  let p11 = get_pixel(x1, y1);
-
-  // Bilinear interpolation with premultiplied alpha
-  let a00 = p00[3] as f32 / 255.0;
-  let a10 = p10[3] as f32 / 255.0;
-  let a01 = p01[3] as f32 / 255.0;
-  let a11 = p11[3] as f32 / 255.0;
-
-  let r00 = p00[0] as f32 * a00;
-  let g00 = p00[1] as f32 * a00;
-  let b00 = p00[2] as f32 * a00;
-  let r10 = p10[0] as f32 * a10;
-  let g10 = p10[1] as f32 * a10;
-  let b10 = p10[2] as f32 * a10;
-  let r01 = p01[0] as f32 * a01;
-  let g01 = p01[1] as f32 * a01;
-  let b01 = p01[2] as f32 * a01;
-  let r11 = p11[0] as f32 * a11;
-  let g11 = p11[1] as f32 * a11;
-  let b11 = p11[2] as f32 * a11;
-
-  let a0 = a00 * (1.0 - fx) + a10 * fx;
-  let a1 = a01 * (1.0 - fx) + a11 * fx;
-  let a = a0 * (1.0 - fy) + a1 * fy;
-
-  let r0 = r00 * (1.0 - fx) + r10 * fx;
-  let r1 = r01 * (1.0 - fx) + r11 * fx;
-  let rp = r0 * (1.0 - fy) + r1 * fy;
-
-  let g0 = g00 * (1.0 - fx) + g10 * fx;
-  let g1 = g01 * (1.0 - fx) + g11 * fx;
-  let gp = g0 * (1.0 - fy) + g1 * fy;
-
-  let b0 = b00 * (1.0 - fx) + b10 * fx;
-  let b1 = b01 * (1.0 - fx) + b11 * fx;
-  let bp = b0 * (1.0 - fy) + b1 * fy;
-
-  let result = if a > 0.0 {
-    [
-      (rp / a).clamp(0.0, 255.0).round() as u8,
-      (gp / a).clamp(0.0, 255.0).round() as u8,
-      (bp / a).clamp(0.0, 255.0).round() as u8,
-      (a * 255.0).clamp(0.0, 255.0).round() as u8,
-    ]
-  } else {
-    [0, 0, 0, 0]
-  };
-
-  result
-}
-
-/// Sample a pixel using bicubic interpolation with premultiplied alpha.
-///
-/// This function samples the image at a fractional (x, y) coordinate by performing
-/// a weighted average of the sixteen nearest pixels using a cubic kernel. This
-/// provides higher quality than bilinear interpolation.
-///
-/// - `p_image`: The image to sample from.
-/// - `p_x`: The x-coordinate (can be fractional).
-/// - `p_y`: The y-coordinate (can be fractional).
-///
-/// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-fn sample_bicubic(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (width, height) = p_image.dimensions::<u32>();
-  let pixels = p_image.rgba();
-
-  // Cubic interpolation kernel
-  let cubic_kernel = |t: f32| -> f32 {
-    let t = t.abs();
-    if t < 1.0 {
-      1.0 - 2.0 * t * t + t * t * t
-    } else if t < 2.0 {
-      -4.0 + 8.0 * t - 5.0 * t * t + t * t * t
-    } else {
-      0.0
-    }
-  };
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Helper to safely get pixel
-  let get_pixel = |px: i32, py: i32| -> [u8; 4] {
-    if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
-      [0, 0, 0, 0]
-    } else {
-      let idx = (py as u32 * width + px as u32) as usize;
-      if idx * 4 + 3 < pixels.len() {
-        [
-          pixels[idx * 4],
-          pixels[idx * 4 + 1],
-          pixels[idx * 4 + 2],
-          pixels[idx * 4 + 3],
-        ]
-      } else {
-        [0, 0, 0, 0]
-      }
-    }
-  };
-
-  // Sample 4x4 neighborhood using premultiplied alpha
-  let mut acc_r = 0.0;
-  let mut acc_g = 0.0;
-  let mut acc_b = 0.0;
-  let mut acc_a = 0.0;
-  let mut weight_sum = 0.0;
-
-  for dy in -1..=2 {
-    for dx in -1..=2 {
-      let px = x0 + dx;
-      let py = y0 + dy;
-      let p = get_pixel(px, py);
-      let a = p[3] as f32 / 255.0;
-      let w = cubic_kernel(dx as f32 - fx) * cubic_kernel(dy as f32 - fy);
-      acc_r += (p[0] as f32 * a) * w;
-      acc_g += (p[1] as f32 * a) * w;
-      acc_b += (p[2] as f32 * a) * w;
-      acc_a += a * w;
-      weight_sum += w;
-    }
-  }
-
-  if weight_sum > 0.0 {
-    acc_r /= weight_sum;
-    acc_g /= weight_sum;
-    acc_b /= weight_sum;
-    acc_a /= weight_sum;
-  }
-
-  let result = if acc_a > 0.0 {
-    [
-      (acc_r / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_g / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_b / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_a * 255.0).clamp(0.0, 255.0).round() as u8,
-    ]
-  } else {
-    [0, 0, 0, 0]
-  };
-
-  result
-}
-
-/// Sample a pixel using Lanczos resampling with premultiplied alpha.
-///
-/// This function samples the image at a fractional (x, y) coordinate using the
-/// Lanczos kernel (a=3). This provides the highest quality interpolation but
-/// is more computationally expensive.
-///
-/// - `p_image`: The image to sample from.
-/// - `p_x`: The x-coordinate (can be fractional).
-/// - `p_y`: The y-coordinate (can be fractional).
-///
-/// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-fn sample_lanczos(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (width, height) = p_image.dimensions::<u32>();
-  let pixels = p_image.rgba();
-
-  const LANCZOS_SIZE: i32 = 3;
-
-  // Lanczos kernel with a=3
-  let lanczos_kernel = |t: f32| -> f32 {
-    let t = t.abs();
-    if t == 0.0 {
-      1.0
-    } else if t < LANCZOS_SIZE as f32 {
-      let pi_t = std::f32::consts::PI * t;
-      let pi_t_a = std::f32::consts::PI * t / LANCZOS_SIZE as f32;
-      (pi_t.sin() / pi_t) * (pi_t_a.sin() / pi_t_a)
-    } else {
-      0.0
-    }
-  };
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Helper to safely get pixel
-  let get_pixel = |px: i32, py: i32| -> [u8; 4] {
-    if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
-      [0, 0, 0, 0]
-    } else {
-      let idx = (py as u32 * width + px as u32) as usize;
-      if idx * 4 + 3 < pixels.len() {
-        [
-          pixels[idx * 4],
-          pixels[idx * 4 + 1],
-          pixels[idx * 4 + 2],
-          pixels[idx * 4 + 3],
-        ]
-      } else {
-        [0, 0, 0, 0]
-      }
-    }
-  };
-
-  // Sample neighborhood with Lanczos kernel using premultiplied alpha
-  let mut acc_r = 0.0;
-  let mut acc_g = 0.0;
-  let mut acc_b = 0.0;
-  let mut acc_a = 0.0;
-  let mut weight_sum = 0.0;
-
-  for dy in -LANCZOS_SIZE + 1..=LANCZOS_SIZE {
-    for dx in -LANCZOS_SIZE + 1..=LANCZOS_SIZE {
-      let px = x0 + dx;
-      let py = y0 + dy;
-      let p = get_pixel(px, py);
-      let a = p[3] as f32 / 255.0;
-      let w = lanczos_kernel(dx as f32 - fx) * lanczos_kernel(dy as f32 - fy);
-      acc_r += (p[0] as f32 * a) * w;
-      acc_g += (p[1] as f32 * a) * w;
-      acc_b += (p[2] as f32 * a) * w;
-      acc_a += a * w;
-      weight_sum += w;
-    }
-  }
-
-  if weight_sum > 0.0 {
-    acc_r /= weight_sum;
-    acc_g /= weight_sum;
-    acc_b /= weight_sum;
-    acc_a /= weight_sum;
-  }
-
-  let result = if acc_a > 0.0 {
-    [
-      (acc_r / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_g / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_b / acc_a).clamp(0.0, 255.0).round() as u8,
-      (acc_a * 255.0).clamp(0.0, 255.0).round() as u8,
-    ]
-  } else {
-    [0, 0, 0, 0]
-  };
-
-  result
-}
-
-/// Sample a pixel using nearest neighbor (no interpolation).
-///
-/// This function returns the pixel at the nearest integer coordinate.
-/// It's the fastest but lowest quality sampling method.
-///
-/// - `p_image`: The image to sample from.
-/// - `p_x`: The x-coordinate (will be rounded).
-/// - `p_y`: The y-coordinate (will be rounded).
-///
-/// Returns `[r, g, b, a]` as u8 values, or `[0, 0, 0, 0]` if out of bounds.
-fn sample_nearest(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (width, height) = p_image.dimensions::<u32>();
-  let pixels = p_image.rgba();
-
-  let x = p_x.round() as i32;
-  let y = p_y.round() as i32;
-
-  if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-    [0, 0, 0, 0]
-  } else {
-    let idx = (y as u32 * width + x as u32) as usize;
-    if idx * 4 + 3 < pixels.len() {
-      [
-        pixels[idx * 4],
-        pixels[idx * 4 + 1],
-        pixels[idx * 4 + 2],
-        pixels[idx * 4 + 3],
-      ]
-    } else {
-      [0, 0, 0, 0]
-    }
-  }
-}
-
-/// Resample an entire image using bilinear interpolation.
-///
-/// This is a batch operation that samples all pixels for a new image size using
-/// bilinear interpolation. More efficient than calling `sample_bilinear` per pixel.
-///
-/// - `p_source`: The source image to sample from.
-/// - `p_width`: The target width.
-/// - `p_height`: The target height.
-///
-/// Returns a vector of RGBA pixel data for the new image.
-fn resample_bilinear(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  resample_interpolated(p_source, p_width, p_height, sample_bilinear)
-}
-
-fn resample_interpolated<F>(p_source: &Image, p_width: u32, p_height: u32, p_sample: F) -> Vec<u8>
+/// ```ignore
+/// // Scale by 2 around the origin.
+/// let pixels = remap(&image, width * 2, height * 2, Interpolation::Bicubic, EdgeMode::Clamp, |x, y| Some((x / 2.0, y / 2.0)));
+/// ```
+pub fn remap<F>(
+  p_source: &Image, p_width: u32, p_height: u32, p_interpolation: Interpolation, p_edge: EdgeMode, p_map: F,
+) -> Vec<u8>
 where
-  F: Fn(&Image, f32, f32) -> [u8; 4] + Sync,
+  F: Fn(f64, f64) -> Option<(f64, f64)> + Sync,
 {
-  let (old_width, old_height) = p_source.dimensions::<u32>();
   let buffer_size = (p_width as u64)
     .checked_mul(p_height as u64)
     .and_then(|size| size.checked_mul(4))
     .expect("Image dimensions too large") as usize;
-  let mut new_pixels = vec![0; buffer_size];
-
-  new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-    let x = i as u32 % p_width;
-    let y = i as u32 / p_width;
-
-    let src_x = (x as f32 + 0.5) * (old_width as f32 / p_width as f32) - 0.5;
-    let src_y = (y as f32 + 0.5) * (old_height as f32 / p_height as f32) - 0.5;
-
-    let pixel = p_sample(p_source, src_x, src_y);
-    chunk.copy_from_slice(&pixel);
-  });
-
-  new_pixels
-}
-
-/// Resample an entire image using bicubic interpolation.
-///
-/// This is a batch operation that samples all pixels for a new image size using
-/// bicubic interpolation. More efficient than calling `sample_bicubic` per pixel.
-///
-/// - `p_source`: The source image to sample from.
-/// - `p_width`: The target width.
-/// - `p_height`: The target height.
-///
-/// Returns a vector of RGBA pixel data for the new image.
-fn resample_bicubic(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  resample_interpolated(p_source, p_width, p_height, sample_bicubic)
-}
-
-/// Resample an entire image using Lanczos resampling.
-///
-/// This is a batch operation that samples all pixels for a new image size using
-/// Lanczos resampling. More efficient than calling `sample_lanczos` per pixel.
-///
-/// - `p_source`: The source image to sample from.
-/// - `p_width`: The target width.
-/// - `p_height`: The target height.
-///
-/// Returns a vector of RGBA pixel data for the new image.
-fn resample_lanczos(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  resample_interpolated(p_source, p_width, p_height, sample_lanczos)
-}
-
-/// Resample an entire image using nearest neighbor (no interpolation).
-///
-/// This is a batch operation that samples all pixels for a new image size using
-/// nearest neighbor. This is the fastest but lowest quality resampling method.
-///
-/// - `p_source`: The source image to sample from.
-/// - `p_width`: The target width.
-/// - `p_height`: The target height.
-///
-/// Returns a vector of RGBA pixel data for the new image.
-fn resample_nearest(p_source: &Image, p_width: u32, p_height: u32) -> Vec<u8> {
-  let (old_width, old_height) = p_source.dimensions::<u32>();
-  let old_pixels = p_source.rgba();
-  let buffer_size = (p_width as u64)
-    .checked_mul(p_height as u64)
-    .and_then(|size| size.checked_mul(4))
-    .expect("Image dimensions too large") as usize;
-  let mut new_pixels = vec![0; buffer_size];
-
-  new_pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-    let x = i as u32 % p_width;
-    let y = i as u32 / p_width;
-
-    let old_x = ((x as f32 / p_width as f32) * (old_width as f32 - 1.0)).max(0.0).min(old_width as f32 - 1.0) as u32;
-    let old_y = ((y as f32 / p_height as f32) * (old_height as f32 - 1.0)).max(0.0).min(old_height as f32 - 1.0) as u32;
-    let old_index = (old_y * old_width + old_x) as usize;
-
-    if old_index * 4 + 3 < old_pixels.len() {
-      chunk.copy_from_slice(&old_pixels[old_index * 4..old_index * 4 + 4]);
+  let mut pixels = vec![0u8; buffer_size];
+  if p_width == 0 {
+    return pixels;
+  }
+  let source = Source::new(p_source, p_edge);
+  pixels.par_chunks_exact_mut(p_width as usize * 4).enumerate().for_each(|(y, row)| {
+    let center_y = y as f64 + 0.5;
+    for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
+      if let Some((source_x, source_y)) = p_map(x as f64 + 0.5, center_y) {
+        let (sx, sy) = ((source_x - 0.5) as f32, (source_y - 0.5) as f32);
+        let sampled = match p_interpolation {
+          Interpolation::Nearest => source.fetch(sx.round() as i32, sy.round() as i32),
+          Interpolation::Bilinear => sample_kernel(&source, sx, sy, 0, 1, tent),
+          Interpolation::Bicubic => sample_kernel(&source, sx, sy, -1, 2, cubic),
+          Interpolation::Lanczos => sample_kernel(&source, sx, sy, -2, 3, lanczos3),
+          Interpolation::EdgeDirectedNedi => sample_nedi(&source, sx, sy),
+          Interpolation::EdgeDirectedEdi => sample_edi(&source, sx, sy),
+        };
+        pixel.copy_from_slice(&sampled);
+      }
     }
   });
-
-  new_pixels
+  pixels
 }
 
-/// Resample an image with the selected interpolation algorithm.
+/// Resample an image to a new size with the selected interpolation algorithm.
 pub fn resample(p_source: &Image, p_width: u32, p_height: u32, p_interpolation: Interpolation) -> Vec<u8> {
-  match p_interpolation {
-    Interpolation::Nearest => resample_nearest(p_source, p_width, p_height),
-    Interpolation::Bilinear => resample_bilinear(p_source, p_width, p_height),
-    Interpolation::Bicubic => resample_bicubic(p_source, p_width, p_height),
-    Interpolation::Lanczos => resample_lanczos(p_source, p_width, p_height),
+  let (old_width, old_height) = p_source.dimensions::<u32>();
+  let scale_x = old_width as f64 / p_width as f64;
+  let scale_y = old_height as f64 / p_height as f64;
+  remap(p_source, p_width, p_height, p_interpolation, EdgeMode::Transparent, |x, y| Some((x * scale_x, y * scale_y)))
+}
+
+/// The pixels of an image with the edge handling used to read past its borders.
+struct Source<'a> {
+  pixels: &'a [u8],
+  width: u32,
+  height: u32,
+  edge: EdgeMode,
+}
+
+impl<'a> Source<'a> {
+  fn new(p_image: &'a Image, p_edge: EdgeMode) -> Self {
+    let (width, height) = p_image.dimensions::<u32>();
+    Source {
+      pixels: p_image.rgba(),
+      width,
+      height,
+      edge: p_edge,
+    }
+  }
+
+  /// The pixel at `(p_x, p_y)`, with positions past the edges read as the edge mode says.
+  #[inline]
+  fn fetch(&self, p_x: i32, p_y: i32) -> [u8; 4] {
+    if self.width == 0 || self.height == 0 {
+      return [0, 0, 0, 0];
+    }
+    let (x, y) = match self.edge {
+      EdgeMode::Transparent => {
+        if p_x < 0 || p_y < 0 || p_x >= self.width as i32 || p_y >= self.height as i32 {
+          return [0, 0, 0, 0];
+        }
+        (p_x as usize, p_y as usize)
+      }
+      EdgeMode::Clamp => (p_x.clamp(0, self.width as i32 - 1) as usize, p_y.clamp(0, self.height as i32 - 1) as usize),
+    };
+    let index = (y * self.width as usize + x) * 4;
+    match self.pixels.get(index..index + 4) {
+      Some(pixel) => [pixel[0], pixel[1], pixel[2], pixel[3]],
+      None => [0, 0, 0, 0],
+    }
+  }
+
+  /// The pixel with its color premultiplied by alpha, as `[r*a, g*a, b*a, a]` with `a` in 0-1.
+  #[inline]
+  fn premultiplied(&self, p_x: i32, p_y: i32) -> [f32; 4] {
+    let pixel = self.fetch(p_x, p_y);
+    let a = pixel[3] as f32 / 255.0;
+    [pixel[0] as f32 * a, pixel[1] as f32 * a, pixel[2] as f32 * a, a]
+  }
+
+  /// The bilinear blend of premultiplied pixels at a fractional position.
+  fn premultiplied_bilinear(&self, p_x: f32, p_y: f32) -> [f32; 4] {
+    let (x0, y0) = (p_x.floor() as i32, p_y.floor() as i32);
+    let (fx, fy) = (p_x - x0 as f32, p_y - y0 as f32);
+    let top = lerp4(self.premultiplied(x0, y0), self.premultiplied(x0 + 1, y0), fx);
+    let bottom = lerp4(self.premultiplied(x0, y0 + 1), self.premultiplied(x0 + 1, y0 + 1), fx);
+    lerp4(top, bottom, fy)
+  }
+
+  /// The luma of a premultiplied pixel, un-premultiplied.
+  #[inline]
+  fn luma(&self, p_x: i32, p_y: i32) -> f32 {
+    let [r, g, b, a] = self.premultiplied(p_x, p_y);
+    if a > 0.0 { luma(r, g, b, LumaStandard::Rec601) / a } else { 0.0 }
+  }
+}
+
+/// Linear interpolation between two premultiplied pixels.
+#[inline]
+fn lerp4(p_a: [f32; 4], p_b: [f32; 4], p_t: f32) -> [f32; 4] {
+  [0, 1, 2, 3].map(|i| p_a[i] + (p_b[i] - p_a[i]) * p_t)
+}
+
+/// Converts an accumulated premultiplied pixel back to straight 8-bit RGBA.
+#[inline]
+fn unpremultiply(p_acc: [f32; 4]) -> [u8; 4] {
+  let [r, g, b, a] = p_acc;
+  if a <= 0.0 {
+    return [0, 0, 0, 0];
+  }
+  let channel = |value: f32| (value / a).clamp(0.0, 255.0).round() as u8;
+  [
+    channel(r),
+    channel(g),
+    channel(b),
+    (a * 255.0).clamp(0.0, 255.0).round() as u8,
+  ]
+}
+
+/// Weighted sum of premultiplied pixels in the window `x0 + p_from..=x0 + p_to` (same for y) around the sample,
+/// with each pixel weighted by `p_kernel(dx) * p_kernel(dy)` and the result normalized by the total weight.
+#[inline]
+fn sample_kernel(p_source: &Source, p_x: f32, p_y: f32, p_from: i32, p_to: i32, p_kernel: fn(f32) -> f32) -> [u8; 4] {
+  let (x0, y0) = (p_x.floor() as i32, p_y.floor() as i32);
+  let (fx, fy) = (p_x - x0 as f32, p_y - y0 as f32);
+  let mut acc = [0.0f32; 4];
+  let mut weight_sum = 0.0;
+  for dy in p_from..=p_to {
+    let wy = p_kernel(dy as f32 - fy);
+    for dx in p_from..=p_to {
+      let w = p_kernel(dx as f32 - fx) * wy;
+      let pixel = p_source.premultiplied(x0 + dx, y0 + dy);
+      for i in 0..4 {
+        acc[i] += pixel[i] * w;
+      }
+      weight_sum += w;
+    }
+  }
+  if weight_sum > 0.0 {
+    acc = acc.map(|value| value / weight_sum);
+  }
+  unpremultiply(acc)
+}
+
+/// Linear (tent) kernel: the bilinear weights.
+fn tent(p_t: f32) -> f32 {
+  (1.0 - p_t.abs()).max(0.0)
+}
+
+/// Cubic convolution kernel.
+fn cubic(p_t: f32) -> f32 {
+  let t = p_t.abs();
+  if t < 1.0 {
+    1.0 - 2.0 * t * t + t * t * t
+  } else if t < 2.0 {
+    -4.0 + 8.0 * t - 5.0 * t * t + t * t * t
+  } else {
+    0.0
+  }
+}
+
+/// Lanczos kernel with a = 3.
+fn lanczos3(p_t: f32) -> f32 {
+  const A: f32 = 3.0;
+  let t = p_t.abs();
+  if t == 0.0 {
+    1.0
+  } else if t < A {
+    let pi_t = std::f32::consts::PI * t;
+    (pi_t.sin() / pi_t) * ((pi_t / A).sin() / (pi_t / A))
+  } else {
+    0.0
+  }
+}
+
+/// New Edge-Directed Interpolation. Estimates the edge direction from the covariance of luma gradients in a 5x5
+/// window and interpolates along it; falls back to bicubic where the edge is weak.
+fn sample_nedi(p_source: &Source, p_x: f32, p_y: f32) -> [u8; 4] {
+  const WINDOW: i32 = 2;
+  const EDGE_THRESHOLD: f32 = 5.0;
+
+  let (x0, y0) = (p_x.floor() as i32, p_y.floor() as i32);
+  let (fx, fy) = (p_x - x0 as f32, p_y - y0 as f32);
+
+  let mut gradients = [(0.0f32, 0.0f32); ((2 * WINDOW + 1) * (2 * WINDOW + 1)) as usize];
+  let mut index = 0;
+  for dy in -WINDOW..=WINDOW {
+    for dx in -WINDOW..=WINDOW {
+      let (px, py) = (x0 + dx, y0 + dy);
+      let gx = (p_source.luma(px + 1, py) - p_source.luma(px - 1, py)) * 0.5;
+      let gy = (p_source.luma(px, py + 1) - p_source.luma(px, py - 1)) * 0.5;
+      gradients[index] = (gx, gy);
+      index += 1;
+    }
+  }
+
+  let count = gradients.len() as f32;
+  let (mean_x, mean_y) = gradients.iter().fold((0.0, 0.0), |(sx, sy), (gx, gy)| (sx + gx, sy + gy));
+  let (mean_x, mean_y) = (mean_x / count, mean_y / count);
+  let (mut a, mut b, mut c) = (0.0f32, 0.0f32, 0.0f32);
+  for (gx, gy) in gradients {
+    let (dx, dy) = (gx - mean_x, gy - mean_y);
+    a += dx * dx;
+    b += dx * dy;
+    c += dy * dy;
+  }
+  let (a, b, c) = (a / count, b / count, c / count);
+
+  if (a + c).sqrt() <= EDGE_THRESHOLD {
+    return sample_kernel(p_source, p_x, p_y, -1, 2, cubic);
+  }
+
+  // The eigenvector of the larger eigenvalue of the covariance is the main edge direction.
+  let trace = a + c;
+  let discriminant = (trace * trace * 0.25 - (a * c - b * b)).max(0.0).sqrt();
+  let (lambda1, lambda2) = (trace * 0.5 + discriminant, trace * 0.5 - discriminant);
+  let lambda = if lambda1.abs() > lambda2.abs() { lambda1 } else { lambda2 };
+  let (edge_x, edge_y) = if b.abs() > 1e-6 {
+    let (vx, vy) = (lambda - c, b);
+    let norm = (vx * vx + vy * vy).sqrt();
+    if norm > 0.0 { (vx / norm, vy / norm) } else { (1.0, 0.0) }
+  } else if (a - c).abs() > 1e-6 {
+    if a > c { (1.0, 0.0) } else { (0.0, 1.0) }
+  } else {
+    (1.0, 0.0)
+  };
+
+  let behind = p_source.premultiplied_bilinear(x0 as f32 - edge_x, y0 as f32 - edge_y);
+  let ahead = p_source.premultiplied_bilinear(x0 as f32 + edge_x, y0 as f32 + edge_y);
+  let t = ((fx * edge_x + fy * edge_y) + 1.0) * 0.5;
+  unpremultiply(lerp4(behind, ahead, t))
+}
+
+/// Edge-Directed Interpolation. Finds the Sobel edge direction, snaps it to one of four directions, and
+/// interpolates between the two pixels along it; falls back to bilinear where the edge is weak.
+fn sample_edi(p_source: &Source, p_x: f32, p_y: f32) -> [u8; 4] {
+  const EDGE_THRESHOLD: f32 = 10.0;
+
+  let (x0, y0) = (p_x.floor() as i32, p_y.floor() as i32);
+  let (fx, fy) = (p_x - x0 as f32, p_y - y0 as f32);
+  let l = |dx: i32, dy: i32| p_source.luma(x0 + dx, y0 + dy);
+
+  let gx = -l(-1, -1) - 2.0 * l(-1, 0) - l(-1, 1) + l(1, -1) + 2.0 * l(1, 0) + l(1, 1);
+  let gy = -l(-1, -1) - 2.0 * l(0, -1) - l(1, -1) + l(-1, 1) + 2.0 * l(0, 1) + l(1, 1);
+
+  if (gx * gx + gy * gy).sqrt() <= EDGE_THRESHOLD {
+    return sample_kernel(p_source, p_x, p_y, 0, 1, tent);
+  }
+
+  let angle = gy.atan2(gx);
+  let angle = if angle < 0.0 { angle + std::f32::consts::PI } else { angle };
+  let direction = ((angle / std::f32::consts::PI * 4.0).round() as i32) % 4;
+  let ((ax, ay), (bx, by), t) = match direction {
+    0 => ((0, 0), (1, 0), fx),
+    1 => ((0, 0), (1, 1), (fx + fy) * 0.5),
+    2 => ((0, 0), (0, 1), fy),
+    _ => ((1, 0), (0, 1), (fx + fy) * 0.5),
+  };
+  let start = p_source.premultiplied(x0 + ax, y0 + ay);
+  let end = p_source.premultiplied(x0 + bx, y0 + by);
+  unpremultiply(lerp4(start, end, t))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use primitives::Channels;
+
+  fn checker(p_size: u32) -> Image {
+    let pixels = (0..p_size * p_size)
+      .flat_map(|i| if (i % p_size + i / p_size) % 2 == 0 { [255, 255, 255, 255] } else { [0, 0, 0, 255] })
+      .collect::<Vec<u8>>();
+    Image::new_from_pixels(p_size, p_size, pixels, Channels::RGBA)
+  }
+
+  #[test]
+  fn every_interpolation_returns_the_pixel_at_its_center() {
+    let image = checker(8);
+    for interpolation in [
+      Interpolation::Nearest,
+      Interpolation::Bilinear,
+      Interpolation::EdgeDirectedEdi,
+    ] {
+      for (x, y) in [(2, 2), (3, 2), (4, 5)] {
+        let expected = image.get_pixel(x, y).unwrap();
+        let sampled = sample(&image, x as f32, y as f32, interpolation, EdgeMode::Clamp);
+        assert_eq!(sampled, [expected.0, expected.1, expected.2, expected.3], "{interpolation:?} at {x},{y}");
+      }
+    }
+  }
+
+  #[test]
+  fn resampling_to_the_same_size_keeps_the_image() {
+    let image = checker(6);
+    for interpolation in [Interpolation::Nearest, Interpolation::Bilinear] {
+      assert_eq!(resample(&image, 6, 6, interpolation), image.rgba(), "{interpolation:?}");
+    }
+  }
+
+  #[test]
+  fn remap_leaves_unmapped_pixels_transparent() {
+    let image = Image::new_from_color(4, 4, primitives::Color::red());
+    let pixels = remap(&image, 4, 1, Interpolation::Nearest, EdgeMode::Clamp, |x, y| (x < 2.0).then_some((x, y)));
+    assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
+    assert_eq!(&pixels[8..12], &[0, 0, 0, 0]);
   }
 }

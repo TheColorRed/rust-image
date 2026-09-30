@@ -4,7 +4,7 @@
 //! This module provides utilities for splitting images into tiles, processing
 //! them individually, and blending the results back together.
 
-use abra_core::Image;
+use abra_core::{Channels, Image};
 
 use rayon::prelude::*;
 
@@ -205,7 +205,7 @@ impl TileAccumulator {
     }
 
     let mut image = Image::new(self.width, self.height);
-    image.set_new_pixels(&rgba_data, self.width, self.height);
+    image.set_pixels(self.width, self.height, rgba_data, Channels::RGBA);
     image
   }
 }

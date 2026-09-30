@@ -89,7 +89,7 @@ fn apply_motion_blur(p_img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
     dst_px[3] = (acc_a * inv).clamp(0.0, 255.0) as u8;
   });
 
-  p_img.set_rgba_owned(out);
+  p_img.set_rgba(out);
 }
 
 /// Applies a motion blur to an image.
@@ -97,18 +97,25 @@ fn apply_motion_blur(p_img: &mut Image, p_angle_degrees: f32, p_distance: u32) {
 /// - `p_angle_degrees`: The angle of the motion blur in degrees.
 /// - `p_distance`: The distance of the motion blur in pixels.
 /// - `p_apply_options`: Additional options for applying the blur.
+#[derive(Clone)]
 pub struct MotionBlur {
   angle_degrees: f32,
   distance: u32,
   options: Options,
 }
 
+options::cpu_processor!(MotionBlur);
+
 impl Apply for MotionBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

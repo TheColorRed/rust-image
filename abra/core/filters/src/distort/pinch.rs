@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::Channels;
 use abra_core::transform::*;
 use rayon::prelude::*;
 
@@ -33,7 +34,7 @@ fn apply_pinch(p_image: &mut Image, p_amount: f32) {
       let src_y = (center_y + dy * scale).clamp(0.0, (height - 1) as f32);
 
       // Use bilinear interpolation for smoother results
-      let pixel = sample(&original_image, src_x, src_y, Interpolation::Bilinear);
+      let pixel = sample(&original_image, src_x, src_y, Interpolation::Bilinear, EdgeMode::Transparent);
       chunk.copy_from_slice(&pixel);
     } else {
       // Copy original pixel for areas outside the effect radius
@@ -42,22 +43,29 @@ fn apply_pinch(p_image: &mut Image, p_amount: f32) {
     }
   });
 
-  p_image.set_new_pixels(&new_pixels, width, height);
+  p_image.set_pixels(width, height, new_pixels, Channels::RGBA);
 }
 
 /// Applies a pinch distortion effect to the image.
 /// - `p_image`: The image to apply the effect to.
 /// - `p_amount`: The amount of pinch effect to apply. Positive values pinch inward, negative values bulge outward.
 /// - `p_apply_options`: Options to specify for the filter.
+#[derive(Clone)]
 pub struct Pinch {
   amount: f32,
   options: Options,
 }
+options::cpu_processor!(Pinch);
+
 impl Apply for Pinch {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

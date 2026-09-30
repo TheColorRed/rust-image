@@ -165,6 +165,7 @@ impl FocusGeometry {
 ///
 /// A mask or area set with [`Apply::with_options`] is combined with the focus area, so the blur only lands where
 /// both allow it.
+#[derive(Clone)]
 pub struct FocusBlur {
   /// Focus geometry configuration.
   geometry: FocusGeometry,
@@ -215,12 +216,18 @@ impl FocusBlur {
   }
 }
 
+options::cpu_processor!(FocusBlur);
+
 impl Apply for FocusBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let (width, height) = image.dimensions::<u32>();
@@ -321,10 +328,7 @@ mod tests {
     let original = striped_image(32, 32);
     let mut image = original.clone();
     let mask = Mask::from_image(Image::new_from_color(32, 32, Color::from_rgba(0, 0, 0, 255)));
-    focus_blur()
-      .with_blur(gaussian_blur(3))
-      .with_options(ApplyOptions::new().with_mask(mask))
-      .apply(&mut image);
+    focus_blur().with_blur(gaussian_blur(3)).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut image);
 
     assert_eq!(image.rgba(), original.rgba());
   }

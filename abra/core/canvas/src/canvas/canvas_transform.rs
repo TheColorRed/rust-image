@@ -1,9 +1,6 @@
 //! Transform operations for canvases.
 
-use abra_core::Crop;
-use abra_core::IntoNumber;
-use abra_core::Rotate;
-use abra_core::{FlipAxis, Resize, ResizeTarget, Size, TransformAlgorithm};
+use abra_core::{FlipAxis, IntoNumber, ResizeTarget, Size, Transform, TransformAlgorithm};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -124,26 +121,6 @@ fn crop_all_layers(p_canvas: &mut CanvasInner, p_crop_x: u32, p_crop_y: u32, p_w
 }
 
 impl<'a> CanvasTransform<'a> {
-  /// Resize the canvas and its layer tree according to the supplied target.
-  pub fn resize(&mut self, p_target: CanvasResizeTarget, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    let algorithm = p_algorithm.into();
-    match p_target {
-      CanvasResizeTarget::Exact(size) => {
-        self.resize_exact(size.width.max(0.0) as u32, size.height.max(0.0) as u32, algorithm)
-      }
-      CanvasResizeTarget::StretchWidth(width) => self.stretch_width(width, algorithm),
-      CanvasResizeTarget::StretchHeight(height) => self.stretch_height(height, algorithm),
-      CanvasResizeTarget::Scale(scale) => {
-        let canvas = self.canvas.lock().unwrap();
-        let (width, height) = (canvas.width.get(), canvas.height.get());
-        drop(canvas);
-        self.resize_exact((width as f32 * scale).max(1.0) as u32, (height as f32 * scale).max(1.0) as u32, algorithm);
-      }
-      CanvasResizeTarget::RelativeWidth(amount) => self.resize_relative_width(amount, algorithm),
-      CanvasResizeTarget::RelativeHeight(amount) => self.resize_relative_height(amount, algorithm),
-    }
-  }
-
   fn resize_exact(&mut self, p_width: u32, p_height: u32, p_algorithm: Option<TransformAlgorithm>) {
     {
       let mut canvas = self.canvas.lock().unwrap();
@@ -221,8 +198,35 @@ impl<'a> CanvasTransform<'a> {
   }
 }
 
-impl<'a> Crop for CanvasTransform<'a> {
-  fn crop(&mut self, p_crop_x: u32, p_crop_y: u32, p_width: u32, p_height: u32) {
+impl<'a> Transform for CanvasTransform<'a> {
+  type Target = CanvasResizeTarget;
+
+  /// Resize the canvas and its layer tree according to the supplied target.
+  fn resize(&mut self, p_target: CanvasResizeTarget, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
+    let algorithm = p_algorithm.into();
+    match p_target {
+      CanvasResizeTarget::Exact(size) => {
+        self.resize_exact(size.width.max(0.0) as u32, size.height.max(0.0) as u32, algorithm)
+      }
+      CanvasResizeTarget::StretchWidth(width) => self.stretch_width(width, algorithm),
+      CanvasResizeTarget::StretchHeight(height) => self.stretch_height(height, algorithm),
+      CanvasResizeTarget::Scale(scale) => {
+        let canvas = self.canvas.lock().unwrap();
+        let (width, height) = (canvas.width.get(), canvas.height.get());
+        drop(canvas);
+        self.resize_exact((width as f32 * scale).max(1.0) as u32, (height as f32 * scale).max(1.0) as u32, algorithm);
+      }
+      CanvasResizeTarget::RelativeWidth(amount) => self.resize_relative_width(amount, algorithm),
+      CanvasResizeTarget::RelativeHeight(amount) => self.resize_relative_height(amount, algorithm),
+    }
+  }
+
+  fn crop(
+    &mut self, p_crop_x: impl IntoNumber, p_crop_y: impl IntoNumber, p_width: impl IntoNumber,
+    p_height: impl IntoNumber,
+  ) {
+    let (p_crop_x, p_crop_y, p_width, p_height) =
+      (p_crop_x.into::<u32>(), p_crop_y.into::<u32>(), p_width.into::<u32>(), p_height.into::<u32>());
     {
       let mut canvas = self.canvas.lock().unwrap();
       crop_all_layers(&mut canvas, p_crop_x, p_crop_y, p_width, p_height);
@@ -231,9 +235,7 @@ impl<'a> Crop for CanvasTransform<'a> {
       canvas.mark_dirty();
     }
   }
-}
 
-impl<'a> Rotate for CanvasTransform<'a> {
   fn rotate(&mut self, p_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
     {
       let canvas = self.canvas.lock().unwrap();

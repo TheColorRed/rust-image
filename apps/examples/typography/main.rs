@@ -10,7 +10,7 @@ const TEXT_SIZE: u32 = 50;
 const OUT_FILE: &str = "out/typography.png";
 
 pub fn main() {
-  let fill = Gradient::complementary(Color::ruby()); //.with_direction(90);
+  let fill = Gradient::harmony(Color::ruby(), Harmony::Complementary); //.with_direction(90);
 
   // Background canvas: the photo on its own layer.
   let background = Canvas::new_from_path("Background", BACKGROUND_IMAGE, None);
@@ -32,7 +32,7 @@ pub fn main() {
     .with_letter_spacing(40)
     .with_weight(800);
   text_canvas.add_layer_from_image("Title", text, None);
-  text_canvas.set_blend_mode(blend::multiply);
+  text_canvas.set_blend_mode(BlendMode::Multiply);
 
   // Root canvas: a canvas's own layers always render above its child canvases, so both the
   // background and text must be added as child canvases (in bottom-to-top order) to stack correctly.

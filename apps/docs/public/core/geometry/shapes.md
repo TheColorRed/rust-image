@@ -6,83 +6,56 @@ outline: deep
 
 # Shapes
 
-Abra includes reusable closed shapes that return `Area` values. They are defined in a normalized coordinate space and can be filled, stroked, fitted, or transformed like any other area.
-
-## Heart
-
-`Heart::new` creates a heart using cubic Bezier curves:
+`Area::shape` creates a predefined closed shape. Shapes are drawn inside a `100 x 100` box at the origin and can be filled, stroked, fitted, or transformed like any other area.
 
 ```rust
-use abra::abra_core::Heart;
+use abra::abra_core::{Area, Shape};
 
-let heart = Heart::new();
+let heart = Area::shape(Shape::Heart);
+let star = Area::shape(Shape::Star);
+let hexagon = Area::shape(Shape::Polygon(6));
 ```
 
-The default heart occupies approximately `0..=100` horizontally and `0..=120` vertically.
-
-## Polygon
-
-`Polygon::new` creates a regular polygon with the requested number of sides:
-
-```rust
-use abra::abra_core::Polygon;
-
-let triangle = Polygon::new(3);
-let hexagon = Polygon::new(6);
-let decagon = Polygon::new(10);
-```
-
-A polygon must have at least three sides. Values below three panic because they cannot define a closed polygon.
-
-The polygon is generated around a radius of `50` and occupies approximately a `100 x 100` coordinate space.
-
-## Star
-
-`Star::new` creates a five-pointed star from line segments:
-
-```rust
-use abra::abra_core::Star;
-
-let star = Star::new();
-```
-
-The default star occupies a `100 x 100` coordinate space.
+| `Shape`       | Outline                                                                                   |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `Heart`       | A heart made of cubic Bezier curves. It is 120 tall, so it overflows the box at the bottom. |
+| `Star`        | A five-pointed star.                                                                      |
+| `Polygon(n)`  | A regular polygon with `n` sides and a corner at the top. Fewer than three sides produces an empty area. |
 
 ## Fill a shape
 
-All built-in shapes return `Area`, so they work directly with `fill`:
+Shapes are `Area` values, so they work directly with `fill`:
 
 ```rust
-use abra::abra_core::{Color, Heart, Star};
+use abra::abra_core::{Area, Color, Shape};
 use abra::drawing::prelude::fill;
 
-let heart_image = fill(Heart::new(), Color::red()).to_image();
-let star_image = fill(Star::new(), Color::yellow()).to_image();
+let heart_image = fill(Area::shape(Shape::Heart), Color::red()).to_image();
+let star_image = fill(Area::shape(Shape::Star), Color::yellow()).to_image();
 ```
 
 ## Resize a shape
 
-Use `fit`, `fit_square`, `fit_with_aspect`, `stretch`, or `cover` to place a normalized shape into an output size:
+`fit` scales a shape from its own bounds into a target size. The `AspectRatio` decides how differing proportions are handled:
 
 ```rust
-use abra::abra_core::{AspectRatio, Heart, Size};
+use abra::abra_core::{Area, AspectRatio, Shape, Size};
 
-let heart = Heart::new();
-let contained = heart.fit(Size::new(400, 300));
-let square = heart.fit_square(256.0);
-let stretched = heart.stretch((400, 300));
-let covered = heart.cover((400, 300));
-let aligned = heart.fit_with_aspect(Size::new(400, 300), AspectRatio::meet());
+let heart = Area::shape(Shape::Heart);
+let contained = heart.fit(Size::new(400, 300), AspectRatio::meet());
+let square = heart.fit((256, 256), AspectRatio::meet());
+let stretched = heart.fit((400, 300), AspectRatio::none());
+let covered = heart.fit((400, 300), AspectRatio::slice());
 ```
 
-Use `fit` or `fit_with_aspect` to preserve proportions. Use `stretch` when filling the exact viewport is more important than preserving the original ratio.
+Use `AspectRatio::meet()` to preserve proportions. Use `AspectRatio::none()` when filling the exact size matters more than the original ratio. See [Rectangles and viewports](./rect) for alignment.
 
 ## Stroke a shape
 
 ```rust
-use abra::abra_core::{LineJoin, Star};
+use abra::abra_core::{Area, LineJoin, Shape};
 
-let outline = Star::new().stroke(6.0).with_join(LineJoin::Round).to_area();
+let outline = Area::shape(Shape::Star).stroke(6.0).with_join(LineJoin::Round).to_area();
 ```
 
 See [Strokes](./strokes) for join behavior.

@@ -1,6 +1,6 @@
 use abra_core::{
   Image, ImageRef,
-  image::gpu_op::{GpuOp, clear_gpu_op, set_gpu_op},
+  image::gpu::{CpuProcessor, GpuEffect, GpuOp, GpuPass, GpuProcessor},
 };
 
 use options::{Apply, Options};
@@ -16,7 +16,7 @@ fn apply_contrast(p_image: &mut Image, p_amount: impl Into<f64>) {
   let factor = (259.0 * (p_amount + 255.0)) / (255.0 * (259.0 - p_amount));
   let colors = p_image.colors();
   let slice = colors.as_slice_mut().expect("Image colors must be contiguous");
-  slice.par_chunks_exact_mut(4096).for_each(|chunk| {
+  slice.par_chunks_mut(4096).for_each(|chunk| {
     for i in (0..chunk.len()).step_by(4) {
       let pixel = &mut chunk[i..i + 4];
       pixel[0] = (factor * (pixel[0] as f32 - 128.0) + 128.0).clamp(0.0, 255.0) as u8;
@@ -26,22 +26,47 @@ fn apply_contrast(p_image: &mut Image, p_amount: impl Into<f64>) {
   });
 }
 
+#[derive(Clone)]
 pub struct Contrast {
   amount: f64,
   options: Options,
 }
 
+impl Contrast {
+  fn gpu_op(&self) -> GpuOp {
+    GpuOp::new(include_str!("./contrast.wgsl"), (self.amount as f32).to_le_bytes())
+  }
+}
+
+impl CpuProcessor for Contrast {
+  fn process(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
+  }
+
+  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
+impl GpuProcessor for Contrast {
+  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
+    self.gpu_op().passes(p_width, p_height)
+  }
+}
+
 impl Apply for Contrast {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
-    set_gpu_op(include_str!("./contrast.wgsl"), GpuOp::Contrast(self.amount as f32));
-    apply_adjustment!(apply_contrast, image, self.options.as_ref(), 1, self.amount);
-    clear_gpu_op();
+    apply_adjustment!(gpu = self; apply_contrast, image, self.options.as_ref(), 1, self.amount);
   }
 }
 

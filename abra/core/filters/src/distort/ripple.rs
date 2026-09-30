@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::Channels;
 use abra_core::transform::*;
 use rayon::prelude::*;
 
@@ -138,25 +139,32 @@ fn apply_ripple(p_image: &mut Image, p_amount: f32, p_size: RippleSize, p_shape:
     };
 
     // Use bicubic interpolation for smoother, higher quality results
-    let pixel = sample(&original_image, src_x, src_y, Interpolation::Bicubic);
+    let pixel = sample(&original_image, src_x, src_y, Interpolation::Bicubic, EdgeMode::Transparent);
     chunk.copy_from_slice(&pixel);
   });
 
-  p_image.set_new_pixels(&new_pixels, width, height);
+  p_image.set_pixels(width, height, new_pixels, Channels::RGBA);
 }
 
 /// A ripple distortion. Create one with [`ripple`].
+#[derive(Clone)]
 pub struct Ripple {
   amount: f32,
   size: RippleSize,
   shape: RippleShape,
   options: Options,
 }
+options::cpu_processor!(Ripple);
+
 impl Apply for Ripple {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

@@ -1,17 +1,15 @@
-use std::{
-  fmt::Display,
-  ops::{Add, Sub},
-};
+use std::fmt::Display;
+use std::ops::{Deref, DerefMut};
 
-use crate::{AspectRatio, FromF32, Image, Path, Point, PointF, Segment, Size, ViewBox};
-// use crate::{
-//   Image,
-// };
+use crate::{AspectRatio, Image, Path, PointF, Shape, Size};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 /// An area represents a closed shape made of lines and curves.
 /// Areas are used for drawing, filling, effects, and more.
 /// An area is a closed shape. Use a Path for open shapes.
+///
+/// An area derefs to its outline [`Path`], so every path method (`move_to`, `line_to`, `flatten`, `bounds`, ...)
+/// can be called on it directly.
 pub struct Area {
   /// The underlying path outline that defines this closed area.
   pub path: Path,
@@ -36,21 +34,20 @@ impl Area {
   pub fn rect(p_origin: impl Into<PointF>, p_size: impl Into<Size>) -> Area {
     let origin: PointF = p_origin.into();
     let size: Size = p_size.into();
-    let mut path = Path::new();
-    path
+    let mut area = Area::new();
+    area
       .move_to(origin)
       .line_to((origin.x + size.width, origin.y))
       .line_to((origin.x + size.width, origin.y + size.height))
       .line_to((origin.x, origin.y + size.height));
-    Area { path, feather: 0 }
+    area
   }
   /// Creates a circular area.
   /// - `p_center`: The center point of the circle.
   /// - `p_radius`: The radius of the circle.
   pub fn circle(p_center: impl Into<PointF>, p_radius: impl Into<f64>) -> Area {
-    let center = p_center.into();
     let radius = p_radius.into() as f32;
-    Area::ellipse(center, (radius * 2.0, radius * 2.0))
+    Area::ellipse(p_center, (radius * 2.0, radius * 2.0))
   }
   /// Creates an elliptical area.
   /// - `p_center`: The center point of the ellipse.
@@ -66,27 +63,35 @@ impl Area {
     let ox = rx * kappa;
     let oy = ry * kappa;
 
-    let mut path = Path::new();
-    path
+    let mut area = Area::new();
+    area
       .move_to((center.x, center.y - ry))
       .cubic_to((center.x + ox, center.y - ry), (center.x + rx, center.y - oy), (center.x + rx, center.y))
       .cubic_to((center.x + rx, center.y + oy), (center.x + ox, center.y + ry), (center.x, center.y + ry))
       .cubic_to((center.x - ox, center.y + ry), (center.x - rx, center.y + oy), (center.x - rx, center.y))
       .cubic_to((center.x - rx, center.y - oy), (center.x - ox, center.y - ry), (center.x, center.y - ry));
-
-    Area { path, feather: 0 }
+    area
+  }
+  /// Creates a predefined shape inside a 100x100 box at the origin. Use [`Area::fit`] to size it.
+  /// - `p_shape`: The shape to create.
+  ///
+  /// ```ignore
+  /// let star = Area::shape(Shape::Star).fit((200, 200), AspectRatio::meet());
+  /// ```
+  pub fn shape(p_shape: Shape) -> Area {
+    p_shape.to_area()
   }
   /// Creates an area from a list of points.
   /// - `p_points`: The list of points defining the area.
   pub fn from_points(p_points: &[[f32; 2]]) -> Area {
-    let mut path = Path::new();
+    let mut area = Area::new();
     if let Some(first) = p_points.first() {
-      path.move_to((first[0], first[1]));
+      area.move_to((first[0], first[1]));
       for point in &p_points[1..] {
-        path.line_to((point[0], point[1]));
+        area.line_to((point[0], point[1]));
       }
     }
-    Area { path, feather: 0 }
+    area
   }
   /// Sets the feather amount for the area edges.
   /// - `p_feather`: The feather radius in pixels.
@@ -99,147 +104,52 @@ impl Area {
     self.feather
   }
   /// Determines if a point is inside the area using the ray-casting algorithm.
+  ///
+  /// This flattens the outline on every call. To test many points, flatten once with
+  /// [`Path::flatten`] and use [`polygon_contains`].
   /// - `p_point`: The point to test.
   pub fn contains(&self, p_point: impl Into<PointF>) -> bool {
-    let point = p_point.into();
-    let pts = self.path.flatten(0.5);
-    let mut inside = false;
-    let n = pts.len();
-    let mut j = n - 1;
-
-    for i in 0..n {
-      let pi = pts[i];
-      let pj = pts[j];
-      if (pi.y > point.y) != (pj.y > point.y)
-        && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y + 0.00001) + pi.x)
-      {
-        inside = !inside;
-      }
-      j = i;
+    polygon_contains(&self.path.flatten(0.5), p_point.into())
+  }
+  /// Scales this area from its own bounds into a box of `p_size`. See [`Path::fit`].
+  /// - `p_size`: The target size.
+  /// - `p_aspect_ratio`: How to scale when the shapes differ.
+  pub fn fit(&self, p_size: impl Into<Size>, p_aspect_ratio: AspectRatio) -> Area {
+    Area {
+      path: self.path.fit(p_size, p_aspect_ratio),
+      feather: self.feather,
     }
+  }
+}
 
-    inside
+/// Whether `p_point` is inside the closed polygon through `p_points`, using the even-odd ray-casting rule.
+/// An empty polygon contains nothing.
+pub fn polygon_contains(p_points: &[PointF], p_point: PointF) -> bool {
+  let Some(mut previous) = p_points.last().copied() else {
+    return false;
+  };
+  let mut inside = false;
+  for &current in p_points {
+    if (current.y > p_point.y) != (previous.y > p_point.y)
+      && p_point.x < (previous.x - current.x) * (p_point.y - current.y) / (previous.y - current.y) + current.x
+    {
+      inside = !inside;
+    }
+    previous = current;
   }
-  /// Sets the starting point of the area's (move to).
-  /// - `p_start`: The starting point.
-  pub fn move_to(&mut self, p_start: impl Into<PointF>) -> &mut Self {
-    self.path.move_to(p_start);
-    self
+  inside
+}
+
+impl Deref for Area {
+  type Target = Path;
+  fn deref(&self) -> &Path {
+    &self.path
   }
-  /// Adds a line to the next point in the area's.
-  /// - `p_to`: The next point to add to the area.
-  pub fn line_to(&mut self, p_to: impl Into<PointF>) -> &mut Self {
-    self.path.line_to(p_to);
-    self
-  }
-  /// Adds a quadratic Bezier segment to the area's.
-  /// - `p_ctrl`: The control point for the curve.
-  /// - `p_to`: The end point of the curve.
-  pub fn quad_to(&mut self, p_ctrl: impl Into<PointF>, p_to: impl Into<PointF>) -> &mut Self {
-    self.path.quad_to(p_ctrl, p_to);
-    self
-  }
-  /// Adds a cubic Bezier segment to the area's.
-  /// - `p_ctrl1`: The first control point for the curve.
-  /// - `p_ctrl2`: The second control point for the curve.
-  /// - `p_to`: The end point of the curve.
-  pub fn cubic_to(
-    &mut self, p_ctrl1: impl Into<PointF>, p_ctrl2: impl Into<PointF>, p_to: impl Into<PointF>,
-  ) -> &mut Self {
-    self.path.cubic_to(p_ctrl1, p_ctrl2, p_to);
-    self
-  }
-  /// Gets the starting point of the area's path.
-  pub fn start(&self) -> PointF {
-    self.path.start()
-  }
-  /// Gets the ending point of the area's path.
-  pub fn end(&self) -> PointF {
-    self.path.end()
-  }
-  /// Gets the segments that make up the area's path.
-  pub fn segments(&self) -> &[Segment] {
-    self.path.segments()
-  }
-  /// Gets all points in the area's path as a flat list of PointF.
-  pub fn points(&self) -> Vec<PointF> {
-    self.path.points()
-  }
-  /// Gets the point at parameter t (0 to 1) along the area's path.
-  pub fn point_at(&self, p_t: f32) -> PointF {
-    self.path.point_at(p_t)
-  }
-  /// Gets the point at parameter t within a specific segment of the area's path.
-  /// - `p_segment_idx`: The index of the segment.
-  /// - `p_t`: The parameter t (0 to 1) within that segment.
-  pub fn point_at_segment(&self, p_segment_idx: usize, p_t: f32) -> PointF {
-    self.path.point_at_segment(p_segment_idx, p_t)
-  }
-  /// Flattens the area's path into a polyline (list of points) with the given tolerance.
-  /// - `p_tolerance`: The maximum allowed deviation from the original path.
-  pub fn flatten(&self, p_tolerance: f32) -> Vec<PointF> {
-    self.path.flatten(p_tolerance)
-  }
-  /// Gets an approximate length of the area's outline path.
-  pub fn length(&self) -> f32 {
-    self.path.length()
-  }
-  /// Gets the bounding box of the area's outline as (`min_x`, `min_y`, `max_x`, `max_y`).
-  pub fn bounds<S: FromF32>(&self) -> (S, S, S, S) {
-    let (min_x, min_y, max_x, max_y) = self.path.bounds();
-    (S::from_f32(min_x), S::from_f32(min_y), S::from_f32(max_x), S::from_f32(max_y))
-  }
-  /// Converts the area's path to a list of integer points (for raster operations).
-  /// - `p_tolerance`: The tolerance for flattening curves to points.
-  pub fn to_points(&self, p_tolerance: f32) -> Vec<Point> {
-    self.path.to_points(p_tolerance)
-  }
-  /// Finds the closest position on the area's path to the given coordinates and returns t.
-  /// - `p_x`: The x-coordinate of the point.
-  /// - `p_y`: The y-coordinate of the point.
-  pub fn closest_time(&self, p_x: f32, p_y: f32) -> f32 {
-    self.path.closest_time(p_x, p_y)
-  }
-  /// Transforms this area's path to fit within a viewport using a ViewBox.
-  /// - `p_viewbox`: The viewbox defining the area to fit.
-  /// - `p_viewport_width`: The width of the viewport.
-  /// - `p_viewport_height`: The height of the viewport.
-  /// - `p_aspect_ratio`: The aspect ratio policy to use.
-  pub fn transform_to_viewport(
-    &self, p_viewbox: &ViewBox, p_viewport_width: f32, p_viewport_height: f32, p_aspect_ratio: AspectRatio,
-  ) -> Path {
-    self.path.transform_to_viewport(p_viewbox, p_viewport_width, p_viewport_height, p_aspect_ratio)
-  }
-  /// Convenience method to create a ViewBox from the area's bounds.
-  pub fn to_viewbox(&self) -> ViewBox {
-    self.path.to_viewbox()
-  }
-  /// Fits this area's path into the given viewport size preserving aspect ratio (Meet).
-  /// - `p_size`: The target size to fit into.
-  pub fn fit(&self, p_size: impl Into<Size>) -> Area {
-    self.path.fit(p_size.into()).into()
-  }
-  /// Fits this area's path into a square viewport of the given size (Meet).
-  /// - `p_size`: The size of the square viewport.
-  pub fn fit_square(&self, p_size: impl Into<f32>) -> Area {
-    self.path.fit_square(p_size.into()).into()
-  }
-  /// Fits this area's path into the given viewport using a specific aspect ratio policy.
-  /// - `p_size`: The target size to fit into.
-  /// - `p_aspect_ratio`: The aspect ratio policy to use.
-  pub fn fit_with_aspect(&self, p_size: impl Into<Size>, p_aspect_ratio: AspectRatio) -> Area {
-    let size = p_size.into();
-    self.path.fit_with_aspect(size.width, size.height, p_aspect_ratio).into()
-  }
-  /// Stretches this area's path non-uniformly to fill the viewport (no aspect ratio preservation).
-  /// - `p_size`: The target size to stretch into.
-  pub fn stretch(&self, p_size: impl Into<Size>) -> Area {
-    self.path.stretch(p_size.into()).into()
-  }
-  /// Scales this area's path uniformly to cover the viewport (may crop) using Slice.
-  /// - `p_size`: The target size to cover.
-  pub fn cover(&self, p_size: impl Into<Size>) -> Area {
-    self.path.cover(p_size.into()).into()
+}
+
+impl DerefMut for Area {
+  fn deref_mut(&mut self) -> &mut Path {
+    &mut self.path
   }
 }
 
@@ -250,18 +160,9 @@ impl Display for Area {
   }
 }
 
-impl Default for Area {
-  fn default() -> Self {
-    Area {
-      path: Path::default(),
-      feather: 0,
-    }
-  }
-}
-
-impl Into<Path> for Area {
-  fn into(self) -> Path {
-    self.path
+impl From<Area> for Path {
+  fn from(p_area: Area) -> Self {
+    p_area.path
   }
 }
 
@@ -280,55 +181,24 @@ impl From<&Area> for Area {
   }
 }
 
-// impl From<Image> for Area {
-//   fn from(image: Image) -> Self {
-//     let (width, height) = image.dimensions::<u32>();
-//     Area::rect((0.0, 0.0), (width as f32, height as f32))
-//   }
-// }
+#[cfg(test)]
+mod tests {
+  use super::*;
 
-impl Sub<Area> for Area {
-  type Output = Area;
-
-  fn sub(self, _rhs: Area) -> Self::Output {
-    Area {
-      path: self.path.clone(),
-      feather: self.feather,
-    }
+  #[test]
+  fn contains_tests_inside_and_outside() {
+    let area = Area::rect((0, 0), (10, 10));
+    assert!(area.contains((5, 5)));
+    assert!(!area.contains((15, 5)));
+    assert!(!Area::new().contains((0, 0)));
+    assert!(!polygon_contains(&[], PointF::zero()));
   }
-}
 
-impl<T: Into<f32>> Sub<T> for Area {
-  type Output = Area;
-
-  fn sub(self, p_rhs: T) -> Self::Output {
-    let p_rhs = p_rhs.into();
-    println!("Subtraction {}", p_rhs);
-    Area {
-      path: self.path.clone(),
-      feather: self.feather,
-    }
-  }
-}
-
-impl Add<Area> for Area {
-  type Output = Area;
-
-  fn add(self, _rhs: Area) -> Self::Output {
-    Area {
-      path: self.path.clone(),
-      feather: self.feather,
-    }
-  }
-}
-
-impl Add<f32> for Area {
-  type Output = Area;
-
-  fn add(self, _rhs: f32) -> Self::Output {
-    Area {
-      path: self.path.clone(),
-      feather: self.feather,
-    }
+  #[test]
+  fn path_methods_are_available_on_areas() {
+    let area = Area::rect((2, 3), (10, 20));
+    assert_eq!(area.bounds().edges::<i32>(), (2, 3, 12, 23));
+    let fitted = area.fit((5, 5), AspectRatio::meet());
+    assert_eq!(fitted.bounds().size(), Size::new(2.5, 5));
   }
 }

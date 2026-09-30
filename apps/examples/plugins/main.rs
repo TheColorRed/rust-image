@@ -17,8 +17,9 @@ pub fn main() {
 
   let load_start = std::time::Instant::now();
 
-  let loader = ImageLoader::FromGlob(vec!["assets/**/*{boob,tit,chest}*.{jpg}"]).load(LoadMode::Parallel { threads: 4 });
-  let img = loader.at(1u8);
+  let loader =
+    ImageLoader::FromGlob(vec!["assets/**/*{boob,tit,chest}*.{jpg}"]).load(LoadMode::Parallel { threads: 4 });
+  let img = loader.at(1);
   let path = Path::new().line_to((1024 * 3, 1024 * 2)).clone();
   let mut colors = img.unwrap().as_ref().clone();
   let colors = colors.colors().as_slice().unwrap();
@@ -31,9 +32,9 @@ pub fn main() {
         .with_background(Fill::Gradient(
           Gradient::evenly(vec![
             // Color::magenta(),
-            Color::average(colors),
-            Color::median(colors),
-            Color::mode(colors),
+            Color::from_pixels(colors, Channels::RGBA, ColorStat::Average),
+            Color::from_pixels(colors, Channels::RGBA, ColorStat::Median),
+            Color::from_pixels(colors, Channels::RGBA, ColorStat::Mode),
           ])
           .with_direction(path)
           .into(),

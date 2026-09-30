@@ -1,10 +1,7 @@
-//! Color management utilities.
-// Re-export color primitives from `primitives` crate and provide gradient/fill in core
+//! Color management utilities: fills and gradients, plus the color types re-exported from `primitives`.
 mod fill;
 mod gradient;
-mod histogram;
 
 pub use fill::Fill;
 pub use gradient::{ColorStop, Gradient};
-pub use histogram::{Histogram, HistogramChannel};
 pub use primitives::color::*;

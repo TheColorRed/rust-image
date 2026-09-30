@@ -1,5 +1,6 @@
 use crate::common::*;
 use abra::abra_core::Color as AbraColor;
+use abra::abra_core::{Channels, ColorStat};
 
 macro_rules! color_factories {
   ($($name:ident),*) => {
@@ -106,11 +107,11 @@ impl Color {
     self.inner.contrast_ratio(other.inner) as f64
   }
   #[napi]
-  /// Returns the average of this color and another color.
-  /// @param other The other color to average with.
+  /// Returns the average color of an RGBA pixel buffer.
+  /// @param colors The RGBA pixel bytes to average.
   /// @return The resulting average color.
   pub fn average(colors: &[u8]) -> Color {
-    AbraColor::average(colors).into()
+    AbraColor::from_pixels(colors, Channels::RGBA, ColorStat::Average).into()
   }
   #[napi]
   /// Converts the color to a hexadecimal string (e.g., "#RRGGBB" or "#RRGGBBAA").

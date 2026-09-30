@@ -1,10 +1,9 @@
-use abra_core::blend::{RGBA, blend as blend_images, normal};
-use abra_core::{Color, Fill, Image, Point};
+use abra_core::blend::blend as blend_images;
+use abra_core::{BlendMode, Color, Fill, Image, PointF};
 
 use filters::Apply;
 use filters::blur::gaussian_blur;
 use rayon::prelude::*;
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,7 +13,7 @@ pub struct DropShadow<'a> {
   /// The color of the shadow in RGBA format.
   pub fill: Fill<'a>,
   /// The blend mode used to combine the shadow with the layer.
-  pub blend_mode: fn(RGBA, RGBA) -> RGBA,
+  pub blend_mode: BlendMode,
   /// The opacity of the shadow (0.0 to 1.0).
   pub opacity: f32,
   /// The angle of the shadow in degrees.
@@ -36,8 +35,8 @@ impl<'a> DropShadow<'a> {
   /// - color: black with 60% opacity (0, 0, 0, 153)
   pub fn new() -> Self {
     DropShadow {
-      fill: Fill::Solid(Cow::Owned(Color::black())),
-      blend_mode: normal,
+      fill: Fill::Solid(Color::black()),
+      blend_mode: BlendMode::Normal,
       opacity: 0.35,
       angle: 45.0,
       distance: 5.0,
@@ -83,7 +82,7 @@ impl<'a> DropShadow<'a> {
   }
 
   /// Sets the blend mode used to combine the shadow with the layer.
-  pub fn with_blend_mode(mut self, p_blend_mode: fn(RGBA, RGBA) -> RGBA) -> Self {
+  pub fn with_blend_mode(mut self, p_blend_mode: BlendMode) -> Self {
     self.blend_mode = p_blend_mode;
     self
   }
@@ -160,11 +159,11 @@ pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &Dro
   // Create an expanded image to contain shadow offset
   let mut composite = Image::new(canvas_width, canvas_height);
   let empty_pixels = vec![0u8; (canvas_width * canvas_height * 4) as usize];
-  composite.set_rgba_owned(empty_pixels);
+  composite.set_rgba(empty_pixels);
 
   // Composite shadow at offset position with the configured blend mode and opacity
   blend_images(&shadow_image)
-    .with_offset(Point::new(shadow_x, shadow_y))
+    .with_offset(PointF::new(shadow_x, shadow_y))
     .with_mode(p_options.blend_mode)
     .apply(&mut composite);
 
@@ -179,7 +178,7 @@ pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &Dro
   }
 
   // Composite original at padding position
-  blend_images(&original_image).with_offset(Point::new(padding_left, padding_top)).apply(&mut composite);
+  blend_images(&original_image).with_offset(PointF::new(padding_left, padding_top)).apply(&mut composite);
 
   // DebugEffects::DropShadow(options.clone(), duration.elapsed()).log();
 
@@ -196,7 +195,7 @@ fn colorize_image<'a>(p_image: &mut Image, p_fill: impl Into<Fill<'a>>, p_opacit
     .par_chunks(4)
     .flat_map_iter(|pixel| {
       let color = match &p_fill {
-        Fill::Solid(c) => c.as_ref().clone(),
+        Fill::Solid(c) => *c,
         _ => Color::black(),
       };
       // Preserve the alpha channel from the original, apply opacity and color's alpha
@@ -207,7 +206,7 @@ fn colorize_image<'a>(p_image: &mut Image, p_fill: impl Into<Fill<'a>>, p_opacit
     })
     .collect();
 
-  p_image.set_rgba_owned(colorized);
+  p_image.set_rgba(colorized);
 }
 
 /// Applies spread to the shadow by dilating or eroding the alpha channel.
@@ -253,7 +252,7 @@ fn apply_spread(p_image: &mut Image, p_spread: impl Into<f32>) {
         }
       }
     }
-    p_image.set_rgba_owned(result);
+    p_image.set_rgba(result);
   } else if p_spread < 0.5 {
     // Erode: contract opaque regions
     let mut result = pixels.clone();
@@ -283,6 +282,6 @@ fn apply_spread(p_image: &mut Image, p_spread: impl Into<f32>) {
         }
       }
     }
-    p_image.set_rgba_owned(result);
+    p_image.set_rgba(result);
   }
 }

@@ -1,6 +1,6 @@
 //! Utilities for applying layer size options to layers.
 
-use abra_core::{Resize, ResizeTarget, Size};
+use abra_core::{ResizeTarget, Size, Transform};
 
 use super::layer_inner::LayerInner;
 use super::options_new_layer::LayerSize;

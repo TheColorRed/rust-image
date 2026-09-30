@@ -1,7 +1,9 @@
 //! The Canvas public API struct.
 
+use abra_core::BlendMode;
 use abra_core::IntoNumber;
-use abra_core::image::image_ext::CoreImageFsExt;
+use abra_core::Transform;
+use abra_core::image::image_ext::ImageExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -537,15 +539,13 @@ impl<'a> Canvas<'a> {
   }
 
   /// Sets the blend mode used when compositing this canvas into a parent.
-  pub fn set_blend_mode(
-    &self, p_blend_mode: fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA,
-  ) {
+  pub fn set_blend_mode(&self, p_blend_mode: BlendMode) {
     let mut canvas = self.inner.lock().unwrap();
     canvas.set_blend_mode(p_blend_mode);
   }
 
   /// Gets the blend mode used when compositing this canvas into a parent.
-  pub fn blend_mode(&self) -> fn(abra_core::blend::RGBA, abra_core::blend::RGBA) -> abra_core::blend::RGBA {
+  pub fn blend_mode(&self) -> BlendMode {
     let canvas = self.inner.lock().unwrap();
     canvas.blend_mode()
   }

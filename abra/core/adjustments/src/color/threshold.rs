@@ -26,17 +26,24 @@ fn apply_threshold(p_image: &mut Image, p_threshold: u8) {
   });
 }
 
+#[derive(Clone)]
 pub struct Threshold {
   threshold: u8,
   options: Options,
 }
 
+options::cpu_processor!(Threshold);
+
 impl Apply for Threshold {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_threshold, image, self.options.as_ref(), 0, self.threshold);

@@ -11,91 +11,20 @@ pub enum FontLoadMode {
   Parallel { threads: usize },
 }
 
-/// A collection of fonts loaded from a [`FontLoader`].
+/// A collection of fonts loaded from a [`FontLoader`]. Its methods come from [`LoadedCollection`].
 pub struct LoadedFonts {
   fonts: Vec<Arc<crate::Font>>,
-}
-
-impl LoadedFonts {
-  /// Adds a font to the loaded collection.
-  pub fn add(&mut self, p_font: impl IntoFontArc) -> &mut Self {
-    self.fonts.push(p_font.into_font_arc());
-    self
-  }
-
-  /// Removes and returns the first loaded font.
-  pub fn shift(&mut self) -> Option<Arc<crate::Font>> {
-    if self.fonts.is_empty() { None } else { Some(self.fonts.remove(0)) }
-  }
-
-  /// Removes and returns the last loaded font.
-  pub fn pop(&mut self) -> Option<Arc<crate::Font>> {
-    self.fonts.pop()
-  }
-
-  /// Removes a loaded font at `p_index` when it exists.
-  pub fn drop(&mut self, p_index: usize) -> &mut Self {
-    if p_index < self.fonts.len() {
-      self.fonts.remove(p_index);
-    }
-    self
-  }
-
-  /// Gets a loaded font at `p_index`.
-  pub fn at(&self, p_index: impl Into<usize>) -> Option<Arc<crate::Font>> {
-    self.fonts.get(p_index.into()).cloned()
-  }
-
-  /// Returns all loaded fonts.
-  pub fn all(&self) -> Vec<Arc<crate::Font>> {
-    self.fonts.clone()
-  }
-
-  /// Returns the first loaded font.
-  pub fn first(&self) -> Option<Arc<crate::Font>> {
-    self.fonts.first().cloned()
-  }
-
-  /// Returns the last loaded font.
-  pub fn last(&self) -> Option<Arc<crate::Font>> {
-    self.fonts.last().cloned()
-  }
 }
 
 impl LoadedCollection for LoadedFonts {
   type Item = Arc<crate::Font>;
 
-  fn add(&mut self, p_item: Self::Item) -> &mut Self {
-    self.fonts.push(p_item);
-    self
+  fn items(&self) -> &[Arc<crate::Font>] {
+    &self.fonts
   }
 
-  fn shift(&mut self) -> Option<Self::Item> {
-    self.shift()
-  }
-
-  fn pop(&mut self) -> Option<Self::Item> {
-    self.pop()
-  }
-
-  fn drop(&mut self, p_index: usize) -> &mut Self {
-    self.drop(p_index)
-  }
-
-  fn at(&self, p_index: usize) -> Option<Self::Item> {
-    self.fonts.get(p_index).cloned()
-  }
-
-  fn all(&self) -> Vec<Self::Item> {
-    self.all()
-  }
-
-  fn first(&self) -> Option<Self::Item> {
-    self.first()
-  }
-
-  fn last(&self) -> Option<Self::Item> {
-    self.last()
+  fn items_mut(&mut self) -> &mut Vec<Arc<crate::Font>> {
+    &mut self.fonts
   }
 }
 
@@ -139,12 +68,14 @@ impl FontLoader {
     #[cfg(target_os = "macos")]
     {
       fonts.extend(abra_core::get_paths_from_glob("/System/Library/Fonts/**/*.ttf"));
-      // fonts.push("/System/Library/Fonts/Supplemental/Arial Bold.ttf".to_string());
     }
     #[cfg(target_os = "linux")]
     {
       fonts.extend(abra_core::get_paths_from_glob("/usr/share/fonts/**/*.ttf"));
-      // fonts.push("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf".to_string());
+    }
+    #[cfg(target_os = "android")]
+    {
+      fonts.extend(abra_core::get_paths_from_glob("/system/fonts/**/*.ttf"));
     }
     FontLoader { fonts }
   }

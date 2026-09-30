@@ -1,16 +1,28 @@
-use abra_core::{ImageRef, image::Image};
+use abra_core::{
+  ImageRef, IntoNumber,
+  image::{
+    Image,
+    apply_area::apply_in_area,
+    gpu::{CpuProcessor, GpuEffect, GpuOp, GpuPass, GpuProcessor},
+  },
+};
 use options::{Apply, Options};
 
 use rayon::prelude::*;
 
-use crate::apply_adjustment;
 
-fn apply_exposure(p_image: &mut Image, p_exposure: f32, p_offset: f32, p_gamma_correction: f32) {
+fn apply_exposure(
+  p_image: &mut Image, p_exposure: impl IntoNumber, p_offset: impl IntoNumber, p_gamma_correction: impl IntoNumber,
+) {
   let (width, height) = p_image.dimensions::<i32>();
   let src = p_image.rgba();
   let mut out = vec![0u8; (width * height * 4) as usize];
 
   // guard gamma correction
+  let p_exposure = p_exposure.into::<f32>();
+  let p_offset = p_offset.into::<f32>();
+  let p_gamma_correction = p_gamma_correction.into::<f32>();
+
   let gamma_correction = if p_gamma_correction <= 0.0 { 0.01 } else { p_gamma_correction };
   // fixed gamma for sRGB conversion
   let gamma = 2.2;
@@ -53,9 +65,10 @@ fn apply_exposure(p_image: &mut Image, p_exposure: f32, p_offset: f32, p_gamma_c
     dst_px[3] = a;
   });
 
-  p_image.set_rgba(&out);
+  p_image.set_rgba(out);
 }
 
+#[derive(Clone)]
 /// An exposure adjustment. Create one with [`exposure`].
 pub struct Exposure {
   exposure: f64,
@@ -65,21 +78,56 @@ pub struct Exposure {
 }
 
 impl Apply for Exposure {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
-    let exposure = (self.exposure as f32).clamp(-20.0, 20.0);
-    let offset = (self.offset as f32).clamp(-0.5, 0.5);
-    let gamma_correction = (self.gamma_correction as f32).clamp(0.01, 9.99);
-    apply_adjustment!(apply_exposure, image, self.options.as_ref(), 1, exposure, offset, gamma_correction);
+    let ctx = options::get_ctx(self.options.as_ref());
+    let (exposure, offset, gamma_correction) = self.params();
+    apply_in_area(image, ctx, 1, Some(self as &dyn GpuEffect), |p_area_image| {
+      apply_exposure(p_area_image, exposure, offset, gamma_correction)
+    });
+  }
+}
+
+impl CpuProcessor for Exposure {
+  fn process(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
+  }
+
+  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
+impl GpuProcessor for Exposure {
+  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
+    let (exposure, offset, gamma_correction) = self.params();
+    let mut uniforms = Vec::with_capacity(16);
+    for value in [exposure, offset, gamma_correction, 0.0] {
+      uniforms.extend_from_slice(&value.to_le_bytes());
+    }
+    GpuOp::new(include_str!("exposure.wgsl"), uniforms).passes(p_width, p_height)
   }
 }
 
 impl Exposure {
+  /// The exposure, offset and gamma correction clamped to their valid ranges.
+  fn params(&self) -> (f32, f32, f32) {
+    (
+      (self.exposure as f32).clamp(-20.0, 20.0),
+      (self.offset as f32).clamp(-0.5, 0.5),
+      (self.gamma_correction as f32).clamp(0.01, 9.99),
+    )
+  }
+
   /// Sets the offset added to each color channel, from `-0.5` to `0.5`. Lightens or darkens the shadows while
   /// barely touching the highlights. Defaults to `0.0`.
   pub fn with_offset(mut self, p_offset: impl Into<f64>) -> Self {

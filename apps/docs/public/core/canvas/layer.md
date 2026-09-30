@@ -42,12 +42,12 @@ let visible = photo.is_visible();
 let opacity = photo.opacity();
 ```
 
-Set a blend function with `set_blend_mode`. Abra provides blend functions in its blend module:
+Set a blend mode with `set_blend_mode`. See [Blend modes](./blend-modes) for every mode:
 
 ```rust
-use abra::abra_core::blend;
+use abra::abra_core::BlendMode;
 
-photo.set_blend_mode(blend::multiply);
+photo.set_blend_mode(BlendMode::Multiply);
 let current_blend = photo.blend_mode();
 ```
 

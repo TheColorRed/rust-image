@@ -1,4 +1,4 @@
-use abra_core::{Histogram, HistogramChannel, Image, image::image_ext::ImageRef, lab_to_rgb, rgb_to_lab};
+use abra_core::{Channel, Histogram, Image, image::image_ext::ImageRef, lab_to_rgb, rgb_to_lab};
 use options::{Apply, Options};
 
 use rayon::prelude::*;
@@ -18,18 +18,18 @@ fn apply_auto_color(p_image: &mut Image) {
 
   // Helper to compute percentiles (low/high) per channel from histogram
   // Compute histogram using helper struct.
-  let hist = Histogram::from_image_skip_transparent(p_image);
+  let hist = Histogram::from_rgba(p_image.rgba(), true);
 
   // Use histogram helpers to compute channel clip bounds
   // Clip bounds still available via Histogram helpers, but to compute mapping we use LUTs
-  let _ = hist.clip_bounds(HistogramChannel::Red, clip_fraction);
-  let _ = hist.clip_bounds(HistogramChannel::Green, clip_fraction);
-  let _ = hist.clip_bounds(HistogramChannel::Blue, clip_fraction);
+  let _ = hist.channel(Channel::R).clip_bounds(clip_fraction);
+  let _ = hist.channel(Channel::G).clip_bounds(clip_fraction);
+  let _ = hist.channel(Channel::B).clip_bounds(clip_fraction);
 
   // Second pass: compute midtone mean a & b (Lab) using post-levels LUTs.
-  let lut_r = hist.levels_lut(HistogramChannel::Red, clip_fraction);
-  let lut_g = hist.levels_lut(HistogramChannel::Green, clip_fraction);
-  let lut_b = hist.levels_lut(HistogramChannel::Blue, clip_fraction);
+  let lut_r = hist.channel(Channel::R).levels_lut(clip_fraction);
+  let lut_g = hist.channel(Channel::G).levels_lut(clip_fraction);
+  let lut_b = hist.channel(Channel::B).levels_lut(clip_fraction);
 
   let (sum_a, sum_b_lab, midtone_count) = src
     .par_chunks(4)
@@ -106,21 +106,27 @@ fn apply_auto_color(p_image: &mut Image) {
     dst_px[2] = nb;
     dst_px[3] = a;
   });
-  p_image.set_rgba(&out);
+  p_image.set_rgba(out);
 }
 
 /// Configures an automatic color adjustment before applying it to an image.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AutoColor {
   options: Options,
 }
 
+options::cpu_processor!(AutoColor);
+
 impl Apply for AutoColor {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_auto_color, image, self.options.as_ref(), 1);

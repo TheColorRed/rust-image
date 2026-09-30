@@ -16,6 +16,16 @@ metadata:
 
 The Abra library is located in the `/abra` directory of the repository. It is broken down into several modules, each responsible for different aspects of image manipulation and processing.
 
+## Reuse First (Read Before Writing Code)
+
+**IMPORTANT:** Before creating any new function, struct, or module for a tool, filter, adjustment, effect, or other feature, **search the whole workspace** to see if that functionality already exists.
+
+- If it exists, use it.
+- If something close exists, update it to cover your use case, keeping it general-purpose and reusable (not tailored to your feature).
+- Only write new code when nothing suitable exists, and place reusable logic in a core/shared crate rather than inside the feature.
+
+See the [reuse first document](./references/reuse-first.md) for the full workflow, where to search, and how to extend existing code.
+
 ## Root Crate
 
 The root crate of the Abra library is located in the root of the workspace. It is broken down into several workspaces, some are for the library and others are for the examples (see below).
@@ -27,14 +37,16 @@ The root crate of the Abra library is located in the root of the workspace. It i
 - `/abra/core`: This directory contains the core functionality of the library and is further divided into several sub-modules:
   - `adjustments`: Contains functions for adjusting image properties such as brightness, contrast, and saturation.
   - `canvas`: A canvas is a group of layers, and this module contains functions for creating and managing canvases and their layers.
-  - `core`: Contains common types and functions used throughout the library and is used by other modules. It is commonly used as the middle-man for passing data between modules.
+  - `core`: Contains common types and functions used throughout the library and is used by other modules. It is commonly used as the middle-man for passing data between modules. Includes geometry, transforms, color utilities, blending, file IO, and area/GPU application helpers.
+  - `debug`: Contains debug console output helpers for inspecting canvases, layers, and effects.
   - `drawing`: Contains functions for drawing shapes and text onto images.
   - `filters`: Contains functions for applying various filters to images, such as blur, sharpen, and color adjustments.
   - `gpu`: Contains functions for leveraging GPU acceleration for image processing tasks.
-  - `gpu_integration`: Contains functions for integrating GPU processing with other parts of the library.
   - `mask`: Contains functions for creating and applying masks to images.
   - `options`: Contains types and functions for configuring options for various image processing tasks.
-  - `primitives`: Contains basic image processing functions and algorithms.
+  - `primitives`: Contains the lightweight base types (`Image`, `Channels`, `Color`, `Resolution`) with no heavy dependencies.
+  - `tools`: Contains interactive image tools (perspective, straighten, remover). Tools are thin wrappers that compose library functions.
+  - `typography`: Contains font loading, glyph metrics, and text rendering support.
 - `/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
 
 ## Examples

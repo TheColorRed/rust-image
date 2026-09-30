@@ -15,8 +15,8 @@ use crate::common::*;
 #[napi]
 pub fn get_pixels(project: &Project, area: &Area) -> ImageData {
   let image = project.canvas().as_image();
-  let image_data = image.get_rgba_in_area(&area.inner);
-  let (min_x, min_y, max_x, max_y) = area.inner.bounds::<f32>();
+  let image_data = image.rgba_in_area(&area.inner);
+  let (min_x, min_y, max_x, max_y) = area.inner.bounds().edges::<f32>();
   let width = (max_x - min_x) as u32;
   let height = (max_y - min_y) as u32;
 

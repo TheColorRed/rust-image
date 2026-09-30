@@ -1,4 +1,3 @@
-use abra::abra_core::{Heart, Star};
 use abra::mask::prelude::*;
 use abra::prelude::*;
 
@@ -9,8 +8,8 @@ pub fn main() {
   let mut mask = Mask::new_from_image(&image);
 
   let size = image.size();
-  let star = Star::new().fit_with_aspect(size / 2, AspectRatio::meet());
-  let heart = Heart::new().fit_with_aspect(size - 100, AspectRatio::meet());
+  let star = Area::shape(Shape::Star).fit(size / 2, AspectRatio::meet());
+  let heart = Area::shape(Shape::Heart).fit(size - 100, AspectRatio::meet());
   mask.draw_area(&star.with_feather(30), Color::black(), None);
   mask.draw_area(&heart.with_feather(30), Color::black(), (5, 200));
 

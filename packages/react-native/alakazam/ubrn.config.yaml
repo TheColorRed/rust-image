@@ -1,0 +1,15 @@
+---
+name: AlakazamMobile
+rust:
+  # The cargo workspace root, relative to this package.
+  directory: ../../..
+  manifestPath: packages/react-native/alakazam/Cargo.toml
+bindings:
+  ts: src/generated
+android:
+  apiLevel: 24
+jsi2:
+  # The @ubjs/react-native player ships only these two ABIs.
+  androidTargets:
+    - arm64-v8a
+    - x86_64

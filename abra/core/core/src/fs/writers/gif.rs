@@ -1,6 +1,4 @@
 use crate::Image;
-use crate::fs::mkdirp;
-use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
 use gif::{Encoder, Frame, Repeat};
 use std::fs::File;
@@ -8,8 +6,6 @@ use std::fs::File;
 /// Writes the image data to a GIF file
 pub fn write_gif(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let p_file = p_file.into();
-  let dir = dirname(&p_file);
-  mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
 
   let file_handle = File::create(p_file).map_err(|e| e.to_string())?;
   let (width, height) = p_image.dimensions::<u16>();
@@ -43,7 +39,6 @@ pub fn write_gif(p_file: impl Into<String>, p_image: &Image, p_options: &Option<
 
   encoder.write_frame(&frame).map_err(|e| e.to_string())?;
 
-  println!("GIF written successfully");
   Ok(())
 }
 

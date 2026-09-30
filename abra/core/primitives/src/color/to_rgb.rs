@@ -33,24 +33,6 @@ fn lab_to_linear_rgb(p_l: f32, p_a: f32, p_b: f32) -> (f32, f32, f32) {
 fn linear_to_srgb(p_c: f32) -> f32 {
   if p_c <= 0.0031308 { 12.92 * p_c } else { 1.055 * p_c.powf(1.0 / 2.4) - 0.055 }
 }
-fn hue_to_rgb(p_p: f32, p_q: f32, mut p_t: f32) -> f32 {
-  if p_t < 0.0 {
-    p_t += 1.0
-  }
-  if p_t > 1.0 {
-    p_t -= 1.0
-  }
-  if p_t < 1.0 / 6.0 {
-    return p_p + (p_q - p_p) * 6.0 * p_t;
-  }
-  if p_t < 1.0 / 2.0 {
-    return p_q;
-  }
-  if p_t < 2.0 / 3.0 {
-    return p_p + (p_q - p_p) * (2.0 / 3.0 - p_t) * 6.0;
-  }
-  p_p
-}
 /// Converts HSV color to RGB color space.
 /// - `p_h`: The hue component (0-360).
 /// - `p_s`: The saturation component (0-1).
@@ -58,22 +40,7 @@ fn hue_to_rgb(p_p: f32, p_q: f32, mut p_t: f32) -> f32 {
 /// Returns a tuple `(R, G, B)` representing the RGB color.
 pub fn hsv_to_rgb(p_h: f32, p_s: f32, p_v: f32) -> (u8, u8, u8) {
   let c = p_v * p_s;
-  let x = c * (1.0 - (((p_h / 60.0) % 2.0) - 1.0).abs());
-  let m = p_v - c;
-  let (r1, g1, b1) = if p_h < 60.0 {
-    (c, x, 0.0)
-  } else if p_h < 120.0 {
-    (x, c, 0.0)
-  } else if p_h < 180.0 {
-    (0.0, c, x)
-  } else if p_h < 240.0 {
-    (0.0, x, c)
-  } else if p_h < 300.0 {
-    (x, 0.0, c)
-  } else {
-    (c, 0.0, x)
-  };
-  (((r1 + m) * 255.0).round() as u8, ((g1 + m) * 255.0).round() as u8, ((b1 + m) * 255.0).round() as u8)
+  chroma_to_rgb(p_h, c, p_v - c)
 }
 /// Converts HSL color to RGB color space.
 /// - `p_h`: The hue component (0-360).
@@ -82,40 +49,26 @@ pub fn hsv_to_rgb(p_h: f32, p_s: f32, p_v: f32) -> (u8, u8, u8) {
 /// Returns a tuple `(R, G, B)` representing the RGB color.
 pub fn hsl_to_rgb(p_h: f32, p_s: f32, p_l: f32) -> (u8, u8, u8) {
   let c = (1.0 - (2.0 * p_l - 1.0).abs()) * p_s;
-  let x = c * (1.0 - (((p_h / 60.0) % 2.0) - 1.0).abs());
-  let m = p_l - c / 2.0;
-  let (r1, g1, b1) = if p_h < 60.0 {
-    (c, x, 0.0)
-  } else if p_h < 120.0 {
-    (x, c, 0.0)
-  } else if p_h < 180.0 {
-    (0.0, c, x)
-  } else if p_h < 240.0 {
-    (0.0, x, c)
-  } else if p_h < 300.0 {
-    (x, 0.0, c)
-  } else {
-    (c, 0.0, x)
-  };
-  (((r1 + m) * 255.0).round() as u8, ((g1 + m) * 255.0).round() as u8, ((b1 + m) * 255.0).round() as u8)
+  chroma_to_rgb(p_h, c, p_l - c / 2.0)
 }
-/// Converts HSL color where Hue is in normalized [0,1] range to RGB (u8) for callers that
-/// work with normalized H values (the old `hsl_to_rgb_f` helper from adjustments).
-pub fn hsl_to_rgb_f(p_h: f32, p_s: f32, p_l: f32) -> (u8, u8, u8) {
-  if p_s.abs() < 1e-5 {
-    let v = (p_l * 255.0).round().clamp(0.0, 255.0) as u8;
-    return (v, v, v);
-  }
-  let q = if p_l < 0.5 { p_l * (1.0 + p_s) } else { p_l + p_s - p_l * p_s };
-  let p = 2.0 * p_l - q;
-  let r = hue_to_rgb(p, q, p_h + 1.0 / 3.0);
-  let g = hue_to_rgb(p, q, p_h);
-  let b = hue_to_rgb(p, q, p_h - 1.0 / 3.0);
-  (
-    (r * 255.0).round().clamp(0.0, 255.0) as u8,
-    (g * 255.0).round().clamp(0.0, 255.0) as u8,
-    (b * 255.0).round().clamp(0.0, 255.0) as u8,
-  )
+/// Shared final step of the HSV and HSL conversions: places chroma `p_c` on the hue sector for
+/// `p_h` (degrees) and adds the lightness offset `p_m`.
+fn chroma_to_rgb(p_h: f32, p_c: f32, p_m: f32) -> (u8, u8, u8) {
+  let x = p_c * (1.0 - (((p_h / 60.0) % 2.0) - 1.0).abs());
+  let (r1, g1, b1) = if p_h < 60.0 {
+    (p_c, x, 0.0)
+  } else if p_h < 120.0 {
+    (x, p_c, 0.0)
+  } else if p_h < 180.0 {
+    (0.0, p_c, x)
+  } else if p_h < 240.0 {
+    (0.0, x, p_c)
+  } else if p_h < 300.0 {
+    (x, 0.0, p_c)
+  } else {
+    (p_c, 0.0, x)
+  };
+  (((r1 + p_m) * 255.0).round() as u8, ((g1 + p_m) * 255.0).round() as u8, ((b1 + p_m) * 255.0).round() as u8)
 }
 /// Converts LAB color to RGB color space.
 /// - `p_l`: The lightness component (0-100).

@@ -15,17 +15,24 @@ fn apply_posterize(p_image: &mut Image, p_levels: u8) {
   });
 }
 
+#[derive(Clone)]
 pub struct Posterize {
   levels: u8,
   options: Options,
 }
 
+options::cpu_processor!(Posterize);
+
 impl Apply for Posterize {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_posterize, image, self.options.as_ref(), 0, self.levels);

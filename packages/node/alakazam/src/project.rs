@@ -4,7 +4,7 @@ use napi_derive::napi;
 
 use abra::{
   canvas::prelude::Canvas,
-  prelude::{Color, Image, Resize},
+  prelude::{Color, Image, Transform},
 };
 
 /// Represents a project. A project has one root canvas.

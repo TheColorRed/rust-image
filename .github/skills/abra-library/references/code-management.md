@@ -4,6 +4,12 @@ This explains how to handle code modifications.
 
 **IMPORTANT:** Library execution speed is number 1 priority. Anything slowing down the library should be optimized or rewritten for better performance; image result quality should not be compromised in the process.
 
+## Implementation Options
+
+Sometimes there are multiple ways to implement a feature, when suggesting or implementing a solution, implement the option that is best in the long-run not the one that is the quickest/easiest to implement unless it is also the best in the long-run.
+
+This is not a public library and is intended for internal use only. So no need to support fallback/compatibility for external users. A re-write is the best approach to all code modifications to better support the long-term maintainability and performance of the library.
+
 ## Guidelines
 
 - Do full function/module rewrites.
@@ -17,6 +23,7 @@ This explains how to handle code modifications.
 - Avoid introducing unnecessary complexity.
 - Use versatility for example the `Fill` `enum`, and `fill()` function to handle different features using the same interface.
 - Avoid duplicating code unnecessarily.
+- Search the workspace for existing functionality before writing new code (see [reuse first](./reuse-first.md)).
 - Reuse existing functions as much as possible; this will require modifying the parameters of existing functions most of the time. 100% okay to do.
   - Use `impl Into<XXX>` for function parameters to allow flexible input types.
   - Use `enum` types for function parameters when there are a limited set of valid options.

@@ -1,12 +1,12 @@
 use image_webp as webp;
 
 use crate::Channels;
-use crate::fs::file_info::FileInfo;
+use crate::Image;
 use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a WebP file and returns the image data
-pub fn read_webp(p_file: impl Into<String>) -> Result<FileInfo, String> {
+pub fn read_webp(p_file: impl Into<String>) -> Result<Image, String> {
   let file_path = p_file.into();
   let p_file = File::open(&file_path).map_err(|e| format!("Failed to open file: {}", e))?;
   // Larger buffer for better IO performance
@@ -27,7 +27,7 @@ pub fn read_webp(p_file: impl Into<String>) -> Result<FileInfo, String> {
   let mut pixels = vec![0u8; buffer_size];
   decoder.read_image(&mut pixels).map_err(|e| format!("Failed to decode WebP image: {:?}", e))?;
 
-  let info = FileInfo::new(dim.0, dim.1, channels, pixels);
+  let info = Image::new_from_pixels(dim.0, dim.1, pixels, channels);
 
   Ok(info)
 }

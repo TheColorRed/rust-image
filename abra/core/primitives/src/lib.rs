@@ -6,7 +6,7 @@ pub mod color;
 pub mod image;
 pub mod resolution;
 
-pub use self::channels::Channels;
-pub use self::color::Color;
+pub use self::channels::{Channel, Channels};
+pub use self::color::{Bins, Color, ColorStat, Harmony, Histogram, LumaStandard, luma};
 pub use self::image::Image;
 pub use self::resolution::Resolution;

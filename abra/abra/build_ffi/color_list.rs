@@ -4,12 +4,12 @@ use std::fs;
 use std::path::PathBuf;
 
 pub fn color_list() {
-  // Location of the core colors file, relative to this crate
+  // Location of the named colors file in the primitives crate, relative to this crate
   let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
   let colors_path = PathBuf::from(manifest_dir)
-    .join("..") // packages/abra -> packages
+    .join("..") // abra/abra -> abra
     .join("core")
-    .join("core")
+    .join("primitives")
     .join("src")
     .join("color")
     .join("colors_list.rs");

@@ -1,10 +1,21 @@
 # Node
 node_modules/
 
-# Expo / React Native build artifacts
-.expo/
-.expo-shared/
-android/
+# Android build artifacts (the android/ project itself is committed)
+android/**/build/
+android/.gradle/
+android/.kotlin/
+android/**/.cxx/
+android/local.properties
+*.iml
+*.hprof
+*.keystore
+!debug.keystore
+*.jsbundle
+.metro-health-check*
+
+# Leftovers from the Expo setup
+.expo*/
 ios/
 dist/
 

@@ -13,6 +13,7 @@ pub mod generate_image;
 pub mod gradient;
 pub mod image_data;
 pub mod layer;
+pub mod live;
 pub mod metadata;
 pub mod path;
 pub mod project;

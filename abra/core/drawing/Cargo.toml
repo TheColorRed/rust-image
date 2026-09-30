@@ -9,6 +9,8 @@ rayon = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.5"
+gpu = { path = "../gpu" }
+anyhow = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]

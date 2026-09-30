@@ -1,7 +1,7 @@
 //! Parallel image loading utilities using Rayon.
 
 use crate::fs::path::{get_paths_from_folders as get_paths_from_folders_filtered, get_paths_from_glob};
-use crate::{Image, LoadedCollection, image::image_ext::*};
+use crate::{Image, ImageExt, LoadedCollection};
 use rayon::{ThreadPoolBuilder, prelude::*};
 use std::sync::Arc;
 
@@ -38,14 +38,12 @@ impl<'a> ImageLoader<'a> {
       },
       ImageLoader::FromFolders(folders, recursive) => {
         let all_paths = get_paths_from_folders(folders, recursive);
-        println!("Found {} images in folders.", all_paths.len());
         LoadedImages {
           images: load_images(all_paths, p_mode),
         }
       }
       ImageLoader::FromGlob(patterns) => {
         let all_paths = get_paths_from_glob(patterns);
-        println!("Found {} images from glob patterns.", all_paths.len());
         LoadedImages {
           images: load_images(all_paths, p_mode),
         }
@@ -54,118 +52,27 @@ impl<'a> ImageLoader<'a> {
   }
 }
 
-impl<'a> Into<LoadedImages> for ImageLoader<'a> {
-  fn into(self) -> LoadedImages {
-    self.load(LoadMode::Parallel { threads: 4 })
+impl<'a> From<ImageLoader<'a>> for LoadedImages {
+  fn from(p_loader: ImageLoader<'a>) -> Self {
+    p_loader.load(LoadMode::Parallel { threads: 4 })
   }
 }
 
-/// A trait for converting various types into Arc<Image>.
-pub trait IntoImageArc {
-  /// Converts the implementing type into an Arc<Image>.
-  fn into_image_arc(self) -> Arc<Image>;
-}
-
-impl IntoImageArc for &str {
-  fn into_image_arc(self) -> Arc<Image> {
-    Arc::new(Image::read(self).expect("Failed to load image"))
-  }
-}
-
-impl IntoImageArc for Arc<Image> {
-  fn into_image_arc(self) -> Arc<Image> {
-    self
-  }
-}
-
-impl IntoImageArc for Option<Arc<Image>> {
-  fn into_image_arc(self) -> Arc<Image> {
-    self.unwrap_or_else(|| Arc::new(Image::new(1, 1)))
-  }
-}
-
-/// A user-friendly wrapper around loaded images.
+/// A user-friendly wrapper around loaded images. Its methods come from [`LoadedCollection`].
+#[derive(Clone, Default)]
 pub struct LoadedImages {
   images: Vec<Arc<Image>>,
-}
-
-impl LoadedImages {
-  /// Adds an image to the loaded images.
-  pub fn add<I: IntoImageArc>(&mut self, p_image: I) -> &mut Self {
-    self.images.push(p_image.into_image_arc());
-    self
-  }
-
-  /// Removes and returns the first image from the loaded images.
-  pub fn shift(&mut self) -> Option<Arc<Image>> {
-    if self.images.is_empty() { None } else { Some(self.images.remove(0)) }
-  }
-
-  /// Removes and returns the last image from the loaded images.
-  pub fn pop(&mut self) -> Option<Arc<Image>> {
-    self.images.pop()
-  }
-
-  /// Removes an image at the specified index.
-  pub fn drop(&mut self, p_index: usize) -> &mut Self {
-    if p_index < self.images.len() {
-      self.images.remove(p_index);
-    }
-    self
-  }
-
-  /// Gets an image at the specified location.
-  pub fn at(&self, p_index: impl Into<u32>) -> Option<Arc<Image>> {
-    self.images.get(p_index.into() as usize).cloned()
-  }
-
-  /// Gets all loaded images.
-  pub fn all(&self) -> Vec<Arc<Image>> {
-    self.images.clone()
-  }
-
-  /// Gets the first loaded image.
-  pub fn first(&self) -> Option<Arc<Image>> {
-    self.images.first().cloned()
-  }
-
-  /// Gets the last loaded image.
-  pub fn last(&self) -> Option<Arc<Image>> {
-    self.images.last().cloned()
-  }
 }
 
 impl LoadedCollection for LoadedImages {
   type Item = Arc<Image>;
 
-  fn add(&mut self, p_item: Self::Item) -> &mut Self {
-    self.images.push(p_item);
-    self
+  fn items(&self) -> &[Arc<Image>] {
+    &self.images
   }
 
-  fn shift(&mut self) -> Option<Self::Item> {
-    if self.images.is_empty() { None } else { Some(self.images.remove(0)) }
-  }
-  fn pop(&mut self) -> Option<Self::Item> {
-    self.images.pop()
-  }
-  fn drop(&mut self, p_index: usize) -> &mut Self {
-    if p_index < self.images.len() {
-      self.images.remove(p_index);
-    }
-    self
-  }
-  fn at(&self, p_index: usize) -> Option<Self::Item> {
-    self.images.get(p_index).cloned()
-  }
-  fn all(&self) -> Vec<Self::Item> {
-    self.images.clone()
-  }
-  fn first(&self) -> Option<Self::Item> {
-    self.images.first().cloned()
-  }
-  fn last(&self) -> Option<Self::Item> {
-    self.images.last().cloned()
+  fn items_mut(&mut self) -> &mut Vec<Arc<Image>> {
+    &mut self.images
   }
 }
 

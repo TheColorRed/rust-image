@@ -1,411 +1,141 @@
-use std::time::{Duration, Instant};
+use crate::{Channels, Image, IntoNumber, Size};
 
-use crate::{Image, IntoNumber};
-use primitives::Image as PrimitiveImage;
+use super::{
+  TransformAlgorithm, TransformFit,
+  interpolation::{EdgeMode, Interpolation, remap},
+  resize::get_resize_algorithm,
+};
 
-use rayon::prelude::*;
-
-use super::{FlipAxis, TransformAlgorithm, interpolation, interpolation::Interpolation, resize::get_resize_algorithm};
-
-/// Trait for rotating images.
-pub trait Rotate {
-  /// Rotates the image by the specified number of degrees.
-  /// Positive values rotate clockwise, negative values rotate counter-clockwise.
-  /// Accepts any numeric type that can losslessly or approximately convert into `f64` (e.g. `i32`, `u32`, `f32`, `f64`).
-  /// Internally coerces to `f32` for computation.
-  fn rotate(&mut self, p_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>);
-  fn flip(&mut self, p_axis: FlipAxis);
+/// The part of the rotated canvas that becomes the output, and the size it is drawn at.
+struct RotateWindow {
+  /// The size of the canvas the whole rotated image fits on. The image is rotated around its center.
+  canvas_width: u32,
+  canvas_height: u32,
+  /// The area of the canvas to keep, in canvas pixels.
+  left: f64,
+  top: f64,
+  width: f64,
+  height: f64,
+  /// The size of the output image. It differs from the kept area only for [`TransformFit::Fill`].
+  output_width: u32,
+  output_height: u32,
 }
 
-/// Calculate the new size of the image after rotation.
-/// This is to resize the new image to fit the rotated image without cropping.
-/// * `width` - The source image width.
-/// * `height` - The source image height.
-/// * `degrees` - The degrees to rotate the image.
-fn calc_image_new_size(p_width: u32, p_height: u32, p_degrees: f32) -> (u32, u32) {
-  let (mut width, mut height) = (p_width, p_height);
-  let mut degrees = p_degrees % 180.0;
-  if degrees < 0.0 {
-    degrees += 180.0
-  }
-  if degrees >= 90.0 {
-    std::mem::swap(&mut width, &mut height);
-    degrees -= 90.0;
-  }
+impl RotateWindow {
+  fn new(p_width: u32, p_height: u32, p_degrees: f32, p_fit: TransformFit) -> RotateWindow {
+    let (canvas_width, canvas_height) = Size::new(p_width, p_height).rotated_bounds(p_degrees).to_tuple::<u32>();
+    let (canvas_w, canvas_h) = (canvas_width as f64, canvas_height as f64);
+    let (center_x, center_y) = (canvas_w / 2.0, canvas_h / 2.0);
+    let source = Size::new(p_width, p_height);
 
-  if degrees == 0.0 {
-    return (width.max(1), height.max(1));
-  }
+    // Resampling a rotated edge also blends in the empty area beside it, so the kept area stays one more pixel
+    // away from any edge that is not axis-aligned.
+    let (sin, cos) = (p_degrees as f64).to_radians().sin_cos();
+    let margin = if (sin * cos).abs() > 1e-4 { 1.0 } else { 0.0 };
 
-  let radians = degrees.to_radians();
-  let new_width = (width as f32 * radians.cos() + height as f32 * radians.sin()).abs() as u32;
-  let new_height = (width as f32 * radians.sin() + height as f32 * radians.cos()).abs() as u32;
-
-  (new_width.max(1), new_height.max(1))
-}
-
-fn fetch_pixel(p_pixels: &[u8], p_width: usize, p_height: usize, p_x: i32, p_y: i32) -> [u8; 4] {
-  if p_x < 0 || p_y < 0 || p_x >= p_width as i32 || p_y >= p_height as i32 {
-    // Return fully transparent pixel instead of opaque black to prevent dark edges during rotation
-    return [0, 0, 0, 0];
-  }
-
-  let index = (p_y as usize * p_width + p_x as usize) * 4;
-  if index + 3 >= p_pixels.len() {
-    // Return fully transparent pixel instead of opaque black to prevent dark edges during rotation
-    return [0, 0, 0, 0];
-  }
-
-  [
-    p_pixels[index],
-    p_pixels[index + 1],
-    p_pixels[index + 2],
-    p_pixels[index + 3],
-  ]
-}
-
-// Implement Rotate trait for primitives::Image so the methods are available on re-exported abra_core::Image.
-impl Rotate for PrimitiveImage {
-  fn rotate(&mut self, p_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
-    crate::transform::rotate(p_degrees).with_algorithm(p_algorithm).apply(self);
-  }
-
-  fn flip(&mut self, p_axis: FlipAxis) {
-    crate::transform::flip(p_axis).apply(self);
-  }
-}
-
-fn sample_edge_direct_nedi(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (p_width, p_height) = p_image.dimensions::<usize>();
-  let p_pixels = p_image.rgba();
-  let get_pixel = |px: i32, py: i32| -> [f32; 4] {
-    let p = fetch_pixel(p_pixels, p_width, p_height, px, py);
-    let a = p[3] as f32 / 255.0;
-    [p[0] as f32 * a, p[1] as f32 * a, p[2] as f32 * a, a]
-  };
-
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Compute local covariance matrix
-  let mut cov = [[0.0f32; 2]; 2];
-  let mut mean_x = 0.0f32;
-  let mut mean_y = 0.0f32;
-  let mut count = 0;
-  let mut gradients = Vec::new();
-
-  let window_size = 2;
-  for dy in -window_size..=window_size {
-    for dx in -window_size..=window_size {
-      let px = x0 + dx;
-      let py = y0 + dy;
-
-      let p_left = get_pixel(px - 1, py);
-      let p_right = get_pixel(px + 1, py);
-      let p_top = get_pixel(px, py - 1);
-      let p_bottom = get_pixel(px, py + 1);
-
-      let luma =
-        |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
-
-      let gx = (luma(p_right) - luma(p_left)) * 0.5;
-      let gy = (luma(p_bottom) - luma(p_top)) * 0.5;
-
-      gradients.push((gx, gy));
-      mean_x += gx;
-      mean_y += gy;
-      count += 1;
-    }
-  }
-
-  if count > 0 {
-    mean_x /= count as f32;
-    mean_y /= count as f32;
-
-    for (gx, gy) in gradients {
-      let dx = gx - mean_x;
-      let dy = gy - mean_y;
-      cov[0][0] += dx * dx;
-      cov[0][1] += dx * dy;
-      cov[1][0] += dx * dy;
-      cov[1][1] += dy * dy;
-    }
-
-    let scale = 1.0 / count as f32;
-    cov[0][0] *= scale;
-    cov[0][1] *= scale;
-    cov[1][0] *= scale;
-    cov[1][1] *= scale;
-  }
-
-  // Compute eigenvector for edge direction
-  let a = cov[0][0];
-  let b = cov[0][1];
-  let c = cov[1][1];
-  let trace = a + c;
-  let det = a * c - b * b;
-  let discriminant = (trace * trace * 0.25 - det).max(0.0).sqrt();
-  let lambda1 = trace * 0.5 + discriminant;
-  let lambda2 = trace * 0.5 - discriminant;
-  let use_lambda = if lambda1.abs() > lambda2.abs() { lambda1 } else { lambda2 };
-
-  let (edge_x, edge_y) = if b.abs() > 1e-6 {
-    let v_x = use_lambda - c;
-    let v_y = b;
-    let norm = (v_x * v_x + v_y * v_y).sqrt();
-    if norm > 0.0 { (v_x / norm, v_y / norm) } else { (1.0, 0.0) }
-  } else if (a - c).abs() > 1e-6 {
-    if a > c { (1.0, 0.0) } else { (0.0, 1.0) }
-  } else {
-    (1.0, 0.0)
-  };
-
-  let edge_strength = (cov[0][0] + cov[1][1]).sqrt();
-
-  if edge_strength > 5.0 {
-    // Use edge-directed interpolation
-    let t = fx * edge_x + fy * edge_y;
-    let step_size = 1.0;
-
-    let sample_x1 = x0 as f32 - edge_x * step_size;
-    let sample_y1 = y0 as f32 - edge_y * step_size;
-    let sample_x2 = x0 as f32 + edge_x * step_size;
-    let sample_y2 = y0 as f32 + edge_y * step_size;
-
-    let get_interpolated = |sx: f32, sy: f32| -> [f32; 4] {
-      let ix = sx.floor() as i32;
-      let iy = sy.floor() as i32;
-      let fx_local = sx - ix as f32;
-      let fy_local = sy - iy as f32;
-
-      let p00 = get_pixel(ix, iy);
-      let p10 = get_pixel(ix + 1, iy);
-      let p01 = get_pixel(ix, iy + 1);
-      let p11 = get_pixel(ix + 1, iy + 1);
-
-      let r0 = p00[0] * (1.0 - fx_local) + p10[0] * fx_local;
-      let r1 = p01[0] * (1.0 - fx_local) + p11[0] * fx_local;
-      let r = r0 * (1.0 - fy_local) + r1 * fy_local;
-
-      let g0 = p00[1] * (1.0 - fx_local) + p10[1] * fx_local;
-      let g1 = p01[1] * (1.0 - fx_local) + p11[1] * fx_local;
-      let g = g0 * (1.0 - fy_local) + g1 * fy_local;
-
-      let b0 = p00[2] * (1.0 - fx_local) + p10[2] * fx_local;
-      let b1 = p01[2] * (1.0 - fx_local) + p11[2] * fx_local;
-      let b = b0 * (1.0 - fy_local) + b1 * fy_local;
-
-      let a0 = p00[3] * (1.0 - fx_local) + p10[3] * fx_local;
-      let a1 = p01[3] * (1.0 - fx_local) + p11[3] * fx_local;
-      let a = a0 * (1.0 - fy_local) + a1 * fy_local;
-
-      [r, g, b, a]
+    let window = |p_left: f64, p_top: f64, p_width: f64, p_height: f64, p_output: (u32, u32)| RotateWindow {
+      canvas_width,
+      canvas_height,
+      left: p_left,
+      top: p_top,
+      width: p_width,
+      height: p_height,
+      output_width: p_output.0.max(1),
+      output_height: p_output.1.max(1),
     };
 
-    let s1 = get_interpolated(sample_x1, sample_y1);
-    let s2 = get_interpolated(sample_x2, sample_y2);
-
-    let interp_t = (t + 1.0) * 0.5;
-    let acc_r = s1[0] * (1.0 - interp_t) + s2[0] * interp_t;
-    let acc_g = s1[1] * (1.0 - interp_t) + s2[1] * interp_t;
-    let acc_b = s1[2] * (1.0 - interp_t) + s2[2] * interp_t;
-    let acc_a = s1[3] * (1.0 - interp_t) + s2[3] * interp_t;
-
-    let mut out = [0u8; 4];
-    if acc_a > 0.0 {
-      out[0] = (acc_r / acc_a).clamp(0.0, 255.0).round() as u8;
-      out[1] = (acc_g / acc_a).clamp(0.0, 255.0).round() as u8;
-      out[2] = (acc_b / acc_a).clamp(0.0, 255.0).round() as u8;
+    match p_fit {
+      TransformFit::Expand => window(0.0, 0.0, canvas_w, canvas_h, (canvas_width, canvas_height)),
+      TransformFit::Crop => {
+        let inscribed = source.inscribed_after_rotation(p_degrees, None);
+        let (half_width, half_height) = (inscribed.width as f64 / 2.0, inscribed.height as f64 / 2.0);
+        // Round inward to whole pixels so partially covered edge pixels are not kept. The tolerance stops float
+        // error, like 49.9999 for 50, from costing a whole pixel.
+        const EPSILON: f64 = 1e-3;
+        let left = (center_x - half_width - EPSILON).ceil().max(0.0) + margin;
+        let top = (center_y - half_height - EPSILON).ceil().max(0.0) + margin;
+        let right = (center_x + half_width + EPSILON).floor().min(canvas_w) - margin;
+        let bottom = (center_y + half_height + EPSILON).floor().min(canvas_h) - margin;
+        let (width, height) = ((right - left).max(1.0), (bottom - top).max(1.0));
+        window(left, top, width, height, (width as u32, height as u32))
+      }
+      TransformFit::Fill => {
+        // The output is resampled from the kept area anyway, so it does not need whole pixels. Shrinking it evenly
+        // for the margin keeps the aspect ratio exact, so the image is never stretched.
+        let inscribed = source.inscribed_after_rotation(p_degrees, source.aspect_ratio());
+        let (width, height) = (inscribed.width as f64, inscribed.height as f64);
+        let shrink = (1.0 - 2.0 * margin / width.min(height)).max(0.0);
+        let (width, height) = (width * shrink, height * shrink);
+        window(center_x - width / 2.0, center_y - height / 2.0, width, height, (p_width, p_height))
+      }
     }
-    out[3] = (acc_a * 255.0).clamp(0.0, 255.0).round() as u8;
-    out
-  } else {
-    // Fall back to bicubic
-    interpolation::sample(p_image, p_x, p_y, Interpolation::Bicubic)
   }
 }
 
-fn sample_edge_direct_edi(p_image: &Image, p_x: f32, p_y: f32) -> [u8; 4] {
-  let (p_width, p_height) = p_image.dimensions::<usize>();
-  let p_pixels = p_image.rgba();
-  let get_pixel = |px: i32, py: i32| -> [f32; 4] {
-    let p = fetch_pixel(p_pixels, p_width, p_height, px, py);
-    let a = p[3] as f32 / 255.0;
-    [p[0] as f32 * a, p[1] as f32 * a, p[2] as f32 * a, a]
-  };
+/// Applies the rotation to the image by sampling, for each output pixel, the source position that rotates onto it.
+/// Only the part of the rotated canvas inside `p_window` is drawn, scaled to the window's output size.
+/// * `p_image` - The image to rotate.
+/// * `p_degrees` - The degrees to rotate the image.
+/// * `p_window` - The area of the rotated canvas to keep and the size to draw it at.
+/// * `p_interpolation` - The interpolation used while sampling source pixels.
+fn apply_rotation(p_image: &mut Image, p_degrees: f32, p_window: &RotateWindow, p_interpolation: Interpolation) {
+  let (source_width, source_height) = p_image.dimensions::<u32>();
+  let (source_center_x, source_center_y) = (source_width as f64 / 2.0, source_height as f64 / 2.0);
+  let (canvas_center_x, canvas_center_y) = (p_window.canvas_width as f64 / 2.0, p_window.canvas_height as f64 / 2.0);
+  let scale_x = p_window.width / p_window.output_width as f64;
+  let scale_y = p_window.height / p_window.output_height as f64;
+  let (sin, cos) = (p_degrees as f64).to_radians().sin_cos();
 
-  let x0 = p_x.floor() as i32;
-  let y0 = p_y.floor() as i32;
-  let fx = p_x - x0 as f32;
-  let fy = p_y - y0 as f32;
-
-  // Compute gradient using Sobel operator
-  let p00 = get_pixel(x0 - 1, y0 - 1);
-  let p01 = get_pixel(x0, y0 - 1);
-  let p02 = get_pixel(x0 + 1, y0 - 1);
-  let p10 = get_pixel(x0 - 1, y0);
-  let p12 = get_pixel(x0 + 1, y0);
-  let p20 = get_pixel(x0 - 1, y0 + 1);
-  let p21 = get_pixel(x0, y0 + 1);
-  let p22 = get_pixel(x0 + 1, y0 + 1);
-
-  let luma =
-    |p: [f32; 4]| -> f32 { if p[3] > 0.0 { (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / p[3] } else { 0.0 } };
-
-  let gx = -luma(p00) - 2.0 * luma(p10) - luma(p20) + luma(p02) + 2.0 * luma(p12) + luma(p22);
-  let gy = -luma(p00) - 2.0 * luma(p01) - luma(p02) + luma(p20) + 2.0 * luma(p21) + luma(p22);
-
-  let magnitude = (gx * gx + gy * gy).sqrt();
-  let angle = gy.atan2(gx);
-
-  if magnitude > 10.0 {
-    // Strong edge - use directional interpolation
-    let norm_angle = if angle < 0.0 { angle + std::f32::consts::PI } else { angle };
-    let direction = ((norm_angle / std::f32::consts::PI * 4.0).round() as i32) % 4;
-
-    let (p0, p1) = match direction {
-      0 => {
-        // Horizontal
-        let p0 = get_pixel(x0, y0);
-        let p1 = get_pixel(x0 + 1, y0);
-        (p0, p1)
-      }
-      1 => {
-        // Diagonal (top-left to bottom-right)
-        let p0 = get_pixel(x0, y0);
-        let p1 = get_pixel(x0 + 1, y0 + 1);
-        (p0, p1)
-      }
-      2 => {
-        // Vertical
-        let p0 = get_pixel(x0, y0);
-        let p1 = get_pixel(x0, y0 + 1);
-        (p0, p1)
-      }
-      _ => {
-        // Diagonal (top-right to bottom-left)
-        let p0 = get_pixel(x0 + 1, y0);
-        let p1 = get_pixel(x0, y0 + 1);
-        (p0, p1)
-      }
-    };
-
-    let t = if direction == 0 {
-      fx
-    } else if direction == 2 {
-      fy
-    } else {
-      (fx + fy) * 0.5
-    };
-
-    let acc_r = p0[0] * (1.0 - t) + p1[0] * t;
-    let acc_g = p0[1] * (1.0 - t) + p1[1] * t;
-    let acc_b = p0[2] * (1.0 - t) + p1[2] * t;
-    let acc_a = p0[3] * (1.0 - t) + p1[3] * t;
-
-    let mut out = [0u8; 4];
-    if acc_a > 0.0 {
-      out[0] = (acc_r / acc_a).clamp(0.0, 255.0).round() as u8;
-      out[1] = (acc_g / acc_a).clamp(0.0, 255.0).round() as u8;
-      out[2] = (acc_b / acc_a).clamp(0.0, 255.0).round() as u8;
-    }
-    out[3] = (acc_a * 255.0).clamp(0.0, 255.0).round() as u8;
-    out
-  } else {
-    // Weak edge - use bilinear
-    interpolation::sample(p_image, p_x, p_y, Interpolation::Bilinear)
-  }
+  let pixels =
+    remap(p_image, p_window.output_width, p_window.output_height, p_interpolation, EdgeMode::Transparent, |x, y| {
+      // The output pixel's position on the rotated canvas, relative to the canvas center, turned back around the
+      // image center into the source.
+      let dx = p_window.left + x * scale_x - canvas_center_x;
+      let dy = p_window.top + y * scale_y - canvas_center_y;
+      Some((dx * cos + dy * sin + source_center_x, -dx * sin + dy * cos + source_center_y))
+    });
+  p_image.set_pixels(p_window.output_width, p_window.output_height, pixels, Channels::RGBA);
 }
 
-fn sample_pixel(p_image: &Image, p_x: f32, p_y: f32, p_algorithm: TransformAlgorithm) -> [u8; 4] {
-  match p_algorithm {
-    // Rotation has always taken the pixel a point falls in, while the shared nearest-neighbor sampler takes the
-    // pixel whose center is closest. Flooring first keeps the behavior rotation has always had.
-    TransformAlgorithm::NearestNeighbor => {
-      interpolation::sample(p_image, p_x.floor(), p_y.floor(), Interpolation::Nearest)
-    }
-    TransformAlgorithm::EdgeDirectNEDI => sample_edge_direct_nedi(p_image, p_x, p_y),
-    TransformAlgorithm::EdgeDirectEDI => sample_edge_direct_edi(p_image, p_x, p_y),
-    TransformAlgorithm::Bilinear
-    | TransformAlgorithm::Bicubic
-    | TransformAlgorithm::Lanczos
-    | TransformAlgorithm::Auto => interpolation::sample(p_image, p_x, p_y, p_algorithm.interpolation()),
-  }
-}
-
-/// Applies the rotation to the image by copying the pixels from the source image to the destination image
-/// at the proper rotated position.
-/// * `image` - The image to rotate.
-/// * `degrees` - The degrees to rotate the image.
-/// * `width` - The new width of the image after rotation.
-/// * `height` - The new height of the image after rotation.
-/// * `algorithm` - The interpolation algorithm to use while sampling source pixels.
-fn apply_rotation(p_image: &mut Image, p_degrees: f32, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm) {
-  let (src_width, src_height) = p_image.dimensions::<usize>();
-  let radians = p_degrees.to_radians();
-
-  let src_center_x = src_width as f32 / 2.0;
-  let src_center_y = src_height as f32 / 2.0;
-  let dest_center_x = p_width as f32 / 2.0;
-  let dest_center_y = p_height as f32 / 2.0;
-
-  let source: &Image = p_image;
-  let mut pixels = vec![0; p_width as usize * p_height as usize * 4];
-
-  let (sin, cos) = radians.sin_cos();
-
-  pixels.par_chunks_mut(4).enumerate().for_each(|(index, pixel)| {
-    let x = index as u32 % p_width;
-    let y = index as u32 / p_width;
-
-    // Inverse mapping: rotate the destination pixel back around the image center into the source image.
-    let dx = x as f32 - dest_center_x;
-    let dy = y as f32 - dest_center_y;
-    let src_x = dx * cos + dy * sin + src_center_x;
-    let src_y = -dx * sin + dy * cos + src_center_y;
-
-    let sample = sample_pixel(source, src_x, src_y, p_algorithm);
-    pixel.copy_from_slice(&sample);
-  });
-
-  p_image.set_new_pixels(&pixels, p_width, p_height);
-}
-
-fn rotate_internal(
-  p_image: &mut Image, p_degrees: impl Into<f64>, p_algorithm: impl Into<Option<TransformAlgorithm>>,
-) -> (TransformAlgorithm, u32, u32, u32, u32, Duration) {
-  let start = Instant::now();
-  let degrees = p_degrees.into() as f32;
-  let (old_width, old_height) = p_image.dimensions::<u32>();
-  let (target_width, target_height) = calc_image_new_size(old_width, old_height, degrees);
-  let resolved_algorithm = get_resize_algorithm(p_algorithm, old_width, old_height, target_width, target_height);
-
-  apply_rotation(p_image, degrees, target_width, target_height, resolved_algorithm);
-
-  let (new_width, new_height) = p_image.dimensions::<u32>();
-  (resolved_algorithm, old_width, old_height, new_width, new_height, start.elapsed())
-}
-
+/// A rotation that has been described but not yet run. Create one with [`rotate`], optionally configure it with
+/// [`RotateImage::with_fit`] and [`RotateImage::with_algorithm`], then run it with [`RotateImage::apply`].
 pub struct RotateImage {
   pub degrees: f32,
+  pub fit: TransformFit,
   pub algorithm: Option<TransformAlgorithm>,
 }
 
 impl RotateImage {
+  /// Sets how the canvas is sized after rotating. Defaults to [`TransformFit::Expand`].
+  pub fn with_fit(mut self, p_fit: TransformFit) -> Self {
+    self.fit = p_fit;
+    self
+  }
+
+  /// Sets the interpolation algorithm. When `None` (the default), the best algorithm is selected automatically.
   pub fn with_algorithm(mut self, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> Self {
     self.algorithm = p_algorithm.into();
     self
   }
+
+  /// Rotates the image in place.
   pub fn apply(&self, p_image: &mut Image) {
-    let degrees = self.degrees;
-    let (_resolved_algorithm, _old_width, _old_height, _new_width, _new_height, _duration) =
-      rotate_internal(p_image, degrees, self.algorithm);
+    let (width, height) = p_image.dimensions::<u32>();
+    let window = RotateWindow::new(width, height, self.degrees, self.fit);
+    // The kept area is what gets resampled, so the automatic algorithm is picked from how much it is scaled.
+    let algorithm = get_resize_algorithm(
+      self.algorithm,
+      window.width as u32,
+      window.height as u32,
+      window.output_width,
+      window.output_height,
+    );
+    apply_rotation(p_image, self.degrees, &window, algorithm.interpolation());
   }
 }
 
-/// Rotates the image around its center by the given number of degrees. The canvas grows to fit the rotated image.
+/// Rotates the image around its center by the given number of degrees. By default the canvas grows to fit the
+/// rotated image; use [`RotateImage::with_fit`] to crop away the transparent corners instead.
 /// # Arguments
 /// - `p_degrees`: The number of degrees to rotate the image. Positive values rotate clockwise, negative values rotate counter-clockwise.
 ///
@@ -413,6 +143,7 @@ impl RotateImage {
 pub fn rotate(p_degrees: impl IntoNumber) -> RotateImage {
   RotateImage {
     degrees: p_degrees.into::<f32>(),
+    fit: TransformFit::Expand,
     algorithm: None,
   }
 }
@@ -420,6 +151,19 @@ pub fn rotate(p_degrees: impl IntoNumber) -> RotateImage {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::crop;
+
+  const FITS: [TransformFit; 3] = [TransformFit::Expand, TransformFit::Crop, TransformFit::Fill];
+
+  fn solid_image(p_width: u32, p_height: u32) -> Image {
+    Image::new_from_pixels(p_width, p_height, &[200, 30, 30, 255].repeat((p_width * p_height) as usize), Channels::RGBA)
+  }
+
+  /// How many pixels are visibly transparent. Resampling can leave a few edge pixels a touch under fully opaque,
+  /// so only ones that visibly show through count.
+  fn transparent_pixels(p_image: &Image) -> usize {
+    p_image.rgba().chunks(4).filter(|pixel| pixel[3] < 240).count()
+  }
 
   #[test]
   fn rotating_by_nothing_changes_nothing() {
@@ -431,19 +175,99 @@ mod tests {
       TransformAlgorithm::Lanczos,
       TransformAlgorithm::Auto,
     ] {
-      let mut image = Image::from_rgba_bytes(16, 12, &bytes);
-      rotate(0.0).with_algorithm(algorithm).apply(&mut image);
-      assert_eq!(image.dimensions::<u32>(), (16, 12), "{algorithm}");
-      assert_eq!(image.rgba(), bytes.as_slice(), "{algorithm}");
+      for fit in FITS {
+        let mut image = Image::new_from_pixels(16, 12, &bytes, Channels::RGBA);
+        rotate(0.0).with_fit(fit).with_algorithm(algorithm).apply(&mut image);
+        assert_eq!(image.dimensions::<u32>(), (16, 12), "{algorithm} {fit:?}");
+        assert_eq!(image.rgba(), bytes.as_slice(), "{algorithm} {fit:?}");
+      }
     }
   }
 
   #[test]
   fn a_quarter_turn_swaps_the_width_and_height() {
-    for algorithm in [TransformAlgorithm::NearestNeighbor, TransformAlgorithm::Bilinear, TransformAlgorithm::Lanczos] {
-      let mut image = Image::from_rgba_bytes(6, 4, &[9, 9, 9, 255].repeat(24));
+    for algorithm in [
+      TransformAlgorithm::NearestNeighbor,
+      TransformAlgorithm::Bilinear,
+      TransformAlgorithm::Lanczos,
+    ] {
+      let mut image = Image::new_from_pixels(6, 4, &[9, 9, 9, 255].repeat(24), Channels::RGBA);
       rotate(90.0).with_algorithm(algorithm).apply(&mut image);
       assert_eq!(image.dimensions::<u32>(), (4, 6), "{algorithm}");
     }
+  }
+
+  #[test]
+  fn a_quarter_turn_crop_keeps_the_whole_rotated_image() {
+    let bytes: Vec<u8> = (0..6 * 4).flat_map(|i| [(i * 10) as u8, 0, 0, 255]).collect();
+    let mut expanded = Image::new_from_pixels(6, 4, &bytes, Channels::RGBA);
+    rotate(90.0).with_algorithm(TransformAlgorithm::NearestNeighbor).apply(&mut expanded);
+    let mut cropped = Image::new_from_pixels(6, 4, &bytes, Channels::RGBA);
+    rotate(90.0).with_fit(TransformFit::Crop).with_algorithm(TransformAlgorithm::NearestNeighbor).apply(&mut cropped);
+    assert_eq!(cropped.dimensions::<u32>(), (4, 6));
+    assert_eq!(cropped.rgba(), expanded.rgba());
+  }
+
+  #[test]
+  fn crop_matches_expanding_then_cropping() {
+    // Drawing only the kept window must give the same pixels as drawing the whole canvas and cutting it out.
+    let bytes: Vec<u8> = (0..40 * 30).flat_map(|i| [(i % 40 * 6) as u8, (i / 40 * 8) as u8, 90, 255]).collect();
+    for degrees in [7.0f32, -20.0, 33.0] {
+      let window = RotateWindow::new(40, 30, degrees, TransformFit::Crop);
+      let mut expected = Image::new_from_pixels(40, 30, &bytes, Channels::RGBA);
+      rotate(degrees).with_algorithm(TransformAlgorithm::Bilinear).apply(&mut expected);
+      crop(window.left, window.top, window.output_width, window.output_height).apply(&mut expected);
+
+      let mut image = Image::new_from_pixels(40, 30, &bytes, Channels::RGBA);
+      rotate(degrees).with_fit(TransformFit::Crop).with_algorithm(TransformAlgorithm::Bilinear).apply(&mut image);
+      assert_eq!(image.dimensions::<u32>(), expected.dimensions::<u32>(), "{degrees}");
+      assert_eq!(image.rgba(), expected.rgba(), "{degrees}");
+    }
+  }
+
+  #[test]
+  fn crop_and_fill_leave_no_transparent_corners() {
+    for degrees in [5.7f32, -12.0, 30.0, 45.0, 100.0] {
+      let mut expanded = solid_image(200, 100);
+      rotate(degrees).apply(&mut expanded);
+      assert!(transparent_pixels(&expanded) > 0, "{degrees}: expected transparent corners");
+
+      let mut cropped = solid_image(200, 100);
+      rotate(degrees).with_fit(TransformFit::Crop).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut cropped);
+      let (width, height) = cropped.dimensions::<u32>();
+      assert!(width < 200 && height < 200, "{degrees}: expected a smaller image, got {width}x{height}");
+      assert_eq!(transparent_pixels(&cropped), 0, "{degrees}: crop {width}x{height}");
+
+      let mut filled = solid_image(200, 100);
+      rotate(degrees).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut filled);
+      assert_eq!(filled.dimensions::<u32>(), (200, 100), "{degrees}");
+      assert_eq!(transparent_pixels(&filled), 0, "{degrees}: fill");
+    }
+  }
+
+  #[test]
+  fn fill_keeps_the_center_in_place() {
+    // A dark dot at the center stays at the center after filling, since the image turns around it.
+    let (width, height) = (120u32, 80u32);
+    let mut bytes = [255u8, 255, 255, 255].repeat((width * height) as usize);
+    for y in 38..42 {
+      for x in 58..62 {
+        let index = ((y * width + x) * 4) as usize;
+        bytes[index..index + 3].copy_from_slice(&[0, 0, 0]);
+      }
+    }
+    let mut image = Image::new_from_pixels(width, height, &bytes, Channels::RGBA);
+    rotate(15.0).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Bilinear).apply(&mut image);
+    let (mut sum_x, mut sum_y, mut count) = (0.0, 0.0, 0.0);
+    for (index, pixel) in image.rgba().chunks(4).enumerate() {
+      if pixel[0] < 128 {
+        sum_x += (index as u32 % width) as f32;
+        sum_y += (index as u32 / width) as f32;
+        count += 1.0;
+      }
+    }
+    assert!(count > 0.0, "the dot was lost");
+    let (center_x, center_y) = (sum_x / count, sum_y / count);
+    assert!((center_x - 59.5).abs() < 1.0 && (center_y - 39.5).abs() < 1.0, "dot at {center_x}, {center_y}");
   }
 }

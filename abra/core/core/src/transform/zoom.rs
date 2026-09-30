@@ -1,11 +1,4 @@
-use crate::Crop;
-use crate::Image;
-use crate::IntoNumber;
-use crate::PointF;
-use crate::Resize;
-use crate::ResizeTarget;
-use crate::TransformAlgorithm;
-use primitives::Image as PrimitiveImage;
+use crate::{Image, IntoNumber, PointF, ResizeTarget, TransformAlgorithm, crop, resize};
 
 /// A zoom that has been described but not yet run. Create one with [`zoom`], optionally set the algorithm
 /// with [`ZoomImage::with_algorithm`], then run it with [`ZoomImage::apply`].
@@ -42,8 +35,8 @@ impl ZoomImage {
     let x = (anchor.x / width as f32 * max_x).round().clamp(0.0, max_x) as u32;
     let y = (anchor.y / height as f32 * max_y).round().clamp(0.0, max_y) as u32;
 
-    p_image.crop(x, y, crop_width, crop_height);
-    p_image.resize(ResizeTarget::Exact((width, height).into()), self.algorithm);
+    crop(x, y, crop_width, crop_height).apply(p_image);
+    resize(ResizeTarget::Exact((width, height).into())).with_algorithm(self.algorithm).apply(p_image);
   }
 }
 
@@ -63,34 +56,10 @@ pub fn zoom(p_anchor: impl Into<PointF>, p_factor: impl IntoNumber) -> ZoomImage
   }
 }
 
-/// Trait for zooming functionality.
-pub trait Zoom {
-  /// Zoom the image according to the supplied target.
-  /// - `p_anchor`: The point to zoom toward, in source image pixel coordinates.
-  /// - `p_factor`: The magnification factor (e.g. `2.0` = 2×). Values `<= 1.0` leave the image unchanged.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn zoom(
-    &mut self, p_anchor: impl Into<PointF>, p_factor: impl IntoNumber,
-    p_algorithm: impl Into<Option<TransformAlgorithm>>,
-  );
-}
-
-impl Zoom for PrimitiveImage {
-  /// Zoom the image according to the supplied target.
-  /// - `p_anchor`: The point to zoom toward, in source image pixel coordinates.
-  /// - `p_factor`: The magnification factor (e.g. `2.0` = 2×). Values `<= 1.0` leave the image unchanged.
-  /// - `p_algorithm`: The resizing algorithm to use. If None, the best algorithm will be selected automatically.
-  fn zoom(
-    &mut self, p_anchor: impl Into<PointF>, p_factor: impl IntoNumber,
-    p_algorithm: impl Into<Option<TransformAlgorithm>>,
-  ) {
-    crate::transform::zoom(p_anchor, p_factor).with_algorithm(p_algorithm).apply(self);
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Channels;
 
   /// Builds an image where each pixel's red channel is its x coordinate and green is its y coordinate.
   fn coordinate_image(p_width: u32, p_height: u32) -> Image {
@@ -100,9 +69,7 @@ mod tests {
         pixels.extend_from_slice(&[x as u8, y as u8, 0, 255]);
       }
     }
-    let mut image = Image::new(p_width, p_height);
-    image.set_new_pixels(&pixels, p_width, p_height);
-    image
+    Image::new_from_pixels(p_width, p_height, pixels, Channels::RGBA)
   }
 
   #[test]
@@ -142,7 +109,9 @@ mod tests {
   fn anchor_stays_in_place() {
     for anchor in [(0u32, 0u32), (8, 8), (20, 30), (32, 16), (39, 39)] {
       let mut image = coordinate_image(40, 40);
-      zoom((anchor.0 as f32, anchor.1 as f32), 2.0).with_algorithm(TransformAlgorithm::NearestNeighbor).apply(&mut image);
+      zoom((anchor.0 as f32, anchor.1 as f32), 2.0)
+        .with_algorithm(TransformAlgorithm::NearestNeighbor)
+        .apply(&mut image);
       let (x, y) = source_coordinate(&image, anchor.0, anchor.1);
       // Allow one pixel of rounding.
       assert!(x.abs_diff(anchor.0 as u8) <= 1 && y.abs_diff(anchor.1 as u8) <= 1, "anchor {anchor:?} -> ({x}, {y})");

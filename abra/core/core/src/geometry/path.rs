@@ -2,9 +2,8 @@ use std::fmt::Display;
 
 use crate::Size;
 
-use super::point::Point;
 use super::pointf::PointF;
-use super::viewbox::{AspectRatio, ViewBox};
+use super::rect::{AspectRatio, Rect};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// A segment in a path.
@@ -32,6 +31,15 @@ pub enum Segment {
   },
 }
 
+impl Segment {
+  /// The point the segment ends at.
+  pub fn end(&self) -> PointF {
+    match self {
+      Segment::Line { to } | Segment::Quadratic { to, .. } | Segment::Cubic { to, .. } => *to,
+    }
+  }
+}
+
 #[derive(Clone, Debug)]
 /// A path represents a geometric shape made of lines and curves.
 /// Paths are geometric utilities that can be used for drawing, following, effects, and more.
@@ -49,37 +57,6 @@ impl Path {
   /// Creates a new empty path.
   pub fn new() -> Path {
     Path::default()
-  }
-  /// Creates a rectangular path given the top-left corner, width, and height.
-  /// - `p_top_left`: The top-left corner of the rectangle.
-  /// - `p_width`: The width of the rectangle.
-  /// - `p_height`: The height of the rectangle.
-  pub fn rect(p_top_left: impl Into<PointF>, p_width: f32, p_height: f32) -> Path {
-    let top_left = p_top_left.into();
-    let mut path = Path::new();
-    path
-      .move_to(top_left)
-      .line_to(PointF::new(top_left.x + p_width, top_left.y))
-      .line_to(PointF::new(top_left.x + p_width, top_left.y + p_height))
-      .line_to(PointF::new(top_left.x, top_left.y + p_height))
-      .line_to(top_left);
-    path
-  }
-  pub fn ellipse(p_center: impl Into<PointF>, p_radius_x: f32, p_radius_y: f32, p_segments: usize) -> Path {
-    let center = p_center.into();
-    let mut path = Path::new();
-    for i in 0..p_segments {
-      let theta = (i as f32 / p_segments as f32) * std::f32::consts::TAU;
-      let x = center.x + p_radius_x * theta.cos();
-      let y = center.y + p_radius_y * theta.sin();
-      if i == 0 {
-        path.move_to(PointF::new(x, y));
-      } else {
-        path.line_to(PointF::new(x, y));
-      }
-    }
-    path.line_to(PointF::new(center.x + p_radius_x, center.y)); // Close the ellipse
-    path
   }
   /// Creates a simple line path from point A to point B.
   pub fn line(p_from: impl Into<PointF>, p_to: impl Into<PointF>) -> Path {
@@ -126,15 +103,7 @@ impl Path {
   }
   /// Gets the ending point of the path.
   pub fn end(&self) -> PointF {
-    if let Some(last_segment) = self.segments.last() {
-      match last_segment {
-        Segment::Line { to } => *to,
-        Segment::Quadratic { to, .. } => *to,
-        Segment::Cubic { to, .. } => *to,
-      }
-    } else {
-      self.start
-    }
+    self.segments.last().map_or(self.start, Segment::end)
   }
   /// Returns the segments of the path.
   pub fn segments(&self) -> &[Segment] {
@@ -149,15 +118,7 @@ impl Path {
   /// Returns all points in the path as a flat list of PointF.
   /// This includes the start point and all segment endpoints.
   pub fn points(&self) -> Vec<PointF> {
-    let mut pts = vec![self.start];
-    for segment in &self.segments {
-      match segment {
-        Segment::Line { to } => pts.push(*to),
-        Segment::Quadratic { to, .. } => pts.push(*to),
-        Segment::Cubic { to, .. } => pts.push(*to),
-      }
-    }
-    pts
+    std::iter::once(self.start).chain(self.segments.iter().map(Segment::end)).collect()
   }
 
   /// Returns the point at parameter t (0 to 1) along the entire path.
@@ -173,20 +134,20 @@ impl Path {
     let segment_index = segment_index.min(self.segments.len() - 1);
     let local_t = (clamped_t * num_segments) - segment_index as f32;
 
-    let prev_point = if segment_index == 0 { self.start } else { self.point_at_segment(segment_index - 1, 1.0) };
-
-    eval_segment(prev_point, &self.segments[segment_index], local_t)
+    eval_segment(self.segment_start(segment_index), &self.segments[segment_index], local_t)
   }
 
   /// Returns the point at parameter t within a specific segment.
   pub fn point_at_segment(&self, p_segment_idx: usize, p_t: f32) -> PointF {
-    if p_segment_idx >= self.segments.len() {
-      return self.points().last().copied().unwrap_or(self.start);
+    match self.segments.get(p_segment_idx) {
+      Some(segment) => eval_segment(self.segment_start(p_segment_idx), segment, p_t),
+      None => self.end(),
     }
+  }
 
-    let prev_point = if p_segment_idx == 0 { self.start } else { self.point_at_segment(p_segment_idx - 1, 1.0) };
-
-    eval_segment(prev_point, &self.segments[p_segment_idx], p_t)
+  /// The point a segment starts at: the end of the previous segment, or the path start for the first one.
+  fn segment_start(&self, p_segment_idx: usize) -> PointF {
+    if p_segment_idx == 0 { self.start } else { self.segments[p_segment_idx - 1].end() }
   }
 
   /// Flattens the path into a polyline (list of points) with the given tolerance.
@@ -196,30 +157,15 @@ impl Path {
     let mut current = self.start;
 
     for segment in &self.segments {
-      match segment {
-        Segment::Line { to } => {
-          result.push(*to);
-          current = *to;
-        }
-        Segment::Quadratic { ctrl, to } => {
-          let subdivisions = calculate_subdivisions(current, *ctrl, *to, p_tolerance);
-          for i in 1..=subdivisions {
-            let t = i as f32 / subdivisions as f32;
-            let pt = eval_segment(current, segment, t);
-            result.push(pt);
-          }
-          current = *to;
-        }
-        Segment::Cubic { ctrl1, ctrl2, to } => {
-          let subdivisions = calculate_subdivisions_cubic(current, *ctrl1, *ctrl2, *to, p_tolerance);
-          for i in 1..=subdivisions {
-            let t = i as f32 / subdivisions as f32;
-            let pt = eval_segment(current, segment, t);
-            result.push(pt);
-          }
-          current = *to;
-        }
+      let pieces = match segment {
+        Segment::Line { .. } => 1,
+        Segment::Quadratic { ctrl, to } => subdivisions(&[current, *ctrl, *to], p_tolerance),
+        Segment::Cubic { ctrl1, ctrl2, to } => subdivisions(&[current, *ctrl1, *ctrl2, *to], p_tolerance),
+      };
+      for i in 1..=pieces {
+        result.push(eval_segment(current, segment, i as f32 / pieces as f32));
       }
+      current = segment.end();
     }
 
     result
@@ -227,221 +173,90 @@ impl Path {
 
   /// Returns an approximate length of the path.
   pub fn length(&self) -> f32 {
-    let flattened = self.flatten(0.5);
-    let mut total = 0.0;
-    for i in 1..flattened.len() {
-      total += flattened[i - 1].distance_to(flattened[i]);
-    }
-    total
+    self.flatten(0.5).windows(2).map(|pair| pair[0].distance_to(pair[1])).sum()
   }
 
-  /// Returns the bounding box of the path as (min_x, min_y, max_x, max_y).
-  pub fn bounds(&self) -> (f32, f32, f32, f32) {
-    let pts = self.flatten(0.5);
-    if pts.is_empty() {
-      return (0.0, 0.0, 0.0, 0.0);
-    }
-
-    let mut min_x = pts[0].x;
-    let mut min_y = pts[0].y;
-    let mut max_x = pts[0].x;
-    let mut max_y = pts[0].y;
-
-    for pt in &pts {
-      min_x = min_x.min(pt.x);
-      min_y = min_y.min(pt.y);
-      max_x = max_x.max(pt.x);
-      max_y = max_y.max(pt.y);
-    }
-
-    (min_x, min_y, max_x, max_y)
-  }
-
-  /// Converts the path to a list of integer points (for raster operations).
-  /// This flattens curves and rounds coordinates to integers.
-  pub fn to_points(&self, p_tolerance: f32) -> Vec<Point> {
-    self.flatten(p_tolerance).iter().map(|p| Point::from(*p)).collect()
+  /// Returns the bounding box of the path.
+  pub fn bounds(&self) -> Rect {
+    Rect::from_points(self.flatten(0.5))
   }
 
   /// Finds the closest point on the path to the given coordinates and returns the parameter t.
   /// This is useful for gradients and effects that need to map pixels to path positions.
   pub fn closest_time(&self, p_x: f32, p_y: f32) -> f32 {
-    let query = PointF::new(p_x, p_y);
-    let flattened = self.flatten(1.0);
-
-    if flattened.len() < 2 {
-      return 0.0;
-    }
-
-    let mut min_distance = f32::MAX;
-    let mut closest_t = 0.0;
-
-    // If the path is closed (first == last) include the closing segment.
-    // Otherwise, iterate only over the forward segments (len - 1).
-    let len = flattened.len();
-    let is_closed = flattened.first() == flattened.last();
-    let segments = if is_closed { len } else { len - 1 };
-    let total_segments = segments as f32;
-
-    for i in 0..segments {
-      let p1 = flattened[i];
-      let p2 = if i + 1 < len { flattened[i + 1] } else { flattened[0] };
-
-      let segment_vec = p2 - p1;
-      let query_vec = query - p1;
-      let segment_len_sq = segment_vec.length_squared();
-
-      if segment_len_sq == 0.0 {
-        continue;
-      }
-
-      let local_t = (query_vec.dot(segment_vec) / segment_len_sq).clamp(0.0, 1.0);
-      let closest_point = p1.lerp(p2, local_t);
-      let distance = query.distance_to(closest_point);
-
-      if distance < min_distance {
-        min_distance = distance;
-        // Map to global t (0 to 1 across the forward path segments)
-        closest_t = (i as f32 + local_t) / total_segments;
-      }
-    }
-
-    closest_t
+    self.closest(PointF::new(p_x, p_y), 1.0).map_or(0.0, |(t, _)| t)
   }
 
   /// Finds the closest point on the path to the given coordinates, returning the point coordinates.
   pub fn closest_point(&self, p_x: f32, p_y: f32) -> PointF {
-    let query = PointF::new(p_x, p_y);
-    let flattened = self.flatten(0.5); // Use finer tolerance for better accuracy
+    self.closest(PointF::new(p_x, p_y), 0.5).map_or(self.start, |(_, point)| point)
+  }
 
-    if flattened.len() < 2 {
-      return self.start;
+  /// The closest position on the flattened path to `p_query`, as `(t, point)` where `t` runs from 0 to 1 across
+  /// the flattened segments. A closed path (first point on the last) includes its closing segment. `None` when the
+  /// path has fewer than two points.
+  fn closest(&self, p_query: PointF, p_tolerance: f32) -> Option<(f32, PointF)> {
+    let flattened = self.flatten(p_tolerance);
+    let len = flattened.len();
+    if len < 2 {
+      return None;
     }
 
-    let mut min_distance = f32::MAX;
-    let mut closest_point = flattened[0];
-
-    // If the path is closed include the closing segment, otherwise iterate forward segments only
-    let len = flattened.len();
-    let is_closed = flattened.first().map(|f| f.distance_to(*flattened.last().unwrap()) < 0.1).unwrap_or(false);
+    let is_closed = flattened[0].distance_to(flattened[len - 1]) < 0.1;
     let segments = if is_closed { len } else { len - 1 };
+    let mut best = (f32::MAX, 0.0, flattened[0]);
 
     for i in 0..segments {
-      let p1 = flattened[i];
-      let p2 = if i + 1 < len { flattened[i + 1] } else { flattened[0] };
-
+      let (p1, p2) = (flattened[i], flattened[(i + 1) % len]);
       let segment_vec = p2 - p1;
-      let query_vec = query - p1;
       let segment_len_sq = segment_vec.length_squared();
-
-      if segment_len_sq < 0.0001 {
-        // Degenerate segment (point), check distance to p1
-        let distance = query.distance_to(p1);
-        if distance < min_distance {
-          min_distance = distance;
-          closest_point = p1;
-        }
-        continue;
-      }
-
-      let local_t = (query_vec.dot(segment_vec) / segment_len_sq).clamp(0.0, 1.0);
+      let local_t =
+        if segment_len_sq < 1e-4 { 0.0 } else { ((p_query - p1).dot(segment_vec) / segment_len_sq).clamp(0.0, 1.0) };
       let candidate = p1.lerp(p2, local_t);
-      let distance = query.distance_to(candidate);
-
-      if distance < min_distance {
-        min_distance = distance;
-        closest_point = candidate;
+      let distance = p_query.distance_to(candidate);
+      if distance < best.0 {
+        best = (distance, (i as f32 + local_t) / segments as f32, candidate);
       }
     }
 
-    closest_point
+    Some((best.1, best.2))
   }
 
-  /// Transforms this path to fit within a viewport using a ViewBox.
-  ///
-  /// This enables SVG-style resolution-independent rendering where the path
-  /// is defined in abstract coordinates and scaled to fit a viewport.
-  ///
-  /// # Arguments
-  ///
-  /// * `viewbox` - The source coordinate system (defines the abstract space)
-  /// * `viewport_width` - Target width in pixels
-  /// * `viewport_height` - Target height in pixels
-  /// * `aspect_ratio` - How to preserve aspect ratio when scaling
-  ///
-  /// # Example
-  ///
-  /// ```ignore
-  /// use crate::geometry::{Path, ViewBox, AspectRatio};
-  ///
-  /// // Define a path in 0-100 coordinate space
-  /// let path = Path::rect((0.0, 0.0), 100.0, 100.0);
-  /// let viewbox = ViewBox::new(0.0, 0.0, 100.0, 100.0);
-  ///
-  /// // Render at 500x500 pixels
-  /// let scaled = path.transform_to_viewport(&viewbox, 500.0, 500.0, AspectRatio::default());
-  /// ```
-
+  /// Maps this path from the `p_source` coordinate system into a viewport of `p_viewport` size, the way an SVG
+  /// `viewBox` maps into its element. See [`Rect::map_point`].
   pub fn transform_to_viewport(
-    &self, p_viewbox: &ViewBox, p_viewport_width: f32, p_viewport_height: f32, p_aspect_ratio: AspectRatio,
+    &self, p_source: &Rect, p_viewport: impl Into<Size>, p_aspect_ratio: AspectRatio,
   ) -> Path {
-    let mut transformed = Path {
-      start: p_viewbox.map_point(self.start, p_viewport_width, p_viewport_height, p_aspect_ratio),
-      segments: Vec::with_capacity(self.segments.len()),
+    let viewport = p_viewport.into();
+    let map = |point: PointF| p_source.map_point(point, viewport, p_aspect_ratio);
+    Path {
+      start: map(self.start),
+      segments: self
+        .segments
+        .iter()
+        .map(|segment| match *segment {
+          Segment::Line { to } => Segment::Line { to: map(to) },
+          Segment::Quadratic { ctrl, to } => Segment::Quadratic {
+            ctrl: map(ctrl),
+            to: map(to),
+          },
+          Segment::Cubic { ctrl1, ctrl2, to } => Segment::Cubic {
+            ctrl1: map(ctrl1),
+            ctrl2: map(ctrl2),
+            to: map(to),
+          },
+        })
+        .collect(),
       angle_degrees: self.angle_degrees,
-    };
-
-    for segment in &self.segments {
-      let transformed_segment = match segment {
-        Segment::Line { to } => Segment::Line {
-          to: p_viewbox.map_point(*to, p_viewport_width, p_viewport_height, p_aspect_ratio),
-        },
-        Segment::Quadratic { ctrl, to } => Segment::Quadratic {
-          ctrl: p_viewbox.map_point(*ctrl, p_viewport_width, p_viewport_height, p_aspect_ratio),
-          to: p_viewbox.map_point(*to, p_viewport_width, p_viewport_height, p_aspect_ratio),
-        },
-        Segment::Cubic { ctrl1, ctrl2, to } => Segment::Cubic {
-          ctrl1: p_viewbox.map_point(*ctrl1, p_viewport_width, p_viewport_height, p_aspect_ratio),
-          ctrl2: p_viewbox.map_point(*ctrl2, p_viewport_width, p_viewport_height, p_aspect_ratio),
-          to: p_viewbox.map_point(*to, p_viewport_width, p_viewport_height, p_aspect_ratio),
-        },
-      };
-      transformed.segments.push(transformed_segment);
     }
-
-    transformed
   }
 
-  /// Convenience method to create a ViewBox from this path's bounds.
-  /// Useful for normalizing a path to its bounding box.
-  pub fn to_viewbox(&self) -> ViewBox {
-    let (min_x, min_y, max_x, max_y) = self.bounds();
-    ViewBox::new(min_x, min_y, max_x - min_x, max_y - min_y)
-  }
-
-  /// Fits this path into the given viewport size preserving aspect ratio (Meet).
-  /// This uses the path's bounds as its implicit viewBox.
-  pub fn fit(&self, p_size: impl Into<Size>) -> Path {
-    let size = p_size.into();
-    self.transform_to_viewport(&self.to_viewbox(), size.width, size.height, AspectRatio::meet())
-  }
-
-  /// Fits this path into a square viewport of the given size (Meet).
-  pub fn fit_square(&self, p_size: impl Into<f32>) -> Path {
-    let size = p_size.into();
-    self.fit(Size::new(size, size))
-  }
-
-  /// Fits this path into the given viewport using a specific aspect ratio policy.
-  /// This uses the path's bounds as its implicit viewBox.
-  pub fn fit_with_aspect(&self, p_viewport_width: f32, p_viewport_height: f32, p_aspect_ratio: AspectRatio) -> Path {
-    self.transform_to_viewport(&self.to_viewbox(), p_viewport_width, p_viewport_height, p_aspect_ratio)
-  }
-
-  /// Stretches this path non-uniformly to fill the viewport (no aspect ratio preservation).
-  pub fn stretch(&self, p_size: impl Into<Size>) -> Path {
-    let size = p_size.into();
-    self.transform_to_viewport(&self.to_viewbox(), size.width, size.height, AspectRatio::none())
+  /// Scales this path from its own bounds into a box of `p_size`.
+  /// - `p_size`: The target size.
+  /// - `p_aspect_ratio`: How to scale when the shapes differ: [`AspectRatio::meet`] fits inside,
+  ///   [`AspectRatio::slice`] covers (may crop), and [`AspectRatio::none`] stretches to fill.
+  pub fn fit(&self, p_size: impl Into<Size>, p_aspect_ratio: AspectRatio) -> Path {
+    self.transform_to_viewport(&self.bounds(), p_size, p_aspect_ratio)
   }
 
   /// Samples uniformly spaced points along the path based on spacing ratio.
@@ -467,12 +282,6 @@ impl Path {
 
     samples.push(self.point_at(1.0));
     samples
-  }
-
-  /// Scales this path uniformly to cover the viewport (may crop) using Slice.
-  pub fn cover(&self, p_size: impl Into<Size>) -> Path {
-    let size = p_size.into();
-    self.transform_to_viewport(&self.to_viewbox(), size.width, size.height, AspectRatio::slice())
   }
 }
 
@@ -557,19 +366,11 @@ mod tests {
   }
 }
 
-/// Calculates the number of subdivisions needed for a quadratic curve.
-fn calculate_subdivisions(p_p0: PointF, p_p1: PointF, p_p2: PointF, p_tolerance: f32) -> usize {
-  // Estimate curve length and divide by tolerance
-  let chord_len = p_p0.distance_to(p_p2);
-  let control_dist = p_p0.distance_to(p_p1) + p_p1.distance_to(p_p2);
-  let estimate_len = (chord_len + control_dist) * 0.5;
-  (estimate_len / p_tolerance).ceil().max(2.0) as usize
-}
-
-/// Calculates the number of subdivisions needed for a cubic curve.
-fn calculate_subdivisions_cubic(p_p0: PointF, p_p1: PointF, p_p2: PointF, p_p3: PointF, p_tolerance: f32) -> usize {
-  let chord_len = p_p0.distance_to(p_p3);
-  let control_dist = p_p0.distance_to(p_p1) + p_p1.distance_to(p_p2) + p_p2.distance_to(p_p3);
+/// The number of straight pieces a curve with the given control polygon (start, controls, end) is flattened into,
+/// estimated from its length so each piece is about `p_tolerance` long.
+fn subdivisions(p_points: &[PointF], p_tolerance: f32) -> usize {
+  let chord_len = p_points[0].distance_to(p_points[p_points.len() - 1]);
+  let control_dist: f32 = p_points.windows(2).map(|pair| pair[0].distance_to(pair[1])).sum();
   let estimate_len = (chord_len + control_dist) * 0.5;
   (estimate_len / p_tolerance).ceil().max(2.0) as usize
 }

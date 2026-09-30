@@ -45,22 +45,29 @@ fn apply_vibrance(p_image: &mut Image, p_vibrance: f32, p_saturation: f32) {
     dst_px[3] = a;
   });
 
-  p_image.set_rgba(&out);
+  p_image.set_rgba(out);
 }
 
 /// A vibrance adjustment. Create one with [`vibrance`].
+#[derive(Clone)]
 pub struct Vibrance {
   vibrance: f64,
   saturation: f64,
   options: Options,
 }
 
+options::cpu_processor!(Vibrance);
+
 impl Apply for Vibrance {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let vibrance = (self.vibrance as f32).clamp(-100.0, 100.0);

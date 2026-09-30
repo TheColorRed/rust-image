@@ -1,13 +1,13 @@
 //! The Layer public API struct.
 
-use abra_core::Image;
 use abra_core::image::image_ext::GuardedOwner;
+use abra_core::{Channels, Image};
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::canvas::layer_inner::LayerInner;
 use crate::effects::LayerEffects;
-use abra_core::blend::RGBA;
+use abra_core::BlendMode;
 use abra_core::image::image_ext::ImageRef;
 use std::sync::MutexGuard;
 
@@ -112,7 +112,7 @@ impl<'a> Layer<'a> {
     let (width, height) = p_image.dimensions();
     let mut borrow_mut = self.borrow_mut();
     let image_mut = borrow_mut.image_mut();
-    image_mut.set_new_pixels(p_image.rgba(), width, height);
+    image_mut.set_pixels(width, height, p_image.rgba(), Channels::RGBA);
   }
 
   /// Return a cloned owned `Image` (cheap clone of the internal Arc/Image).
@@ -181,7 +181,7 @@ macro_rules! layer_method_mut {
 impl<'a> Layer<'a> {
   layer_method_mut!(
     /// Sets the blend mode of the layer.
-    set_blend_mode(blend_mode: fn(RGBA, RGBA) -> RGBA)
+    set_blend_mode(blend_mode: BlendMode)
   );
 
   layer_method_mut!(
@@ -211,6 +211,12 @@ impl<'a> Layer<'a> {
   pub fn effects(&self) -> LayerEffects<'a> {
     LayerEffects::new().with_layer(self.inner.clone())
   }
+  /// Sets the live effects evaluated over the layer's image each time the canvas composes. Changing them only re-runs
+  /// the effects, on the GPU when available, which is what makes dragging a parameter interactive.
+  pub fn set_live_effects(&self, p_effects: Vec<Arc<dyn abra_core::image::gpu::LiveEffect>>) {
+    self.borrow_mut().set_live_effects(p_effects);
+  }
+
   /// Sets all effects for the layer.
   pub fn set_effects(&self, p_effects: LayerEffects<'a>) {
     self.borrow_mut().set_effects(p_effects);
@@ -265,7 +271,7 @@ impl<'a> Layer<'a> {
 
   layer_method_imm_scalar!(
     /// Gets the blend mode of the layer.
-    blend_mode() -> fn(RGBA, RGBA) -> RGBA
+    blend_mode() -> BlendMode
   );
 
   layer_method_imm_scalar!(

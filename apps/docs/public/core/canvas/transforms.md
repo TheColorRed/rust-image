@@ -10,17 +10,17 @@ Canvas and layer transforms provide resize, crop, rotation, and flip operations.
 
 ## Layer transforms
 
-Call `layer.transform()` to get a chainable `LayerTransform` proxy:
+Call `layer.transform()` to get a `LayerTransform` proxy. Its methods come from the `Transform` trait, the same trait `Image` implements:
 
 ```rust
-use abra::abra_core::{FlipAxis, ResizeTarget, Size};
+use abra::abra_core::{FlipAxis, ResizeTarget, Size, Transform};
 
 let photo = canvas.get_layer_by_name("Photo").unwrap();
 
-photo.transform()
-  .resize(ResizeTarget::FitWidth(640), None)
-  .crop(0, 0, 640, 360)
-  .rotate(2.0, None);
+let mut transform = photo.transform();
+transform.resize(ResizeTarget::FitWidth(640), None);
+transform.crop(0, 0, 640, 360);
+transform.rotate(2.0, None);
 ```
 
 ### Resize

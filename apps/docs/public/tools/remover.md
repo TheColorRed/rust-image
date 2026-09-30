@@ -142,6 +142,27 @@ For each position, the remover:
 
 Only color is changed. The alpha channel is left as it was.
 
+## Building blocks
+
+`remover` is a thin wrapper around library pieces you can use directly:
+
+- **Coverage shapes** from `drawing`: `StrokeCoverage` (a round brush dragged along points), `RectCoverage` and `PolygonCoverage`. Any `CoverageMask` works.
+- **`CoverageMap`** rasterizes a shape into an anti-aliased mask over a window of pixels, with `distance_inside` and `distance_outside` for how far each pixel is from the edge.
+- **`heal(&shape)`** from `filters::repair` does the healing itself, with `with_distance`, `with_feather` and `with_source`.
+
+`with_source` borrows texture from a fixed offset instead of searching for the best match, like a healing brush with a chosen source point:
+
+```rust
+use abra::drawing::prelude::StrokeCoverage;
+use abra::filters::prelude::repair::heal;
+
+let spot = StrokeCoverage::new(&[PointF::new(120, 80)], 6.0);
+heal(&spot).with_distance(4).with_feather(2).apply(&mut image);
+
+// Take the texture from 40 pixels to the left.
+heal(&spot).with_source((-40, 0)).apply(&mut image);
+```
+
 ## Notes
 
 - Shapes that fall off the image are clipped, and a shape that misses the image entirely does nothing.

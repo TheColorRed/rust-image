@@ -33,5 +33,5 @@ pub fn apply_kernel(p_image: &mut Image, p_kernel: &[f32]) {
     }
   });
 
-  p_image.set_rgba_owned(new_pixels);
+  p_image.set_rgba(new_pixels);
 }

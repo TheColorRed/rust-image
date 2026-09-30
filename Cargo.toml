@@ -9,6 +9,7 @@ members = [
   "apps/examples/*",
   "apps/examples/ai/super-resolution",
   "packages/node/alakazam",
+  "packages/react-native/alakazam",
 ]
 exclude = ["apps/examples/ai"]
 default-members = [
@@ -41,8 +42,8 @@ saphyr = { version = "0.1.0" }
 ctor = { version = "1.0.13" }
 paste = { version = "1.0.15" }
 ort = { version = "2.0.0-rc.13" }
-napi = { version = "3.12.7", default-features = false, features = ["napi4"] }
-napi-derive = { version = "3.6.8" }
+napi = { version = "3.13.0", default-features = false, features = ["napi4"] }
+napi-derive = { version = "3.6.9" }
 swash = { version = "0.2.10" }
 
 # Packages
@@ -58,7 +59,7 @@ primitives = { path = "./abra/core/primitives" }
 tools = { path = "./abra/core/tools" }
 
 gpu = { path = "./abra/core/gpu" }
-gpu_integration = { path = "./abra/core/gpu_integration" }
+abra-live = { path = "./abra/core/live" }
 typography = { path = "./abra/core/typography" }
 
 # Abra Plugins

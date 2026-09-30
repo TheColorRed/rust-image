@@ -16,6 +16,7 @@
 mod core {
   pub mod compositor;
   pub mod coverage;
+  pub mod coverage_map;
   pub mod painter;
   pub mod rasterize;
   pub mod sampling;
@@ -39,7 +40,8 @@ mod performance;
 
 pub use brush::brush::Brush;
 pub use core::compositor::{Compositor, SourceOverCompositor};
-pub use core::coverage::{CoverageMask, PolygonCoverage};
+pub use core::coverage::{CoverageMask, PolygonCoverage, RectCoverage, StrokeCoverage};
+pub use core::coverage_map::CoverageMap;
 pub use core::painter::*;
 pub use core::rasterize::Rasterizer;
 pub use core::sampling::SampleGrid;

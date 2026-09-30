@@ -42,14 +42,18 @@ perspective(area).apply(&mut image);
 
 | Method                             | Default   | Behavior                                                                      |
 | ---------------------------------- | --------- | ----------------------------------------------------------------------------- |
-| `with_crop(bool)`                  | `true`    | Keep only the flattened area. `false` stretches it to its bounding box in place. |
+| `with_fit(TransformFit)`           | `Crop`    | How the result is sized. See [Fit](#fit).                                     |
 | `with_algorithm(TransformAlgorithm)` | `Lanczos` | Interpolation used to resample. The edge-directed algorithms use Lanczos here. |
 
-## Cropping
+## Fit
 
-With `with_crop(true)` the result is exactly the flattened area.
+| Value                 | Result                                                                                                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `TransformFit::Crop`   | Exactly the flattened area. Default.                                                                          |
+| `TransformFit::Fill`   | The whole image, the same size as the original, with the area stretched out in place and zoomed in to fill.  |
+| `TransformFit::Expand` | Like `Fill`, but the canvas grows to show the whole corrected image instead of zooming in, with transparent gaps. |
 
-With `with_crop(false)` the whole image is warped and stays the same size as the original, and the area is stretched out in place to fill its bounding box. Each corner only moves outwards, and no further than the corners next to it already reach:
+With `TransformFit::Fill` the whole image is warped and stays the same size as the original, and the area is stretched out in place to fill its bounding box. Each corner only moves outwards, and no further than the corners next to it already reach:
 
 | Corner       | Moves                                                                      |
 | ------------ | -------------------------------------------------------------------------- |
@@ -63,5 +67,20 @@ For a building photographed from below, the bottom and sides stay where they are
 Stretching the area out also stretches what lies beyond it, and beyond its longer sides that pulls in parts of the view from past the edges of the photo. The result then zooms in, keeping its size and aspect ratio, just far enough that every pixel comes from the photo. Nothing is smeared out from the edges and no transparent gaps open up.
 
 ```rust
-perspective(area).with_crop(false).with_algorithm(TransformAlgorithm::Bicubic).apply(&mut image);
+perspective(area).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Bicubic).apply(&mut image);
+```
+
+With `TransformFit::Expand` nothing is zoomed away: the canvas grows to fit the corrected image and the parts the photo does not reach are transparent. A strong correction can stretch the far edge of the photo out towards infinity, so the canvas grows at most half the image's size past each edge.
+
+## Building blocks
+
+`perspective` is a thin wrapper around library pieces you can use directly:
+
+- `Area::to_quad()` finds the four corners of the area, in order.
+- `Quad::flattened_size()` works out the rectangle the corners flatten to.
+- `warp(from, to)` moves the four corners of one `Quad` onto another, with the same `with_fit` options.
+
+```rust
+let quad = area.to_quad().expect("four corners");
+warp(quad, Quad::rect((0, 0), quad.flattened_size())).with_fit(TransformFit::Crop).apply(&mut image);
 ```

@@ -1,7 +1,6 @@
 // #[cfg(debug_assertions)]
-// use crate::combine::blend::blend_mode_name;
 
-use abra_core::{Gradient, Path, TransformAlgorithm, blend::blend_mode_name};
+use abra_core::{Gradient, Path, TransformAlgorithm};
 use std::time::Duration;
 
 use canvas::{DropShadow, Stroke};
@@ -180,7 +179,7 @@ impl<'a> DebugEffects<'a> {
         options.angle,
         options.size,
         options.spread,
-        blend_mode_name(options.blend_mode).1,
+        options.blend_mode.label(),
         options.fill,
         duration
       ),

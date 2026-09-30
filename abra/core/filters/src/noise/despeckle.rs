@@ -1,6 +1,6 @@
 use crate::common::*;
 
-use abra_core::color::{Histogram, HistogramChannel};
+use abra_core::{Channel, Histogram};
 
 fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
   let (width, height) = p_image.dimensions::<u32>();
@@ -37,11 +37,9 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
 
       // Clear and get mutable access to histogram arrays
       hist.clear();
-      let (r_hist, g_hist, b_hist) = hist.rgb_mut();
 
       let mut min_lum = i32::MAX;
       let mut max_lum = i32::MIN;
-      let mut pixel_count = 0u64;
 
       // Iterate over kernel neighborhood and build histograms
       for dy in -r..=r {
@@ -56,10 +54,7 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
           let (nr, ng, nb) =
             unsafe { (*src.get_unchecked(n_idx), *src.get_unchecked(n_idx + 1), *src.get_unchecked(n_idx + 2)) };
 
-          r_hist[nr as usize] += 1;
-          g_hist[ng as usize] += 1;
-          b_hist[nb as usize] += 1;
-          pixel_count += 1;
+          hist.add_rgb(nr, ng, nb);
 
           // Compute luminance using integer approximation
           let lum = (299 * (nr as i32) + 587 * (ng as i32) + 114 * (nb as i32)) / 1000;
@@ -72,9 +67,9 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
       let center_lum = (299 * cr + 587 * cg + 114 * cb) / 1000;
 
       // Compute median using histogram (much faster than sorting!)
-      let mr = hist.median(HistogramChannel::Red, pixel_count) as i32;
-      let mg = hist.median(HistogramChannel::Green, pixel_count) as i32;
-      let mb = hist.median(HistogramChannel::Blue, pixel_count) as i32;
+      let mr = hist.channel(Channel::R).median() as i32;
+      let mg = hist.channel(Channel::G).median() as i32;
+      let mb = hist.channel(Channel::B).median() as i32;
 
       // If pixel is an outlier (local min or local max), replace with median
       let mut out_r = cr as u8;
@@ -106,21 +101,28 @@ fn apply_despeckle(p_image: &mut Image, p_radius: f32, p_threshold: f32) {
     }
   });
 
-  p_image.set_rgba_owned(out);
+  p_image.set_rgba(out);
 }
 /// Applies a despeckle filter to the image, removing isolated noise pixels while preserving edges.
 /// - `p_image`: The image to apply the filter to.
 /// - `p_apply_options`: Options to specify for the filter.
+#[derive(Clone)]
 pub struct Despeckle {
   radius: f32,
   threshold: f32,
   options: Options,
 }
+options::cpu_processor!(Despeckle);
+
 impl Apply for Despeckle {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();
@@ -200,26 +202,21 @@ mod tests {
     let y = 1usize;
     let x = 2usize;
     let mut hist = Histogram::new();
-    let (r_hist, g_hist, b_hist) = hist.rgb_mut();
     let r = 1i32;
     let h = 3usize;
-    let mut pixel_count = 0u64;
 
     for dy in -r..=r {
       let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as usize;
       for dx in -r..=r {
         let nx = (x as i32 + dx).clamp(0, w as i32 - 1) as usize;
         let n_idx = (ny * w + nx) * 4;
-        r_hist[src[n_idx] as usize] += 1;
-        g_hist[src[n_idx + 1] as usize] += 1;
-        b_hist[src[n_idx + 2] as usize] += 1;
-        pixel_count += 1;
+        hist.add_rgb(src[n_idx], src[n_idx + 1], src[n_idx + 2]);
       }
     }
 
-    let mr = hist.median(HistogramChannel::Red, pixel_count);
-    let mg = hist.median(HistogramChannel::Green, pixel_count);
-    let mb = hist.median(HistogramChannel::Blue, pixel_count);
+    let mr = hist.channel(Channel::R).median();
+    let mg = hist.channel(Channel::G).median();
+    let mb = hist.channel(Channel::B).median();
 
     // Debug: print neighbors to help track median behavior
     // debug: neighbors and median computed

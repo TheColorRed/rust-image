@@ -1,6 +1,4 @@
 use crate::Image;
-use crate::fs::mkdirp;
-use crate::fs::path::dirname;
 use crate::fs::writer_options::WriterOptions;
 
 use png::ColorType::Rgba;
@@ -10,8 +8,6 @@ use std::fs::File;
 /// Writes the image data to a PNG file
 pub fn write_png(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let p_file = p_file.into();
-  let dir = dirname(&p_file);
-  mkdirp(&dir).unwrap_or_else(|_| panic!("Error creating directory {}", &dir));
   let p_file = File::create(p_file).map_err(|e| e.to_string())?;
   let (width, height) = p_image.dimensions();
   let mut encoder = Encoder::new(p_file, width, height);
@@ -30,11 +26,9 @@ pub fn write_png(p_file: impl Into<String>, p_image: &Image, p_options: &Option<
     } else {
       png::Compression::High
     };
-    println!("PNG Compression level set to {:?}", compression);
     encoder.set_compression(compression);
   } else {
     encoder.set_compression(png::Compression::default());
-    println!("PNG Compression level set to Balanced");
   }
 
   let mut writer = encoder.write_header().unwrap();

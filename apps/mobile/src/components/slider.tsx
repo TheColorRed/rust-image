@@ -1,0 +1,126 @@
+import RNSlider from '@react-native-community/slider';
+import { RotateCcw } from 'lucide-react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTheme, type ThemeColors } from '@/src/lib/theme';
+
+const DEBOUNCE_MS = 300;
+
+const formatValue = (value: number, step: number) => {
+  const rounded = step >= 1 ? Math.round(value) : Math.round(value * 10) / 10;
+  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+};
+
+export interface SliderProps {
+  /** The minimum value of the slider. */
+  min: number;
+  /** The maximum value of the slider. */
+  max: number;
+  /** The step between selectable values. Use a fractional step (e.g. 0.1) for finer controls. */
+  step?: number;
+  /** The label for the slider. */
+  label: string;
+  /** Whether the slider should show a reset button. */
+  reset: boolean;
+  /** The value the slider starts at, and what the reset button returns it to. */
+  initialValue?: number;
+  /** The trigger type for the slider. Debounce triggers after a delay, release triggers on release. */
+  triggerType?: 'live' | 'debounce' | 'release';
+  /** Trigged when the slider value changes (ignores `triggerType`). */
+  onChange?: (value: number) => void;
+  /** Trigged when the slider is reset. */
+  onReset?: () => void;
+  /** Trigged when the slider value is triggered based on `triggerType`. */
+  onTrigger?: (value: number) => void;
+}
+
+/** A labelled slider with a live value readout and an optional reset-to-original button. */
+export function Slider({
+  min,
+  max,
+  step = 1,
+  label,
+  reset,
+  initialValue = 0,
+  triggerType = 'live',
+  onChange,
+  onReset,
+  onTrigger,
+}: SliderProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [value, setValue] = useState(initialValue);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  function handleChange(next: number) {
+    setValue(next);
+    onChange?.(next);
+    if (triggerType === 'debounce') {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => onTrigger?.(next), DEBOUNCE_MS);
+    }
+    if (triggerType === 'live') {
+      onTrigger?.(next);
+    }
+  }
+
+  function handleSlidingComplete(next: number) {
+    if (triggerType !== 'release') return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    onTrigger?.(next);
+  }
+
+  function handleReset() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setValue(initialValue);
+    onReset?.();
+  }
+
+  return (
+    <View style={styles.row}>
+      <Text style={styles.label}>{label}</Text>
+      <RNSlider
+        style={styles.slider}
+        minimumValue={min}
+        maximumValue={max}
+        step={step}
+        value={value}
+        minimumTrackTintColor={colors.accent}
+        maximumTrackTintColor={colors.chip}
+        thumbTintColor={colors.accent}
+        onValueChange={handleChange}
+        onSlidingComplete={handleSlidingComplete}
+      />
+      <Text style={styles.value}>{formatValue(value, step)}</Text>
+      {reset && (
+        <Pressable onPress={handleReset} hitSlop={8} style={styles.resetButton}>
+          <RotateCcw color={colors.textSecondary} size={16} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    label: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', width: 78 },
+    slider: { flex: 1, height: 36 },
+    value: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', width: 40, textAlign: 'right' },
+    resetButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+  });
+}

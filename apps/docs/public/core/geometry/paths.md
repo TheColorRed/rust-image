@@ -27,12 +27,14 @@ path.move_to((20, 40))
 Convenience constructors cover common paths:
 
 ```rust
+use abra::abra_core::Area;
+
 let line = Path::line((0, 0), (320, 180));
-let rectangle = Path::rect((10, 10), 300.0, 160.0);
-let ellipse = Path::ellipse((160, 90), 140.0, 80.0, 64);
+let rectangle: Path = Area::rect((10, 10), (300, 160)).into();
+let ellipse: Path = Area::ellipse((160, 90), (280, 160)).into();
 ```
 
-`Path::ellipse` approximates an ellipse using line segments. Increase the segment count for a smoother outline.
+Closed outlines such as rectangles and ellipses are built as an [`Area`](./areas) and converted into a `Path` when an open path is needed.
 
 ## Segments
 
@@ -70,7 +72,6 @@ Raster operations often need a polyline approximation. `flatten` converts curves
 
 ```rust
 let polyline = path.flatten(0.5);
-let integer_points = path.to_points(0.5);
 ```
 
 Smaller tolerances produce more points and a closer approximation. Larger tolerances are faster but less precise.
@@ -79,7 +80,8 @@ Smaller tolerances produce more points and a closer approximation. Larger tolera
 
 ```rust
 let length = path.length();
-let (min_x, min_y, max_x, max_y) = path.bounds::<f32>();
+let bounds = path.bounds(); // a Rect
+let (min_x, min_y, max_x, max_y) = bounds.edges::<f32>();
 let closest = path.closest_time(100.0, 60.0);
 ```
 
@@ -87,17 +89,17 @@ let closest = path.closest_time(100.0, 60.0);
 
 ## Viewports
 
-Map a path from an abstract coordinate system to a viewport with `ViewBox` and `AspectRatio`:
+Map a path from an abstract coordinate system into a viewport, or fit it from its own bounds:
 
 ```rust
-use abra::abra_core::{AspectRatio, ViewBox};
+use abra::abra_core::{AspectRatio, Rect};
 
-let viewbox = ViewBox::new(0.0, 0.0, 320.0, 180.0);
-let rendered = path.transform_to_viewport(&viewbox, 640.0, 360.0, AspectRatio::meet());
-let inferred = path.to_viewbox();
+let design = Rect::new((0, 0), (320, 180));
+let rendered = path.transform_to_viewport(&design, (640, 360), AspectRatio::meet());
+let fitted = path.fit((640, 360), AspectRatio::meet());
 ```
 
-See [ViewBox](./viewbox) for `Meet`, `Slice`, stretching, and alignment.
+See [Rectangles and viewports](./rect) for `Meet`, `Slice`, stretching, and alignment.
 
 ## Stroke a path
 

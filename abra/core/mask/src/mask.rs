@@ -273,11 +273,11 @@ mod tests {
   #[test]
   fn draw_star_area_offset_is_correct() {
     use abra_core::image::image_ext::*;
-    use abra_core::{AspectRatio, Star};
+    use abra_core::{AspectRatio, Shape};
     let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
     let mut mask = Mask::new_from_image(&img);
     // Create a star area sized to half the image and not positioned explicitly
-    let area = Star::new().fit_with_aspect(img.size() / 2, AspectRatio::meet());
+    let area = Area::shape(Shape::Star).fit(img.size() / 2, AspectRatio::meet());
     mask.draw_area(&area, Color::black(), None);
     // compute topmost row with non-white pixel
     let mut topmost: Option<u32> = None;
@@ -300,10 +300,10 @@ mod tests {
   #[test]
   fn draw_star_area_offset_with_position() {
     use abra_core::image::image_ext::*;
-    use abra_core::{AspectRatio, Star};
+    use abra_core::{AspectRatio, Shape};
     let img = Image::new_from_color(200, 200, Color::from_rgba(255, 255, 255, 255));
     let mut mask = Mask::new_from_image(&img);
-    let area = Star::new().fit_with_aspect(img.size() / 2, AspectRatio::meet());
+    let area = Area::shape(Shape::Star).fit(img.size() / 2, AspectRatio::meet());
     // Draw with an explicit offset
     mask.draw_area(&area, Color::black(), (10.0, 20.0));
     // compute topmost row with non-white pixel

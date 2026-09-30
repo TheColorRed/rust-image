@@ -1,10 +1,10 @@
-use crate::{Channels, fs::file_info::FileInfo};
+use crate::{Channels, Image};
 use gif::DecodeOptions;
 use std::fs::File;
 use std::io::BufReader;
 
 /// Reads a GIF file and returns the first frame's image data
-pub fn read_gif(p_file: impl Into<String>) -> Result<FileInfo, String> {
+pub fn read_gif(p_file: impl Into<String>) -> Result<Image, String> {
   let p_file = p_file.into();
   let p_file = File::open(p_file).map_err(|e| e.to_string())?;
   let decoder = DecodeOptions::new();
@@ -22,7 +22,7 @@ pub fn read_gif(p_file: impl Into<String>) -> Result<FileInfo, String> {
   // Convert indexed color to RGBA
   let pixels = indexed_to_rgba(&buffer, width, height, decoder.global_palette())?;
 
-  let info = FileInfo::new(width, height, Channels::RGBA, pixels);
+  let info = Image::new_from_pixels(width, height, pixels, Channels::RGBA);
 
   Ok(info)
 }

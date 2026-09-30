@@ -156,17 +156,24 @@ fn apply_smooth_skin_with_options<'a>(p_image: impl Into<ImageRef<'a>>, p_amount
   apply_filter!(apply_smooth_skin, image, opts, pad, amount);
 }
 
+#[derive(Clone)]
 pub struct SmoothSkin {
   amount: f32,
   options: Options,
 }
 
+options::cpu_processor!(SmoothSkin);
+
 impl Apply for SmoothSkin {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     apply_smooth_skin_with_options(p_image, self.amount, self.options.clone());
   }
 }

@@ -1,8 +1,8 @@
 use crate::common::*;
 
 use abra_core::Size;
-use abra_core::color::{Histogram, HistogramChannel};
-use abra_core::transform::{Resize, ResizeTarget, TransformAlgorithm};
+use abra_core::transform::{ResizeTarget, Transform, TransformAlgorithm};
+use abra_core::{Channel, Histogram};
 
 fn apply_surface_blur(p_image: &mut Image, p_radius: u32, p_threshold: u8) {
   if p_radius == 0 {
@@ -57,7 +57,6 @@ fn apply_surface_blur(p_image: &mut Image, p_radius: u32, p_threshold: u8) {
 
       // Clear and get mutable access to histogram arrays
       hist.clear();
-      let (r_hist, g_hist, b_hist) = hist.rgb_mut();
 
       // Build histogram of neighbors
       for dy in -r..=r {
@@ -72,16 +71,14 @@ fn apply_surface_blur(p_image: &mut Image, p_radius: u32, p_threshold: u8) {
           let (nr, ng, nb) =
             unsafe { (*src.get_unchecked(n_idx), *src.get_unchecked(n_idx + 1), *src.get_unchecked(n_idx + 2)) };
 
-          r_hist[nr as usize] += 1;
-          g_hist[ng as usize] += 1;
-          b_hist[nb as usize] += 1;
+          hist.add_rgb(nr, ng, nb);
         }
       }
 
       // Compute weighted average within threshold using histogram
-      let out_r = hist.weighted_average(HistogramChannel::Red, cr, p_threshold);
-      let out_g = hist.weighted_average(HistogramChannel::Green, cg, p_threshold);
-      let out_b = hist.weighted_average(HistogramChannel::Blue, cb, p_threshold);
+      let out_r = hist.channel(Channel::R).weighted_average(cr, p_threshold);
+      let out_g = hist.channel(Channel::G).weighted_average(cg, p_threshold);
+      let out_b = hist.channel(Channel::B).weighted_average(cb, p_threshold);
 
       let dst = &mut row[x * 4..(x + 1) * 4];
       dst[0] = out_r;
@@ -91,25 +88,32 @@ fn apply_surface_blur(p_image: &mut Image, p_radius: u32, p_threshold: u8) {
     }
   });
 
-  p_image.set_rgba_owned(out);
+  p_image.set_rgba(out);
 }
 /// Applies a surface blur to an image.
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the surface blur.
 /// - `p_threshold`: The threshold for the surface blur.
 /// - `p_apply_options`: Additional options for applying the blur.
+#[derive(Clone)]
 pub struct SurfaceBlur {
   radius: u32,
   threshold: u8,
   options: Options,
 }
 
+options::cpu_processor!(SurfaceBlur);
+
 impl Apply for SurfaceBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

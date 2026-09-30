@@ -1,5 +1,6 @@
 use crate::common::*;
-use abra_core::{Channels, Resize, ResizeTarget, Size};
+use abra_core::image::gpu::{CpuProcessor, GpuPass, GpuProcessor};
+use abra_core::{Channels, ResizeTarget, Size, Transform};
 use abra_core::{IntoNumber, if_pick};
 
 fn gaussian_kernel_1d(p_radius: u32) -> Vec<f32> {
@@ -118,14 +119,14 @@ fn apply_gaussian_blur(p_image: &mut Image, p_radius: u32) {
     let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
     tmp_img.resize(ResizeTarget::Exact(Size::new(down_w, down_h)), None);
     let blurred_small = separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
-    tmp_img.set_rgba_owned(blurred_small);
+    tmp_img.set_rgba(blurred_small);
     tmp_img.resize(ResizeTarget::Exact(Size::new(width, height)), None);
     tmp_img.into_rgba_vec()
   } else {
     separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)
   };
 
-  p_image.set_rgba_owned(vertical);
+  p_image.set_rgba(vertical);
 }
 
 #[derive(Clone)]
@@ -134,16 +135,45 @@ pub struct GaussianBlur {
   options: Options,
 }
 
+impl GpuProcessor for GaussianBlur {
+  /// A horizontal pass followed by a vertical pass. Unlike the CPU path, large radii are not downsampled.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    if self.radius == 0 {
+      return Vec::new();
+    }
+    let pass = |direction: u32| {
+      let uniforms: Vec<u8> =
+        [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
+      GpuPass::new(include_str!("./gaussian.wgsl"), uniforms)
+    };
+    vec![pass(0), pass(1)]
+  }
+}
+
+impl CpuProcessor for GaussianBlur {
+  fn process(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
+  }
+
+  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
 impl Apply for GaussianBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();
-    apply_filter!(apply_gaussian_blur, image, options, self.radius as i32, self.radius);
+    apply_filter!(gpu = self; apply_gaussian_blur, image, options, self.radius as i32, self.radius);
   }
 }
 
@@ -160,6 +190,46 @@ mod tests {
 
   use super::gaussian_blur;
   use abra_core::{Area, Image};
+
+  fn test_pixels(p_width: u32, p_height: u32) -> Vec<u8> {
+    let mut pixels = Vec::new();
+    for y in 0..p_height {
+      for x in 0..p_width {
+        // Hard edges and a bright dot, so blurring visibly matters and clamped borders are exercised.
+        let value = if (x / 5 + y / 4) % 2 == 0 { 230 } else { 20 };
+        pixels.extend_from_slice(&[value, (x * 7) as u8, (y * 9) as u8, if x == 3 && y == 3 { 40 } else { 255 }]);
+      }
+    }
+    pixels
+  }
+
+  #[test]
+  fn gpu_blur_matches_the_cpu_blur() -> anyhow::Result<()> {
+    use gpu::{GpuContext, LiveRenderer};
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let (width, height) = (41u32, 27u32);
+    let pixels = test_pixels(width, height);
+
+    for radius in [1u32, 2, 5, 12] {
+      let expected = super::separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, radius);
+      let actual = renderer.process(&[&gaussian_blur(radius)], width, height, &pixels)?;
+      assert_eq!(actual.len(), expected.len());
+      for (index, (a, e)) in actual.iter().zip(&expected).enumerate() {
+        // The CPU truncates after each pass and the GPU rounds, so allow a couple of levels.
+        assert!(a.abs_diff(*e) <= 2, "radius {radius}, byte {index}: gpu {a} vs cpu {e}");
+      }
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn gpu_blur_radius_zero_is_a_no_op() -> anyhow::Result<()> {
+    use gpu::{GpuContext, LiveRenderer};
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels = test_pixels(9, 9);
+    assert_eq!(renderer.process(&[&gaussian_blur(0)], 9, 9, &pixels)?, pixels);
+    Ok(())
+  }
 
   #[test]
   fn gaussian_blur_without_area_does_not_panic() {

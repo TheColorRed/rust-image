@@ -7,9 +7,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use abra_core::IntoNumber;
-use abra_core::Rotate;
-use abra_core::{Crop, FlipAxis, Resize, ResizeTarget, TransformAlgorithm};
+use abra_core::{FlipAxis, IntoNumber, ResizeTarget, Transform, TransformAlgorithm};
 
 use super::layer_inner::{LayerInner, LayerOperation};
 
@@ -29,21 +27,20 @@ impl<'a> LayerTransform<'a> {
   }
 }
 
-impl<'a> Resize for LayerTransform<'a> {
+impl<'a> Transform for LayerTransform<'a> {
+  type Target = ResizeTarget;
+
   fn resize(&mut self, p_target: ResizeTarget, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
     self.layer.lock().unwrap().queue_operation(LayerOperation::Resize(p_target, p_algorithm.into()));
     self.layer.lock().unwrap().mark_dirty();
   }
-}
 
-impl<'a> Crop for LayerTransform<'a> {
-  fn crop(&mut self, p_x: u32, p_y: u32, p_width: u32, p_height: u32) {
-    self.layer.lock().unwrap().queue_operation(LayerOperation::Crop(p_x, p_y, p_width, p_height));
+  fn crop(&mut self, p_x: impl IntoNumber, p_y: impl IntoNumber, p_width: impl IntoNumber, p_height: impl IntoNumber) {
+    let (x, y, width, height) = (p_x.into::<u32>(), p_y.into::<u32>(), p_width.into::<u32>(), p_height.into::<u32>());
+    self.layer.lock().unwrap().queue_operation(LayerOperation::Crop(x, y, width, height));
     self.layer.lock().unwrap().mark_dirty();
   }
-}
 
-impl<'a> Rotate for LayerTransform<'a> {
   fn rotate(&mut self, p_angle_in_degrees: impl IntoNumber, p_algorithm: impl Into<Option<TransformAlgorithm>>) {
     self.layer.lock().unwrap().queue_operation(LayerOperation::Rotate(p_angle_in_degrees.into(), p_algorithm.into()));
     self.layer.lock().unwrap().mark_dirty();

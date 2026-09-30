@@ -14,3 +14,4 @@ rayon = { workspace = true }
 [dev-dependencies]
 gpu = { path = "../gpu" }
 primitives = { path = "../primitives" }
+anyhow = { workspace = true }

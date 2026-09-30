@@ -16,7 +16,7 @@ The Abra core documentation covers the foundational image-processing APIs: adjus
 | [Canvas](./canvas/)              | Layered composition, positioning, transforms, and effects.        |
 | [Color](./color/)                | RGBA colors, fills, gradients, and histograms.                    |
 | [Filters](./filters/)            | Blur, sharpen, noise, edge, smoothing, and distortion operations. |
-| [Geometry](./geometry/)          | Points, paths, areas, strokes, shapes, and viewbox mapping.       |
+| [Geometry](./geometry/)          | Points, paths, areas, strokes, shapes, and rectangles.           |
 | [Drawing](./drawing/)            | Fills, brushes, painter contexts, and rasterized drawing.         |
 | [Typography](./typography/)      | Font loading, text layout, and rasterized text rendering.         |
 | [Masks](./mask/)                 | Grayscale visibility masks and per-pixel effect strength.         |

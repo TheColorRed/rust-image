@@ -1,4 +1,4 @@
-use abra_core::{Histogram, HistogramChannel, Image, image::image_ext::ImageRef};
+use abra_core::{Channel, Histogram, Image, image::image_ext::ImageRef};
 use options::{Apply, Options};
 
 use rayon::prelude::*;
@@ -14,12 +14,12 @@ fn apply_auto_tone(p_image: &mut Image) {
   let clip_fraction: f32 = 0.005;
 
   // Compute histogram skipping fully-transparent pixels
-  let hist = Histogram::from_image_skip_transparent(p_image);
+  let hist = Histogram::from_rgba(p_image.rgba(), true);
 
   // Build per-channel levels LUTs using histogram helpers
-  let lut_r = hist.levels_lut(HistogramChannel::Red, clip_fraction);
-  let lut_g = hist.levels_lut(HistogramChannel::Green, clip_fraction);
-  let lut_b = hist.levels_lut(HistogramChannel::Blue, clip_fraction);
+  let lut_r = hist.channel(Channel::R).levels_lut(clip_fraction);
+  let lut_g = hist.channel(Channel::G).levels_lut(clip_fraction);
+  let lut_b = hist.channel(Channel::B).levels_lut(clip_fraction);
 
   // Apply the per-channel LUT transform in parallel
   out.par_chunks_mut(4).enumerate().for_each(|(idx, dst_px)| {
@@ -41,20 +41,26 @@ fn apply_auto_tone(p_image: &mut Image) {
     dst_px[2] = lut_b[b as usize];
     dst_px[3] = a;
   });
-  p_image.set_rgba(&out);
+  p_image.set_rgba(out);
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AutoTone {
   options: Options,
 }
 
+options::cpu_processor!(AutoTone);
+
 impl Apply for AutoTone {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_auto_tone, image, self.options.as_ref(), 1);

@@ -1,6 +1,5 @@
-use abra_core::{Color, Fill, Image, Path, Point};
+use abra_core::{Color, Fill, Image, Path, PointF};
 
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -38,7 +37,7 @@ impl<'a> Stroke<'a> {
   /// - color: black with 100% opacity (0, 0, 0, 255)
   pub fn new() -> Self {
     Stroke {
-      fill: Fill::Solid(Cow::Owned(Color::black())),
+      fill: Fill::Solid(Color::black()),
       opacity: 1.0,
       size: 3,
       position: OutlinePosition::Inside,
@@ -83,14 +82,15 @@ pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image
   let max_y = (height.saturating_sub(1)) as i32;
 
   // We will build our path at the original image border coordinates.
-  let relative_path = Point::array(vec![(0, 0), (max_x, 0), (max_x, max_y), (0, max_y), (0, 0)]);
+  let relative_path: Vec<PointF> =
+    [(0, 0), (max_x, 0), (max_x, max_y), (0, max_y), (0, 0)].into_iter().map(PointF::from).collect();
 
   // Create a path from the calculated points.
   let mut path = Path::new();
   if !relative_path.is_empty() {
-    path.move_to((relative_path[0].x() as f32, relative_path[0].y() as f32));
+    path.move_to((relative_path[0].x, relative_path[0].y));
     for point in relative_path.iter().skip(1) {
-      path.line_to((point.x() as f32, point.y() as f32));
+      path.line_to((point.x, point.y));
     }
   }
 
@@ -98,7 +98,7 @@ pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image
   let solid_color = match &p_options.fill {
     Fill::Solid(cow) => {
       // Ensure owned Color so we can mutate alpha regardless of borrow state.
-      let mut col = cow.clone().into_owned();
+      let mut col = *cow;
       let factor = p_options.opacity.clamp(0.0, 1.0);
       col.a = ((col.a as f32) * factor).round().clamp(0.0, 255.0) as u8;
       col
@@ -111,7 +111,7 @@ pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image
     }
   };
 
-  let fill = Fill::Solid(Cow::Owned(solid_color));
+  let fill = Fill::Solid(solid_color);
 
   // Use the Painter to render the stroke using a brush. Build a brush based on options
   // with a hardness of 1.0 and paint the path directly into the composite image.

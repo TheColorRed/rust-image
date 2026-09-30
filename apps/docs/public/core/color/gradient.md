@@ -37,11 +37,11 @@ The first point of the path is the start of the gradient and the last point is t
 let gradient = Gradient::from_to(Color::red(), Color::blue());
 ```
 
-For a fade to a neutral color, use `to_black` or `to_white`:
+For a fade to a neutral color, end on black or white:
 
 ```rust
-let shade = Gradient::to_black(Color::orange());
-let tint = Gradient::to_white(Color::orange());
+let shade = Gradient::from_to(Color::orange(), Color::black());
+let tint = Gradient::from_to(Color::orange(), Color::white());
 ```
 
 ### Evenly spaced colors
@@ -97,14 +97,14 @@ When `fill` is given a gradient without an explicit direction, it uses the fille
 
 ## Reading and transforming gradients
 
-Sample a gradient at a normalized position with `get_color`:
+Sample a gradient at a normalized position with `color_at`:
 
 ```rust
 let gradient = Gradient::from_to(Color::black(), Color::white());
-let middle = gradient.get_color(0.5);
+let middle = gradient.color_at(0.5);
 ```
 
-`get_color` returns an RGBA tuple. `get_color_type` returns the same value as a `Color`. Reverse the color progression with `reverse`:
+`color_at` returns a `Color`. Positions before the first stop or after the last take that stop's color. Reverse the color progression with `reverse`:
 
 ```rust
 let reversed = gradient.reverse();
@@ -151,12 +151,9 @@ pub fn main() {
 | ----------------------------- | --------------------------------------------------- |
 | `Gradient::new(stops)`        | Create a gradient from explicit `ColorStop` values. |
 | `Gradient::from_to(from, to)` | Create a two-color gradient.                        |
-| `Gradient::to_black(from)`    | Fade a color to black.                              |
-| `Gradient::to_white(from)`    | Fade a color to white.                              |
 | `Gradient::evenly(colors)`    | Distribute colors evenly between `0.0` and `1.0`.   |
 | `Gradient::rainbow()`         | Create a red-to-violet rainbow gradient.            |
 | `Gradient::hue()`             | Create a hue-based gradient.                        |
 | `.with_direction(path)`       | Set the start and end points of the gradient.       |
-| `.get_color(time)`            | Sample an RGBA tuple at a normalized position.      |
-| `.get_color_type(time)`       | Sample a `Color` at a normalized position.          |
+| `.color_at(time)`             | Sample a `Color` at a normalized position.          |
 | `.reverse()`                  | Return a gradient with its progression reversed.    |

@@ -6,14 +6,14 @@ outline: deep
 
 # Geometry Overview
 
-Abra's geometry module provides the coordinate types and shapes used by drawing, filling, stroking, transforms, and viewbox rendering.
+Abra's geometry module provides the coordinate types and shapes used by drawing, filling, stroking, transforms, and viewport rendering.
 
 The central distinction is:
 
 - `Path` is an open sequence of lines and curves.
 - `Area` is a closed shape intended for fills, hit testing, and effects.
-- `Point` and `PointF` represent integer and floating-point coordinates.
-- `ViewBox` maps abstract geometry into a target viewport.
+- `PointF` represents coordinates, and `Size` a width and height.
+- `Rect` is an upright rectangle: every `bounds()` result, and the coordinate system geometry is mapped out of.
 
 ## A complete geometry workflow
 
@@ -36,14 +36,14 @@ Use `Area` directly with `fill`, or use `Path` when you need an open line, a gra
 
 ## Coordinate types
 
-`Point` stores integer coordinates and is useful for raster operations. `PointF` stores `f32` coordinates for curves and precise geometric calculations. `Size` stores floating-point width and height.
+`PointF` stores `f32` coordinates. `Size` stores a floating-point width and height, and `Rect` an upright rectangle.
 
 ```rust
-use abra::abra_core::{Point, PointF, Size};
+use abra::abra_core::{PointF, Rect, Size};
 
-let pixel = Point::new(24, 12);
-let precise = PointF::new(24.5, 12.25);
+let point = PointF::new(24.5, 12.25);
 let dimensions = Size::new(320, 180);
+let frame = Rect::new((0, 0), dimensions);
 ```
 
 These types accept common tuples through `Into` conversions, so `(x, y)` and `(width, height)` can often be passed directly.
@@ -53,36 +53,36 @@ These types accept common tuples through `Into` conversions, so `(x, y)` and `(w
 Use the built-in shapes for common closed geometry:
 
 ```rust
-use abra::abra_core::{Heart, Polygon, Star};
+use abra::abra_core::{Area, Shape};
 
-let heart = Heart::new();
-let triangle = Polygon::new(3);
-let star = Star::new();
+let heart = Area::shape(Shape::Heart);
+let triangle = Area::shape(Shape::Polygon(3));
+let star = Area::shape(Shape::Star);
 ```
 
-Built-in shapes are defined in a normalized coordinate space and return `Area` values. See [Shapes](./shapes).
+Shapes are drawn inside a `100 x 100` box and return `Area` values. See [Shapes](./shapes).
 
 ## Viewport rendering
 
-Define geometry in an abstract coordinate system, then map it to different output sizes with a `ViewBox`:
+Define geometry once, then fit it to different output sizes:
 
 ```rust
-use abra::abra_core::{AspectRatio, Heart, ViewBox};
+use abra::abra_core::{Area, AspectRatio, Shape};
 
-let heart = Heart::new();
-let viewbox = ViewBox::new(0.0, 0.0, 100.0, 120.0);
-let path = heart.transform_to_viewport(&viewbox, 500.0, 600.0, AspectRatio::meet());
+let heart = Area::shape(Shape::Heart);
+let large = heart.fit((500, 600), AspectRatio::meet());
+let icon = heart.fit((32, 32), AspectRatio::meet());
 ```
 
-See [ViewBox](./viewbox) for scaling, alignment, and aspect-ratio behavior.
+See [Rectangles and viewports](./rect) for explicit coordinate systems, alignment, and aspect-ratio behavior.
 
 ## Geometry pages
 
 | Page                       | Covers                                                               |
 | -------------------------- | -------------------------------------------------------------------- |
-| [Primitives](./primitives) | `Point`, `PointF`, `Size`, and line helpers.                         |
+| [Primitives](./primitives) | `PointF`, `Size`, and line helpers.                                  |
 | [Paths](./paths)           | Lines, quadratic and cubic curves, sampling, flattening, and bounds. |
 | [Areas](./areas)           | Closed shapes, containment, fitting, and area measurements.          |
 | [Strokes](./strokes)       | Expanding paths and areas with cap and join styles.                  |
-| [Shapes](./shapes)         | Heart, polygon, and star constructors.                               |
-| [ViewBox](./viewbox)       | Resolution-independent coordinate mapping.                           |
+| [Shapes](./shapes)         | Heart, polygon, and star shapes.                                     |
+| [Rectangles](./rect)       | `Rect`, clipping, and resolution-independent coordinate mapping.     |

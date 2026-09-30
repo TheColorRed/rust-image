@@ -39,7 +39,7 @@ pub fn color_picker(active_color: &Color, width: u32, height: u32) -> ImageData 
   let img_trans_to_black = fill(&area, &trans_to_black);
 
   img.draw_image_at(&img_white_to_hue, (0, 0));
-  blend_images(&mut img, &img_trans_to_black, blend::normal);
+  blend_images(&mut img, &img_trans_to_black, BlendMode::Normal);
 
   img.into()
 }

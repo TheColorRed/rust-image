@@ -49,11 +49,11 @@ logo.set_global_position(-24, -24);
 Layers are composited in stack order. Reorder and blend them as needed:
 
 ```rust
-use abra::abra_core::blend;
+use abra::abra_core::BlendMode;
 
 logo.move_to(LayerMove::Top);
 photo.set_opacity(0.85);
-photo.set_blend_mode(blend::normal);
+photo.set_blend_mode(BlendMode::Normal);
 ```
 
 Look up layers by name when configuring a composition in separate steps:

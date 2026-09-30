@@ -37,7 +37,7 @@ pub fn main() {
 
   let p_options = NewLayerOptions::new().with_opacity(1.0);
   let text_layer = canvas.add_layer_from_image("text", text, p_options);
-  text_layer.set_blend_mode(blend::multiply);
+  text_layer.set_blend_mode(BlendMode::Multiply);
   let (width, height) = bg_image.dimensions();
   text_layer.transform().rotate(LineSegment::new((0, 0), (width, height)).degrees(), None);
 

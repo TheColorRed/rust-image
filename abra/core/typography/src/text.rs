@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use abra_core::{Color, Fill, IntoNumber, Path};
+use abra_core::{Area, Color, Fill, IntoNumber, Path};
 use drawing::shader_from_fill_with_path;
 use primitives::Image;
 use swash::{
@@ -151,7 +151,7 @@ impl Default for TextAppearance {
   fn default() -> Self {
     Self {
       size: TextSize::points(16),
-      fill: Fill::Solid(Cow::Owned(Color::black())),
+      fill: Fill::Solid(Color::black()),
       weight: 400,
       style: TextStyle::Normal,
       variations: Vec::new(),
@@ -282,7 +282,7 @@ impl Text {
   /// Sets the fill (color, gradient, or image) used to fill the rasterized text.
   pub fn with_fill<'a>(mut self, p_color: impl Into<Fill<'a>>) -> Self {
     self.appearance.fill = match p_color.into() {
-      Fill::Solid(color) => Fill::Solid(Cow::Owned(color.into_owned())),
+      Fill::Solid(color) => Fill::Solid(color),
       Fill::Gradient(gradient) => Fill::Gradient(Cow::Owned(gradient.into_owned())),
       Fill::Image(image) => Fill::Image(image),
     };
@@ -807,7 +807,7 @@ impl Font {
     let width = (max_x + offset_x).max(1) as u32;
     let height = (max_y + offset_y).max(1) as u32;
     let mut image = Image::new(width, height);
-    let fallback_path = Path::rect((0, 0), width as f32, height as f32);
+    let fallback_path = Path::from(Area::rect((0, 0), (width as f32, height as f32)));
     let shader = shader_from_fill_with_path(p_text.appearance.fill.clone(), Some(fallback_path));
 
     for (x, y, glyph_width, glyph_height, bitmap) in placements {

@@ -73,7 +73,7 @@ impl<'a> Painter<'a> {
     // Fast-path: if the original path is an ellipse and the brush is a solid color,
     // use the SDF-based rasterizer for a much faster stroke of large circular shapes.
     fn detect_ellipse(p_path: &Path) -> Option<(f32, f32, f32, f32)> {
-      let (min_x, min_y, max_x, max_y) = p_path.bounds();
+      let (min_x, min_y, max_x, max_y) = p_path.bounds().edges::<f32>();
       let rx = (max_x - min_x) / 2.0;
       let ry = (max_y - min_y) / 2.0;
       if rx <= 0.0 || ry <= 0.0 {
@@ -202,7 +202,7 @@ mod tests {
   #[test]
   fn stroke_ellipse_fastpath_works() {
     let mut img = Image::new(1200, 1200);
-    let path = Path::ellipse((600.0, 600.0), 400.0, 400.0, 64);
+    let path = Path::from(Area::ellipse((600.0, 600.0), (2.0 * 400.0, 2.0 * 400.0)));
     let black = Color::black();
     let brush = Brush::new().with_size(40).with_color(&black).with_hardness(1.0);
     // Should take the fast SDF path and write pixels
@@ -218,7 +218,7 @@ mod tests {
     use std::time::Instant;
     let mut img_fast = Image::new(1200, 1200);
     let mut img_raster = img_fast.clone();
-    let path_fast = Path::ellipse((600.0, 600.0), 500.0, 500.0, 128);
+    let path_fast = Path::from(Area::ellipse((600.0, 600.0), (2.0 * 500.0, 2.0 * 500.0)));
     // Create a perturbed path by flattening and slightly jittering points to defeat ellipse detection
     let mut pts = path_fast.flatten(0.5);
     for (i, p) in pts.iter_mut().enumerate() {
@@ -256,8 +256,7 @@ mod tests {
     use std::time::Instant;
     let size = 1000.0f32;
     let mut cursor = Image::new((size + 2.0) as u32, (size + 2.0) as u32);
-    let segments = (size * 4.0).clamp(32f32, 360f32) as usize; // matches cursor code
-    let path = Path::ellipse(((size / 2.0) + 1.0, (size / 2.0) + 1.0), size / 2.0, size / 2.0, segments);
+    let path = Path::from(Area::ellipse(((size / 2.0) + 1.0, (size / 2.0) + 1.0), (size, size)));
     let black = Color::black();
     let brush = Brush::new().with_size(4).with_color(&black).with_hardness(1.0);
 

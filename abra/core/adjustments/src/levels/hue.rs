@@ -3,17 +3,24 @@ use options::{Apply, Options};
 
 // TODO: Fix hue adjustment
 /// Adjust the hue of an image where 0.0 is no change, -180.0 is -180 degrees, and 180.0 is 180 degrees.
+#[derive(Clone)]
 pub struct Hue {
   amount: i32,
   options: Options,
 }
 
+options::cpu_processor!(Hue);
+
 impl Apply for Hue {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let _image = &mut image_ref as &mut Image;
     let _amount = self.amount;

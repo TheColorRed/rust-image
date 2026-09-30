@@ -1,5 +1,4 @@
 pub mod color;
-// mod debug;
 mod combine;
 mod fs;
 pub mod geometry;
@@ -12,27 +11,23 @@ pub mod transform;
 pub mod units;
 
 pub use color::*;
-pub use performance::{Performance, PerformanceOptions};
-pub use settings::Settings;
-pub use transform::*;
-// pub use debug::*;
 pub use combine::*;
 pub use fs::WriterOptions;
 pub use fs::path::IntoGlobPatterns;
 pub use fs::path::{get_paths_from_folders, get_paths_from_glob};
 pub use fs::{ImageFormat, reader, writer};
 pub use geometry::*;
-pub use units::*;
-// `image` module content moved to `primitives` crate and re-exported below.
+pub use image::image_ext::{ImageExt, ImageRef};
 pub use image_loader::*;
 pub use loader::*;
-// Re-export primitives Image for workspace users. This replaces the core-defined Image type
-// so consumers can continue to use `use abra_core::Image;` with the new primitives implementation.
-pub use image::image_ext::{CoreImageFsExt, ImageRef};
-pub use primitives::Channels;
+pub use performance::{Performance, PerformanceOptions};
 pub use primitives::Color;
 pub use primitives::Image;
 pub use primitives::Resolution;
+pub use primitives::{Channel, Channels};
+pub use settings::Settings;
+pub use transform::*;
+pub use units::*;
 
 /// Converts primitive numeric inputs to a requested numeric type.
 pub trait IntoNumber {
@@ -102,12 +97,6 @@ impl FromF32 for f64 {
   }
 }
 
-impl FromF32 for i32 {
-  fn from_f32(p_v: f32) -> Self {
-    p_v.round() as _
-  } // or floor(), or trunc()
-}
-
 macro_rules! impl_from_f32_rounding {
   ($($number:ty),+ $(,)?) => {
     $(
@@ -120,19 +109,7 @@ macro_rules! impl_from_f32_rounding {
   };
 }
 
-impl_from_f32_rounding!(i8, i16, i64, i128, isize, u16, u64, u128, usize);
-
-impl FromF32 for u8 {
-  fn from_f32(p_v: f32) -> Self {
-    p_v.round() as _
-  }
-}
-
-impl FromF32 for u32 {
-  fn from_f32(p_v: f32) -> Self {
-    p_v.round() as _
-  }
-}
+impl_from_f32_rounding!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
 #[cfg(test)]
 mod tests {

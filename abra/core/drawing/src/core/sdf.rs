@@ -212,7 +212,7 @@ pub fn draw_ellipse_stroke(p_img: &mut Image, p_cx: f32, p_cy: f32, p_rx: f32, p
 /// - `feather` is the feather radius in pixels; a value of 0 performs a hard fill.
 pub fn draw_area_fill(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &crate::Brush) {
   // Compute bounds and adaptive tolerance before flattening
-  let (min_x_f, min_y_f, max_x_f, max_y_f) = p_area.path.bounds();
+  let (min_x_f, min_y_f, max_x_f, max_y_f) = p_area.path.bounds().edges::<f32>();
   let area_w = (max_x_f - min_x_f).max(max_y_f - min_y_f);
   // tolerance scales with size: larger areas can use looser flattening
   let tol = (area_w * 0.005).max(0.5).min(8.0);
@@ -291,7 +291,7 @@ pub fn draw_area_fill(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &cra
 /// `stroke_w` is total width and `hardness` (0..1) scales the coverage falloff.
 pub fn draw_area_stroke(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &crate::Brush) {
   // Compute bounds first and pick adaptive flatten tolerance
-  let (min_x_f, min_y_f, max_x_f, max_y_f) = p_area.path.bounds();
+  let (min_x_f, min_y_f, max_x_f, max_y_f) = p_area.path.bounds().edges::<f32>();
   let area_w = (max_x_f - min_x_f).max(max_y_f - min_y_f);
   let tol = (area_w * 0.005).max(0.5).min(8.0);
 
@@ -314,7 +314,7 @@ pub fn draw_area_stroke(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &c
     _ => return,
   };
 
-  let (min_x, min_y, max_x, max_y) = p_area.path.bounds();
+  let (min_x, min_y, max_x, max_y) = p_area.path.bounds().edges::<f32>();
   let min_x = ((min_x - half - 1.0).floor() as i32).max(0) as u32;
   let max_x = ((max_x + half + 1.0).ceil() as i32).min(p_img.dimensions::<u32>().0 as i32 - 1) as u32;
   let min_y = ((min_y - half - 1.0).floor() as i32).max(0) as u32;

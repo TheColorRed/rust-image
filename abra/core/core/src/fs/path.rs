@@ -1,12 +1,3 @@
-/// Returns the directory name of a path.
-pub fn dirname(p_path: impl Into<String>) -> String {
-  let sep = std::path::MAIN_SEPARATOR.to_string();
-  let p_path = p_path.into();
-  let mut parts = p_path.split(&sep).collect::<Vec<&str>>();
-  parts.pop();
-  parts.join(&sep)
-}
-
 /// Converts a single pattern, `&str`, `String`, or a collection of them into a `Vec<String>`.
 pub trait IntoGlobPatterns {
   /// Converts `self` into a `Vec<String>` of patterns.

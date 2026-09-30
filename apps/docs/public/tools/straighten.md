@@ -23,34 +23,38 @@ The image rotates around its center. Rotating leaves transparent corners, so by 
 
 | Method                             | Default      | Behavior                                                                      |
 | ---------------------------------- | ------------ | ----------------------------------------------------------------------------- |
-| `with_axis(Axis)`                  | `Axis::Auto` | Whether the line becomes horizontal, vertical, or whichever is closer.        |
-| `with_crop(bool)`                  | `true`       | Crop away the empty corners the rotation leaves.                              |
-| `with_resize(bool)`                | `false`      | Scale the cropped result back up to the original size.                        |
+| `with_orientation(Orientation)`    | `Nearest`    | The direction the line is turned to. See [Orientation](#orientation).          |
+| `with_fit(TransformFit)`              | `Crop`       | How the canvas is sized after rotating. See [Fit](#fit).                      |
 | `with_algorithm(TransformAlgorithm)` | `Lanczos`    | Interpolation used to rotate. Lanczos is the highest quality and the slowest. |
 
-## Axis
+## Orientation
 
-| Value              | Result                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| `Axis::Horizontal` | The line becomes horizontal.                                                             |
-| `Axis::Vertical`   | The line becomes vertical.                                                               |
-| `Axis::Auto`       | Whichever of horizontal or vertical is closer, so the image turns as little as possible. |
+| Value                         | Result                                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `Orientation::Nearest`        | Whichever of horizontal or vertical is closer, so the image turns as little as possible. |
+| `Orientation::Horizontal`     | The line becomes horizontal.                                                             |
+| `Orientation::Vertical`       | The line becomes vertical.                                                               |
+| `Orientation::Angle(degrees)` | The line is turned to any other angle, measured clockwise from horizontal.               |
 
 ```rust
 straighten(PointF::new(350, 300), PointF::new(450, 250))
-  .with_axis(Axis::Horizontal)
+  .with_orientation(Orientation::Horizontal)
   .with_algorithm(TransformAlgorithm::Bilinear)
   .apply(&mut image);
 ```
 
-## Cropping and resizing
+## Fit
 
-With `with_crop(true)` the result is the largest area with no empty corners, which is smaller than the original. Add `with_resize(true)` to scale that area back up to the original size while keeping the original aspect ratio, so the image is never stretched.
+Straightening uses the same fit modes as [`rotate`](../core/transform/image-transforms.md#rotate).
 
-With `with_crop(false)` the whole rotated image is kept on a larger canvas with transparent corners. `with_resize` only applies when cropping, because scaling a canvas of a different shape to the original size would stretch it.
+| Value               | Result                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `TransformFit::Crop`   | The largest area with no empty corners, which is smaller than the original. Default.                             |
+| `TransformFit::Fill`   | The largest area with the original aspect ratio, scaled back up to the original size. The image is never stretched. |
+| `TransformFit::Expand` | The whole rotated image, on a larger canvas with transparent corners.                                            |
 
 ```rust
-straighten(start, end).with_crop(true).with_resize(true).apply(&mut image);
+straighten(start, end).with_fit(TransformFit::Fill).apply(&mut image);
 ```
 
 ## Notes

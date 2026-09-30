@@ -14,9 +14,9 @@ pub fn main() {
     &mut base,
     &overlay,
     blend::BlendOptions {
-      offset: Point::default(),
+      offset: PointF::zero(),
       opacity: 1.0,
-      mode: blend::multiply,
+      mode: BlendMode::Multiply,
     },
   );
   println!("Blend Time: {:?}", start.elapsed());

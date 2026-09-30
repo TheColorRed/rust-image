@@ -8,7 +8,7 @@ use std::sync::Arc;
 /// The fill style for drawing shapes, effects, and other graphical that require a fill.
 pub enum Fill<'a> {
   /// A solid color fill.
-  Solid(Cow<'a, Color>),
+  Solid(Color),
   /// A gradient fill.
   Gradient(Cow<'a, Gradient>),
   /// An image fill.
@@ -18,7 +18,7 @@ pub enum Fill<'a> {
 impl<'a> Fill<'a> {
   /// Creates a solid color fill.
   /// - `p_color`: The color to use for the solid fill.
-  pub fn solid(p_color: impl Into<Cow<'a, Color>>) -> Self {
+  pub fn solid(p_color: impl Into<Color>) -> Self {
     Self::Solid(p_color.into())
   }
   /// Creates a gradient fill.
@@ -33,15 +33,15 @@ impl<'a> Fill<'a> {
   }
 }
 
-impl<'a> From<&'a Color> for Fill<'a> {
-  fn from(p_color: &'a Color) -> Self {
-    Fill::Solid(Cow::Borrowed(p_color))
+impl From<&Color> for Fill<'_> {
+  fn from(p_color: &Color) -> Self {
+    Fill::Solid(*p_color)
   }
 }
 
 impl From<Color> for Fill<'_> {
   fn from(p_color: Color) -> Self {
-    Fill::Solid(Cow::Owned(p_color))
+    Fill::Solid(p_color)
   }
 }
 

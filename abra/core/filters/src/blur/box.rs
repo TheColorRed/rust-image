@@ -85,24 +85,31 @@ fn apply_box_blur(p_image: &mut Image, p_radius: u32) {
   });
 
   // Write back the processed result
-  p_image.set_rgba_owned(tmp);
+  p_image.set_rgba(tmp);
 }
 
 /// Applies a box blur to an image.
 /// - `p_image`: The image to be blurred.
 /// - `p_radius`: The radius of the box blur.
 /// - `p_options`: Additional options for applying the blur.
+#[derive(Clone)]
 pub struct BoxBlur {
   radius: u32,
   options: Options,
 }
 
+options::cpu_processor!(BoxBlur);
+
 impl Apply for BoxBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

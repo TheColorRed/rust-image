@@ -48,21 +48,28 @@ fn apply_add_noise(p_image: &mut Image, p_amount: f32, p_distribution: NoiseDist
     dst_px[2] = (src[idx * 4 + 2] as f32 + noise_value).clamp(0.0, 255.0) as u8;
     dst_px[3] = src[idx * 4 + 3];
   });
-  p_image.set_rgba_owned(out);
+  p_image.set_rgba(out);
 }
 
 /// Adds random noise to the image. Create one with [`noise`].
+#[derive(Clone)]
 pub struct Noise {
   amount: f32,
   distribution: NoiseDistribution,
   options: Options,
 }
 
+options::cpu_processor!(Noise);
+
 impl Apply for Noise {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

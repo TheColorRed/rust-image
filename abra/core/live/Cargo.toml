@@ -1,0 +1,16 @@
+[package]
+name = "abra-live"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "abra_live"
+
+[dependencies]
+abra-core = { workspace = true }
+options = { workspace = true }
+gpu = { workspace = true, optional = true }
+
+[features]
+# Renders on the GPU when one is available; without it everything runs on the CPU.
+gpu = ["dep:gpu"]

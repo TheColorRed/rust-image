@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use abra_core::{Area, Color, Fill};
 
 /// A brush represents a drawing tool with a specific size.
@@ -32,7 +30,7 @@ impl<'a> Default for Brush<'a> {
     Brush {
       size: 5,
       area: Area::circle((0, 0), 5),
-      color: Fill::Solid(Cow::Owned(Color::black())),
+      color: Fill::Solid(Color::black()),
       hardness: 0.0,
       opacity: 1.0,
     }

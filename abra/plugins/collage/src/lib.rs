@@ -41,7 +41,7 @@ impl<'a> CollageOptions<'a> {
     Self {
       rotation: (0.0, 0.0),
       scale: (1.0, 1.0),
-      background: Fill::Solid(Cow::Owned(Color::transparent())),
+      background: Fill::Solid(Color::transparent()),
       effects: None,
     }
   }
@@ -153,8 +153,7 @@ impl<'a> CollagePlugin<'a> {
   fn set_background(&self, p_root_canvas: &Canvas) {
     if let Some(options) = &self.options {
       let background = match options.background.clone() {
-        Fill::Solid(color_cow) => {
-          let color = color_cow.into_owned();
+        Fill::Solid(color) => {
           let bg_image = Arc::new(Image::new_from_color(self.size.0, self.size.1, color));
           {
             let canvas = Canvas::new("Background Color");

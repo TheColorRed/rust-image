@@ -30,7 +30,7 @@ impl Gradient {
   /// @param from The starting color.
   /// @return The resulting gradient from the color to black.
   pub fn to_black(from: &Color) -> Self {
-    AbraGradient::to_black(from.inner.clone()).into()
+    AbraGradient::from_to(from.inner, abra::abra_core::Color::black()).into()
   }
 
   #[napi(factory)]
@@ -38,7 +38,7 @@ impl Gradient {
   /// @param from The starting color.
   /// @return The resulting gradient from the color to white.
   pub fn to_white(from: &Color) -> Self {
-    AbraGradient::to_white(from.inner.clone()).into()
+    AbraGradient::from_to(from.inner, abra::abra_core::Color::white()).into()
   }
 
   #[napi(factory)]
@@ -82,7 +82,7 @@ impl Gradient {
   /// @param t A value between 0.0 and 1.0 representing the position in the gradient.
   /// @return The color at the specified position.
   pub fn get_color(&self, t: f64) -> Color {
-    self.inner.get_color(t as f32).into()
+    self.inner.color_at(t as f32).into()
   }
 
   #[napi]
@@ -110,7 +110,7 @@ impl Gradient {
 
     let area = Area::rect((x as f32, y as f32), (width as f32, height as f32));
     let gradient = fill(&area, &self.inner);
-    blend_images(&mut result_image, &gradient, blend::normal);
+    blend_images(&mut result_image, &gradient, BlendMode::Normal);
     ImageData::from_image(&result_image)
   }
 

@@ -3,7 +3,7 @@
 //! This module provides helpers for converting between `Image` and tensor formats
 //! commonly used by neural networks (NCHW layout).
 
-use abra_core::Image;
+use abra_core::{Channels, Image};
 use ndarray::Array4;
 
 /// Converts an `Image` to an NCHW tensor (batch=1, channels=3, height, width).
@@ -83,7 +83,7 @@ pub fn nchw_to_image(p_width: u32, p_height: u32, p_data: &[f32]) -> Image {
   }
 
   let mut image = Image::new(p_width, p_height);
-  image.set_new_pixels(&rgba_data, p_width, p_height);
+  image.set_pixels(p_width, p_height, rgba_data, Channels::RGBA);
   image
 }
 

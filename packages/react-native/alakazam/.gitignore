@@ -1,0 +1,8 @@
+# Built by `npm run build:android`
+android/src/main/jniLibs/
+
+# Rebuilt by `npm run build:android`
+src/generated/
+
+# Gradle output
+android/build/

@@ -4,6 +4,7 @@ pub mod blur;
 pub mod distort;
 pub mod edges;
 pub mod noise;
+pub mod repair;
 pub mod sharpen;
 pub mod smooth;
 pub mod sobel;
@@ -47,10 +48,23 @@ pub(crate) mod common {
 /// ```
 #[macro_export]
 macro_rules! apply_filter {
+  (gpu = $gpu:expr; $func:ident, $image:ident, $apply_opts:ident, $kernel_padding:expr $(, $rest:expr )* ) => {
+    let options: options::Options = $apply_opts.into();
+    let ctx = options::get_ctx(options.as_ref());
+    abra_core::image::apply_area::apply_in_area(
+      $image,
+      ctx,
+      $kernel_padding,
+      Some($gpu as &dyn abra_core::image::gpu::GpuEffect),
+      |img| {
+        $func(img $(, $rest )*);
+      },
+    );
+  };
   ($func:ident, $image:ident, $apply_opts:ident, $kernel_padding:expr $(, $rest:expr )* ) => {
     let options: options::Options = $apply_opts.into();
     let ctx = options::get_ctx(options.as_ref());
-    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, |img| {
+    abra_core::image::apply_area::apply_in_area($image, ctx, $kernel_padding, None, |img| {
       $func(img $(, $rest )*);
     });
   };

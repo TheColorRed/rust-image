@@ -1,7 +1,5 @@
 //! File system utilities.
 
-/// The file info of an image.
-pub(crate) mod file_info;
 pub(crate) mod path;
 mod read_write;
 mod writer_options;
@@ -30,17 +28,4 @@ pub(crate) mod writers {
   pub mod webp;
 }
 pub use read_write::{ImageFormat, reader, writer};
-use std::{fs, path::Path};
 pub use writer_options::WriterOptions;
-
-/// Creates a directory and all its parent directories if they do not exist.
-pub fn mkdirp(p_path: impl Into<String>) -> Result<(), String> {
-  let p_path = p_path.into();
-  let p_path = Path::new(p_path.as_str());
-  if p_path.exists() {
-    return Ok(());
-  }
-
-  fs::create_dir_all(p_path).map_err(|e| e.to_string())?;
-  Ok(())
-}

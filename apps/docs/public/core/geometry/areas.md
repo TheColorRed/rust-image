@@ -66,11 +66,18 @@ assert!(area.contains((40, 30)));
 assert!(!area.contains((120, 30)));
 ```
 
-Containment uses a ray-casting test over the flattened path.
+Containment uses a ray-casting test over the flattened path. `contains` flattens the outline on every call; to test many points, flatten once and use `polygon_contains`:
+
+```rust
+use abra::abra_core::{PointF, polygon_contains};
+
+let outline = area.flatten(0.5);
+let inside = polygon_contains(&outline, PointF::new(40.0, 30.0));
+```
 
 ## Building and inspecting geometry
 
-Area methods mirror the underlying path methods:
+An area dereferences to its outline `Path`, so every path method can be called on it directly:
 
 ```rust
 let start = area.start();
@@ -79,38 +86,28 @@ let segments = area.segments();
 let points = area.points();
 let sampled = area.point_at(0.5);
 let length = area.length();
-let bounds: (f32, f32, f32, f32) = area.bounds();
+let bounds = area.bounds(); // a Rect
 ```
 
-Use `flatten` or `to_points` when a raster or polygon operation needs discrete points:
+Use `flatten` when a raster or polygon operation needs discrete points:
 
 ```rust
 let curve_points = area.flatten(0.5);
-let pixel_points = area.to_points(0.5);
 ```
 
 ## Fitting and transforming areas
 
-Fit or stretch an area into a target size:
+`fit` scales an area from its own bounds into a target size. The `AspectRatio` decides how differing proportions are handled, and the feather is kept:
 
 ```rust
 use abra::abra_core::{AspectRatio, Size};
 
-let fitted = area.fit(Size::new(800, 600));
-let square = area.fit_square(400.0);
-let aspect_fitted = area.fit_with_aspect(Size::new(800, 600), AspectRatio::meet());
-let stretched = area.stretch((800, 600));
-let covered = area.cover((800, 600));
+let fitted = area.fit(Size::new(800, 600), AspectRatio::meet());
+let stretched = area.fit((800, 600), AspectRatio::none());
+let covered = area.fit((800, 600), AspectRatio::slice());
 ```
 
-Use `transform_to_viewport` when an explicit `ViewBox` and aspect-ratio policy are needed:
-
-```rust
-use abra::abra_core::ViewBox;
-
-let viewbox = area.to_viewbox();
-let rendered = area.transform_to_viewport(&viewbox, 400.0, 300.0, AspectRatio::meet());
-```
+Use `transform_to_viewport` when an explicit coordinate system is needed. See [Rectangles and viewports](./rect).
 
 ## Stroking an area
 

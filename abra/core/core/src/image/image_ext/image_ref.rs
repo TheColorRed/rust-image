@@ -1,4 +1,4 @@
-use primitives::Image as PrimitiveImage;
+use crate::Image;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
@@ -10,13 +10,13 @@ pub trait GuardedOwner {}
 /// optionally owns an opaque owner that keeps a mutex/guard alive for the duration
 /// of the `ImageRef`.
 pub struct ImageRef<'a> {
-  ptr: *mut PrimitiveImage,
+  ptr: *mut Image,
   _owner: Option<Box<dyn GuardedOwner + 'a>>,
-  _marker: PhantomData<&'a mut PrimitiveImage>,
+  _marker: PhantomData<&'a mut Image>,
 }
 
 impl<'a> ImageRef<'a> {
-  pub fn new(p_ptr: *mut PrimitiveImage, p_owner: Option<Box<dyn GuardedOwner + 'a>>) -> Self {
+  pub fn new(p_ptr: *mut Image, p_owner: Option<Box<dyn GuardedOwner + 'a>>) -> Self {
     Self {
       ptr: p_ptr,
       _owner: p_owner,
@@ -26,21 +26,21 @@ impl<'a> ImageRef<'a> {
 }
 
 impl<'a> Deref for ImageRef<'a> {
-  type Target = PrimitiveImage;
-  fn deref(&self) -> &PrimitiveImage {
+  type Target = Image;
+  fn deref(&self) -> &Image {
     unsafe { &*self.ptr }
   }
 }
 
 impl<'a> DerefMut for ImageRef<'a> {
-  fn deref_mut(&mut self) -> &mut PrimitiveImage {
+  fn deref_mut(&mut self) -> &mut Image {
     unsafe { &mut *self.ptr }
   }
 }
 
-impl<'a> From<&'a mut PrimitiveImage> for ImageRef<'a> {
-  fn from(p_image: &'a mut PrimitiveImage) -> Self {
-    let ptr = p_image as *mut PrimitiveImage;
+impl<'a> From<&'a mut Image> for ImageRef<'a> {
+  fn from(p_image: &'a mut Image) -> Self {
+    let ptr = p_image as *mut Image;
     ImageRef::new(ptr, None)
   }
 }

@@ -1,23 +1,11 @@
 {
+  "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "jsx": "react-jsx",
-    "strict": true,
-    "moduleResolution": "bundler",
-    "allowJs": true,
-    "noEmit": true,
-    "isolatedModules": true,
-    "skipLibCheck": true,
+    "types": [],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./*"]
     }
   },
-  "include": [
-    "src/**/*.tsx",
-    "nativewind-env.d.ts"
-  ],
-  "extends": "expo/tsconfig.base"
+  "include": ["index.js", "src/**/*.ts", "src/**/*.tsx", "nativewind-env.d.ts"],
+  "exclude": ["**/node_modules", "android"]
 }

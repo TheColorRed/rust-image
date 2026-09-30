@@ -56,12 +56,14 @@ let transparent = Color::transparent();
 
 ## Warm and spectral colors
 
-| Constructor       | RGBA                 |
-| ----------------- | -------------------- |
-| `Color::yellow()` | `(255, 255, 0, 255)` |
-| `Color::orange()` | `(255, 127, 0, 255)` |
-| `Color::indigo()` | `(75, 0, 130, 255)`  |
-| `Color::violet()` | `(148, 0, 211, 255)` |
+| Constructor       | RGBA                   |
+| ----------------- | ---------------------- |
+| `Color::yellow()` | `(255, 255, 0, 255)`   |
+| `Color::orange()` | `(255, 165, 0, 255)`   |
+| `Color::indigo()` | `(75, 0, 130, 255)`    |
+| `Color::violet()` | `(238, 130, 238, 255)` |
+| `Color::purple()` | `(128, 0, 128, 255)`   |
+| `Color::tan()`    | `(210, 180, 140, 255)` |
 
 ## Neutral colors
 

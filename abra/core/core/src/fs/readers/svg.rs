@@ -4,10 +4,10 @@ use resvg::tiny_skia;
 use resvg::usvg::{self, Options};
 
 use crate::Channels;
-use crate::fs::file_info::FileInfo;
+use crate::Image;
 
 /// Reads an SVG file and returns the image data
-pub fn read_svg(p_file: impl Into<String>) -> Result<FileInfo, String> {
+pub fn read_svg(p_file: impl Into<String>) -> Result<Image, String> {
   let p_file = p_file.into();
   let p_file = p_file.as_str();
   let tree = {
@@ -36,5 +36,5 @@ pub fn read_svg(p_file: impl Into<String>) -> Result<FileInfo, String> {
     })
     .collect::<Vec<u8>>();
 
-  Ok(FileInfo::new(pix_map_size.width(), pix_map_size.height(), Channels::RGBA, pixels))
+  Ok(Image::new_from_pixels(pix_map_size.width(), pix_map_size.height(), pixels, Channels::RGBA))
 }

@@ -41,4 +41,4 @@ Other small shared types are documented with the feature that owns them:
 - `Channels` and pixel storage: [Image operations](./image/operations)
 - `WriterOptions`: [Loading and saving](./image/io)
 - `TransformAlgorithm`: [Image transforms](./transform/image-transforms)
-- `FileInfo`: [Loading and saving](./image/io)
+- `ImageFormat`: [Loading and saving](./image/io)

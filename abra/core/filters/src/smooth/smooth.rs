@@ -10,14 +10,21 @@ fn apply_smooth(p_image: &mut Image) {
 
 /// Smooths the image using a 3x3 box blur kernel.
 /// This version supports `Options` to restrict and feather the operation.
+#[derive(Clone)]
 pub struct Smooth {
   options: Options,
 }
+options::cpu_processor!(Smooth);
+
 impl Apply for Smooth {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

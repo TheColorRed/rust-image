@@ -1,4 +1,4 @@
-use abra_core::{Color, Image, hsl_to_rgb_f, linear_f32_to_srgb_u8, rgb_to_hsl_f, srgb_u8_to_linear_f32};
+use abra_core::{Color, Image, hsl_to_rgb, linear_f32_to_srgb_u8, rgb_to_hsl, srgb_u8_to_linear_f32};
 use options::{Apply, Options};
 
 use rayon::prelude::*;
@@ -8,9 +8,9 @@ use crate::apply_adjustment;
 /// Types of preset photo filters.
 #[derive(Clone, Copy)]
 pub enum FilterType {
-  /// A warm, darkening filter rgb(255,101,0)
+  /// A warm, darkening filter rgb(236,138,0), Photoshop's Warming Filter (85)
   WarmingDark,
-  /// A warm, lightening filter rgb(236,138,0)
+  /// A warm, lightening filter rgb(235,177,19), Photoshop's Warming Filter (81)
   WarmingLight,
   /// A cool, darkening filter rgb(0,109,255)
   CoolingDark,
@@ -53,8 +53,8 @@ impl From<Color> for PhotoFilter {
 
 fn preset_color(p_preset: FilterType) -> Color {
   match p_preset {
-    FilterType::WarmingDark => Color::from_rgb(255, 101, 0),
-    FilterType::WarmingLight => Color::from_rgb(236, 138, 0),
+    FilterType::WarmingDark => Color::from_rgb(236, 138, 0),
+    FilterType::WarmingLight => Color::from_rgb(235, 177, 19),
     FilterType::CoolingDark => Color::from_rgb(0, 109, 255),
     FilterType::CoolingLight => Color::from_rgb(0, 181, 255),
     FilterType::Red => Color::from_rgb(234, 26, 26),
@@ -81,8 +81,7 @@ fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32
 
   // Use primitives helpers for Lab conversions instead of local re-implementation.
   // Precompute the filter's H and S for HSL-based colorization.
-  let (filter_h, filter_s, _filter_l_norm) =
-    rgb_to_hsl_f(p_filter_color.r as f32, p_filter_color.g as f32, p_filter_color.b as f32);
+  let (filter_h, filter_s, _filter_l_norm) = p_filter_color.hsl();
 
   out.par_chunks_mut(4).enumerate().for_each(|(idx, dst_px)| {
     let i = idx * 4;
@@ -121,15 +120,15 @@ fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32
     // - Set H and S from the filter color, convert to RGB, then blend
     //   with the source in linear space by density. This mirrors how Photoshop
     //   tends to transfer hue/saturation while preserving brightness.
-    let (_src_h, _src_s, src_l_norm) = rgb_to_hsl_f(src[i] as f32, src[i + 1] as f32, src[i + 2] as f32);
+    let (_src_h, _src_s, src_l_norm) = rgb_to_hsl(src[i], src[i + 1], src[i + 2]);
     // Use the filter H/S while keeping source L
     // reuse precomputed filter_h,filter_s
-    let (mut r_color_f, mut g_color_f, mut b_color_f) = hsl_to_rgb_f(filter_h, filter_s, src_l_norm);
+    let (mut r_color_f, mut g_color_f, mut b_color_f) = hsl_to_rgb(filter_h, filter_s, src_l_norm);
     // Simple out-of-gamut fallback: if any channel is clipped fully to 0 or 255,
     // reduce saturation and recompute once.
     if r_color_f == 0 || r_color_f == 255 || g_color_f == 0 || g_color_f == 255 || b_color_f == 0 || b_color_f == 255 {
       let reduced_s = (filter_s * 0.5).clamp(0.0, 1.0);
-      let (rr, gg, bb) = hsl_to_rgb_f(filter_h, reduced_s, src_l_norm);
+      let (rr, gg, bb) = hsl_to_rgb(filter_h, reduced_s, src_l_norm);
       r_color_f = rr;
       g_color_f = gg;
       b_color_f = bb;
@@ -151,21 +150,28 @@ fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32
     dst_px[3] = a;
   });
 
-  p_image.set_rgba(&out);
+  p_image.set_rgba(out);
 }
 /// A photo filter adjustment. Create one with [`photo_filter`].
+#[derive(Clone)]
 pub struct PhotoFilterAdjustment {
   filter: PhotoFilter,
   density: f64,
   options: Options,
 }
 
+options::cpu_processor!(PhotoFilterAdjustment);
+
 impl Apply for PhotoFilterAdjustment {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<abra_core::ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<abra_core::ImageRef<'a>>) {
     let mut image_ref: abra_core::ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let (filter_color, preserve_l) = match self.filter {

@@ -214,7 +214,7 @@ fn apply_lens_blur(p_image: &mut Image, p_options: LensSettings) {
     dst_px[3] = a as u8;
   });
 
-  p_image.set_rgba_owned(out);
+  p_image.set_rgba(out);
 
   if let Some(noise) = p_options.noise {
     if noise.amount > 0.0 {
@@ -276,12 +276,18 @@ impl LensBlur {
   }
 }
 
+options::cpu_processor!(LensBlur);
+
 impl Apply for LensBlur {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let apply_options = self.options.clone();

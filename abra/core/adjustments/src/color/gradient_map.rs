@@ -14,7 +14,7 @@ fn apply_gradient_map(p_image: &mut Image, p_gradient: &Gradient) {
     // Normalize the grayscale value to a value between 0 and 1.
     let time = gray / 255.0;
     // Get the color from the gradient at the normalized time.
-    let (r, g, b, _) = p_gradient.get_color(time);
+    let (r, g, b, _) = p_gradient.color_at(time).rgba();
 
     pixel[0] = r;
     pixel[1] = g;
@@ -22,17 +22,24 @@ fn apply_gradient_map(p_image: &mut Image, p_gradient: &Gradient) {
   });
 }
 
+#[derive(Clone)]
 pub struct GradientMap {
   gradient: Gradient,
   options: Options,
 }
 
+options::cpu_processor!(GradientMap);
+
 impl Apply for GradientMap {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
 
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     apply_adjustment!(apply_gradient_map, image, self.options.as_ref(), 1, &self.gradient);

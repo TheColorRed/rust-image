@@ -39,7 +39,7 @@ fn apply_glowing_edges(p_image: &mut Image, p_edge_width: u32, _edge_brightness:
   //   pixel[2] = brightness_b.min(255.0) as u8;
   //   pixel[3] = 255;
   // });
-  clone.set_rgba_owned(pixels);
+  clone.set_rgba(pixels);
 
   // Step 5: Apply Gaussian blur to smooth the edges
   blur().apply(&mut clone);
@@ -64,17 +64,23 @@ fn apply_glowing_edges(p_image: &mut Image, p_edge_width: u32, _edge_brightness:
   // image.copy_channel_data(&clone);
 }
 
+#[derive(Clone)]
 pub struct GlowingEdges {
   edge_width: u32,
   edge_brightness: u32,
   smoothness: u32,
   options: options::Options,
 }
+options::cpu_processor!(GlowingEdges);
+
 impl Apply for GlowingEdges {
+  fn options(&self) -> &options::Options {
+    &self.options
+  }
   fn options_mut(&mut self) -> &mut options::Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

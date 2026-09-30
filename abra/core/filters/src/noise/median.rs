@@ -1,35 +1,32 @@
 use crate::common::*;
-use abra_core::color::Histogram;
-use abra_core::{Channels, Resize, ResizeTarget, Size, if_pick};
+use abra_core::Bins;
+use abra_core::{Channels, ResizeTarget, Size, Transform, if_pick};
 
 /// Naive histogram-based median filter - O(r²) per pixel
 /// Good for small radius values (< 8)
 fn apply_median_naive(p_src: &[u8], p_out: &mut [u8], p_width: usize, p_height: usize, p_radius: u32) {
-  let diameter = (p_radius * 2 + 1) as usize;
-  let window_size = (diameter * diameter) as u64;
-
   p_out.par_chunks_mut(4).enumerate().for_each(|(idx, dst_px)| {
     let x = idx % p_width;
     let y = idx / p_width;
 
-    let mut r_hist = [0u64; 256];
-    let mut g_hist = [0u64; 256];
-    let mut b_hist = [0u64; 256];
+    let mut r_hist = Bins::new();
+    let mut g_hist = Bins::new();
+    let mut b_hist = Bins::new();
 
     for dy in -(p_radius as isize)..=(p_radius as isize) {
       for dx in -(p_radius as isize)..=(p_radius as isize) {
         let nx = (x as isize + dx).clamp(0, (p_width - 1) as isize) as usize;
         let ny = (y as isize + dy).clamp(0, (p_height - 1) as isize) as usize;
         let n_idx = (ny * p_width + nx) * 4;
-        r_hist[p_src[n_idx] as usize] += 1;
-        g_hist[p_src[n_idx + 1] as usize] += 1;
-        b_hist[p_src[n_idx + 2] as usize] += 1;
+        r_hist.add(p_src[n_idx]);
+        g_hist.add(p_src[n_idx + 1]);
+        b_hist.add(p_src[n_idx + 2]);
       }
     }
 
-    dst_px[0] = Histogram::median_from_hist(&r_hist, window_size);
-    dst_px[1] = Histogram::median_from_hist(&g_hist, window_size);
-    dst_px[2] = Histogram::median_from_hist(&b_hist, window_size);
+    dst_px[0] = r_hist.median();
+    dst_px[1] = g_hist.median();
+    dst_px[2] = b_hist.median();
     dst_px[3] = p_src[idx * 4 + 3];
   });
 }
@@ -42,9 +39,9 @@ fn apply_median_sliding(p_src: &[u8], p_out: &mut [u8], p_width: usize, p_height
 
   // Process row by row to maintain sliding window
   for y in 0..p_height {
-    let mut r_hist = [0u64; 256];
-    let mut g_hist = [0u64; 256];
-    let mut b_hist = [0u64; 256];
+    let mut r_hist = Bins::new();
+    let mut g_hist = Bins::new();
+    let mut b_hist = Bins::new();
 
     // Initialize histogram for first pixel in row
     for dy in -r..=r {
@@ -52,19 +49,17 @@ fn apply_median_sliding(p_src: &[u8], p_out: &mut [u8], p_width: usize, p_height
       for dx in -r..=r {
         let nx = dx.clamp(0, (p_width - 1) as isize) as usize;
         let idx = (ny * p_width + nx) * 4;
-        r_hist[p_src[idx] as usize] += 1;
-        g_hist[p_src[idx + 1] as usize] += 1;
-        b_hist[p_src[idx + 2] as usize] += 1;
+        r_hist.add(p_src[idx]);
+        g_hist.add(p_src[idx + 1]);
+        b_hist.add(p_src[idx + 2]);
       }
     }
 
-    let diameter = (p_radius * 2 + 1) as u64;
-
     // Process first pixel
     let out_idx = y * p_width * 4;
-    p_out[out_idx] = Histogram::median_from_hist(&r_hist, diameter * diameter);
-    p_out[out_idx + 1] = Histogram::median_from_hist(&g_hist, diameter * diameter);
-    p_out[out_idx + 2] = Histogram::median_from_hist(&b_hist, diameter * diameter);
+    p_out[out_idx] = r_hist.median();
+    p_out[out_idx + 1] = g_hist.median();
+    p_out[out_idx + 2] = b_hist.median();
     p_out[out_idx + 3] = p_src[out_idx + 3];
 
     // Slide window horizontally across row
@@ -74,9 +69,9 @@ fn apply_median_sliding(p_src: &[u8], p_out: &mut [u8], p_width: usize, p_height
       for dy in -r..=r {
         let ny = ((y as isize) + dy).clamp(0, (p_height - 1) as isize) as usize;
         let idx = (ny * p_width + left_x) * 4;
-        r_hist[p_src[idx] as usize] = r_hist[p_src[idx] as usize].saturating_sub(1);
-        g_hist[p_src[idx + 1] as usize] = g_hist[p_src[idx + 1] as usize].saturating_sub(1);
-        b_hist[p_src[idx + 2] as usize] = b_hist[p_src[idx + 2] as usize].saturating_sub(1);
+        r_hist.remove(p_src[idx]);
+        g_hist.remove(p_src[idx + 1]);
+        b_hist.remove(p_src[idx + 2]);
       }
 
       // Add rightmost column to histogram
@@ -84,16 +79,16 @@ fn apply_median_sliding(p_src: &[u8], p_out: &mut [u8], p_width: usize, p_height
       for dy in -r..=r {
         let ny = ((y as isize) + dy).clamp(0, (p_height - 1) as isize) as usize;
         let idx = (ny * p_width + right_x) * 4;
-        r_hist[p_src[idx] as usize] += 1;
-        g_hist[p_src[idx + 1] as usize] += 1;
-        b_hist[p_src[idx + 2] as usize] += 1;
+        r_hist.add(p_src[idx]);
+        g_hist.add(p_src[idx + 1]);
+        b_hist.add(p_src[idx + 2]);
       }
 
       // Calculate median and store result
       let out_idx = (y * p_width + x) * 4;
-      p_out[out_idx] = Histogram::median_from_hist(&r_hist, diameter * diameter);
-      p_out[out_idx + 1] = Histogram::median_from_hist(&g_hist, diameter * diameter);
-      p_out[out_idx + 2] = Histogram::median_from_hist(&b_hist, diameter * diameter);
+      p_out[out_idx] = r_hist.median();
+      p_out[out_idx + 1] = g_hist.median();
+      p_out[out_idx + 2] = b_hist.median();
       p_out[out_idx + 3] = p_src[out_idx + 3];
     }
   }
@@ -121,11 +116,11 @@ fn apply_median_downsampled(p_image: &mut Image, p_radius: u32) {
 
   // Use sliding window for downsampled image (still efficient)
   apply_median_sliding(src, &mut out, down_w as usize, down_h as usize, scaled_radius);
-  tmp_img.set_rgba_owned(out);
+  tmp_img.set_rgba(out);
 
   // Upsample back to original size
   tmp_img.resize(ResizeTarget::Exact(Size::new(width, height)), None);
-  p_image.set_rgba_owned(tmp_img.into_rgba_vec());
+  p_image.set_rgba(tmp_img.into_rgba_vec());
 }
 
 fn apply_median(p_image: &mut Image, p_radius: f32) {
@@ -144,7 +139,7 @@ fn apply_median(p_image: &mut Image, p_radius: f32) {
       let src = p_image.rgba();
       let mut out = vec![0u8; width * height * 4];
       apply_median_naive(src, &mut out, width, height, radius);
-      p_image.set_rgba_owned(out);
+      p_image.set_rgba(out);
     }
 
     // Large radius: Downsample, filter, then upsample
@@ -159,15 +154,22 @@ fn apply_median(p_image: &mut Image, p_radius: f32) {
 /// - `p_image`: The image to apply the filter to.
 /// - `p_radius`: The radius of the median filter.
 /// - `p_apply_options`: Options for applying the filter.
+#[derive(Clone)]
 pub struct Median {
   radius: f32,
   options: Options,
 }
+options::cpu_processor!(Median);
+
 impl Apply for Median {
+  fn options(&self) -> &Options {
+    &self.options
+  }
+
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
+  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
     let options = self.options.clone();

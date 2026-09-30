@@ -6,32 +6,11 @@ outline: deep
 
 # Geometry primitives
 
-Abra provides three small coordinate types for geometry: `Point`, `PointF`, and `Size`. The module also includes Bresenham line helpers for integer raster coordinates.
-
-## Point
-
-`Point` stores integer `x` and `y` coordinates:
-
-```rust
-use abra::abra_core::Point;
-
-let point = Point::new(12, 24);
-let (x, y) = point.dimensions();
-assert_eq!(point.x(), x);
-assert_eq!(point.y(), y);
-```
-
-Create a collection of points from values that can be converted into `Point`:
-
-```rust
-let points = Point::array(vec![(0, 0), (10, 20), (30, 10)]);
-```
-
-`Point` supports addition, scalar multiplication, and point-by-point multiplication. It converts to integer and floating-point tuples.
+Abra provides two small value types for geometry, `PointF` and `Size`, plus [`Rect`](./rect) for bounds. The module also includes a Bresenham line helper for integer raster coordinates.
 
 ## PointF
 
-`PointF` stores `f32` coordinates and is the preferred type for curves and precise geometry:
+`PointF` stores `f32` coordinates. It is the one point type used across geometry, drawing, and compositing:
 
 ```rust
 use abra::abra_core::PointF;
@@ -53,7 +32,7 @@ let perpendicular = point.perpendicular();
 let midpoint = point.lerp(PointF::zero(), 0.5);
 ```
 
-`PointF` converts to and from common tuples and `Point`. Conversion to integer coordinates rounds the floating-point values.
+`PointF` converts from any `(x, y)` tuple of numbers, so APIs that take `impl Into<PointF>` accept `(10, 20)` directly. It converts to `(f32, f32)`, `(f64, f64)`, and, rounding to the nearest pixel, `(i32, i32)` and `(u32, u32)`.
 
 ## Size
 
@@ -63,35 +42,38 @@ let midpoint = point.lerp(PointF::zero(), 0.5);
 use abra::abra_core::Size;
 
 let size = Size::new(320, 180);
-let tuple: (f32, f32) = size.to_tuple();
+let tuple: (u32, u32) = size.to_tuple();
 ```
 
-It accepts `(f32, f32)`, `(u32, u32)`, and `(i32, i32)` tuples. Arithmetic with scalars or another `Size` supports layout calculations:
+It converts from any `(width, height)` tuple of numbers. Arithmetic with scalars or another `Size` supports layout calculations:
 
 ```rust
 let doubled = size * 2.0;
 let inset = size - 20.0;
 let half = size / 2.0;
+let per_pixel = 1.0 / size; // (1 / width, 1 / height)
 ```
+
+`rotated_bounds(degrees)` is the canvas a rotated rectangle of this size needs, and `inscribed_after_rotation(degrees, aspect)` is the largest upright rectangle inside the rotation.
 
 ## Bresenham lines
 
-The geometry module re-exports `bresenham` and `bresenham_from_points` for generating integer points along a raster line:
+`bresenham` returns every integer pixel on the straight line between two points, including both ends:
 
 ```rust
-use abra::abra_core::{bresenham, Point};
+use abra::abra_core::bresenham;
 
-let pixels: Vec<Point> = bresenham((0, 0), (8, 5));
+let pixels: Vec<(i32, i32)> = bresenham((0, 0), (8, 5));
 ```
 
-Use these helpers when a raster operation needs every integer coordinate on a line. Use [`Path`](./paths) for vector lines and curves.
+Use it when a raster operation needs every pixel on a line. Use [`Path`](./paths) for vector lines and curves.
 
 ## Conversion guidance
 
-| Type | Best for |
-| --- | --- |
-| `Point` | Integer pixels and raster coordinates. |
-| `PointF` | Curves, transforms, vectors, and subpixel geometry. |
-| `Size` | Width and height calculations. |
-| `Path` | Open lines and curves. |
-| `Area` | Closed regions for fills and hit testing. |
+| Type     | Best for                                             |
+| -------- | ---------------------------------------------------- |
+| `PointF` | Positions, vectors, transforms, and pixel offsets.   |
+| `Size`   | Width and height calculations.                       |
+| `Rect`   | Bounds, clipping, and coordinate systems.            |
+| `Path`   | Open lines and curves.                               |
+| `Area`   | Closed regions for fills and hit testing.            |
