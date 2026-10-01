@@ -6,6 +6,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["index.js", "src/**/*.ts", "src/**/*.tsx", "nativewind-env.d.ts"],
+  "include": ["index.js", "src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["**/node_modules", "android"]
 }
