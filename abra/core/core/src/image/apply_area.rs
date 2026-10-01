@@ -178,6 +178,76 @@ fn compute_area_mask(p_prepared: &PreparedAreaMeta, p_area: Option<&Area>, p_mas
   mask
 }
 
+/// A weight from `0.0` to `1.0` as a byte from 0 to 255, rounded. Every place that blends by an area or mask goes
+/// through this, so the image path, the CPU and the GPU agree on the weight of every pixel.
+pub fn weight_to_byte(p_weight: f32) -> u8 {
+  (p_weight.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// Mixes one channel: `p_weight` (0 to 255) of `p_after` and the rest of `p_before`, in whole numbers, rounded to the
+/// nearest value. The blend shader for live images does exactly these steps.
+fn mix_byte(p_before: u8, p_after: u8, p_weight: u32) -> u8 {
+  ((p_after as u32 * p_weight + p_before as u32 * (255 - p_weight) + 127) / 255) as u8
+}
+
+/// Mixes `p_after` into `p_before` pixel by pixel: a pixel with weight 0 stays as it was, 255 takes the new one, and
+/// values between mix them. Both are RGBA; `p_weights` has one byte per pixel (see [`weight_to_byte`]).
+pub fn mix_by_weights(p_before: &[u8], p_after: &[u8], p_weights: impl IntoIterator<Item = u8>) -> Vec<u8> {
+  p_before
+    .chunks_exact(4)
+    .zip(p_after.chunks_exact(4))
+    .zip(p_weights)
+    .flat_map(|((before, after), weight)| (0..4).map(move |channel| mix_byte(before[channel], after[channel], weight as u32)))
+    .collect()
+}
+
+/// Puts `p_processed` (the whole image, processed) into `p_image`, limited by the areas and mask in `p_ctx`: only where
+/// they allow, and mixed in at the edges. With neither, it simply replaces the image.
+fn put_whole_image(p_image: &mut Image, p_processed: Vec<u8>, p_ctx: Option<&ApplyContext<'_>>) {
+  let Some(ctx) = p_ctx.filter(|ctx| ctx.area.is_some() || ctx.mask_image.is_some()) else {
+    p_image.set_rgba(p_processed);
+    return;
+  };
+  let (width, height) = p_image.dimensions::<u32>();
+  let weights = area_weights(width, height, ctx).into_iter().map(weight_to_byte);
+  let mixed = mix_by_weights(&p_image.to_rgba_vec(), &p_processed, weights);
+  p_image.set_rgba(mixed);
+}
+
+/// Runs `p_processor` over the whole image and then limits the result to the areas and mask in `p_ctx`, instead of
+/// cropping the image to the area first like [`apply_in_area`]. Use it for an operation that depends on where a pixel
+/// is in the image, such as a gradient or something centered on the image: a crop would move its origin.
+/// - `p_image`: The image to modify.
+/// - `p_ctx`: Optional area and mask (from `ApplyOptions`).
+/// - `p_processor`: Processes the whole image on the CPU.
+pub fn apply_to_whole_image_in_area<F>(p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_processor: F)
+where
+  F: FnOnce(&mut Image),
+{
+  let limited = p_ctx.as_ref().is_some_and(|ctx| ctx.area.is_some() || ctx.mask_image.is_some());
+  if !limited {
+    p_processor(p_image);
+    return;
+  }
+  let before = p_image.to_rgba_vec();
+  p_processor(p_image);
+  let processed = p_image.to_rgba_vec();
+  p_image.set_rgba(before);
+  put_whole_image(p_image, processed, p_ctx.as_ref());
+}
+
+/// Like [`apply_to_whole_image_in_area`], but on the GPU: it never falls back to the CPU, and returns an error when no
+/// GPU is available or the GPU fails, leaving `p_image` as it was.
+pub fn apply_to_whole_image_in_area_gpu(
+  p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_gpu: &dyn GpuEffect,
+) -> Result<(), String> {
+  let provider = ready_gpu_provider(Hardware::Gpu).ok_or("no GPU is available")?;
+  let (width, height) = p_image.dimensions::<u32>();
+  let processed = (provider.process)(p_gpu, width, height, &p_image.to_rgba_vec())?;
+  put_whole_image(p_image, processed, p_ctx.as_ref());
+  Ok(())
+}
+
 /// Blend processed pixels (of size prepared.rect_w * prepared.rect_h) back into the original image in place,
 /// weighting each by the provided `p_mask` (0..1 floats). Only the rows of the processed rect are touched.
 fn blend_area_pixels(p_image: &mut Image, p_processed: &[u8], p_prepared_meta: &PreparedAreaMeta, p_mask: &[f32]) {
@@ -200,8 +270,9 @@ fn blend_area_pixels(p_image: &mut Image, p_processed: &[u8], p_prepared_meta: &
         }
         let out = &mut row[(rect_x + px) * 4..(rect_x + px) * 4 + 4];
         let processed = &p_processed[(py * rect_w + px) * 4..(py * rect_w + px) * 4 + 4];
+        let weight = weight_to_byte(alpha) as u32;
         for (destination, &source) in out.iter_mut().zip(processed) {
-          *destination = (source as f32 * alpha + *destination as f32 * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
+          *destination = mix_byte(*destination, source, weight);
         }
       }
     });
@@ -294,6 +365,44 @@ pub fn apply_in_area<F>(
   }
 }
 
+/// Like [`apply_in_area`], but always on the GPU: it never falls back to the CPU, and returns an error when no GPU is
+/// available or the GPU fails. When it fails, `p_image` is left as it was.
+/// - `p_image`: The destination image to modify.
+/// - `p_ctx`: Optional area and mask (from `ApplyOptions`).
+/// - `p_kernel_padding`: Padding around the kernel for processing.
+/// - `p_gpu`: The GPU version of the processing.
+pub fn apply_in_area_gpu(
+  p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_kernel_padding: impl Into<i32>, p_gpu: &dyn GpuEffect,
+) -> Result<(), String> {
+  let provider = ready_gpu_provider(Hardware::Gpu).ok_or("no GPU is available")?;
+  let kernel_padding = p_kernel_padding.into();
+  let mask = p_ctx.as_ref().and_then(|c| c.mask_image);
+  let areas: Vec<Option<&Area>> = match p_ctx.as_ref().and_then(|c| c.area.clone()) {
+    Some(areas) => areas.into_iter().map(Some).collect(),
+    None => vec![None],
+  };
+  // Several areas are applied one after the other, so a failure part way would leave some of them applied.
+  let snapshot = (areas.len() > 1).then(|| p_image.to_rgba_vec());
+
+  for area in areas {
+    let prepared = prepare_area_pixels(p_image, area, kernel_padding);
+    let meta = prepared.meta;
+    if meta.area_w == 0 || meta.area_h == 0 {
+      continue;
+    }
+    match (provider.process)(p_gpu, meta.rect_w as u32, meta.rect_h as u32, prepared.pixels.as_ref()) {
+      Ok(processed) => apply_processed_pixels_to_image(p_image, processed, &meta, area, mask),
+      Err(error) => {
+        if let Some(pixels) = snapshot {
+          p_image.set_rgba(pixels);
+        }
+        return Err(error);
+      }
+    }
+  }
+  Ok(())
+}
+
 /// Process one area (or the full image when `p_area` is `None`) and blend the result back. Uses the GPU when one
 /// is given, falling back to `p_processor` if it fails.
 fn process_area<F>(
@@ -354,6 +463,24 @@ mod tests {
     let meta = prepare_area_pixels(&img, Some(&area), 2).meta;
     assert_eq!((meta.area_min_x, meta.area_min_y, meta.area_w, meta.area_h), (1, 6, 4, 4));
     assert_eq!((meta.rect_min_x, meta.rect_min_y, meta.rect_w, meta.rect_h), (0, 4, 7, 6));
+  }
+
+  #[test]
+  fn mixing_by_weights_keeps_takes_or_blends_each_pixel() {
+    let before = [0u8, 0, 0, 255, 10, 20, 30, 255, 100, 100, 100, 255];
+    let after = [255u8, 255, 255, 255, 110, 120, 130, 255, 200, 200, 200, 255];
+    let out = mix_by_weights(&before, &after, [0u8, 255, 128]);
+    assert_eq!(out[0..4], before[0..4], "weight 0 keeps the pixel");
+    assert_eq!(out[4..8], after[4..8], "weight 255 takes the new one");
+    // Halfway, rounded to the nearest: 100 and 200 mix to 150, and 0 and 255 to 128.
+    assert_eq!(out[8], 150);
+    assert_eq!(mix_by_weights(&[0, 0, 0, 255], &[255, 255, 255, 255], [128u8])[0], 128);
+  }
+
+  #[test]
+  fn weights_round_to_the_nearest_byte() {
+    assert_eq!((weight_to_byte(0.0), weight_to_byte(1.0), weight_to_byte(0.5)), (0, 255, 128));
+    assert_eq!((weight_to_byte(-3.0), weight_to_byte(9.0)), (0, 255));
   }
 
   #[test]

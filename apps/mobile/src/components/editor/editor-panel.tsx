@@ -1,12 +1,13 @@
-import { ChevronLeft, Redo2, RedoDot, Undo2, UndoDot } from 'lucide-react-native';
-import { useEffect, useMemo } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useObservable } from 'react-rx';
-import { EDIT_SECTIONS, findSection } from '@/src/lib/edit-sections';
-import { commitSlider, redoHistory, toggleAction, undoHistory } from '@/src/lib/editor-history';
+import { Slider } from '@/src/components/slider';
+import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { useLiveAction } from '@/src/hooks/useLiveAction';
+import { useLiveSlider } from '@/src/hooks/useLiveSlider';
+import { EDIT_SECTIONS, appliesOnSelect, findSection, isSliderApplied } from '@/src/lib/edit-sections';
+import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
 import { THUMBNAIL_SIZE } from '@/src/lib/editor-thumbnails';
 import { useTheme } from '@/src/lib/theme';
 import {
+  actionPreviewRequested,
   blemishApplyRequested,
   redoRequested,
   redoRequested$,
@@ -23,6 +24,8 @@ import {
   activeSectionKey,
   activeSectionKey$,
   adjustments$,
+  adjustments as adjustmentsState,
+  appliedActions,
   appliedActions$,
   focusedControl$,
   focusedControlKey,
@@ -31,9 +34,11 @@ import {
 } from '@/src/state/edits';
 import { canRedo$, canRedoDraft$, canUndo$, canUndoDraft$ } from '@/src/state/history';
 import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
-import { useLiveSlider } from '@/src/hooks/useLiveSlider';
-import { Slider } from '@/src/components/slider';
-import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { replayHidden } from '@/src/state/session';
+import { ChevronLeft, Redo2, RedoDot, Undo2, UndoDot, X } from 'lucide-react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View, type ImageStyle, type StyleProp } from 'react-native';
+import { useObservable } from 'react-rx';
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
 export function EditorPanel() {
@@ -46,6 +51,7 @@ export function EditorPanel() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const activeSection = findSection(activeKey);
+  useLiveAction();
   const focusedControl = useObservable(focusedControl$, undefined);
   const isBlemishToolFocused = useObservable(isBlemishToolFocused$, false);
   const canUndoHistory = canUndoDraft || canUndo;
@@ -55,10 +61,25 @@ export function EditorPanel() {
     const subscriptions = [
       undoRequested$.subscribe(undoHistory),
       redoRequested$.subscribe(redoHistory),
-      selectSectionRequested$.subscribe(key => activeSectionKey.next(key)),
+      // Picking a section closes any open slider, including when it is the section already showing, so its controls come back.
+      selectSectionRequested$.subscribe(key => {
+        focusedControlKey.next(null);
+        activeSectionKey.next(key);
+      }),
       selectControlRequested$.subscribe(control => {
-        if (control.kind === 'action') toggleAction(control);
-        else focusedControlKey.next(control.key);
+        if (control.kind === 'action') {
+          if (control.live) {
+            // Applying previews at once; removing has nothing to preview, but the same short replay needs no spinner either.
+            replayHidden.next(true);
+            if (!appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
+          }
+          toggleAction(control);
+        } else {
+          focusedControlKey.next(control.key);
+          if (control.kind === 'slider' && appliesOnSelect(control) && adjustmentsState.value[control.key] === undefined) {
+            commitSlider(control, control.defaultValue);
+          }
+        }
       }),
       sliderCommitRequested$.subscribe(({ control, value }) => commitSlider(control, value)),
     ];
@@ -139,14 +160,26 @@ function SliderEditor() {
       <Pressable onPress={() => focusedControlKey.next(null)} hitSlop={8} style={styles.backChip}>
         <ChevronLeft color={colors.textPrimary} size={18} />
       </Pressable>
+      {/* Turns the effect off and closes the slider. The slider's own reset only puts the value back to its default. */}
+      <Pressable
+        onPress={() => {
+          removeSlider(control);
+          focusedControlKey.next(null);
+        }}
+        hitSlop={8}
+        style={styles.backChip}
+      >
+        <X color={colors.textPrimary} size={16} />
+      </Pressable>
       <View style={styles.sliderFill}>
         <Slider
           key={control.key + '-' + resetVersion}
           label={control.label}
           min={control.min}
           max={control.max}
-          step={control.step}
+          step={control.step ?? 1}
           initialValue={adjustments[control.key] ?? control.defaultValue}
+          resetValue={control.defaultValue}
           triggerType="release"
           onChange={onLiveChange}
           reset
@@ -183,16 +216,7 @@ function ThumbnailControls() {
             onPress={() => selectControlRequested.next(control)}
           >
             <View style={[styles.thumbnailImage, adjusted && styles.thumbnailApplied]}>
-              {thumbnail && (
-                <Image
-                  source={{ uri: thumbnail }}
-                  style={styles.thumbnailCanvas}
-                  resizeMode="cover"
-                  // Every edit swaps in freshly rendered thumbnails; Android's default 300ms fade-in would
-                  // make the whole row fade out and back in on each tap.
-                  fadeDuration={0}
-                />
-              )}
+              {thumbnail && <Thumbnail uri={thumbnail} style={styles.thumbnailCanvas} />}
             </View>
             <Text style={[styles.thumbnailLabel, adjusted && styles.thumbnailLabelApplied]} numberOfLines={2}>
               {control.label}
@@ -201,6 +225,29 @@ function ThumbnailControls() {
         );
       })}
     </ScrollView>
+  );
+}
+
+/**
+ * A thumbnail that keeps showing the previous image until the new one has loaded. Every edit swaps in freshly rendered
+ * data URIs; an `Image` whose uri changes is blank while the new one decodes, which shows as a flicker.
+ */
+function Thumbnail({ uri, style }: { uri: string; style: StyleProp<ImageStyle> }) {
+  const [shown, setShown] = useState(uri);
+  // Android's default 300ms fade-in would make the row fade out and back in on each edit.
+  return (
+    <>
+      <Image source={{ uri: shown }} style={[style, StyleSheet.absoluteFill]} resizeMode="cover" fadeDuration={0} />
+      {uri !== shown && (
+        <Image
+          source={{ uri }}
+          style={[style, StyleSheet.absoluteFill]}
+          resizeMode="cover"
+          fadeDuration={0}
+          onLoad={() => setShown(uri)}
+        />
+      )}
+    </>
   );
 }
 
@@ -223,7 +270,7 @@ function ChipControls() {
         const adjusted =
           control.kind === 'action'
             ? appliedActions.includes(control.key)
-            : control.kind === 'slider' && (adjustments[control.key] ?? control.defaultValue) !== control.defaultValue;
+            : control.kind === 'slider' && isSliderApplied(control, adjustments[control.key]);
         return (
           <Pressable
             key={control.key}

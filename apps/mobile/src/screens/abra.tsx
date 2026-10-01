@@ -9,7 +9,7 @@ import { disposeLater, useLivePreview } from '@/src/hooks/useLivePreview';
 type Operation = { label: string; run: (image: AbraImageLike) => void };
 
 const OPERATIONS: Operation[] = [
-  { label: 'Grayscale', run: (image) => image.grayscale() },
+  { label: 'Grayscale', run: (image) => image.applyEffect(EffectSpec.Grayscale.new()) },
   { label: 'Invert', run: (image) => image.invert() },
   { label: 'Brightness +40', run: (image) => image.applyEffect(EffectSpec.Brightness.new({ amount: 40 })) },
   { label: 'Auto tone', run: (image) => image.autoTone() },

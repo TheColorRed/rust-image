@@ -1,12 +1,12 @@
 use abra_core::{
-  ImageRef, IntoNumber,
+  IntoNumber,
   image::{
     Image,
-    apply_area::apply_in_area,
-    gpu::{CpuProcessor, GpuEffect, GpuOp, GpuPass, GpuProcessor},
+    gpu::{GpuPass, GpuProcessor},
   },
 };
-use options::{Apply, Options};
+use crate::lut::channel_lut_pass;
+use options::{Effect, Options};
 
 use rayon::prelude::*;
 
@@ -77,7 +77,7 @@ pub struct Exposure {
   options: Options,
 }
 
-impl Apply for Exposure {
+impl Effect for Exposure {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -86,35 +86,24 @@ impl Apply for Exposure {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let ctx = options::get_ctx(self.options.as_ref());
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
     let (exposure, offset, gamma_correction) = self.params();
-    apply_in_area(image, ctx, 1, Some(self as &dyn GpuEffect), |p_area_image| {
-      apply_exposure(p_area_image, exposure, offset, gamma_correction)
-    });
-  }
-}
-
-impl CpuProcessor for Exposure {
-  fn process(&self, p_image: &mut Image) {
-    self.apply_to_image(p_image);
+    apply_exposure(p_image, exposure, offset, gamma_correction);
   }
 
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
     Some(self)
   }
 }
 
 impl GpuProcessor for Exposure {
-  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
-    let (exposure, offset, gamma_correction) = self.params();
-    let mut uniforms = Vec::with_capacity(16);
-    for value in [exposure, offset, gamma_correction, 0.0] {
-      uniforms.extend_from_slice(&value.to_le_bytes());
-    }
-    GpuOp::new(include_str!("exposure.wgsl"), uniforms).passes(p_width, p_height)
+  /// A lookup table built from the CPU code, so the GPU gives exactly the CPU's pixels.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![channel_lut_pass(|image| self.cpu_processor(image))]
   }
 }
 

@@ -1,12 +1,11 @@
 use crate::{
-  apply_filter,
   blur::blur,
   kernel::apply_kernel,
   sobel::{SobelDirection, sobel},
 };
-use abra_core::{Image, ImageRef};
+use abra_core::Image;
 use adjustments::color::grayscale;
-use options::Apply;
+use options::Effect;
 
 // TODO: Implement the glowing_edges filter to look a little more like Photoshop's glowing edges filter.
 /// Applies the glowing edges filter to the image.
@@ -71,20 +70,20 @@ pub struct GlowingEdges {
   smoothness: u32,
   options: options::Options,
 }
-options::cpu_processor!(GlowingEdges);
-
-impl Apply for GlowingEdges {
+impl Effect for GlowingEdges {
   fn options(&self) -> &options::Options {
     &self.options
   }
   fn options_mut(&mut self) -> &mut options::Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_glowing_edges, image, options, 1, self.edge_width, self.edge_brightness, self.smoothness);
+  /// The Sobel step reads one pixel, each pass that widens the edges reads one more, and the smoothing blur one more.
+  fn padding(&self) -> i32 {
+    self.edge_width as i32 + 2
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_glowing_edges(p_image, self.edge_width, self.edge_brightness, self.smoothness);
   }
 }
 impl GlowingEdges {

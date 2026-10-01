@@ -1,3 +1,5 @@
+// Not used by the contrast effect, which uses the lookup-table shader (channel_lut.wgsl) so the GPU gives exactly the
+// CPU's pixels. Kept as a small example shader for the gpu crate's tests and the live image's tests.
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var<uniform> params: f32;

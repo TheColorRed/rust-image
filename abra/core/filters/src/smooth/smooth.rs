@@ -1,7 +1,7 @@
-use options::{Apply, Options};
+use options::{Effect, Options};
 
-use crate::{apply_filter, kernel::apply_kernel};
-use abra_core::{Image, image::image_ext::ImageRef};
+use crate::kernel::apply_kernel;
+use abra_core::Image;
 
 fn apply_smooth(p_image: &mut Image) {
   let kernel = [0.0; 9].iter().map(|_| 1.0 / 9.0).collect::<Vec<f32>>();
@@ -14,9 +14,7 @@ fn apply_smooth(p_image: &mut Image) {
 pub struct Smooth {
   options: Options,
 }
-options::cpu_processor!(Smooth);
-
-impl Apply for Smooth {
+impl Effect for Smooth {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -24,11 +22,12 @@ impl Apply for Smooth {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_smooth, image, options, 1);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_smooth(p_image);
   }
 }
 pub fn smooth() -> Smooth {

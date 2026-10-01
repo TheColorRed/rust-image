@@ -1,9 +1,9 @@
-use abra_core::{Image, ImageRef};
+use abra_core::Image;
 
-use options::{Apply, Options};
+use options::{Effect, Options};
 
-use crate::apply_adjustment;
-use abra_core::image::gpu::{CpuProcessor, GpuEffect, GpuOp, GpuPass, GpuProcessor};
+use crate::lut::channel_lut_pass;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 /// Adjust the brightness of an image.
 /// * `p_image` - The image.
@@ -20,34 +20,21 @@ pub struct Brightness {
 }
 
 impl Brightness {
-  /// The multiplicative factor the shader uses: 0 is black and 1.0 is no change. A positive amount increases
+  /// The multiplicative factor: 0 is black and 1.0 is no change. A positive amount increases
   /// brightness.
   fn factor(&self) -> f32 {
     ((self.amount as f32) / 100.0) + 1.0
   }
-
-  fn gpu_op(&self) -> GpuOp {
-    GpuOp::new(include_str!("./brightness.wgsl"), self.factor().to_le_bytes())
-  }
-}
-
-impl CpuProcessor for Brightness {
-  fn process(&self, p_image: &mut Image) {
-    self.apply_to_image(p_image);
-  }
-
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
-  }
 }
 
 impl GpuProcessor for Brightness {
-  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
-    self.gpu_op().passes(p_width, p_height)
+  /// A lookup table built from the CPU code, so the GPU gives exactly the CPU's pixels.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![channel_lut_pass(|image| self.cpu_processor(image))]
   }
 }
 
-impl Apply for Brightness {
+impl Effect for Brightness {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -56,10 +43,16 @@ impl Apply for Brightness {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(gpu = self; apply_brightness, image, self.options.as_ref(), 0, self.factor());
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_brightness(p_image, self.factor());
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 

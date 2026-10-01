@@ -1,8 +1,12 @@
-import { AbraImage } from '@alakazam/mobile';
-import { combineLatest, Observable, type Subscription } from 'rxjs';
-import { filter, switchMap, tap } from 'rxjs/operators';
 import { batch } from '@/src/lib/batch';
-import { EDIT_SECTIONS, findSection, type EditSection } from '@/src/lib/edit-sections';
+import {
+  EDIT_SECTIONS,
+  applyAction,
+  findSection,
+  isSliderApplied,
+  type ActionControl,
+  type EditSection,
+} from '@/src/lib/edit-sections';
 import { comparisonImage, recordDraftStep } from '@/src/lib/editor-history';
 import { buildControlThumbnails } from '@/src/lib/editor-thumbnails';
 import {
@@ -15,46 +19,128 @@ import {
 } from '@/src/state/edits';
 import { previewBox$ } from '@/src/state/gestures';
 import { controlThumbnails, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
-import { busy, currentImage, editBaseImage, ready$ } from '@/src/state/session';
+import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
+import { AbraImage, type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
+import { combineLatest, Observable, type Subscription } from 'rxjs';
+import { filter, switchMap, tap } from 'rxjs/operators';
 
 /** Gap between an edit and its replay, so the tap's immediate UI feedback can be drawn first. */
 const REPLAY_DELAY_MS = 60;
 
-const actionGroup = (key: string) => {
+const findAction = (key: string): ActionControl | undefined => {
   for (const section of EDIT_SECTIONS) {
-    for (const control of section.controls) if (control.kind === 'action' && control.key === key) return control.group;
+    for (const control of section.controls) if (control.kind === 'action' && control.key === key) return control;
   }
   return undefined;
 };
 
+/** One applied control: how to run it on an image, and, when it has a live form, its effect. */
+type Step = {
+  key: string;
+  /** The slider's value; actions have none. */
+  value?: number;
+  run: (image: AbraImageLike) => void;
+  live?: () => EffectSpec;
+};
+
 /**
- * Renders the whole edit stack (one-shot actions, then sliders) onto a fresh copy of the edit base.
- * `excludeGroups` leaves out applied actions of those mutually exclusive groups.
+ * The applied controls in the order they run: one-shot actions, then sliders in section order.
+ * `excludeGroups` leaves out applied actions of those mutually exclusive groups. `slider` is the slider being dragged:
+ * without a `value` it is left out, and with one it is included at that value whether or not it is applied.
+ * `pending` is an action about to be applied: it goes after the applied actions, where toggling it will put it.
  */
-function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, skipSliderKey?: string) {
-  const next = base.copy() as AbraImage;
-  for (const key of appliedActions.value) {
-    const group = actionGroup(key);
-    if (group && excludeGroups?.has(group)) continue;
-    for (const section of EDIT_SECTIONS) {
-      const action = section.controls.find(control => control.kind === 'action' && control.key === key);
-      if (action?.kind === 'action') action.apply(next);
-    }
+function appliedSteps(
+  excludeGroups?: ReadonlySet<string>,
+  slider?: { key: string; value?: number },
+  pending?: ActionControl,
+): Step[] {
+  const steps: Step[] = [];
+  const keys = pending && !appliedActions.value.includes(pending.key) ? [...appliedActions.value, pending.key] : appliedActions.value;
+  for (const key of keys) {
+    const control = findAction(key);
+    if (!control || (!control.apply && !control.live)) continue;
+    if (control.group && excludeGroups?.has(control.group)) continue;
+    steps.push({ key, run: image => applyAction(control, image), live: control.live });
   }
   for (const section of EDIT_SECTIONS) {
     for (const control of section.controls) {
-      if (control.kind !== 'slider' || control.key === skipSliderKey) continue;
-      const value = adjustments.value[control.key] ?? control.defaultValue;
-      if (value !== control.defaultValue) control.apply(next, value);
+      if (control.kind !== 'slider') continue;
+      const dragged = slider?.key === control.key;
+      if (dragged && slider.value === undefined) continue;
+      const committed = dragged ? slider.value : adjustments.value[control.key];
+      if (!dragged && !isSliderApplied(control, committed)) continue;
+      const value = committed ?? control.defaultValue;
+      const live = control.live;
+      steps.push({
+        key: control.key,
+        value,
+        run: image => control.apply(image, value),
+        live: live && (() => live(value)),
+      });
     }
   }
+  return steps;
+}
+
+/** Renders the whole edit stack onto a fresh copy of the edit base. */
+function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>) {
+  const next = base.copy() as AbraImage;
+  for (const step of appliedSteps(excludeGroups)) step.run(next);
   return next;
 }
 
-/** The edit stack without one slider: the starting point for previewing that slider live. The caller owns the result. */
-export function renderEditStackWithoutSlider(sliderKey: string): AbraImage | null {
+/**
+ * Whether a drag of this slider can be previewed as one GPU chain over the original image: every applied control other
+ * than the slider has a live form. Once more effects have shaders this is true more often; until then a stack with a
+ * CPU-only effect falls back to rendering the rest on the CPU.
+ */
+export function canChainLive(sliderKey: string): boolean {
+  return appliedSteps(undefined, { key: sliderKey }).every(step => step.live);
+}
+
+/**
+ * What a live preview of this slider starts from. When the stack can run as a chain it is the untouched edit base;
+ * otherwise it is the edit stack without the slider, and the slider's effect is applied on top. The caller owns the result.
+ */
+export function renderLivePreviewBase(sliderKey: string): AbraImage | null {
   const base = editBaseImage.value;
-  return base ? renderEditStack(base, undefined, sliderKey) : null;
+  if (!base) return null;
+  return canChainLive(sliderKey) ? (base.copy() as AbraImage) : renderEditStackWithoutSlider(base, sliderKey);
+}
+
+function renderEditStackWithoutSlider(base: AbraImage, sliderKey: string) {
+  const next = base.copy() as AbraImage;
+  for (const step of appliedSteps(undefined, { key: sliderKey })) step.run(next);
+  return next;
+}
+
+/**
+ * The applied controls as effects, in the order they run, with the slider being dragged in its place at `value`. Only
+ * valid when {@link canChainLive} is true.
+ */
+export function liveChain(sliderKey: string, value: number): { key: string; effect: EffectSpec }[] {
+  return appliedSteps(undefined, { key: sliderKey, value }).map(step => ({ key: step.key, effect: step.live!() }));
+}
+
+/**
+ * What an action's live preview is made of. Picking the action replaces the others in its exclusive group.
+ *
+ * When every control that will be applied has a live form, `image` is the untouched edit base and `chain` is the whole
+ * stack as effects, with the action where the replay will put it. Otherwise `chain` is null and `image` is the stack
+ * without the action's group, with the action's own effect to be applied on top (after the sliders, not before them as
+ * in the replay, which is the best a CPU-rendered base allows). The caller owns `image`.
+ */
+export function renderPreviewForAction(
+  control: ActionControl,
+): { image: AbraImage; chain: { key: string; effect: EffectSpec }[] | null } | null {
+  const base = editBaseImage.value;
+  if (!base) return null;
+  const groups = control.group ? new Set([control.group]) : undefined;
+  const steps = appliedSteps(groups, undefined, control);
+  if (steps.every(step => step.live)) {
+    return { image: base.copy() as AbraImage, chain: steps.map(step => ({ key: step.key, effect: step.live!() })) };
+  }
+  return { image: renderEditStack(base, groups), chain: null };
 }
 
 const imageIds = new WeakMap<object, number>();
@@ -76,7 +162,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
   const groups = new Set<string>();
   for (const control of section.controls) if (control.kind === 'action' && control.group) groups.add(control.group);
   const applied = appliedActions.value;
-  const inGroup = applied.filter(key => groups.has(actionGroup(key) ?? ''));
+  const inGroup = applied.filter(key => groups.has(findAction(key)?.group ?? ''));
   const key = JSON.stringify([
     section.key,
     imageId(base),
@@ -95,6 +181,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
 function replay() {
   // Re-check: on Fast Refresh this can fire after the session was disposed and its images destroyed.
   const base = editBaseImage.value;
+  replayHidden.next(false);
   if (!base) return busy.next(false);
 
   const next = renderEditStack(base);
@@ -122,7 +209,7 @@ export function startReplay(): Subscription {
   return combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$])
     .pipe(
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
-      tap(() => busy.next(true)),
+      tap(() => busy.next(!replayHidden.value)),
       switchMap(
         () =>
           new Observable<void>(subscriber => {

@@ -4,7 +4,7 @@ use crate::blur::gaussian_blur;
 use abra_core::Channels;
 use abra_core::color::rgb_to_hsv;
 use mask::Mask;
-use options::Apply;
+use options::Effect;
 
 const H_MIN: f32 = 0.0;
 const H_MAX: f32 = 50.0;
@@ -125,7 +125,7 @@ fn apply_smooth_skin_with_options<'a>(p_image: impl Into<ImageRef<'a>>, p_amount
   // Combine with existing mask if provided via options
   let mut opts = p_options.into().unwrap_or_else(ApplyOptions::new);
   if let Some(existing_mask) = opts.mask() {
-    let existing_mask_bytes = existing_mask.image().rgba();
+    let existing_mask_bytes = existing_mask.rgba();
     // Multiply existing mask grayscale with skin mask
     let mut combined = vec![0u8; w * h * 4];
     for i in 0..(w * h) {
@@ -153,7 +153,10 @@ fn apply_smooth_skin_with_options<'a>(p_image: impl Into<ImageRef<'a>>, p_amount
     opts = opts.with_mask(Mask::from_image(mask_img));
   }
 
-  apply_filter!(apply_smooth_skin, image, opts, pad, amount);
+  let options: Options = Some(opts);
+  abra_core::image::apply_area::apply_in_area(image, options::get_ctx(options.as_ref()), pad, None, |p_area_image| {
+    apply_smooth_skin(p_area_image, amount);
+  });
 }
 
 #[derive(Clone)]
@@ -162,15 +165,22 @@ pub struct SmoothSkin {
   options: Options,
 }
 
-options::cpu_processor!(SmoothSkin);
-
-impl Apply for SmoothSkin {
+impl Effect for SmoothSkin {
   fn options(&self) -> &Options {
     &self.options
   }
 
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
+  }
+
+  /// This effect builds its own mask from its options, so it handles them itself.
+  fn apply_on_cpu(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
   }
 
   fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {

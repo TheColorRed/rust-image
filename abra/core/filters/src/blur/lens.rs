@@ -276,9 +276,7 @@ impl LensBlur {
   }
 }
 
-options::cpu_processor!(LensBlur);
-
-impl Apply for LensBlur {
+impl Effect for LensBlur {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -287,13 +285,12 @@ impl Apply for LensBlur {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let apply_options = self.options.clone();
-    let settings = self.settings;
-    let padding = settings.iris.radius as i32 + 1;
-    apply_filter!(apply_lens_blur, image, apply_options, padding, settings);
+  fn padding(&self) -> i32 {
+    self.settings.iris.radius as i32 + 1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_lens_blur(p_image, self.settings);
   }
 }
 

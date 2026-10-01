@@ -1,9 +1,8 @@
-use abra_core::{Channel, Histogram, Image, image::image_ext::ImageRef};
-use options::{Apply, Options};
+use abra_core::{Channel, Histogram, Image};
+use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-use crate::apply_adjustment;
 
 fn apply_auto_tone(p_image: &mut Image) {
   let (width, height) = p_image.dimensions::<i32>();
@@ -49,9 +48,7 @@ pub struct AutoTone {
   options: Options,
 }
 
-options::cpu_processor!(AutoTone);
-
-impl Apply for AutoTone {
+impl Effect for AutoTone {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -60,10 +57,12 @@ impl Apply for AutoTone {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_auto_tone, image, self.options.as_ref(), 1);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_auto_tone(p_image);
   }
 }
 

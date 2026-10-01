@@ -1,7 +1,8 @@
-use abra_core::{Channel, Image, ImageRef};
-use options::{Apply, Options};
-
-use crate::apply_adjustment;
+use abra_core::{
+  Channel, Image,
+  image::gpu::{GpuOp, GpuPass, GpuProcessor},
+};
+use options::{Effect, Options};
 
 fn apply_invert<'a>(p_image: &mut Image) {
   p_image.mut_channels(Channel::RGB, |channel| 255 - channel);
@@ -13,9 +14,7 @@ pub struct Invert {
   options: Options,
 }
 
-options::cpu_processor!(Invert);
-
-impl Apply for Invert {
+impl Effect for Invert {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -24,10 +23,22 @@ impl Apply for Invert {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_invert, image, self.options.as_ref(), 1);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_invert(p_image);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
+impl GpuProcessor for Invert {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<abra_core::image::gpu::GpuPass> {
+    vec![GpuPass::new(include_str!("invert.wgsl"), Vec::new())]
   }
 }
 

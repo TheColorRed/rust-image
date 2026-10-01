@@ -112,9 +112,7 @@ pub struct Despeckle {
   threshold: f32,
   options: Options,
 }
-options::cpu_processor!(Despeckle);
-
-impl Apply for Despeckle {
+impl Effect for Despeckle {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -122,11 +120,12 @@ impl Apply for Despeckle {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_despeckle, image, options, 1, self.radius, self.threshold);
+  fn padding(&self) -> i32 {
+    self.radius.clamp(1.0, 30.0).round() as i32
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_despeckle(p_image, self.radius, self.threshold);
   }
 }
 pub fn despeckle(p_radius: f32, p_threshold: f32) -> Despeckle {

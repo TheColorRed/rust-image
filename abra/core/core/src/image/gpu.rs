@@ -132,17 +132,16 @@ pub trait LiveEffect: GpuEffect + Send + Sync {
   fn apply_cpu(&self, p_image: &mut crate::Image);
 }
 
-/// The CPU implementation every adjustment, filter and effect provides. It is the only required part: an effect that
-/// also has a shader implements [`GpuProcessor`] and returns itself from [`gpu`](Self::gpu).
+/// The CPU entry point for an effect: what it does to an image on the CPU, limited to its area and mask. It always
+/// runs on the CPU and never uses the GPU, whatever the settings. Every [`Apply`](crate::image::effect::Apply) type has this provided, so an effect does not
+/// implement it; it is what [`ChainRenderer`] and live images call for an effect that has no shader.
 ///
-/// Implementing this is enough to be used one-shot and in live chains: [`GpuEffect`] and [`LiveEffect`] are provided
-/// for every `CpuProcessor`.
+/// [`GpuEffect`] and [`LiveEffect`] are provided for every `CpuProcessor`.
 pub trait CpuProcessor: Send + Sync {
-  /// Applies the effect to the whole of `p_image`.
+  /// Applies the effect to `p_image` on the CPU.
   fn process(&self, p_image: &mut crate::Image);
 
-  /// The GPU version of this effect, or `None` (the default) when it only runs on the CPU. Override with
-  /// `Some(self)` after implementing [`GpuProcessor`].
+  /// The GPU version of this effect, or `None` (the default) when it only runs on the CPU.
   fn gpu(&self) -> Option<&dyn GpuProcessor> {
     None
   }

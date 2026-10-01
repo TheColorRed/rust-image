@@ -25,6 +25,8 @@ export interface LivePreviewControls {
    * different keys to apply the same kind of effect more than once.
    */
   apply: (effect: EffectSpec, key?: string) => void;
+  /** Whether an effect is applied under `key` in the current preview. A new preview starts with none. */
+  has: (key: string) => boolean;
   /** Removes the effect applied under `key`. */
   remove: (key: string) => void;
   /** Removes every effect. */
@@ -136,6 +138,8 @@ export function useLivePreview(
     [wake, surfaceId],
   );
 
+  const has = useCallback((key: string) => idsRef.current.has(key), []);
+
   const remove = useCallback(
     (key: string) => {
       const id = idsRef.current.get(key);
@@ -153,5 +157,5 @@ export function useLivePreview(
     wake();
   }, [wake]);
 
-  return { frame, isGpu, surface, error, apply, remove, clear };
+  return { frame, isGpu, surface, error, apply, has, remove, clear };
 }

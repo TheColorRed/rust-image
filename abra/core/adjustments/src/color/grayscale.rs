@@ -1,7 +1,8 @@
-use abra_core::{Image, ImageRef};
-use options::{Apply, Options};
-
-use crate::apply_adjustment;
+use abra_core::{
+  Image,
+  image::gpu::{GpuPass, GpuProcessor},
+};
+use options::{Effect, Options};
 
 /// Converts an image to grayscale
 fn apply_grayscale(p_image_ref: &mut Image) {
@@ -11,7 +12,7 @@ fn apply_grayscale(p_image_ref: &mut Image) {
     let b = pixel[2] as f32;
 
     // Map the pixel to a grayscale value.
-    let gray = (r * 0.299 + g * 0.587 + b * 0.114) as u8;
+    let gray = ((77.0 * r + 150.0 * g + 29.0 * b + 128.0) / 256.0) as u8; // r, g, b as f32
 
     // Set the pixel to the grayscale value.
     pixel[0] = gray;
@@ -25,9 +26,7 @@ pub struct Grayscale {
   options: Options,
 }
 
-options::cpu_processor!(Grayscale);
-
-impl Apply for Grayscale {
+impl Effect for Grayscale {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -36,10 +35,22 @@ impl Apply for Grayscale {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_grayscale, image, self.options.as_ref(), 1);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_grayscale(p_image);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
+impl GpuProcessor for Grayscale {
+  fn passes(&self, _w: u32, _h: u32) -> Vec<GpuPass> {
+    vec![GpuPass::new(include_str!("./grayscale.wgsl"), Vec::new())]
   }
 }
 

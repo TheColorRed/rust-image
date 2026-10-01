@@ -1,7 +1,7 @@
 use abra_core::blend::blend as blend_images;
 use abra_core::{BlendMode, Color, Fill, Image, PointF};
 
-use filters::Apply;
+use filters::Effect;
 use filters::blur::gaussian_blur;
 use rayon::prelude::*;
 use std::sync::Arc;

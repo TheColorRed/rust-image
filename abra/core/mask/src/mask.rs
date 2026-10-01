@@ -74,6 +74,12 @@ impl Mask {
   }
 }
 
+impl From<Mask> for Image {
+  fn from(p_mask: Mask) -> Image {
+    p_mask.image().clone()
+  }
+}
+
 impl From<Image> for Mask {
   fn from(p_img: Image) -> Mask {
     Mask::from_image(p_img)

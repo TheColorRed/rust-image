@@ -27,6 +27,11 @@ export const loadError = new BehaviorSubject<string | null>(null);
 export const loadError$ = loadError.asObservable();
 export const busy = new BehaviorSubject(false);
 export const busy$ = busy.asObservable();
+/**
+ * Set when the pending edit is already showing on screen through a live preview, so its replay runs unseen and needs no
+ * busy indicator. The replay clears it.
+ */
+export const replayHidden = new BehaviorSubject(false);
 export const saved = new BehaviorSubject(false);
 export const saved$ = saved.asObservable();
 

@@ -55,9 +55,7 @@ pub struct Pinch {
   amount: f32,
   options: Options,
 }
-options::cpu_processor!(Pinch);
-
-impl Apply for Pinch {
+impl Effect for Pinch {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -65,11 +63,16 @@ impl Apply for Pinch {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_pinch, image, options, 1, self.amount);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn positional(&self) -> bool {
+    true
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_pinch(p_image, self.amount);
   }
 }
 pub fn pinch(p_amount: f32) -> Pinch {

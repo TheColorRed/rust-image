@@ -1,5 +1,5 @@
 import { Subject } from 'rxjs';
-import { type EditControl, type SliderControl } from '@/src/lib/edit-sections';
+import { type ActionControl, type EditControl, type SliderControl } from '@/src/lib/edit-sections';
 
 // Fire-and-forget editor commands: UI emits them, whichever component or tool owns the behavior subscribes.
 
@@ -7,6 +7,9 @@ export const closeRequested = new Subject<void>();
 export const closeRequested$ = closeRequested.asObservable();
 export const selectControlRequested = new Subject<EditControl>();
 export const selectControlRequested$ = selectControlRequested.asObservable();
+/** An action with a live form is about to be applied; the preview shows it at once. */
+export const actionPreviewRequested = new Subject<ActionControl>();
+export const actionPreviewRequested$ = actionPreviewRequested.asObservable();
 export const selectSectionRequested = new Subject<string>();
 export const selectSectionRequested$ = selectSectionRequested.asObservable();
 export const sliderCommitRequested = new Subject<{ control: SliderControl; value: number }>();

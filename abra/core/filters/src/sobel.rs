@@ -1,6 +1,6 @@
-use crate::{apply_filter, kernel::apply_kernel};
-use abra_core::{Image, image::image_ext::ImageRef};
-use options::{Apply, Options};
+use crate::kernel::apply_kernel;
+use abra_core::Image;
+use options::{Effect, Options};
 
 /// Direction of the Sobel derivative kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,9 +23,7 @@ pub struct Sobel {
   direction: SobelDirection,
   options: Options,
 }
-options::cpu_processor!(Sobel);
-
-impl Apply for Sobel {
+impl Effect for Sobel {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -33,11 +31,12 @@ impl Apply for Sobel {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_sobel, image, options, 1, self.direction);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_sobel(p_image, self.direction);
   }
 }
 pub fn sobel(p_direction: SobelDirection) -> Sobel {

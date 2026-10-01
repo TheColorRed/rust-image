@@ -102,9 +102,7 @@ pub struct SurfaceBlur {
   options: Options,
 }
 
-options::cpu_processor!(SurfaceBlur);
-
-impl Apply for SurfaceBlur {
+impl Effect for SurfaceBlur {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -113,11 +111,12 @@ impl Apply for SurfaceBlur {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_surface_blur, image, options, self.radius as i32, self.radius, self.threshold);
+  fn padding(&self) -> i32 {
+    self.radius as i32
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_surface_blur(p_image, self.radius, self.threshold);
   }
 }
 

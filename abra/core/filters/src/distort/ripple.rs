@@ -154,9 +154,7 @@ pub struct Ripple {
   shape: RippleShape,
   options: Options,
 }
-options::cpu_processor!(Ripple);
-
-impl Apply for Ripple {
+impl Effect for Ripple {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -164,11 +162,16 @@ impl Apply for Ripple {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_ripple, image, options, 1, self.amount, self.size.clone(), self.shape.clone());
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn positional(&self) -> bool {
+    true
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_ripple(p_image, self.amount, self.size.clone(), self.shape.clone());
   }
 }
 impl Ripple {

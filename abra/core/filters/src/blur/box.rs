@@ -98,9 +98,7 @@ pub struct BoxBlur {
   options: Options,
 }
 
-options::cpu_processor!(BoxBlur);
-
-impl Apply for BoxBlur {
+impl Effect for BoxBlur {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -109,11 +107,12 @@ impl Apply for BoxBlur {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_box_blur, image, options, self.radius as i32, self.radius);
+  fn padding(&self) -> i32 {
+    self.radius as i32
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_box_blur(p_image, self.radius);
   }
 }
 

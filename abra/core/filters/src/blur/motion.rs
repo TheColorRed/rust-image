@@ -104,9 +104,7 @@ pub struct MotionBlur {
   options: Options,
 }
 
-options::cpu_processor!(MotionBlur);
-
-impl Apply for MotionBlur {
+impl Effect for MotionBlur {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -115,11 +113,14 @@ impl Apply for MotionBlur {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_motion_blur, image, options, 1, self.angle_degrees, self.distance);
+  /// The samples run half the distance either way from a pixel, and each is read with bilinear filtering, which reads
+  /// one pixel further.
+  fn padding(&self) -> i32 {
+    (self.distance as i32 + 1) / 2 + 1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_motion_blur(p_image, self.angle_degrees, self.distance);
   }
 }
 

@@ -1,7 +1,5 @@
-use abra_core::{Channel, Image, ImageRef};
-use options::{Apply, Options};
-
-use crate::apply_adjustment;
+use abra_core::{Channel, Image};
+use options::{Effect, Options};
 
 /// Reduces the opacity of an image by a factor of `p_opacity`.
 /// The opacity is a value between 0.0 and 1.0.
@@ -16,9 +14,7 @@ pub struct Opacity {
   options: Options,
 }
 
-options::cpu_processor!(Opacity);
-
-impl Apply for Opacity {
+impl Effect for Opacity {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -27,10 +23,12 @@ impl Apply for Opacity {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_opacity, image, self.options.as_ref(), 0, self.opacity);
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_opacity(p_image, self.opacity);
   }
 }
 

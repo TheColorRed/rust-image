@@ -1,13 +1,13 @@
 use abra_core::{
-  Image, ImageRef,
-  image::gpu::{CpuProcessor, GpuEffect, GpuOp, GpuPass, GpuProcessor},
+  Image,
+  image::gpu::{GpuPass, GpuProcessor},
 };
 
-use options::{Apply, Options};
+use crate::lut::channel_lut_pass;
+use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-use crate::apply_adjustment;
 
 /// Adjusts the contrast of an image.
 fn apply_contrast(p_image: &mut Image, p_amount: impl Into<f64>) {
@@ -32,29 +32,14 @@ pub struct Contrast {
   options: Options,
 }
 
-impl Contrast {
-  fn gpu_op(&self) -> GpuOp {
-    GpuOp::new(include_str!("./contrast.wgsl"), (self.amount as f32).to_le_bytes())
-  }
-}
-
-impl CpuProcessor for Contrast {
-  fn process(&self, p_image: &mut Image) {
-    self.apply_to_image(p_image);
-  }
-
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
-  }
-}
-
 impl GpuProcessor for Contrast {
-  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
-    self.gpu_op().passes(p_width, p_height)
+  /// A lookup table built from the CPU code, so the GPU gives exactly the CPU's pixels.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![channel_lut_pass(|image| self.cpu_processor(image))]
   }
 }
 
-impl Apply for Contrast {
+impl Effect for Contrast {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -63,10 +48,16 @@ impl Apply for Contrast {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(gpu = self; apply_contrast, image, self.options.as_ref(), 1, self.amount);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_contrast(p_image, self.amount);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 

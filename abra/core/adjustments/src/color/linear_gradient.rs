@@ -1,7 +1,6 @@
-use crate::apply_adjustment;
-use abra_core::image::gpu::{CpuProcessor, GpuAux, GpuPass, GpuProcessor};
-use abra_core::{Gradient, Image, ImageRef};
-use options::{Apply, Options};
+use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor};
+use abra_core::{Gradient, Image};
+use options::{Effect, Options};
 
 /// Number of colors sampled from the gradient into the lookup table the shader reads.
 const LUT_SIZE: u32 = 1024;
@@ -18,7 +17,7 @@ enum Direction {
 /// be re-rendered every frame while a slider is dragged. Colors are composited source-over.
 #[derive(Clone)]
 pub struct LinearGradientEffect {
-  lut: Vec<u8>,
+  lut: std::sync::Arc<[u8]>,
   direction: Direction,
   opacity: f32,
   options: Options,
@@ -30,7 +29,7 @@ impl LinearGradientEffect {
   /// runs left to right.
   pub fn angle(p_gradient: &Gradient, p_degrees: f32) -> LinearGradientEffect {
     LinearGradientEffect {
-      lut: build_lut(p_gradient),
+      lut: build_lut(p_gradient).into(),
       direction: Direction::Angle(p_degrees),
       opacity: 1.0,
       options: None,
@@ -40,7 +39,7 @@ impl LinearGradientEffect {
   /// A gradient from `p_start` to `p_end`, in image pixels.
   pub fn between(p_gradient: &Gradient, p_start: (f32, f32), p_end: (f32, f32)) -> LinearGradientEffect {
     LinearGradientEffect {
-      lut: build_lut(p_gradient),
+      lut: build_lut(p_gradient).into(),
       direction: Direction::Between(p_start, p_end),
       opacity: 1.0,
       options: None,
@@ -70,7 +69,7 @@ impl LinearGradientEffect {
 
   /// Replaces the colors.
   pub fn set_gradient(&mut self, p_gradient: &Gradient) {
-    self.lut = build_lut(p_gradient);
+    self.lut = build_lut(p_gradient).into();
   }
 
   /// The start and end of the gradient line for an image of the given size.
@@ -91,69 +90,130 @@ impl LinearGradientEffect {
   }
 }
 
+/// Where each pixel falls along the gradient, and how opaque it is, in whole numbers. The CPU and the shader both work
+/// from these, with the same steps, so they give exactly the same pixels.
+///
+/// The position along the gradient is a straight line in the pixel's coordinates: `a * x + b * y + c`, in units of
+/// `2^-shift` texels of the color table. `shift` is as large as fits without overflowing, so long and short gradients
+/// both keep their precision.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Plan {
+  a: i32,
+  b: i32,
+  c: i32,
+  shift: u32,
+  /// The overall opacity, 0 to 255.
+  opacity: u32,
+}
+
+impl Plan {
+  /// The index into the color table for the pixel at (`p_x`, `p_y`), from 0 to `LUT_SIZE - 1`.
+  fn table_index(&self, p_x: i32, p_y: i32) -> usize {
+    let half = (1i32 << self.shift) >> 1;
+    let position = self.a * p_x + self.b * p_y + self.c;
+    ((position + half) >> self.shift).clamp(0, LUT_SIZE as i32 - 1) as usize
+  }
+}
+
+/// Puts one gradient color over one pixel, source-over with straight (not premultiplied) alpha, in whole numbers.
+/// Both are RGBA bytes, and `p_opacity` is 0 to 255.
+fn composite(p_base: [u8; 4], p_gradient: [u8; 4], p_opacity: u32) -> [u8; 4] {
+  let source_alpha = (p_gradient[3] as u32 * p_opacity + 127) / 255;
+  let base_alpha = p_base[3] as u32;
+  let out_alpha = source_alpha + (base_alpha * (255 - source_alpha) + 127) / 255;
+  if out_alpha == 0 {
+    return [0, 0, 0, 0];
+  }
+  let divisor = out_alpha * 255;
+  let channel = |gradient: u8, base: u8| {
+    let sum = gradient as u32 * source_alpha * 255 + base as u32 * base_alpha * (255 - source_alpha);
+    ((sum + divisor / 2) / divisor).min(255) as u8
+  };
+  [channel(p_gradient[0], p_base[0]), channel(p_gradient[1], p_base[1]), channel(p_gradient[2], p_base[2]), out_alpha as u8]
+}
+
+impl LinearGradientEffect {
+  /// The whole-number plan for an image of the given size.
+  fn plan(&self, p_width: u32, p_height: u32) -> Plan {
+    let opacity = (self.opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let (start, end) = self.line(p_width, p_height);
+    let (start_x, start_y) = (start.0 as f64, start.1 as f64);
+    let axis = (end.0 as f64 - start_x, end.1 as f64 - start_y);
+    let length_squared = axis.0 * axis.0 + axis.1 * axis.1;
+    if length_squared.is_nan() || length_squared <= 0.0 {
+      // No line: every pixel takes the first color.
+      return Plan {
+        a: 0,
+        b: 0,
+        c: 0,
+        shift: 0,
+        opacity,
+      };
+    }
+    // The index is `(x + 0.5 - start_x) * axis.0 + (y + 0.5 - start_y) * axis.1`, scaled to the table, as `a x + b y + c`.
+    let scale = (LUT_SIZE - 1) as f64 / length_squared;
+    let (mut a, mut b) = (axis.0 * scale, axis.1 * scale);
+    let mut c = ((0.5 - start_x) * axis.0 + (0.5 - start_y) * axis.1) * scale;
+    // Keep every value below 2^29 before shifting, so nothing overflows; a gradient too short to fit only loses
+    // resolution it never had.
+    let largest = a.abs() * p_width as f64 + b.abs() * p_height as f64 + c.abs();
+    let limit = (1u64 << 29) as f64;
+    if largest > limit {
+      let factor = limit / largest;
+      (a, b, c) = (a * factor, b * factor, c * factor);
+    }
+    let largest = largest.min(limit).max(1.0);
+    let mut shift = 0u32;
+    while shift < 20 && largest * (1u64 << (shift + 1)) as f64 <= (1u64 << 30) as f64 {
+      shift += 1;
+    }
+    let fixed = |value: f64| (value * (1u64 << shift) as f64).round() as i32;
+    Plan {
+      a: fixed(a),
+      b: fixed(b),
+      c: fixed(c),
+      shift,
+      opacity,
+    }
+  }
+}
+
 impl GpuProcessor for LinearGradientEffect {
   fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
-    let (start, end) = self.line(p_width, p_height);
-    let params = [start.0, start.1, end.0, end.1, self.opacity.clamp(0.0, 1.0), LUT_SIZE as f32, 0.0, 0.0];
-    let uniforms: Vec<u8> = params.iter().flat_map(|value| value.to_le_bytes()).collect();
+    let plan = self.plan(p_width, p_height);
+    let mut uniforms: Vec<u8> = Vec::with_capacity(32);
+    for value in [plan.a as u32, plan.b as u32, plan.c as u32, plan.shift, plan.opacity, 0, 0, 0] {
+      uniforms.extend_from_slice(&value.to_le_bytes());
+    }
     vec![GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_aux(GpuAux {
       width: LUT_SIZE,
       height: 1,
-      rgba: self.lut.as_slice().into(),
+      rgba: self.lut.clone(),
     })]
   }
 }
 
-impl CpuProcessor for LinearGradientEffect {
-  fn process(&self, p_image: &mut Image) {
-    self.apply_to_image(p_image);
-  }
-
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
-  }
-}
-
 impl LinearGradientEffect {
-  /// The same math as the shader: straight-alpha source-over of the sampled gradient. This is the whole CPU
-  /// implementation; [`CpuProcessor::process`] adds the effect's area and mask around it.
+  /// The whole CPU implementation, in the same whole-number steps as the shader: source-over of the sampled gradient.
+  /// [`Apply`] adds the effect's area and mask around it.
   fn draw(&self, p_image: &mut Image) {
     let (width, height) = p_image.dimensions::<u32>();
     if width == 0 || height == 0 {
       return;
     }
-    let (start, end) = self.line(width, height);
-    let axis = (end.0 - start.0, end.1 - start.1);
-    let axis_len_sq = axis.0 * axis.0 + axis.1 * axis.1;
-    let opacity = self.opacity.clamp(0.0, 1.0);
+    let plan = self.plan(width, height);
     let mut pixels = p_image.to_rgba_vec();
     for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
-      let (x, y) = ((index as u32 % width) as f32 + 0.5, (index as u32 / width) as f32 + 0.5);
-      let t = if axis_len_sq > 0.0 {
-        (((x - start.0) * axis.0 + (y - start.1) * axis.1) / axis_len_sq).clamp(0.0, 1.0)
-      } else {
-        0.0
-      };
-      let lut_index = (t * (LUT_SIZE - 1) as f32).round() as usize * 4;
-      let gradient = &self.lut[lut_index..lut_index + 4];
-      let src_a = gradient[3] as f32 / 255.0 * opacity;
-      let base_a = pixel[3] as f32 / 255.0;
-      let out_a = src_a + base_a * (1.0 - src_a);
-      for channel in 0..3 {
-        let value = if out_a > 0.0 {
-          (gradient[channel] as f32 * src_a + pixel[channel] as f32 * base_a * (1.0 - src_a)) / out_a
-        } else {
-          0.0
-        };
-        pixel[channel] = value.round().clamp(0.0, 255.0) as u8;
-      }
-      pixel[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+      let (x, y) = ((index as u32 % width) as i32, (index as u32 / width) as i32);
+      let table = plan.table_index(x, y) * 4;
+      let gradient = [self.lut[table], self.lut[table + 1], self.lut[table + 2], self.lut[table + 3]];
+      pixel.copy_from_slice(&composite([pixel[0], pixel[1], pixel[2], pixel[3]], gradient, plan.opacity));
     }
     p_image.set_rgba(pixels);
   }
 }
 
-impl Apply for LinearGradientEffect {
+impl Effect for LinearGradientEffect {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -162,10 +222,20 @@ impl Apply for LinearGradientEffect {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(gpu = self; draw_gradient, image, self.options.as_ref(), 0, self);
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  fn positional(&self) -> bool {
+    true
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    draw_gradient(p_image, self);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 
@@ -276,6 +346,39 @@ mod tests {
       assert_ne!(pair[0], pair[1]);
     }
     Ok(())
+  }
+
+  /// The table index for the far corner and the first pixel, without overflowing, whatever the size and line.
+  #[test]
+  fn the_position_math_never_overflows_and_stays_in_the_table() {
+    let gradient = Gradient::from_to(Color::black(), Color::white());
+    let last = LUT_SIZE as usize - 1;
+    for (width, height) in [(1, 1), (37, 21), (1920, 1080), (8192, 8192), (16384, 16384)] {
+      let lines = [
+        ((0.0, 0.0), (width as f32, height as f32)),
+        ((width as f32, height as f32), (0.0, 0.0)),
+        ((5.0, 5.0), (5.5, 5.0)),
+        ((5.0, 5.0), (5.0, 5.001)),
+        ((-1.0e6, -1.0e6), (1.0e6, 1.0e6)),
+        ((0.0, 0.0), (1.0e-6, 0.0)),
+      ];
+      for (start, end) in lines {
+        let plan = LinearGradientEffect::between(&gradient, start, end).plan(width, height);
+        for (x, y) in [(0, 0), (width as i32 - 1, 0), (0, height as i32 - 1), (width as i32 - 1, height as i32 - 1)] {
+          assert!(plan.table_index(x, y) <= last, "{width}x{height} from {start:?} to {end:?} at ({x}, {y})");
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn a_long_gradient_still_runs_from_the_first_color_to_the_last() {
+    let gradient = Gradient::from_to(Color::black(), Color::white());
+    let plan = LinearGradientEffect::between(&gradient, (0.0, 0.0), (8000.0, 0.0)).plan(8192, 1);
+    assert_eq!(plan.table_index(0, 0), 0);
+    assert_eq!(plan.table_index(8000, 0), LUT_SIZE as usize - 1);
+    let middle = plan.table_index(4000, 0) as i32;
+    assert!((middle - (LUT_SIZE as i32 - 1) / 2).abs() <= 1, "halfway along is halfway through the table: {middle}");
   }
 
   #[test]

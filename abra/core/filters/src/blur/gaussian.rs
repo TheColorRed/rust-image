@@ -1,8 +1,9 @@
 use crate::common::*;
-use abra_core::image::gpu::{CpuProcessor, GpuPass, GpuProcessor};
+use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor};
 use abra_core::{Channels, ResizeTarget, Size, Transform};
 use abra_core::{IntoNumber, if_pick};
 
+#[cfg(test)]
 fn gaussian_kernel_1d(p_radius: u32) -> Vec<f32> {
   let mut kernel = vec![0.0; (2 * p_radius + 1) as usize];
   let sigma = p_radius as f32 / 2.0;
@@ -24,77 +25,67 @@ fn gaussian_kernel_1d(p_radius: u32) -> Vec<f32> {
   kernel
 }
 
+/// The Gaussian kernel as whole numbers that add up to exactly 65536, so a blur can be done in whole numbers and give
+/// the same pixels on the CPU and the GPU, and a flat area stays exactly as it was. Sigma is half the radius and edge
+/// pixels are clamped. The result has `2 * p_radius + 1` weights, and the middle one is adjusted to make the sum exact.
+fn gaussian_weights(p_radius: u32) -> Vec<u32> {
+  let radius = p_radius as i64;
+  let sigma = p_radius as f64 / 2.0;
+  let raw: Vec<f64> = (-radius..=radius).map(|k| (-((k * k) as f64) / (2.0 * sigma * sigma)).exp()).collect();
+  let total: f64 = raw.iter().sum();
+  let mut weights: Vec<u32> = raw.iter().map(|value| (value / total * 65536.0).round() as u32).collect();
+  let sum: i64 = weights.iter().map(|&weight| weight as i64).sum();
+  let middle = p_radius as usize;
+  weights[middle] = (weights[middle] as i64 + 65536 - sum) as u32;
+  weights
+}
+
+/// One pass of the blur along a line of `p_length` pixels: each output is the weights times the pixels around it,
+/// rounded. `p_at` gives the index of the pixel `offset` steps from the one being computed, clamped to the line.
+fn blur_line(p_source: &[u8], p_weights: &[u32], p_index: impl Fn(i32) -> usize, p_length: usize, p_out: &mut [u8]) {
+  let radius = (p_weights.len() / 2) as i32;
+  for position in 0..p_length {
+    let mut sums = [0u32; 4];
+    for (offset, &weight) in (-radius..=radius).zip(p_weights) {
+      let neighbour = (position as i32 + offset).clamp(0, p_length as i32 - 1);
+      let source = p_index(neighbour) * 4;
+      for channel in 0..4 {
+        sums[channel] += p_source[source + channel] as u32 * weight;
+      }
+    }
+    for channel in 0..4 {
+      p_out[position * 4 + channel] = ((sums[channel] + 32768) >> 16) as u8;
+    }
+  }
+}
+
 /// Applies a Gaussian blur to an image using separable convolution.
-/// Uses two passes: horizontal and vertical for O(r) complexity instead of O(r²).
-/// * `p_image` - A mutable reference to the image to be blurred.
+/// Uses two passes: horizontal and vertical for O(r) complexity instead of O(r²). The math is whole numbers (see
+/// [`gaussian_weights`]) and `gaussian.wgsl` does exactly the same steps.
+/// * `p_pixels` - The RGBA pixels of the image to be blurred.
 /// * `p_radius` - The radius of the Gaussian kernel.
 fn separable_gaussian_blur_pixels(p_pixels: &[u8], p_width: usize, p_height: usize, p_radius: u32) -> Vec<u8> {
-  let kernel = gaussian_kernel_1d(p_radius);
-  let kernel_radius = p_radius as i32;
-  // kernel_radius is no longer used here; separable implementation computes its kernel locally.
-  let width_i32 = p_width as i32;
-  let height_i32 = p_height as i32;
+  let weights = gaussian_weights(p_radius);
 
-  // Preallocate two buffers (horizontal then vertical) to avoid repeated allocations when processing rows.
+  // Horizontal pass (parallel per row), then vertical pass reading its result.
   let mut horizontal = vec![0u8; p_width * p_height * 4];
+  horizontal.par_chunks_mut(p_width * 4).enumerate().for_each(|(y, row)| {
+    blur_line(&p_pixels[y * p_width * 4..(y + 1) * p_width * 4], &weights, |x| x as usize, p_width, row);
+  });
+
+  // The vertical pass works down each column, then the columns are put back into rows.
+  let mut columns = vec![0u8; p_width * p_height * 4];
+  columns.par_chunks_mut(p_height * 4).enumerate().for_each(|(x, column)| {
+    blur_line(&horizontal, &weights, |y| y as usize * p_width + x, p_height, column);
+  });
   let mut vertical = vec![0u8; p_width * p_height * 4];
-
-  // Horizontal pass (parallel per-row writing into horizontal buffer)
-  horizontal.par_chunks_mut(p_width * 4).enumerate().for_each(|(y, chunk)| {
-    for x in 0..p_width {
-      let mut r = 0.0f32;
-      let mut g = 0.0f32;
-      let mut b = 0.0f32;
-      let mut a = 0.0f32;
-      for kx in -kernel_radius..=kernel_radius {
-        let px = (x as i32 + kx).clamp(0, width_i32 - 1) as usize;
-        let src_idx = (y * p_width + px) * 4;
-        let weight = kernel[(kx + kernel_radius) as usize];
-        r += p_pixels[src_idx] as f32 * weight;
-        g += p_pixels[src_idx + 1] as f32 * weight;
-        b += p_pixels[src_idx + 2] as f32 * weight;
-        a += p_pixels[src_idx + 3] as f32 * weight;
-      }
-      let rr = r.clamp(0.0, 255.0) as u8;
-      let gg = g.clamp(0.0, 255.0) as u8;
-      let bb = b.clamp(0.0, 255.0) as u8;
-      let aa = a.clamp(0.0, 255.0) as u8;
-      let off = x * 4;
-      chunk[off] = rr;
-      chunk[off + 1] = gg;
-      chunk[off + 2] = bb;
-      chunk[off + 3] = aa;
+  for x in 0..p_width {
+    for y in 0..p_height {
+      let from = (x * p_height + y) * 4;
+      let to = (y * p_width + x) * 4;
+      vertical[to..to + 4].copy_from_slice(&columns[from..from + 4]);
     }
-  });
-
-  // Vertical pass: read from horizontal buffer, write into vertical buffer
-  vertical.par_chunks_mut(p_width * 4).enumerate().for_each(|(y, chunk)| {
-    for x in 0..p_width {
-      let mut r = 0.0f32;
-      let mut g = 0.0f32;
-      let mut b = 0.0f32;
-      let mut a = 0.0f32;
-      for ky in -kernel_radius..=kernel_radius {
-        let py = (y as i32 + ky).clamp(0, height_i32 - 1) as usize;
-        let src_idx = (py * p_width + x) * 4;
-        let weight = kernel[(ky + kernel_radius) as usize];
-        r += horizontal[src_idx] as f32 * weight;
-        g += horizontal[src_idx + 1] as f32 * weight;
-        b += horizontal[src_idx + 2] as f32 * weight;
-        a += horizontal[src_idx + 3] as f32 * weight;
-      }
-      let rr = r.clamp(0.0, 255.0) as u8;
-      let gg = g.clamp(0.0, 255.0) as u8;
-      let bb = b.clamp(0.0, 255.0) as u8;
-      let aa = a.clamp(0.0, 255.0) as u8;
-      let off = x * 4;
-      chunk[off] = rr;
-      chunk[off + 1] = gg;
-      chunk[off + 2] = bb;
-      chunk[off + 3] = aa;
-    }
-  });
-
+  }
   vertical
 }
 /// Applies a Gaussian blur to an image.
@@ -136,31 +127,30 @@ pub struct GaussianBlur {
 }
 
 impl GpuProcessor for GaussianBlur {
-  /// A horizontal pass followed by a vertical pass. Unlike the CPU path, large radii are not downsampled.
+  /// A horizontal pass followed by a vertical pass, in the same whole-number math as the CPU, so the pixels are exactly
+  /// the same. The one difference is that the CPU downsamples a large radius (24 or more) on a large image (128 pixels
+  /// or more on a side) for speed, and the GPU does not, so those two give slightly different pixels.
   fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
     if self.radius == 0 {
       return Vec::new();
     }
+    // The weights go to the shader as a table, three bytes each (they never need more than 17 bits).
+    let table: Vec<u8> =
+      gaussian_weights(self.radius).iter().flat_map(|&weight| [weight as u8, (weight >> 8) as u8, (weight >> 16) as u8, 255]).collect();
+    let table: std::sync::Arc<[u8]> = table.into();
     let pass = |direction: u32| {
-      let uniforms: Vec<u8> =
-        [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
-      GpuPass::new(include_str!("./gaussian.wgsl"), uniforms)
+      let uniforms: Vec<u8> = [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
+      GpuPass::new(include_str!("./gaussian.wgsl"), uniforms).with_aux(GpuAux {
+        width: 2 * self.radius + 1,
+        height: 1,
+        rgba: table.clone(),
+      })
     };
     vec![pass(0), pass(1)]
   }
 }
 
-impl CpuProcessor for GaussianBlur {
-  fn process(&self, p_image: &mut Image) {
-    self.apply_to_image(p_image);
-  }
-
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
-  }
-}
-
-impl Apply for GaussianBlur {
+impl Effect for GaussianBlur {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -169,11 +159,16 @@ impl Apply for GaussianBlur {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(gpu = self; apply_gaussian_blur, image, options, self.radius as i32, self.radius);
+  fn padding(&self) -> i32 {
+    self.radius as i32
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_gaussian_blur(p_image, self.radius);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 
@@ -186,7 +181,7 @@ pub fn gaussian_blur(p_radius: impl IntoNumber) -> GaussianBlur {
 
 #[cfg(test)]
 mod tests {
-  use options::{Apply, ApplyOptions};
+  use options::{Effect, ApplyOptions};
 
   use super::gaussian_blur;
   use abra_core::{Area, Image};
@@ -210,16 +205,37 @@ mod tests {
     let (width, height) = (41u32, 27u32);
     let pixels = test_pixels(width, height);
 
-    for radius in [1u32, 2, 5, 12] {
+    for radius in [1u32, 2, 5, 12, 23, 40] {
       let expected = super::separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, radius);
       let actual = renderer.process(&[&gaussian_blur(radius)], width, height, &pixels)?;
       assert_eq!(actual.len(), expected.len());
       for (index, (a, e)) in actual.iter().zip(&expected).enumerate() {
-        // The CPU truncates after each pass and the GPU rounds, so allow a couple of levels.
-        assert!(a.abs_diff(*e) <= 2, "radius {radius}, byte {index}: gpu {a} vs cpu {e}");
+        assert_eq!(a, e, "radius {radius}, byte {index}: gpu {a} vs cpu {e}");
       }
     }
     Ok(())
+  }
+
+  #[test]
+  fn the_weights_add_up_to_exactly_65536_and_are_symmetric() {
+    for radius in [1u32, 2, 3, 7, 12, 40, 100] {
+      let weights = super::gaussian_weights(radius);
+      assert_eq!(weights.len() as u32, 2 * radius + 1);
+      assert_eq!(weights.iter().map(|&weight| weight as u64).sum::<u64>(), 65536, "radius {radius}");
+      let (left, right) = weights.split_at(radius as usize);
+      assert!(left.iter().zip(right[1..].iter().rev()).all(|(a, b)| a.abs_diff(*b) <= 1), "radius {radius}");
+    }
+  }
+
+  #[test]
+  fn a_flat_area_stays_exactly_as_it_was() {
+    // A float kernel that adds up to a hair under 1 and then truncates darkens flat areas by a level.
+    for value in [1u8, 100, 200, 255] {
+      let pixels: Vec<u8> = (0..30 * 30).flat_map(|_| [value, value, value, 255]).collect();
+      for radius in [1u32, 3, 12] {
+        assert_eq!(super::separable_gaussian_blur_pixels(&pixels, 30, 30, radius), pixels, "value {value}, radius {radius}");
+      }
+    }
   }
 
   #[test]

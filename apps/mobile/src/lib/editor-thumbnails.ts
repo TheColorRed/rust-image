@@ -1,7 +1,7 @@
 import { AbraImage } from '@alakazam/mobile';
 import { AlphaType, ColorType, Skia } from '@shopify/react-native-skia';
 import { PixelRatio } from 'react-native';
-import { type EditSection } from '@/src/lib/edit-sections';
+import { applyAction, type EditSection } from '@/src/lib/edit-sections';
 
 /** Display size (dp) of a one-tap control's preview thumbnail. */
 export const THUMBNAIL_SIZE = 60;
@@ -23,7 +23,7 @@ export function buildControlThumbnails(image: AbraImage, section: EditSection) {
     // One control's effect throwing must not abort the loop: that would skip every later
     // thumbnail and look, from the UI, like "this one control is just blank."
     try {
-      if (control.kind === 'action') control.apply(thumbnailImage);
+      if (control.kind === 'action') applyAction(control, thumbnailImage);
       // Read dimensions back rather than assuming they match the base: Rotate Left/Right swap them.
       const width = thumbnailImage.width();
       const height = thumbnailImage.height();

@@ -19,6 +19,7 @@ import {
   draftHistory,
   editBaseImage,
   originalImage,
+  replayHidden,
   saved,
 } from '@/src/state/session';
 
@@ -65,10 +66,22 @@ function toggleAction(control: ActionControl) {
 
 /** A slider was released at `value`. */
 function commitSlider(control: SliderControl, value: number) {
+  replayHidden.next(!!control.live);
   saved.next(false);
   recordDraft.next('push');
   lastDraftGroup.next(null);
   adjustments.next({ ...adjustments.value, [control.key]: value });
+}
+
+/** A slider's effect was turned off: it has no value again, so it is not part of the stack. Does nothing if it was already off. */
+function removeSlider(control: SliderControl) {
+  if (adjustments.value[control.key] === undefined) return;
+  replayHidden.next(!!control.live);
+  saved.next(false);
+  recordDraft.next('push');
+  lastDraftGroup.next(null);
+  const { [control.key]: _removed, ...rest } = adjustments.value;
+  adjustments.next(rest);
 }
 
 /**
@@ -180,6 +193,8 @@ const toggleActionBatched = batched(toggleAction);
 export { toggleActionBatched as toggleAction };
 const commitSliderBatched = batched(commitSlider);
 export { commitSliderBatched as commitSlider };
+const removeSliderBatched = batched(removeSlider);
+export { removeSliderBatched as removeSlider };
 const resetDraftBatched = batched(resetDraft);
 export { resetDraftBatched as resetDraft };
 const saveDraftBatched = batched(saveDraft);

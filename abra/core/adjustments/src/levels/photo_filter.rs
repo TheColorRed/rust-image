@@ -1,9 +1,8 @@
 use abra_core::{Color, Image, hsl_to_rgb, linear_f32_to_srgb_u8, rgb_to_hsl, srgb_u8_to_linear_f32};
-use options::{Apply, Options};
+use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-use crate::apply_adjustment;
 
 /// Types of preset photo filters.
 #[derive(Clone, Copy)]
@@ -160,9 +159,7 @@ pub struct PhotoFilterAdjustment {
   options: Options,
 }
 
-options::cpu_processor!(PhotoFilterAdjustment);
-
-impl Apply for PhotoFilterAdjustment {
+impl Effect for PhotoFilterAdjustment {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -171,15 +168,17 @@ impl Apply for PhotoFilterAdjustment {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<abra_core::ImageRef<'a>>) {
-    let mut image_ref: abra_core::ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
     let (filter_color, preserve_l) = match self.filter {
       PhotoFilter::Color(color) => (color, true),
       PhotoFilter::Preset(preset) => (preset_color(preset), false),
     };
     let density = (self.density as f32).clamp(0.0, 1.0);
-    apply_adjustment!(apply_photo_filter, image, self.options.as_ref(), 1, filter_color, density, preserve_l);
+    apply_photo_filter(p_image, filter_color, density, preserve_l);
   }
 }
 

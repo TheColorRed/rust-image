@@ -14,7 +14,7 @@ mod masked;
 use abra_core::image::gpu::{GpuAux, LiveEffect};
 use abra_core::{Channels, Image};
 use masked::MaskedEffect;
-use options::{Apply, ApplyTarget, Options};
+use options::{Effect, ApplyTarget, Options};
 use std::sync::Arc;
 
 /// A rendered preview frame.
@@ -312,7 +312,7 @@ impl LiveImage {
 
 /// A copy of the effect with its area and mask taken off, and those options. The chain limits the effect to them
 /// itself, so the effect must not also apply them.
-fn without_options<E: Apply + LiveEffect + Clone + 'static>(p_effect: &E) -> (Arc<dyn LiveEffect>, Options) {
+fn without_options<E: Effect + LiveEffect + Clone + 'static>(p_effect: &E) -> (Arc<dyn LiveEffect>, Options) {
   let options = p_effect.options().clone();
   let mut effect = p_effect.clone();
   *effect.options_mut() = None;
@@ -326,14 +326,14 @@ pub struct LiveSlot<'a> {
   id: EffectId,
 }
 
-impl<E: Apply + LiveEffect + Clone + 'static> ApplyTarget<E> for LiveSlot<'_> {
+impl<E: Effect + LiveEffect + Clone + 'static> ApplyTarget<E> for LiveSlot<'_> {
   fn receive(self, p_effect: &E) {
     let (effect, options) = without_options(p_effect);
     self.image.put(self.id, effect, options);
   }
 }
 
-impl<E: Apply + LiveEffect + Clone + 'static> ApplyTarget<E> for &mut LiveImage {
+impl<E: Effect + LiveEffect + Clone + 'static> ApplyTarget<E> for &mut LiveImage {
   fn receive(self, p_effect: &E) {
     let id = self.new_id();
     let (effect, options) = without_options(p_effect);
@@ -344,8 +344,7 @@ impl<E: Apply + LiveEffect + Clone + 'static> ApplyTarget<E> for &mut LiveImage 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use abra_core::image::gpu::{GpuEffect, GpuPass};
-  use abra_core::{Area, ImageRef};
+  use abra_core::Area;
   use options::ApplyOptions;
 
   /// A do-nothing effect that carries options, to look at what the chain does with them.
@@ -354,7 +353,7 @@ mod tests {
     options: Options,
   }
 
-  impl Apply for Probe {
+  impl Effect for Probe {
     fn options(&self) -> &Options {
       &self.options
     }
@@ -363,21 +362,7 @@ mod tests {
       &mut self.options
     }
 
-    fn apply_to_image<'a>(&self, _p_image: impl Into<ImageRef<'a>>) {}
-  }
-
-  impl GpuEffect for Probe {
-    fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
-      Vec::new()
-    }
-  }
-
-  impl LiveEffect for Probe {
-    fn has_gpu(&self) -> bool {
-      false
-    }
-
-    fn apply_cpu(&self, _p_image: &mut Image) {}
+    fn cpu_processor(&self, _p_image: &mut Image) {}
   }
 
   fn live() -> LiveImage {

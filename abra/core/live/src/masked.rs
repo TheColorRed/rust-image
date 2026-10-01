@@ -1,6 +1,7 @@
 //! Limits an effect to the areas and mask it was given.
 
 use abra_core::Image;
+use abra_core::image::apply_area::{mix_by_weights, weight_to_byte};
 use abra_core::image::gpu::{GpuAux, GpuEffect, GpuPass, LiveEffect};
 use std::sync::Arc;
 
@@ -24,7 +25,7 @@ pub(crate) fn weights_texture(p_width: u32, p_height: u32, p_weights: &[f32]) ->
   let rgba: Vec<u8> = p_weights
     .iter()
     .flat_map(|weight| {
-      let byte = (weight.clamp(0.0, 1.0) * 255.0).round() as u8;
+      let byte = weight_to_byte(*weight);
       [byte, byte, byte, 255]
     })
     .collect();
@@ -73,17 +74,8 @@ impl LiveEffect for MaskedEffect {
     if (width, height) != (self.weights.width, self.weights.height) {
       return;
     }
-    let mixed: Vec<u8> = p_image
-      .to_rgba_vec()
-      .chunks_exact(4)
-      .zip(before.chunks_exact(4))
-      .zip(self.weights.rgba.chunks_exact(4))
-      .flat_map(|((after, before), weight)| {
-        let weight = weight[0] as f32 / 255.0;
-        (0..4).map(move |i| (after[i] as f32 * weight + before[i] as f32 * (1.0 - weight)).clamp(0.0, 255.0) as u8)
-      })
-      .collect();
-    p_image.set_rgba(mixed);
+    let weights = self.weights.rgba.chunks_exact(4).map(|texel| texel[0]);
+    p_image.set_rgba(mix_by_weights(&before, &p_image.to_rgba_vec(), weights));
   }
 }
 

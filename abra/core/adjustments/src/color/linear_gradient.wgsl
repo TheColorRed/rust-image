@@ -1,9 +1,16 @@
+// The same whole-number steps as `draw` in linear_gradient.rs, so the GPU gives exactly the CPU's pixels: the position
+// along the gradient is the integer line `a * x + b * y + c` (in units of 2^-shift table texels), and the color is put
+// over the pixel with source-over and straight alpha in whole numbers.
 struct Params {
-  start: vec2<f32>,
-  end: vec2<f32>,
-  opacity: f32,
-  lut_size: f32,
-  pad: vec2<f32>,
+  a: i32,
+  b: i32,
+  c: i32,
+  shift: u32,
+  // The overall opacity, 0 to 255.
+  opacity: u32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
 }
 
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
@@ -19,23 +26,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let pos = vec2<i32>(i32(gid.x), i32(gid.y));
 
-  // Project the pixel center onto the gradient line to get the position along the gradient.
-  let axis = params.end - params.start;
-  let axis_len_sq = dot(axis, axis);
-  var t = 0.0;
-  if (axis_len_sq > 0.0) {
-    t = clamp(dot(vec2<f32>(pos) + vec2<f32>(0.5) - params.start, axis) / axis_len_sq, 0.0, 1.0);
-  }
-  let lut_index = i32(round(t * (params.lut_size - 1.0)));
-  let gradient = textureLoad(lut_tex, vec2<i32>(lut_index, 0), 0);
+  let lut_size = i32(textureDimensions(lut_tex).x);
+  let half = (1i << params.shift) >> 1u;
+  let position = params.a * pos.x + params.b * pos.y + params.c;
+  let lut_index = clamp((position + half) >> params.shift, 0, lut_size - 1);
+  let gradient = vec4<u32>(round(textureLoad(lut_tex, vec2<i32>(lut_index, 0), 0) * 255.0));
+  let base = vec4<u32>(round(textureLoad(input_tex, pos, 0) * 255.0));
 
-  // Source-over with straight (non-premultiplied) alpha.
-  let base = textureLoad(input_tex, pos, 0);
-  let src_a = gradient.a * params.opacity;
-  let out_a = src_a + base.a * (1.0 - src_a);
-  var out_rgb = vec3<f32>(0.0);
-  if (out_a > 0.0) {
-    out_rgb = (gradient.rgb * src_a + base.rgb * base.a * (1.0 - src_a)) / out_a;
+  let source_alpha = (gradient.a * params.opacity + 127u) / 255u;
+  let out_alpha = source_alpha + (base.a * (255u - source_alpha) + 127u) / 255u;
+  var out = vec4<u32>(0u);
+  if (out_alpha > 0u) {
+    let divisor = out_alpha * 255u;
+    let sum = gradient.rgb * source_alpha * 255u + base.rgb * base.a * (255u - source_alpha);
+    out = vec4<u32>(min((sum + vec3<u32>(divisor / 2u)) / vec3<u32>(divisor), vec3<u32>(255u)), out_alpha);
   }
-  textureStore(output_tex, pos, vec4<f32>(out_rgb, out_a));
+  textureStore(output_tex, pos, vec4<f32>(out) / 255.0);
 }

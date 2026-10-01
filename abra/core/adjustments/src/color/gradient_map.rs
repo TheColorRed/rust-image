@@ -1,7 +1,5 @@
-use abra_core::{Gradient, Image, ImageRef};
-use options::{Apply, Options};
-
-use crate::apply_adjustment;
+use abra_core::{Gradient, Image};
+use options::{Effect, Options};
 
 fn apply_gradient_map(p_image: &mut Image, p_gradient: &Gradient) {
   p_image.mut_pixels(|mut pixel| {
@@ -28,9 +26,7 @@ pub struct GradientMap {
   options: Options,
 }
 
-options::cpu_processor!(GradientMap);
-
-impl Apply for GradientMap {
+impl Effect for GradientMap {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -39,10 +35,12 @@ impl Apply for GradientMap {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_gradient_map, image, self.options.as_ref(), 1, &self.gradient);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_gradient_map(p_image, &self.gradient);
   }
 }
 

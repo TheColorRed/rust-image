@@ -59,9 +59,7 @@ pub struct Noise {
   options: Options,
 }
 
-options::cpu_processor!(Noise);
-
-impl Apply for Noise {
+impl Effect for Noise {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -69,11 +67,12 @@ impl Apply for Noise {
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
   }
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    let options = self.options.clone();
-    apply_filter!(apply_add_noise, image, options, 1, self.amount, self.distribution);
+  fn padding(&self) -> i32 {
+    1
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_add_noise(p_image, self.amount, self.distribution);
   }
 }
 

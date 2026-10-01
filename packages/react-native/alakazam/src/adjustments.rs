@@ -27,9 +27,9 @@ impl AbraImage {
   }
 
   /// Converts the image to grayscale.
-  pub fn grayscale(&self) {
-    self.with_image_mut(|img| color::grayscale().apply(img));
-  }
+  // pub fn grayscale(&self) {
+  //   self.with_image_mut(|img| color::grayscale().apply(img));
+  // }
 
   /// Inverts the colors of the image.
   pub fn invert(&self) {

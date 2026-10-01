@@ -3,7 +3,7 @@ use crate::common::*;
 use crate::blur::{GaussianBlur, LensBlur, gaussian_blur};
 use abra_core::Channels;
 use mask::{Mask, rgba_to_gray};
-use options::Apply;
+use options::Effect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusShape {
@@ -198,9 +198,9 @@ impl FocusBlur {
 
   /// Builds a mask covering the whole image: black where it stays sharp, white where it is fully blurred.
   /// When `p_mask` is given it is multiplied in, so the blur only lands where both masks allow it.
-  fn focus_mask(&self, p_width: u32, p_height: u32, p_mask: Option<&Mask>) -> Mask {
+  fn focus_mask(&self, p_width: u32, p_height: u32, p_mask: Option<&Image>) -> Mask {
     let (width, height) = (p_width as f32, p_height as f32);
-    let user_mask = p_mask.map(|m| m.image().rgba()).filter(|m| m.len() == (p_width * p_height * 4) as usize);
+    let user_mask = p_mask.map(|m| m.rgba()).filter(|m| m.len() == (p_width * p_height * 4) as usize);
     let mut pixels = vec![255u8; (p_width * p_height * 4) as usize];
     pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
       let x = (i as u32 % p_width) as f32 + 0.5;
@@ -216,15 +216,22 @@ impl FocusBlur {
   }
 }
 
-options::cpu_processor!(FocusBlur);
-
-impl Apply for FocusBlur {
+impl Effect for FocusBlur {
   fn options(&self) -> &Options {
     &self.options
   }
 
   fn options_mut(&mut self) -> &mut Options {
     &mut self.options
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
+  }
+
+  /// This effect builds its own mask from its options, so it handles them itself.
+  fn apply_on_cpu(&self, p_image: &mut Image) {
+    self.apply_to_image(p_image);
   }
 
   fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {

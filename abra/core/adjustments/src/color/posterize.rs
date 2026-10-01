@@ -1,8 +1,7 @@
-use abra_core::{Image, ImageRef};
-use options::{Apply, Options};
+use abra_core::Image;
+use options::{Effect, Options};
 use rayon::prelude::*;
 
-use crate::apply_adjustment;
 
 fn apply_posterize(p_image: &mut Image, p_levels: u8) {
   let p_levels = (p_levels as f32).clamp(2.0, 255.0);
@@ -21,9 +20,7 @@ pub struct Posterize {
   options: Options,
 }
 
-options::cpu_processor!(Posterize);
-
-impl Apply for Posterize {
+impl Effect for Posterize {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -32,10 +29,12 @@ impl Apply for Posterize {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_posterize, image, self.options.as_ref(), 0, self.levels);
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_posterize(p_image, self.levels);
   }
 }
 

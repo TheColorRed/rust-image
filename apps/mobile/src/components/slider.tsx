@@ -22,8 +22,10 @@ export interface SliderProps {
   label: string;
   /** Whether the slider should show a reset button. */
   reset: boolean;
-  /** The value the slider starts at, and what the reset button returns it to. */
+  /** The value the slider starts at. */
   initialValue?: number;
+  /** What the reset button returns the slider to. Defaults to `initialValue`, which is wrong when the slider starts from an already-applied value. */
+  resetValue?: number;
   /** The trigger type for the slider. Debounce triggers after a delay, release triggers on release. */
   triggerType?: 'live' | 'debounce' | 'release';
   /** Trigged when the slider value changes (ignores `triggerType`). */
@@ -42,6 +44,7 @@ export function Slider({
   label,
   reset,
   initialValue = 0,
+  resetValue = initialValue,
   triggerType = 'live',
   onChange,
   onReset,
@@ -79,7 +82,10 @@ export function Slider({
 
   function handleReset() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    setValue(initialValue);
+    setValue(resetValue);
+    // The live preview keeps showing the last dragged value until told otherwise, and it covers the photo, so the
+    // committed reset underneath would never be seen.
+    onChange?.(resetValue);
     onReset?.();
   }
 

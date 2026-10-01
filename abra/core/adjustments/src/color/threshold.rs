@@ -1,8 +1,9 @@
-use abra_core::{Image, ImageRef};
-use options::{Apply, Options};
+use abra_core::{
+  Image,
+  image::gpu::{GpuPass, GpuProcessor},
+};
+use options::{Effect, Options};
 use rayon::prelude::*;
-
-use crate::apply_adjustment;
 
 /// Apply a threshold to an image where all pixels above the threshold are set to white and all pixels below are set to black.
 /// * `p_image` - A mutable reference to the image to be processed.
@@ -32,9 +33,7 @@ pub struct Threshold {
   options: Options,
 }
 
-options::cpu_processor!(Threshold);
-
-impl Apply for Threshold {
+impl Effect for Threshold {
   fn options(&self) -> &Options {
     &self.options
   }
@@ -43,10 +42,25 @@ impl Apply for Threshold {
     &mut self.options
   }
 
-  fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
-    let mut image_ref: ImageRef = p_image.into();
-    let image = &mut image_ref as &mut Image;
-    apply_adjustment!(apply_threshold, image, self.options.as_ref(), 0, self.threshold);
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  fn cpu_processor(&self, p_image: &mut Image) {
+    apply_threshold(p_image, self.threshold);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+}
+
+impl GpuProcessor for Threshold {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![GpuPass::new(
+      include_str!("threshold.wgsl"),
+      (self.threshold as f32).to_le_bytes().to_vec(),
+    )]
   }
 }
 

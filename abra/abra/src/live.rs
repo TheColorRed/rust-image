@@ -3,9 +3,11 @@
 //! [`EffectSpec`] maps a parameter list onto effects, for any image or [`LiveImage`]. With the `live` feature,
 //! [`LiveImage`] holds an image and re-renders it as effects change, on the GPU when one is available.
 
-use abra_core::{Color, ColorStop, Gradient};
-use adjustments::color::LinearGradientEffect;
-use options::{Apply, ApplyTarget};
+use core::f32::consts::E;
+
+use abra_core::{Color, ColorStop, Gradient, Image, ImageRef};
+use adjustments::color::{LinearGradientEffect, grayscale, invert};
+use options::Effect;
 
 #[cfg(feature = "live")]
 pub use abra_live::{EffectId, LiveFrame, LiveImage, LiveSlot};
@@ -30,6 +32,11 @@ pub struct GradientStop {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum EffectSpec {
+  /// Threshold effect, 0 to 255.
+  Threshold {
+    /// The threshold value.
+    amount: u8,
+  },
   /// Brightness, -100 to 100 (0 is unchanged).
   Brightness {
     /// The amount of change.
@@ -44,6 +51,13 @@ pub enum EffectSpec {
   Saturation {
     /// The amount of change.
     amount: i32,
+  },
+  /// Vibrance adjustment, -100 to 100 (0 is unchanged).
+  Vibrance {
+    /// The vibrance adjustment, -100 to 100 (0 is unchanged).
+    vibrance: f64,
+    /// The saturation adjustment, -100 to 100 (0 is unchanged).
+    saturation: f64,
   },
   /// Gaussian blur.
   GaussianBlur {
@@ -68,28 +82,71 @@ pub enum EffectSpec {
     /// Overall opacity, 0 to 1.
     opacity: f32,
   },
+  /// Grayscale effect.
+  Grayscale,
+  /// Invert effect.
+  Invert,
+}
+
+/// Any effect an [`EffectSpec`] can build. Every effect qualifies, so this only names the bounds once.
+pub trait SpecEffect: Effect + Clone + 'static {}
+impl<E: Effect + Clone + 'static> SpecEffect for E {}
+
+/// Something an [`EffectSpec`] can be applied to: an image or a [`LiveImage`]. It takes whichever effect the spec
+/// builds, so a new effect only needs an [`EffectSpec`] variant, not a bound here.
+pub trait EffectSink {
+  /// Applies `p_effect` to this target, as `p_effect.apply(target)` would.
+  fn accept<E: SpecEffect>(self, p_effect: E);
+}
+
+impl EffectSink for &mut Image {
+  fn accept<E: SpecEffect>(self, p_effect: E) {
+    p_effect.apply(self);
+  }
+}
+
+impl EffectSink for ImageRef<'_> {
+  fn accept<E: SpecEffect>(self, p_effect: E) {
+    p_effect.apply(self);
+  }
+}
+
+#[cfg(feature = "live")]
+impl EffectSink for &mut LiveImage {
+  fn accept<E: SpecEffect>(self, p_effect: E) {
+    p_effect.apply(self);
+  }
+}
+
+#[cfg(feature = "live")]
+impl EffectSink for LiveSlot<'_> {
+  fn accept<E: SpecEffect>(self, p_effect: E) {
+    p_effect.apply(self);
+  }
 }
 
 impl EffectSpec {
   /// Applies this effect to `p_target`, an image or a [`LiveImage`], exactly as the effect's own `apply` would.
   /// This is the one place a binding maps its parameter list onto effects.
-  pub fn apply<T>(&self, p_target: T)
-  where
-    T: ApplyTarget<adjustments::levels::Brightness>
-      + ApplyTarget<adjustments::levels::Contrast>
-      + ApplyTarget<adjustments::levels::Saturation>
-      + ApplyTarget<filters::blur::GaussianBlur>
-      + ApplyTarget<adjustments::levels::Exposure>
-      + ApplyTarget<LinearGradientEffect>,
-  {
+  pub fn apply(&self, p_target: impl EffectSink) {
     match self {
-      EffectSpec::Brightness { amount } => adjustments::levels::brightness(*amount).apply(p_target),
-      EffectSpec::Contrast { amount } => adjustments::levels::contrast(*amount).apply(p_target),
-      EffectSpec::Saturation { amount } => adjustments::levels::saturation(*amount).apply(p_target),
-      EffectSpec::GaussianBlur { radius } => filters::blur::gaussian_blur(*radius).apply(p_target),
-      EffectSpec::Exposure { exposure, offset, gamma_correction } => {
-        adjustments::levels::exposure(*exposure).with_offset(*offset).with_gamma(*gamma_correction).apply(p_target)
+      // Effects without parameters.
+      EffectSpec::Grayscale => p_target.accept(grayscale()),
+      EffectSpec::Invert => p_target.accept(invert()),
+      // Effects with parameters.
+      EffectSpec::Threshold { amount } => p_target.accept(adjustments::color::threshold(*amount)),
+      EffectSpec::Brightness { amount } => p_target.accept(adjustments::levels::brightness(*amount)),
+      EffectSpec::Contrast { amount } => p_target.accept(adjustments::levels::contrast(*amount)),
+      EffectSpec::Saturation { amount } => p_target.accept(adjustments::levels::saturation(*amount)),
+      EffectSpec::GaussianBlur { radius } => p_target.accept(filters::blur::gaussian_blur(*radius)),
+      EffectSpec::Vibrance { vibrance, saturation } => {
+        p_target.accept(adjustments::levels::vibrance(*vibrance).with_saturation(*saturation))
       }
+      EffectSpec::Exposure {
+        exposure,
+        offset,
+        gamma_correction,
+      } => p_target.accept(adjustments::levels::exposure(*exposure).with_offset(*offset).with_gamma(*gamma_correction)),
       EffectSpec::LinearGradient { stops, angle, opacity } => {
         let stops = stops
           .iter()
@@ -100,7 +157,7 @@ impl EffectSpec {
         } else {
           Gradient::new(stops)
         };
-        LinearGradientEffect::angle(&gradient, *angle).with_opacity(*opacity).apply(p_target)
+        p_target.accept(LinearGradientEffect::angle(&gradient, *angle).with_opacity(*opacity))
       }
     }
   }
@@ -225,7 +282,7 @@ mod tests {
   }
 
   fn wait_for_pixels(p_preview: &mut LiveImage, p_expected: &[u8]) {
-    wait_for_frame_where(p_preview, |frame| frame.pixels.iter().zip(p_expected).all(|(a, b)| a.abs_diff(*b) <= 3));
+    wait_for_frame_where(p_preview, |frame| frame.pixels.iter().zip(p_expected).all(|(a, b)| a == b));
   }
 
   #[test]
@@ -317,7 +374,7 @@ mod tests {
     let original = original_pixels();
     assert_ne!(expected, original, "the effect must change something inside the area");
     assert_eq!(expected[..4], original[..4], "and leave the corner outside the area alone");
-    let frame = wait_for_frame_where(&mut preview, |frame| frame.pixels.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 3));
+    let frame = wait_for_frame_where(&mut preview, |frame| frame.pixels.iter().zip(&expected).all(|(a, b)| a == b));
     assert_eq!(frame.pixels[..4], original[..4]);
   }
 
@@ -325,7 +382,8 @@ mod tests {
   fn a_mask_limits_the_effect_like_it_does_on_an_image() {
     use options::ApplyOptions;
     // Left half white (full effect), right half black (no effect).
-    let mask_pixels: Vec<u8> = (0..16 * 16).flat_map(|i| if i % 16 < 8 { [255, 255, 255, 255] } else { [0, 0, 0, 255] }).collect();
+    let mask_pixels: Vec<u8> =
+      (0..16 * 16).flat_map(|i| if i % 16 < 8 { [255, 255, 255, 255] } else { [0, 0, 0, 255] }).collect();
     let mask = || mask::Mask::from_image(Image::new_from_pixels(16, 16, mask_pixels.clone(), Channels::RGBA));
     let mut preview = preview();
     adjustments::levels::brightness(60).with_options(ApplyOptions::new().with_mask(mask())).apply(&mut preview);
@@ -373,5 +431,62 @@ mod tests {
     assert_ne!(expected[..3], original[..3], "left half turns gray");
     assert_eq!(expected[12 * 4..12 * 4 + 3], original[12 * 4..12 * 4 + 3], "right half is untouched");
     wait_for_pixels(&mut preview, &expected);
+  }
+
+  #[test]
+  fn grayscale_spec_turns_an_image_gray_and_matches_a_live_image() {
+    let gray = one_shot(|image| EffectSpec::Grayscale.apply(&mut *image));
+    assert!(gray.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]));
+    assert_ne!(gray, original_pixels());
+    let mut preview = preview();
+    EffectSpec::Grayscale.apply(&mut preview);
+    wait_for_pixels(&mut preview, &gray);
+  }
+
+  #[test]
+  fn threshold_on_the_gpu_matches_the_cpu() {
+    let mut preview = preview();
+    adjustments::color::threshold(100).apply(&mut preview);
+    let expected = one_shot(|image| adjustments::color::threshold(100).apply(&mut *image));
+    let white = expected.chunks_exact(4).filter(|p| p[0] == 255).count();
+    assert!(white > 0 && white < expected.len() / 4, "the test image must have pixels on both sides");
+    wait_for_pixels(&mut preview, &expected);
+  }
+
+  #[test]
+  fn invert_on_the_gpu_matches_the_cpu() {
+    let mut preview = preview();
+    adjustments::color::invert().apply(&mut preview);
+    let expected = one_shot(|image| adjustments::color::invert().apply(&mut *image));
+    assert_ne!(expected, original_pixels());
+    // Alpha is left alone; only color is flipped.
+    assert!(
+      expected.chunks_exact(4).zip(original_pixels().chunks_exact(4)).all(|(a, b)| a[3] == b[3] && a[0] == 255 - b[0])
+    );
+    wait_for_pixels(&mut preview, &expected);
+  }
+
+  #[test]
+  fn vibrance_on_the_gpu_matches_the_cpu_within_rounding() {
+    let mut preview = preview();
+    adjustments::levels::vibrance(60).apply(&mut preview);
+    let expected = one_shot(|image| adjustments::levels::vibrance(60).apply(&mut *image));
+    assert_ne!(expected, original_pixels());
+    // Float math on the two sides can round a channel differently by one.
+    wait_for_frame_where(&mut preview, |frame| {
+      frame.pixels.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1)
+    });
+  }
+
+  #[test]
+  fn vibrance_with_saturation_on_the_gpu_matches_the_cpu_within_rounding() {
+    let mut preview = preview();
+    adjustments::levels::vibrance(40).with_saturation(25).apply(&mut preview);
+    let expected = one_shot(|image| adjustments::levels::vibrance(40).with_saturation(25).apply(&mut *image));
+    let vibrance_only = one_shot(|image| adjustments::levels::vibrance(40).apply(&mut *image));
+    assert_ne!(expected, vibrance_only, "the saturation step must change something");
+    wait_for_frame_where(&mut preview, |frame| {
+      frame.pixels.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1)
+    });
   }
 }
