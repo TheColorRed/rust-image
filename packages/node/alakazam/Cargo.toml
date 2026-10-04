@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 napi = { workspace = true, features = ["napi4"] }
 napi-derive = { workspace = true }
-abra = { workspace = true, features = ["live"] }
+abra = { workspace = true }
 
 [features]
 # Renders live previews on the GPU; without it they run on the CPU.

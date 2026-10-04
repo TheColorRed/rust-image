@@ -6,10 +6,21 @@ members = [
   "abra/ai/core",
   "abra/ai/super-resolution",
   "abra/plugins/*",
+  # Examples
   "apps/examples/*",
   "apps/examples/ai/super-resolution",
+  # Bindings for different platforms
   "packages/node/alakazam",
   "packages/react-native/alakazam",
+  # Crates for app building
+  "packages/vessel/events",
+  "packages/vessel/engine",
+  "packages/vessel/vessel",
+  "packages/vessel/gpu-passes",
+  "packages/vessel/surface",
+  "packages/vessel/api",
+  "packages/vessel/ui",
+  "packages/vessel/macros",
 ]
 exclude = ["apps/examples/ai"]
 default-members = [
@@ -29,17 +40,16 @@ opt-level = 3
 
 # Whole-program optimization: cross-crate inlining makes the hot pixel loops faster and drops unused code.
 # panic stays "unwind" because UniFFI turns Rust panics into JS errors at the binding boundary.
+# No `strip`: uniffi-bindgen-react-native reads the binding metadata from the library's symbols, so a stripped library
+# generates empty bindings. Gradle strips the library when it packages the APK.
 [profile.release]
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-strip = true
 
 [workspace.dependencies]
 rayon = { version = "1.12.0" }
 rand = { version = "0.10.3" }
-tensorflow = { version = "0.21.0" }
-burn = { version = "0.21.0" }
 ndarray = { version = "0.17.2", features = ["rayon"] }
 wgpu = { version = "30.0.1" }
 pollster = { version = "1.0.1" }
@@ -67,8 +77,17 @@ primitives = { path = "./abra/core/primitives" }
 tools = { path = "./abra/core/tools" }
 
 gpu = { path = "./abra/core/gpu" }
-abra-live = { path = "./abra/core/live" }
 typography = { path = "./abra/core/typography" }
+
+# Standalone packages that must not depend on abra, so they can be published on their own
+pub-sub = { path = "./packages/vessel/events" }
+vessel-engine = { path = "./packages/vessel/engine" }
+vessel = { path = "./packages/vessel/vessel" }
+vessel-api = { path = "./packages/vessel/api" }
+vessel-ui = { path = "./packages/vessel/ui" }
+vessel-macros = { path = "./packages/vessel/macros" }
+gpu-passes = { path = "./packages/vessel/gpu-passes" }
+surface = { path = "./packages/vessel/surface" }
 
 # Abra Plugins
 collage = { path = "./abra/plugins/collage" }
@@ -76,9 +95,6 @@ collage = { path = "./abra/plugins/collage" }
 # Abra AI Packages
 abra-ai-core = { path = "./abra/ai/core" }
 abra-super-resolution = { path = "./abra/ai/super-resolution" }
-
-# Node Packages
-alakazam = { path = "./packages/node/alakazam" }
 
 [workspace.dependencies.uuid]
 version = "1.24.0"

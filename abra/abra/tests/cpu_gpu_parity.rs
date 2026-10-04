@@ -40,6 +40,115 @@ fn saturation_is_exactly_the_same_on_the_gpu() {
   }
 }
 
+/// The lens-filter tint multiplies in linear light with a `pow`, which the CPU and GPU round differently now and then,
+/// so a pixel can be one level apart.
+#[test]
+fn photo_filter_is_within_a_level_of_the_cpu_on_the_gpu() {
+  use adjustments::levels::{FilterType, PhotoFilter, photo_filter};
+  let presets = [
+    FilterType::WarmingLight,
+    FilterType::CoolingLight,
+    FilterType::Sepia,
+    FilterType::Underwater,
+    FilterType::DeepEmerald,
+    FilterType::CoolingDark,
+    FilterType::Magenta,
+  ];
+  for preset in presets {
+    for density in [0.0, 0.2, 0.35, 0.45, 1.0] {
+      agree("photo filter preset", photo_filter(PhotoFilter::Preset(preset)).with_density(density), 1);
+    }
+  }
+  // A plain color tinting like a lens filter, which is how the editor's moods use it.
+  let plain = photo_filter(abra_core::Color::from_rgb(235, 177, 19)).with_density(0.35).with_preserve_luminosity(false);
+  agree("photo filter plain color", plain, 1);
+}
+
+/// The mode that keeps the photo's brightness works in hue and saturation and has no shader, so it must not claim one.
+#[test]
+fn photo_filter_that_preserves_luminosity_stays_on_the_cpu() {
+  use adjustments::levels::photo_filter;
+  let preserving = photo_filter(abra_core::Color::from_rgb(235, 177, 19)).with_density(0.35);
+  assert!(preserving.gpu_processor().is_none());
+  let lens = photo_filter(abra_core::Color::from_rgb(235, 177, 19)).with_preserve_luminosity(false);
+  assert!(lens.gpu_processor().is_some());
+}
+
+/// The shader does the same whole-number steps as the CPU, so the pixels are exactly the same.
+#[test]
+fn surface_blur_is_exactly_the_same_on_the_gpu() {
+  for (radius, threshold) in [(1, 10), (2, 30), (5, 30), (8, 24), (10, 30), (3, 0), (4, 255)] {
+    agree(&format!("surface blur {radius} {threshold}"), filters::blur::surface_blur(radius, threshold), 0);
+  }
+}
+
+/// Skin smoothing is a chain of shader passes that carries its mask in the alpha channel, which holds whole 0-255 levels,
+/// while the CPU keeps the mask as floats, so a pixel can be a level apart. Run on faces cut from real photos.
+#[test]
+fn smooth_skin_is_within_a_level_of_the_cpu_on_the_gpu() {
+  for (path, x, y, w, h) in [("../../assets/aletta-ocean.jpg", 950, 20, 480, 400), ("../../assets/skirt.png", 190, 90, 260, 300)] {
+    let photo = abra_core::reader(path).load().expect("the test photo loads");
+    let (photo_width, _) = photo.dimensions::<usize>();
+    let rgba = photo.rgba();
+    let crop: Vec<u8> = (y..y + h)
+      .flat_map(|row| rgba[(row * photo_width + x) * 4..(row * photo_width + x + w) * 4].iter().copied())
+      .collect();
+    for amount in [0.5, 1.0, 2.0, 3.0] {
+      let effect = filters::smooth::smooth_skin(amount);
+      let mut on_cpu = Image::new_from_pixels(w as u32, h as u32, crop.clone(), Channels::RGBA);
+      effect.apply_on_cpu(&mut on_cpu);
+      let mut on_gpu = Image::new_from_pixels(w as u32, h as u32, crop.clone(), Channels::RGBA);
+      if effect.apply_on_gpu(&mut on_gpu).is_err() {
+        return;
+      }
+      let worst = on_cpu.to_rgba_vec().iter().zip(on_gpu.to_rgba_vec()).map(|(a, b)| a.abs_diff(b)).max().unwrap_or(0);
+      assert!(worst <= 1, "{path} at amount {amount}: the GPU differs from the CPU by up to {worst} levels");
+    }
+  }
+}
+
+/// With a step the blur looks at pixels spaced apart, so it reaches further for the same cost. The shader does the same.
+#[test]
+fn surface_blur_with_a_step_is_exactly_the_same_on_the_gpu() {
+  for (radius, threshold, step) in [(4, 30, 2), (8, 60, 3), (10, 30, 5)] {
+    agree(
+      &format!("surface blur {radius} {threshold} step {step}"),
+      filters::blur::surface_blur(radius, threshold).with_step(step),
+      0,
+    );
+  }
+}
+
+/// The settings of skin smoothing grow with the size of the photo (the blur spaces its pixels out, the edge kernel's taps
+/// are spaced out, the mask blurs widen), so a large photo is a different case from the small crops above.
+#[test]
+fn smooth_skin_on_a_large_photo_is_within_a_level_of_the_cpu_on_the_gpu() {
+  use abra_core::transform::Transform;
+  let mut photo = abra_core::reader("../../assets/aletta-ocean.jpg").load().expect("the test photo loads");
+  photo.resize(
+    abra_core::transform::ResizeTarget::Exact(abra_core::Size::new(3000, 1688)),
+    abra_core::transform::TransformAlgorithm::Bilinear,
+  );
+  for amount in [1.0, 3.0] {
+    let effect = filters::smooth::smooth_skin(amount);
+    let mut on_cpu = photo.clone();
+    effect.apply_on_cpu(&mut on_cpu);
+    let mut on_gpu = photo.clone();
+    if effect.apply_on_gpu(&mut on_gpu).is_err() {
+      return;
+    }
+    let worst = on_cpu.to_rgba_vec().iter().zip(on_gpu.to_rgba_vec()).map(|(a, b)| a.abs_diff(b)).max().unwrap_or(0);
+    assert!(worst <= 1, "3000x1688 at amount {amount}: the GPU differs from the CPU by up to {worst} levels");
+  }
+}
+
+/// A radius the CPU speeds up by blurring a half-size copy has no shader, so it must not claim one.
+#[test]
+fn surface_blur_with_a_huge_radius_stays_on_the_cpu() {
+  assert!(filters::blur::surface_blur(50, 30).gpu_processor().is_some());
+  assert!(filters::blur::surface_blur(51, 30).gpu_processor().is_none());
+}
+
 #[test]
 fn grayscale_is_exactly_the_same_on_the_gpu() {
   agree("grayscale", adjustments::color::grayscale(), 0);

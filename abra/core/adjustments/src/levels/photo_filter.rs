@@ -1,11 +1,14 @@
-use abra_core::{Color, Image, hsl_to_rgb, linear_f32_to_srgb_u8, rgb_to_hsl, srgb_u8_to_linear_f32};
+use abra_core::{
+  Color, Image, hsl_to_rgb,
+  image::gpu::{GpuPass, GpuProcessor},
+  linear_f32_to_srgb_u8, rgb_to_hsl, srgb_u8_to_linear_f32,
+};
 use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-
 /// Types of preset photo filters.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilterType {
   /// A warm, darkening filter rgb(236,138,0), Photoshop's Warming Filter (85)
   WarmingDark,
@@ -156,6 +159,7 @@ fn apply_photo_filter(p_image: &mut Image, p_filter_color: Color, p_density: f32
 pub struct PhotoFilterAdjustment {
   filter: PhotoFilter,
   density: f64,
+  preserve_luminosity: Option<bool>,
   options: Options,
 }
 
@@ -173,20 +177,57 @@ impl Effect for PhotoFilterAdjustment {
   }
 
   fn cpu_processor(&self, p_image: &mut Image) {
-    let (filter_color, preserve_l) = match self.filter {
-      PhotoFilter::Color(color) => (color, true),
-      PhotoFilter::Preset(preset) => (preset_color(preset), false),
-    };
-    let density = (self.density as f32).clamp(0.0, 1.0);
+    let (filter_color, preserve_l, density) = self.resolved();
     apply_photo_filter(p_image, filter_color, density, preserve_l);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    // Only the lens-filter mode has a shader; the mode that keeps the photo's brightness works in hue and saturation.
+    let (_, preserve_l, _) = self.resolved();
+    (!preserve_l).then_some(self)
   }
 }
 
 impl PhotoFilterAdjustment {
+  /// The filter color, whether the photo's brightness is kept, and the density limited to `0.0..=1.0`.
+  fn resolved(&self) -> (Color, bool, f32) {
+    let (filter_color, default_preserve_l) = match self.filter {
+      PhotoFilter::Color(color) => (color, true),
+      PhotoFilter::Preset(preset) => (preset_color(preset), false),
+    };
+    let preserve_l = self.preserve_luminosity.unwrap_or(default_preserve_l);
+    (filter_color, preserve_l, (self.density as f32).clamp(0.0, 1.0))
+  }
+
   /// Sets how strongly the filter is applied, from `0.0` to `1.0`. Defaults to `0.25`.
   pub fn with_density(mut self, p_density: impl Into<f64>) -> Self {
     self.density = p_density.into();
     self
+  }
+
+  /// Sets whether the photo's brightness is kept while its color is tinted. Keeping it takes only the filter's hue and
+  /// saturation; turning it off tints like a colored lens filter, which also darkens. Defaults to keeping it for a custom
+  /// color and to tinting like a lens filter for a preset.
+  pub fn with_preserve_luminosity(mut self, p_preserve: bool) -> Self {
+    self.preserve_luminosity = Some(p_preserve);
+    self
+  }
+}
+
+impl GpuProcessor for PhotoFilterAdjustment {
+  /// One pass of `photo_filter.wgsl`. Its uniform is four `f32`s: the filter color in linear light, then the density.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    let (color, _, density) = self.resolved();
+    let uniforms: Vec<u8> = [
+      srgb_u8_to_linear_f32(color.r),
+      srgb_u8_to_linear_f32(color.g),
+      srgb_u8_to_linear_f32(color.b),
+      density,
+    ]
+    .into_iter()
+    .flat_map(f32::to_le_bytes)
+    .collect();
+    vec![GpuPass::new(include_str!("photo_filter.wgsl"), uniforms)]
   }
 }
 
@@ -197,6 +238,7 @@ pub fn photo_filter(p_filter: impl Into<PhotoFilter>) -> PhotoFilterAdjustment {
   PhotoFilterAdjustment {
     filter: p_filter.into(),
     density: 0.25,
+    preserve_luminosity: None,
     options: None,
   }
 }

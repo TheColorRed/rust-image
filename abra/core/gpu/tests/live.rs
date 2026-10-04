@@ -1,9 +1,14 @@
-use abra_core::image::gpu::GpuOp;
+use abra_core::image::gpu::{GpuEffect, GpuOp, GpuPass};
 use anyhow::Result;
 use gpu::{GpuContext, LiveRenderer};
 
 const BRIGHTNESS: &str = include_str!("../../adjustments/src/levels/brightness.wgsl");
 const CONTRAST: &str = include_str!("../../adjustments/src/levels/contrast.wgsl");
+
+/// The passes of each effect, in the form the renderer takes. A single-pass op does not depend on the image size.
+fn passes(p_effects: &[&GpuOp]) -> Vec<Vec<GpuPass>> {
+  p_effects.iter().map(|effect| effect.passes(0, 0)).collect()
+}
 
 fn brightness(p_factor: f32) -> GpuOp {
   GpuOp::new(BRIGHTNESS, p_factor.to_le_bytes())
@@ -28,7 +33,7 @@ fn renderer() -> Result<LiveRenderer> {
 fn no_effects_returns_the_source_unchanged() -> Result<()> {
   let mut renderer = renderer()?;
   let pixels = gradient_pixels(13, 7);
-  let out = renderer.process(&[], 13, 7, &pixels)?;
+  let out = renderer.process(&passes(&[]), 13, 7, &pixels)?;
   assert_eq!(out, pixels);
   Ok(())
 }
@@ -39,9 +44,9 @@ fn changing_a_parameter_reuses_the_pipeline_and_the_uploaded_source() -> Result<
   let pixels = gradient_pixels(13, 7);
   renderer.set_source(13, 7, &pixels)?;
 
-  renderer.render(&[&brightness(0.5)])?;
+  renderer.render(&passes(&[&brightness(0.5)]))?;
   let dark = renderer.read_pixels()?;
-  renderer.render(&[&brightness(1.0)])?;
+  renderer.render(&passes(&[&brightness(1.0)]))?;
   let same = renderer.read_pixels()?;
 
   assert_eq!(renderer.cached_pipelines(), 1);
@@ -64,10 +69,10 @@ fn effects_chain_in_order_without_leaving_the_gpu() -> Result<()> {
   let pixels = gradient_pixels(13, 7);
   let contrast = GpuOp::new(CONTRAST, 50.0f32.to_le_bytes());
 
-  let chained = renderer.process(&[&brightness(0.5), &contrast], 13, 7, &pixels)?;
+  let chained = renderer.process(&passes(&[&brightness(0.5), &contrast]), 13, 7, &pixels)?;
 
-  let step_one = renderer.process(&[&brightness(0.5)], 13, 7, &pixels)?;
-  let step_two = renderer.process(&[&contrast], 13, 7, &step_one)?;
+  let step_one = renderer.process(&passes(&[&brightness(0.5)]), 13, 7, &pixels)?;
+  let step_two = renderer.process(&passes(&[&contrast]), 13, 7, &step_one)?;
   for (a, b) in chained.iter().zip(&step_two) {
     assert!(a.abs_diff(*b) <= 1, "chained {a} vs stepwise {b}");
   }
@@ -81,9 +86,9 @@ fn a_different_image_size_is_handled_without_stale_textures() -> Result<()> {
   let small = gradient_pixels(5, 3);
   let large = gradient_pixels(70, 33);
 
-  let out_small = renderer.process(&[&brightness(1.0)], 5, 3, &small)?;
-  let out_large = renderer.process(&[&brightness(1.0)], 70, 33, &large)?;
-  let out_small_again = renderer.process(&[&brightness(1.0)], 5, 3, &small)?;
+  let out_small = renderer.process(&passes(&[&brightness(1.0)]), 5, 3, &small)?;
+  let out_large = renderer.process(&passes(&[&brightness(1.0)]), 70, 33, &large)?;
+  let out_small_again = renderer.process(&passes(&[&brightness(1.0)]), 5, 3, &small)?;
 
   assert_eq!(out_small.len(), small.len());
   assert_eq!(out_large.len(), large.len());
@@ -94,7 +99,7 @@ fn a_different_image_size_is_handled_without_stale_textures() -> Result<()> {
 #[test]
 fn rendering_before_a_source_is_an_error() -> Result<()> {
   let mut renderer = renderer()?;
-  assert!(renderer.render(&[&brightness(1.0)]).is_err());
+  assert!(renderer.render(&passes(&[&brightness(1.0)])).is_err());
   assert!(renderer.set_source(2, 2, &[0; 3]).is_err());
   Ok(())
 }
@@ -105,7 +110,7 @@ fn frames_are_read_back_without_blocking_the_render_loop() -> Result<()> {
   let pixels = gradient_pixels(13, 7);
   renderer.set_source(13, 7, &pixels)?;
 
-  renderer.render(&[&brightness(0.5)])?;
+  renderer.render(&passes(&[&brightness(0.5)]))?;
   let id = renderer.request_frame()?.expect("a free staging buffer");
   let frame = renderer.wait_frame()?.expect("the requested frame");
 
@@ -125,11 +130,11 @@ fn a_slow_reader_only_sees_the_newest_frame() -> Result<()> {
   // Three drag steps queued before the reader gets to look.
   let mut last = 0;
   for factor in [0.25f32, 0.5, 1.0] {
-    renderer.render(&[&brightness(factor)])?;
+    renderer.render(&passes(&[&brightness(factor)]))?;
     last = renderer.request_frame()?.expect("a free staging buffer");
   }
   // The pool is full, so a fourth request is refused until a frame is collected.
-  renderer.render(&[&brightness(1.0)])?;
+  renderer.render(&passes(&[&brightness(1.0)]))?;
   assert!(renderer.request_frame()?.is_none());
 
   let frame = renderer.wait_frame()?.expect("the newest frame");
@@ -144,10 +149,10 @@ fn a_slow_reader_only_sees_the_newest_frame() -> Result<()> {
 fn readback_follows_a_size_change() -> Result<()> {
   let mut renderer = renderer()?;
   renderer.set_source(13, 7, &gradient_pixels(13, 7))?;
-  renderer.render(&[])?;
+  renderer.render(&passes(&[]))?;
   renderer.request_frame()?;
   renderer.set_source(20, 9, &gradient_pixels(20, 9))?;
-  renderer.render(&[])?;
+  renderer.render(&passes(&[]))?;
   renderer.request_frame()?;
   let frame = renderer.wait_frame()?.expect("a frame");
   assert_eq!((frame.width, frame.height), (20, 9));
@@ -160,7 +165,7 @@ fn a_new_renderer_on_the_same_context_starts_with_compiled_pipelines() -> Result
   let ctx = GpuContext::new_default_blocking()?;
   let pixels = gradient_pixels(13, 7);
   let mut first = LiveRenderer::new(ctx.clone());
-  first.process(&[&brightness(0.5)], 13, 7, &pixels)?;
+  first.process(&passes(&[&brightness(0.5)]), 13, 7, &pixels)?;
   assert_eq!(first.cached_pipelines(), 1);
 
   let second = LiveRenderer::new(ctx);

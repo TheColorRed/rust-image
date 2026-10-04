@@ -1,0 +1,8 @@
+[package]
+name = "pub-sub"
+version = "0.1.0"
+edition = "2024"
+description = "A pub/sub event system for the live view engine."
+
+[lib]
+name = "pub_sub"

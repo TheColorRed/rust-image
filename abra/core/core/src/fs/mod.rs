@@ -29,3 +29,9 @@ pub(crate) mod writers {
 }
 pub use read_write::{ImageFormat, reader, writer};
 pub use writer_options::WriterOptions;
+
+/// Encodes the image as PNG bytes without touching the file system.
+#[cfg(feature = "png")]
+pub fn encode_png(p_image: &crate::Image, p_options: impl Into<Option<WriterOptions>>) -> Result<Vec<u8>, String> {
+  writers::png::encode_png(p_image, &p_options.into())
+}

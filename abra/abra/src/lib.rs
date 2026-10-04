@@ -5,15 +5,11 @@
 use abra_core::Settings;
 use ctor::ctor;
 
-#[cfg(feature = "uniffi")]
-uniffi::setup_scaffolding!();
-
 pub mod ffi;
 pub mod live;
 pub mod plugin;
 
 pub use abra_core;
-pub use live::{EffectSpec, GradientStop};
 
 // Convenience prelude: re-export commonly used items to simplify consumer imports.
 pub mod prelude;

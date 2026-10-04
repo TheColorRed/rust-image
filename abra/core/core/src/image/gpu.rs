@@ -3,7 +3,13 @@
 //! `core` must stay independent of the `gpu` crate. Adjustments/filters describe the work as a [`GpuEffect`] passed to
 //! `apply_in_area`, and the `gpu` crate registers a [`GpuProvider`] that runs it. When either is missing,
 //! `apply_in_area` uses the CPU path.
+//!
+//! The data a GPU runs ([`GpuPass`], [`GpuAux`]) and the [`GpuSession`] trait live in the standalone `gpu-passes`
+//! package, which knows nothing about abra. An effect here only describes itself as passes ([`GpuEffect`]); whoever runs
+//! them is a separate crate.
 use std::sync::RwLock;
+
+pub use gpu_passes::{GpuAux, GpuPass, GpuSession};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Hardware {
@@ -24,63 +30,6 @@ pub enum Hardware {
   /// This overrides the settings.yml configuration for hardware selection.
   /// Requires the `abra` crate's "gpu" feature; without it the CPU is always used.
   Gpu,
-}
-
-/// A small RGBA texture handed to a shader at binding 3, such as a gradient lookup table.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GpuAux {
-  /// Width in pixels.
-  pub width: u32,
-  /// Height in pixels.
-  pub height: u32,
-  /// `width * height` RGBA pixels. Shared, so handing the same texture to the renderer every frame copies nothing and
-  /// the renderer can tell it has not changed by comparing the pointers.
-  pub rgba: std::sync::Arc<[u8]>,
-}
-
-/// One compute shader dispatch over the whole image.
-///
-/// The shader must use the bindings: 0 = input `texture_2d<f32>`, 1 = output
-/// `texture_storage_2d<rgba8unorm, write>`, 2 = uniform (only when `uniforms` is non-empty),
-/// 3 = `texture_2d<f32>` (only when `aux` is set), 4 = `texture_2d<f32>` (only when `base` is set), with an
-/// `@workgroup_size(8, 8)` entry point named `main`.
-///
-/// The renderer compiles each distinct `shader` once and reuses it, so changing `uniforms` or `aux` between frames
-/// is cheap and never rebuilds a pipeline.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GpuPass {
-  pub shader: &'static str,
-  pub uniforms: Vec<u8>,
-  pub aux: Option<GpuAux>,
-  /// Also binds, at binding 4, the image as it was before the first pass of the effect this pass belongs to. Used by
-  /// a pass that combines an effect's result with its input, such as a masked blend.
-  pub base: bool,
-}
-
-impl GpuPass {
-  /// Describes a pass with the given uniform bytes.
-  /// - `p_shader`: The WGSL source, usually from `include_str!`.
-  /// - `p_uniforms`: The bytes of the uniform buffer, or empty when the shader has none.
-  pub fn new(p_shader: &'static str, p_uniforms: impl Into<Vec<u8>>) -> GpuPass {
-    GpuPass {
-      shader: p_shader,
-      uniforms: p_uniforms.into(),
-      aux: None,
-      base: false,
-    }
-  }
-
-  /// Binds the effect's input image at binding 4. See [`GpuPass::base`].
-  pub fn with_base(mut self) -> GpuPass {
-    self.base = true;
-    self
-  }
-
-  /// Adds an auxiliary texture, bound at binding 3.
-  pub fn with_aux(mut self, p_aux: GpuAux) -> GpuPass {
-    self.aux = Some(p_aux);
-    self
-  }
 }
 
 /// Something that can run on the GPU as one or more [`GpuPass`]es.
@@ -170,35 +119,6 @@ impl<T: CpuProcessor> LiveEffect for T {
   }
 }
 
-/// A source image held on the GPU, which chains of shader effects are run over. This is the GPU-only layer: it
-/// knows nothing about CPU effects. See [`ChainRenderer`] for chains that mix in effects without a shader.
-pub trait GpuSession: Send {
-  /// Uploads the image that effects are run over, replacing the current source.
-  /// - `p_rgba`: `p_width * p_height` RGBA pixels.
-  fn set_source(&mut self, p_width: u32, p_height: u32, p_rgba: &[u8]) -> Result<(), String>;
-
-  /// Runs `p_effects` in order over the source. This only submits the work; use [`read_pixels`](Self::read_pixels) to
-  /// get the result.
-  fn render(&mut self, p_effects: &[&dyn GpuEffect]) -> Result<(), String>;
-
-  /// Waits for the last [`render`](Self::render) and returns the result as RGBA pixels.
-  fn read_pixels(&mut self) -> Result<Vec<u8>, String>;
-}
-
-impl<S: GpuSession + ?Sized> GpuSession for Box<S> {
-  fn set_source(&mut self, p_width: u32, p_height: u32, p_rgba: &[u8]) -> Result<(), String> {
-    (**self).set_source(p_width, p_height, p_rgba)
-  }
-
-  fn render(&mut self, p_effects: &[&dyn GpuEffect]) -> Result<(), String> {
-    (**self).render(p_effects)
-  }
-
-  fn read_pixels(&mut self) -> Result<Vec<u8>, String> {
-    (**self).read_pixels()
-  }
-}
-
 /// Renders chains of [`LiveEffect`]s over a source image on a [`GpuSession`]. Runs of effects with a shader stay on the
 /// GPU. An effect without one ([`LiveEffect::has_gpu`] is `false`) runs on the CPU in between: the pixels are read
 /// back, processed, and uploaded as the new source, so a chain works before every effect has a shader.
@@ -243,10 +163,9 @@ impl<S: GpuSession> ChainRenderer<S> {
   /// Runs the chain and returns the final RGBA pixels, waiting for the GPU.
   pub fn render_blocking(&mut self, p_effects: &[&dyn LiveEffect]) -> Result<Vec<u8>, String> {
     self.restore_source()?;
-    if p_effects.is_empty() {
-      // Nothing to run, but the session must still forget the previous chain's result so the source comes back.
-      self.session.render(&[])?;
-    }
+    // The session still holds the previous chain's result. Rendering nothing makes the source the result again, which
+    // a chain that is empty, or starts with a CPU effect, would otherwise read back instead of the source.
+    self.session.render(&[])?;
     let mut index = 0;
     while index < p_effects.len() {
       let start = index;
@@ -254,7 +173,8 @@ impl<S: GpuSession> ChainRenderer<S> {
         index += 1;
       }
       if index > start {
-        let run: Vec<&dyn GpuEffect> = p_effects[start..index].iter().map(|effect| *effect as &dyn GpuEffect).collect();
+        let run: Vec<Vec<GpuPass>> =
+          p_effects[start..index].iter().map(|effect| effect.passes(self.width, self.height)).collect();
         self.session.render(&run)?;
       }
       if index < p_effects.len() {
@@ -275,8 +195,8 @@ impl<S: GpuSession> ChainRenderer<S> {
 pub struct GpuProvider {
   /// Blocks until the GPU has finished starting up. Returns `false` when no GPU is available.
   pub wait_until_ready: fn() -> bool,
-  /// Runs an effect over `width * height` RGBA pixels and returns the processed pixels.
-  pub process: fn(p_effect: &dyn GpuEffect, p_width: u32, p_height: u32, p_pixels: &[u8]) -> Result<Vec<u8>, String>,
+  /// Runs the passes of effects, in order, over `width * height` RGBA pixels and returns the processed pixels.
+  pub process: fn(p_effects: &[Vec<GpuPass>], p_width: u32, p_height: u32, p_pixels: &[u8]) -> Result<Vec<u8>, String>,
   /// Creates an empty session. Wrap it in a [`ChainRenderer`] to upload an image and render chains.
   pub new_session: fn() -> Result<Box<dyn GpuSession>, String>,
 }

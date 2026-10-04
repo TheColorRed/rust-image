@@ -1,10 +1,10 @@
-import { AbraImage, EffectSpec, type AbraImageLike } from '@alakazam/mobile';
-import { AlphaType, Canvas, ColorType, Image as SkiaImage, Skia, type SkImage } from '@shopify/react-native-skia';
+import { AbraImage, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
 import { useEffect, useRef, useState } from 'react';
-import { Button, PixelRatio, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Button, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import FilePicker, { type PickedImage } from '@/src/components/file-picker';
 import { Slider } from '@/src/components/slider';
-import { disposeLater, useLivePreview } from '@/src/hooks/useLivePreview';
+import { VesselView } from '@vessel/react-native';
+import { useLiveSession } from '@/src/hooks/useLiveSession';
 
 type Operation = { label: string; run: (image: AbraImageLike) => void };
 
@@ -26,49 +26,25 @@ export default function AbraScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const previewWidth = windowWidth - 32;
   const [source, setSource] = useState<PickedImage | null>(null);
-  const [preview, setPreview] = useState<SkImage | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   // The working image lives in Rust at full resolution; only screen-sized previews cross into JS.
   const imageRef = useRef<AbraImage | null>(null);
   const [revision, setRevision] = useState(0);
-  const [liveOn, setLiveOn] = useState(false);
-  const live = useLivePreview(
-    source ? imageRef.current : null,
-    Math.round(previewWidth * PixelRatio.get()),
-    Math.round(PREVIEW_HEIGHT * PixelRatio.get()),
-    revision,
-  );
+  const session = useLiveSession(source ? imageRef.current : null);
+  /** Shows a slider's effect on the preview; Rust knows what each key stands for. */
+  const preview = (key: string, value: number) => session.send(Message.SliderMove.new(key, value));
 
   // The JS garbage collector can't see the Rust-side pixels behind a handle, so free them explicitly.
   useEffect(() => () => imageRef.current?.uniffiDestroy(), []);
-
-  /** Replaces the Skia preview with a screen-sized copy of the working image. */
-  function refreshPreview() {
-    const image = imageRef.current;
-    if (!image) return;
-    const scale = PixelRatio.get();
-    const pixels = image.preview(Math.round(previewWidth * scale), Math.round(PREVIEW_HEIGHT * scale));
-    const next = Skia.Image.MakeImage(
-      { width: pixels.width, height: pixels.height, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
-      Skia.Data.fromBytes(new Uint8Array(pixels.data)),
-      pixels.width * 4,
-    );
-    setPreview((previous) => {
-      disposeLater(previous);
-      return next;
-    });
-  }
 
   function load(asset: PickedImage) {
     try {
       const started = Date.now();
       imageRef.current?.uniffiDestroy();
       imageRef.current = AbraImage.read(toPath(asset.uri)) as AbraImage;
-      refreshPreview();
       const image = imageRef.current;
       setSource(asset);
       setRevision((r) => r + 1);
-      setLiveOn(false);
       setStatus(`Loaded ${image.width()}×${image.height()} in ${Date.now() - started} ms`);
     } catch (e: any) {
       setStatus(`Failed: ${String(e?.message ?? e)}`);
@@ -82,9 +58,7 @@ export default function AbraScreen() {
       const t0 = Date.now();
       operation.run(image);
       const t1 = Date.now();
-      refreshPreview();
       setRevision((r) => r + 1);
-      setLiveOn(false);
       const t2 = Date.now();
       setStatus(`${operation.label}: ${t1 - t0} ms, preview ${t2 - t1} ms`);
     } catch (e: any) {
@@ -120,51 +94,28 @@ export default function AbraScreen() {
       )}
       {source && (
         <View style={styles.live}>
-          <Button
-            title={liveOn ? 'Live preview: on' : 'Live preview: off'}
-            onPress={() => {
-              if (liveOn) live.clear();
-              setLiveOn(!liveOn);
-            }}
-          />
-          {liveOn && (
-            <>
-              <Text style={styles.status}>{live.isGpu ? 'Rendering on the GPU' : 'Rendering on the CPU'}</Text>
-              {live.error && <Text style={styles.status}>{live.error}</Text>}
-              <Slider label="Brightness" min={-100} max={100} reset triggerType="live" onTrigger={(v) => live.apply(EffectSpec.Brightness.new({ amount: Math.round(v) }))} />
-              <Slider label="Contrast" min={-100} max={100} reset triggerType="live" onTrigger={(v) => live.apply(EffectSpec.Contrast.new({ amount: v }))} />
-              <Slider label="Blur" min={0} max={30} reset triggerType="live" onTrigger={(v) => live.apply(EffectSpec.GaussianBlur.new({ radius: Math.round(v) }))} />
-              <Slider
-                label="Gradient angle"
-                min={0}
-                max={360}
-                reset
-                triggerType="live"
-                onTrigger={(v) =>
-                  live.apply(
-                    EffectSpec.LinearGradient.new({
-                      stops: [
-                        { position: 0, r: 255, g: 64, b: 0, a: 255 },
-                        { position: 1, r: 0, g: 96, b: 255, a: 255 },
-                      ],
-                      angle: v,
-                      opacity: 0.6,
-                    }),
-                  )
-                }
-              />
-            </>
-          )}
+          {session.error && <Text style={styles.status}>{session.error}</Text>}
+          <Slider label="Brightness" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview('action-brightness', v)} />
+          <Slider label="Contrast" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview('action-contrast', v)} />
+          <Slider label="Blur" min={0} max={30} reset triggerType="live" onTrigger={(v) => preview('action-gaussian-blur', v)} />
         </View>
       )}
       {status && <Text style={styles.status}>{status}</Text>}
-      {preview && (
-        <Canvas style={[styles.preview, { width: previewWidth }]}>
-          <SkiaImage image={liveOn && live.frame ? live.frame : preview} x={0} y={0} width={previewWidth} height={PREVIEW_HEIGHT} fit="contain" />
-        </Canvas>
+      {source && VesselView && session.size && (
+        <View style={[styles.preview, { width: previewWidth }]}>
+          <VesselView source={session.view} style={fitSize(previewWidth, session.size)} />
+        </View>
       )}
     </ScrollView>
   );
+}
+
+/** Fits a size inside the preview area, centered, so its pixels aren't stretched. */
+function fitSize(p_width: number, p_size: { width: number; height: number }) {
+  const fit = Math.min(p_width / p_size.width, PREVIEW_HEIGHT / p_size.height);
+  const width = Math.max(1, p_size.width * fit);
+  const height = Math.max(1, p_size.height * fit);
+  return { position: 'absolute' as const, left: (p_width - width) / 2, top: (PREVIEW_HEIGHT - height) / 2, width, height };
 }
 
 const styles = StyleSheet.create({
@@ -173,5 +124,5 @@ const styles = StyleSheet.create({
   operations: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   live: { gap: 8 },
   status: { fontSize: 12, color: '#444' },
-  preview: { height: PREVIEW_HEIGHT, borderRadius: 12, backgroundColor: '#111' },
+  preview: { height: PREVIEW_HEIGHT, borderRadius: 12, backgroundColor: '#111', overflow: 'hidden' },
 });

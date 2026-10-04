@@ -93,6 +93,15 @@ impl Area {
     }
     area
   }
+  pub fn from_size(p_size: impl Into<Size>) -> Area {
+    let size = p_size.into();
+    Area::from_points(&[
+      [0.0, 0.0],
+      [size.width, 0.0],
+      [size.width, size.height],
+      [0.0, size.height],
+    ])
+  }
   /// Sets the feather amount for the area edges.
   /// - `p_feather`: The feather radius in pixels.
   pub fn with_feather(mut self, p_feather: u32) -> Self {
@@ -178,6 +187,24 @@ impl From<Path> for Area {
 impl From<&Area> for Area {
   fn from(p_area: &Area) -> Self {
     p_area.clone()
+  }
+}
+
+impl From<Image> for Area {
+  fn from(p_image: Image) -> Self {
+    let (width, height) = p_image.dimensions::<u32>();
+    let mut path = Path::new();
+    path.move_to((0, 0)).line_to((width, 0)).line_to((width, height)).line_to((0, height));
+    Area { path, feather: 0 }
+  }
+}
+
+impl From<&Image> for Area {
+  fn from(p_image: &Image) -> Self {
+    let (width, height) = p_image.dimensions::<u32>();
+    let mut path = Path::new();
+    path.move_to((0, 0)).line_to((width, 0)).line_to((width, height)).line_to((0, height));
+    Area { path, feather: 0 }
   }
 }
 

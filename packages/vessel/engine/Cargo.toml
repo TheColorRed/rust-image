@@ -1,0 +1,23 @@
+[package]
+name = "vessel-engine"
+version = "0.1.0"
+edition = "2024"
+description = "A view engine: an always-on loop that decides when to draw media such as images, video, cameras, games, apps and more."
+
+# This crate must stay free of abra crates so it can be published on its own.
+[dependencies]
+pub-sub = { workspace = true }
+surface = { workspace = true, optional = true }
+
+# Where frames can be shown. Every flag is off by default, so an app compiles only what it uses. They name how the surface
+# is owned: `*-surface` draws inside a view that a host application owns, `*-window` is a standalone app or game where
+# Vessel owns the window. The flags can be combined.
+[features]
+default = []
+# An Android `Surface` handed over by any host UI (React Native, Flutter, a Java or Kotlin app).
+android-surface = ["dep:surface", "surface/android-surface"]
+# A native desktop window for a standalone app or game (Windows first), bordered or borderless.
+desktop-window = ["dep:surface", "surface/desktop-window"]
+
+[lib]
+name = "vessel_engine"

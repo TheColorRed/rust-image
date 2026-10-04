@@ -1,0 +1,23 @@
+[package]
+name = "vessel-api"
+version = "0.1.0"
+edition = "2024"
+description = "The API that Vessel apps are written against: components with typed events, reactive properties and a canvas."
+
+# This crate must stay free of abra crates so it can be published on its own.
+[dependencies]
+vessel-engine = { workspace = true }
+pub-sub = { workspace = true }
+font8x8 = { version = "0.3.1", default-features = false, features = ["std"] }
+fontdue = { version = "0.9.4", default-features = false }
+
+# The target flags live on the engine crate; they are passed down so an app turns them on in one place.
+[features]
+default = []
+# An Android `Surface` handed over by any host UI (React Native, Flutter, a Java or Kotlin app).
+android-surface = ["vessel-engine/android-surface"]
+# A native desktop window for a standalone app or game (Windows first), bordered or borderless.
+desktop-window = ["vessel-engine/desktop-window"]
+
+[lib]
+name = "vessel_api"

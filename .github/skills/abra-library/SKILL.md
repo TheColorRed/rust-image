@@ -41,12 +41,16 @@ The root crate of the Abra library is located in the root of the workspace. It i
   - `debug`: Contains debug console output helpers for inspecting canvases, layers, and effects.
   - `drawing`: Contains functions for drawing shapes and text onto images.
   - `filters`: Contains functions for applying various filters to images, such as blur, sharpen, and color adjustments.
-  - `gpu`: Contains functions for leveraging GPU acceleration for image processing tasks.
+  - `gpu`: The adapter that plugs the standalone `gpu-passes` runtime into abra: it creates the shared GPU context, follows the `gpu.enabled` setting and registers as the GPU provider that `apply_in_area` uses. Effects here only describe themselves as GPU passes.
   - `mask`: Contains functions for creating and applying masks to images.
   - `options`: Contains types and functions for configuring options for various image processing tasks.
   - `primitives`: Contains the lightweight base types (`Image`, `Channels`, `Color`, `Resolution`) with no heavy dependencies.
   - `tools`: Contains interactive image tools (perspective, straighten, remover). Tools are thin wrappers that compose library functions.
   - `typography`: Contains font loading, glyph metrics, and text rendering support.
+- `/packages/vessel/events`: A standalone event system in the style of RxJS (no abra dependency, so it can be published on its own): `Subject<T>`, `BehaviorSubject<T>` and the `Observable` and `Observer` traits. Import them with `use pub_sub::prelude::*`.
+- `/packages/vessel/vessel`: The standalone view engine, package `vessel` (no abra dependency, so it can be published on its own). `Engine` runs `View`s on its own thread and decides when to draw them; each view shows a `MediaSource` (a canvas, a video, a camera, a game...). It uses `pub-sub`.
+- `/packages/vessel/gpu-passes`: Compute shader passes over RGBA pixels (`GpuPass`, `GpuAux`, `GpuSession`) and, with its `runtime` feature, the wgpu runtime that runs them (`GpuContext`, `LiveRenderer`, `Presenter`). No abra dependency. Abra supplies passes as data; it never runs the GPU itself.
+- `/packages/vessel/surface`: Surfaces that frames are drawn on, looked up by id (`Surface` trait; a native Android window is the first kind). No abra dependency.
 - `/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
 
 ## Examples

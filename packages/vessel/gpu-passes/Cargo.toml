@@ -1,0 +1,30 @@
+[package]
+name = "gpu-passes"
+version = "0.1.0"
+edition = "2024"
+description = "Describe image effects as compute shader passes, and run them on the GPU with wgpu."
+
+# This crate must stay free of abra crates so it can be published on its own.
+[dependencies]
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+# Only for the Vessel target, which draws textures on a Vessel surface.
+vessel-engine = { workspace = true, optional = true, features = ["android-surface"] }
+
+[features]
+default = []
+# The wgpu runtime that runs passes (context, renderer, presenter). Without it the crate is only the plain data that
+# describes a pass, so a crate that just describes passes does not pull in wgpu.
+runtime = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:futures", "dep:anyhow"]
+# Draws textures on a Vessel surface without copying them to the CPU (`vessel::GpuTarget` and `vessel::GpuFrame`).
+vessel-target = ["runtime", "dep:vessel-engine"]
+
+[lib]
+name = "gpu_passes"
+crate-type = ["rlib"]
+
+[dev-dependencies]
+env_logger = "0.11"

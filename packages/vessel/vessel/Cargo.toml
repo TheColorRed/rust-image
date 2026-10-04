@@ -1,0 +1,25 @@
+[package]
+name = "vessel"
+version = "0.1.0"
+edition = "2024"
+description = "A toolkit for building apps from components that draw themselves: an always-on engine, components with typed events, layout, theme, and ready-made controls, for windows and for views inside other apps."
+
+# One dependency gives an app the whole toolkit. This crate must stay free of abra crates so it can be published on its own.
+[dependencies]
+vessel-engine = { workspace = true }
+vessel-api = { workspace = true }
+vessel-ui = { workspace = true }
+vessel-macros = { workspace = true }
+
+# Where frames can be shown. Every flag is off by default, so an app compiles only what it uses. They name how the surface
+# is owned: `*-surface` draws inside a view that a host application owns, `*-window` is a standalone app or game where
+# Vessel owns the window. The flags can be combined.
+[features]
+default = []
+# An Android `Surface` handed over by any host UI (React Native, Flutter, a Java or Kotlin app).
+android-surface = ["vessel-api/android-surface"]
+# A native desktop window for a standalone app or game (Windows first), bordered or borderless.
+desktop-window = ["vessel-api/desktop-window"]
+
+[lib]
+name = "vessel"

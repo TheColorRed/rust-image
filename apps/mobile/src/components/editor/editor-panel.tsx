@@ -1,8 +1,10 @@
+import { SkinTanPicker } from '@/src/components/editor/skin-tan-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
 import { useLiveAction } from '@/src/hooks/useLiveAction';
 import { useLiveSlider } from '@/src/hooks/useLiveSlider';
 import { EDIT_SECTIONS, appliesOnSelect, findSection, isSliderApplied } from '@/src/lib/edit-sections';
+import { editorLive } from '@/src/lib/editor-live';
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
 import { THUMBNAIL_SIZE } from '@/src/lib/editor-thumbnails';
 import { useTheme } from '@/src/lib/theme';
@@ -150,6 +152,7 @@ function SliderEditor() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onLiveChange = useLiveSlider(control?.kind === 'slider' ? control : undefined);
+  const preview = useObservable(editorLive.view, null);
 
   if (control?.kind !== 'slider') {
     return null;
@@ -172,6 +175,15 @@ function SliderEditor() {
         <X color={colors.textPrimary} size={16} />
       </Pressable>
       <View style={styles.sliderFill}>
+        {control.picker === 'skin-tan' ? (
+          <SkinTanPicker
+            key={control.key + '-' + resetVersion}
+            preview={preview}
+            value={adjustments[control.key] ?? control.defaultValue}
+            onTouch={() => editorLive.show()}
+            onRelease={value => sliderCommitRequested.next({ control, value })}
+          />
+        ) : (
         <Slider
           key={control.key + '-' + resetVersion}
           label={control.label}
@@ -186,6 +198,7 @@ function SliderEditor() {
           onTrigger={value => sliderCommitRequested.next({ control, value })}
           onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
         />
+        )}
       </View>
     </View>
   );

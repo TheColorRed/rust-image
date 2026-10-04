@@ -15,8 +15,6 @@ options = { workspace = true }
 typography = { workspace = true }
 tools = { workspace = true }
 gpu = { workspace = true, optional = true }
-abra-live = { workspace = true, optional = true }
-uniffi = { version = "=0.31", optional = true }
 
 rayon = { workspace = true }
 ndarray = { workspace = true }
@@ -26,12 +24,8 @@ ctor = { workspace = true }
 regex = "1.9"
 
 [features]
-# GPU acceleration for one-shot edits, and for live rendering when `live` is also on.
-gpu = ["dep:gpu", "abra-live?/gpu"]
-# Interactive rendering (`live::LiveImage`), for apps that show edits as they are made.
-live = ["dep:abra-live"]
-# Derives the uniffi types for `live::EffectSpec` and `live::GradientStop`, so bindings share one definition.
-uniffi = ["dep:uniffi"]
+# GPU acceleration for one-shot edits.
+gpu = ["dep:gpu"]
 
 [lib]
 crate-type = ["rlib"]

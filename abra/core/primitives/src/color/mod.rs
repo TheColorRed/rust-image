@@ -8,6 +8,7 @@ pub mod to_hsl;
 pub mod to_hsv;
 pub mod to_lab;
 pub mod to_rgb;
+pub mod to_ycbcr;
 
 pub use color::Color;
 pub use harmony::Harmony;
@@ -18,3 +19,4 @@ pub use to_hsl::rgb_to_hsl;
 pub use to_hsv::rgb_to_hsv;
 pub use to_lab::*;
 pub use to_rgb::*;
+pub use to_ycbcr::rgb_to_ycbcr;

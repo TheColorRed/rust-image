@@ -11,12 +11,16 @@ use super::to_rgb::{hsl_to_rgb, hsv_to_rgb, lab_to_rgb};
 /// A color with red, green, blue, and alpha values.
 pub struct Color {
   /// The red value of the color.
+  /// A value between 0 and 255 representing the intensity of the red channel.
   pub r: u8,
   /// The green value of the color.
+  /// A value between 0 and 255 representing the intensity of the green channel.
   pub g: u8,
   /// The blue value of the color.
+  /// A value between 0 and 255 representing the intensity of the blue channel.
   pub b: u8,
   /// The alpha value of the color.
+  /// A value between 0 and 255 representing the opacity of the color.
   pub a: u8,
 }
 
@@ -64,6 +68,11 @@ impl Color {
       b: p_b,
       a: p_a,
     }
+  }
+  /// Sets the alpha value of the color.
+  pub fn set_alpha(mut self, p_a: u8) -> Self {
+    self.a = p_a;
+    self
   }
   /// Creates a color from HSV values (hue 0-360, saturation/value 0-1; alpha set to 255).
   pub fn from_hsv(p_h: f32, p_s: f32, p_v: f32) -> Self {

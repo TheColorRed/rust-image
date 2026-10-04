@@ -4,13 +4,25 @@ use crate::fs::writer_options::WriterOptions;
 use png::ColorType::Rgba;
 use png::Encoder;
 use std::fs::File;
+use std::io::Write;
 
 /// Writes the image data to a PNG file
 pub fn write_png(p_file: impl Into<String>, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let p_file = p_file.into();
   let p_file = File::create(p_file).map_err(|e| e.to_string())?;
+  write_png_to(p_file, p_image, p_options)
+}
+
+/// Encodes the image as PNG bytes.
+pub fn encode_png(p_image: &Image, p_options: &Option<WriterOptions>) -> Result<Vec<u8>, String> {
+  let mut bytes = Vec::new();
+  write_png_to(&mut bytes, p_image, p_options)?;
+  Ok(bytes)
+}
+
+fn write_png_to(p_out: impl Write, p_image: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let (width, height) = p_image.dimensions();
-  let mut encoder = Encoder::new(p_file, width, height);
+  let mut encoder = Encoder::new(p_out, width, height);
 
   let channels = 4; // Always use RGBA
 
@@ -31,13 +43,13 @@ pub fn write_png(p_file: impl Into<String>, p_image: &Image, p_options: &Option<
     encoder.set_compression(png::Compression::default());
   }
 
-  let mut writer = encoder.write_header().unwrap();
+  let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
   if channels == 4 {
     let pixels = p_image.rgba();
-    writer.write_image_data(pixels).unwrap();
+    writer.write_image_data(pixels).map_err(|e| e.to_string())?;
   } else {
     let pixels = p_image.rgb();
-    writer.write_image_data(&pixels).unwrap();
+    writer.write_image_data(&pixels).map_err(|e| e.to_string())?;
   }
 
   Ok(())

@@ -104,6 +104,18 @@ impl Color {
   pub fn tan() -> Self {
     Self::from_rgb(210, 180, 140)
   }
+  /// Brown color using RGB(165, 42, 42)
+  pub fn brown() -> Self {
+    Self::from_rgb(139, 90, 43)
+  }
+  /// Dark brown color using RGB(101, 67, 33)
+  pub fn dark_brown() -> Self {
+    Self::from_rgb(101, 67, 33)
+  }
+  /// Light brown color using RGB(181, 101, 29)
+  pub fn light_brown() -> Self {
+    Self::from_rgb(181, 101, 29)
+  }
   /// Random opaque color.
   pub fn random() -> Self {
     // Lightweight LCG seeded from current system time to avoid adding rand dependency.

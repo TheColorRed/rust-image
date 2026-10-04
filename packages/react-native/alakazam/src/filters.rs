@@ -18,10 +18,6 @@ impl AbraImage {
     self.with_image_mut(|img| smooth::smooth().apply(img));
   }
 
-  pub fn smooth_skin(&self, amount: f64) {
-    self.with_image_mut(|img| smooth::smooth_skin(amount).apply(img));
-  }
-
   pub fn median(&self, radius: f64) {
     self.with_image_mut(|img| noise::median(radius as f32).apply(img));
   }

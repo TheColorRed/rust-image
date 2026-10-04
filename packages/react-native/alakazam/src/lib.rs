@@ -8,11 +8,13 @@
 uniffi::setup_scaffolding!();
 
 pub mod adjustments;
+pub mod components;
+pub mod effect_spec;
 pub mod filters;
 pub mod history;
 pub mod image;
-pub mod live;
-pub mod surface;
+pub mod live_effects;
+pub mod live_image;
 pub mod tools;
 pub mod transforms;
 

@@ -1,0 +1,12 @@
+[package]
+name = "vessel-window-test"
+version = "1.0.0"
+edition = "2024"
+
+# A standalone Vessel app: no abra, no React Native. It only needs the API crate and the `desktop-window` flag.
+[dependencies]
+vessel = { workspace = true, features = ["desktop-window"] }
+
+[[bin]]
+name = "vessel-window"
+path = "main.rs"

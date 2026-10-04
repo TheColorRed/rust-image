@@ -15,9 +15,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -48,28 +48,28 @@ jobs:
           Compress-Archive -Path release/desktop/Alakazam-win32-x64 -DestinationPath release/Alakazam-windows-x64.zip
 
       - name: Upload desktop build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: alakazam-desktop-windows-x64
           path: release/Alakazam-windows-x64.zip
           if-no-files-found: error
           retention-days: 30
 
-  mobile:
-    name: Mobile (Android)
+  android-mobile:
+    name: Mobile (Android release)
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Install Android build tools
         run: sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.1.12297006" "cmake;3.31.6"
@@ -77,17 +77,47 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Build native Android binding
+      - name: Build native Android binding (release)
         run: npm run build-bindings:android -- --release
 
-      - name: Build Android APK
+      - name: Build Android APK (release)
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease
 
-      - name: Upload mobile build
-        uses: actions/upload-artifact@v4
+      - name: Upload mobile build (release)
+        uses: actions/upload-artifact@v7
         with:
-          name: alakazam-mobile-android-apk
+          name: alakazam-mobile-android-release-apk
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  ios-mobile:
+    name: Mobile (iOS XCFramework release)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build native iOS binding (release)
+        run: npm exec --workspace packages/react-native/alakazam -- ubrn build ios --release --and-generate --config ubrn.config.yaml
+
+      - name: Upload iOS framework
+        uses: actions/upload-artifact@v7
+        with:
+          name: alakazam-mobile-ios-release-xcframework
+          path: packages/react-native/alakazam/ios/alakazam_mobile.xcframework
           if-no-files-found: error
           retention-days: 30

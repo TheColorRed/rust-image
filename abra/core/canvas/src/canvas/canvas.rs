@@ -239,6 +239,12 @@ impl<'a> Canvas<'a> {
     canvas.as_image()
   }
 
+  /// Whether the canvas, or any layer or child canvas in it, has changed since it was last composed (by `as_image`,
+  /// `save` or similar).
+  pub fn is_dirty(&self) -> bool {
+    self.inner.lock().unwrap().is_dirty()
+  }
+
   /// Flattens all layers into a single layer.
   /// All layers will be merged into one layer and removed.
   pub fn flatten(&self) {

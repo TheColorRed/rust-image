@@ -1,0 +1,15 @@
+[package]
+name = "vessel-macros"
+version = "0.1.0"
+edition = "2024"
+description = "Derive macros for Vessel: make an app's own type a component a host view can show."
+
+# This crate must stay free of abra crates so it can be published on its own.
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-crate = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"

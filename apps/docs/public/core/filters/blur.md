@@ -67,7 +67,14 @@ use abra::filters::prelude::blur::surface_blur;
 surface_blur(8, 20).apply(&mut image);
 ```
 
-The arguments are radius and threshold.
+The arguments are radius and threshold. It runs on the GPU when one is available, and gives the same pixels as the CPU.
+
+For a large photo, `with_step` spaces the pixels the blur averages apart, so the same number of pixels reaches that many times as far. The cost of the blur depends on how many pixels it averages, so this blurs a large photo as widely as a small one would be, for the same cost:
+
+```rust
+// Looks at 10 pixels each way, 3 pixels apart, so it reaches 30 pixels.
+surface_blur(10, 20).with_step(3).apply(&mut image);
+```
 
 ## Focus blur
 

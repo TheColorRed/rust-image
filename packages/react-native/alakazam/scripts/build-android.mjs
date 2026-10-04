@@ -9,7 +9,7 @@
 // Extra arguments are passed through to ubrn, e.g. `--release` or
 // `--targets arm64-v8a`.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,19 +50,6 @@ function newestVersionDir(p_dir) {
   return versions.length ? path.join(p_dir, versions.at(-1)) : undefined;
 }
 
-/** ubrn regenerates the package with no view managers; the live preview view must be registered in it. */
-function registerViewManager() {
-  const file = path.join(packageRoot, 'android/src/main/java/com/alakazam/mobile/abra/AlakazamMobilePackage.java');
-  const source = readFileSync(file, 'utf8');
-  const head = 'createViewManagers(ReactApplicationContext reactContext) {';
-  const marker = `${head}
-    return Collections.emptyList();`;
-  if (!source.includes(marker)) return;
-  const patched = source.replace(marker, `${head}
-    return Collections.<ViewManager>singletonList(new AbraLiveViewManager());`);
-  writeFileSync(file, patched.replace('it is deliberately empty', 'it only registers the live preview view'));
-}
-
 const sdk = findSdk();
 const ndk = process.env.ANDROID_NDK_HOME ?? newestVersionDir(path.join(sdk, 'ndk'));
 if (!ndk || !existsSync(ndk)) fail(`no NDK found under ${path.join(sdk, 'ndk')}; install one with the SDK Manager.`);
@@ -92,5 +79,4 @@ const args = [ubrnCli, 'build', 'jsi2', 'android', '--and-generate', '--config',
 
 console.log(`build-android: NDK ${path.basename(ndk)}, cmake ${path.basename(cmakeDir)}`);
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' });
-if (result.status === 0) registerViewManager();
 process.exit(result.status ?? 1);

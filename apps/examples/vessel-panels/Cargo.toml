@@ -1,0 +1,12 @@
+[package]
+name = "vessel-panels-test"
+version = "1.0.0"
+edition = "2024"
+
+# A standalone Vessel app with several components: no abra, no React Native.
+[dependencies]
+vessel = { workspace = true, features = ["desktop-window"] }
+
+[[bin]]
+name = "vessel-panels"
+path = "main.rs"

@@ -1,5 +1,5 @@
-import { AlphaType, Canvas, ColorType, Skia, type SkImage, Image as SkiaImage } from '@shopify/react-native-skia';
-import { useCallback, useEffect, useMemo } from 'react';
+import { ImagePreview } from '@alakazam/mobile';
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -39,27 +39,18 @@ import {
   trackPreviewTransform,
 } from '@/src/state/gestures';
 import {
-  preview,
-  liveFrame,
-  liveFrame$,
   liveSurface$,
-  preview$,
+  previewSize,
+  previewSize$,
   previewSourceImage,
   previewSourceImage$,
   showingCheckpoint,
   topInset$,
 } from '@/src/state/preview';
 import { busy$, currentImage, loadError$, saved, saved$ } from '@/src/state/session';
-import { AbraLiveView, LIVE_SURFACE_ID } from '@/src/components/editor/abra-live-view';
+import { VesselView } from '@vessel/react-native';
+import { editorLive } from '@/src/lib/editor-live';
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
-
-/**
- * How long a replaced preview `SkImage` lingers before it's disposed. Skia's Canvas can still be
- * drawing the old image a frame or two after the new one is set; touching a disposed image throws
- * "Attempted to access a disposed object", which leaves Skia's reconciler stuck and surfaces as
- * "Should not already be working" on every later render.
- */
-const DISPOSE_DELAY_MS = 1000;
 
 /** How long the "Edits applied" toast stays up; it has no dismiss control of its own. */
 const SAVED_TOAST_MS = 2000;
@@ -70,10 +61,10 @@ const SAVED_TOAST_MS = 2000;
  */
 export function EditorPreview() {
   const topInset = useObservable(topInset$, 0);
-  const committed = useObservable(preview$, null);
-  const live = useObservable(liveFrame$, null);
-  const image = live ?? committed;
-  const surface = useObservable(liveSurface$, null);
+  const photo = useObservable(previewSize$, null);
+  const liveViewRef = useRef<ElementRef<NonNullable<typeof VesselView>> | null>(null);
+  const [baseView, setBaseView] = useState<ImagePreview | null>(null);
+  const liveView = useObservable(editorLive.view, null);
   const box = useObservable(previewBox$, null);
   const loadError = useObservable(loadError$, null);
   const busy = useObservable(busy$, false);
@@ -113,31 +104,38 @@ export function EditorPreview() {
     };
   }, []);
 
-  // Rasterize the source image at the preview's pixel size. The replaced SkImage is disposed
-  // later (see DISPOSE_DELAY_MS) so a still-mounted Canvas can't draw it after disposal.
+  // Show the source image on the native view under the live one; Vessel draws it at the view's size. Each new source
+  // replaces the previous preview, which lets go of the view as it goes.
   useEffect(() => {
+    let current: ImagePreview | null = null;
+    const release = () => {
+      current?.uniffiDestroy();
+      current = null;
+      setBaseView(null);
+    };
     const subscription = combineLatest([previewSourceImage$, previewBox$]).subscribe(([source, size]) => {
+      release();
       if (!source || !size) return;
-      const ratio = PixelRatio.get();
-      const pixels = source.preview(Math.round(size.width * ratio), Math.round(size.height * ratio));
-      const stale = preview.value;
-      liveFrame.next(null);
-      preview.next(
-        Skia.Image.MakeImage(
-          { width: pixels.width, height: pixels.height, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
-          Skia.Data.fromBytes(new Uint8Array(pixels.data)),
-          pixels.width * 4,
-        ),
-      );
-      if (stale) setTimeout(() => stale.dispose(), DISPOSE_DELAY_MS);
+      current = new ImagePreview(source);
+      setBaseView(current);
+      previewSize.next({ width: source.width(), height: source.height() });
     });
     return () => {
       subscription.unsubscribe();
-      const stale = preview.value;
-      preview.next(null);
-      if (stale) setTimeout(() => stale.dispose(), DISPOSE_DELAY_MS);
+      release();
+      previewSize.next(null);
     };
   }, []);
+
+  // The live view is shown and hidden straight on the native view. Going through React state took around 100 ms to reach
+  // the screen, which is what tapping a mood felt like; a slider never paid it because its view stays visible while dragged.
+  useEffect(() => {
+    const subscription = liveSurface$.subscribe(size => {
+      liveViewRef.current?.setNativeProps({ style: { opacity: size ? 1 : 0 } });
+    });
+    return () => subscription.unsubscribe();
+    // Subscribing again once the view has mounted applies the current state to it.
+  }, [photo, box]);
 
   // A long press is a temporary before/after preview that restores on release; it changes no edit state.
   useEffect(() => {
@@ -175,21 +173,18 @@ export function EditorPreview() {
         onPress={event => previewPressed.next(event)}
       >
         {loadError && <Text style={styles.error}>{loadError}</Text>}
-        {!loadError && !image && <ActivityIndicator size="large" color={colors.textPrimary} />}
-        {image && box && (
+        {!loadError && !photo && <ActivityIndicator size="large" color={colors.textPrimary} />}
+        {photo && box && VesselView && (
           <Animated.View
             style={{ width: box.width, height: box.height, transform: [{ translateX }, { translateY }, { scale }] }}
           >
-            <Canvas style={{ width: box.width, height: box.height }}>
-              <SkiaImage image={image} x={0} y={0} width={box.width} height={box.height} fit="contain" />
-            </Canvas>
-            {AbraLiveView && (
-              <AbraLiveView
-                surfaceId={LIVE_SURFACE_ID}
-                pointerEvents="none"
-                style={liveSurfaceStyle(box, committed, surface !== null)}
-              />
-            )}
+            <VesselView source={baseView} pointerEvents="none" style={photoStyle(box, photo, true)} />
+            <VesselView
+              ref={liveViewRef}
+              source={liveView}
+              pointerEvents="none"
+              style={photoStyle(box, photo, false)}
+            />
           </Animated.View>
         )}
         {blemishFocused && <BlemishReticle />}
@@ -205,14 +200,13 @@ export function EditorPreview() {
 }
 
 /**
- * Fits the photo's aspect ratio inside the preview box, like the Canvas's `contain`. The view keeps this size while
- * hidden so its surface is already the right size when the first frame is drawn on it.
+ * Fits the photo's aspect ratio inside the preview box, centered. The live view keeps this size while hidden so its
+ * surface is already the right size when the first frame is drawn on it.
  */
-function liveSurfaceStyle(p_box: { width: number; height: number }, p_photo: SkImage | null, p_visible: boolean) {
-  const photo = p_photo ?? { width: () => p_box.width, height: () => p_box.height };
-  const fit = Math.min(p_box.width / photo.width(), p_box.height / photo.height());
-  const width = Math.max(1, photo.width() * fit);
-  const height = Math.max(1, photo.height() * fit);
+function photoStyle(p_box: { width: number; height: number }, p_photo: { width: number; height: number }, p_visible: boolean) {
+  const fit = Math.min(p_box.width / p_photo.width, p_box.height / p_photo.height);
+  const width = Math.max(1, p_photo.width * fit);
+  const height = Math.max(1, p_photo.height * fit);
   return {
     position: 'absolute' as const,
     left: (p_box.width - width) / 2,

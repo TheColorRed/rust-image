@@ -243,7 +243,7 @@ pub fn apply_to_whole_image_in_area_gpu(
 ) -> Result<(), String> {
   let provider = ready_gpu_provider(Hardware::Gpu).ok_or("no GPU is available")?;
   let (width, height) = p_image.dimensions::<u32>();
-  let processed = (provider.process)(p_gpu, width, height, &p_image.to_rgba_vec())?;
+  let processed = (provider.process)(&[p_gpu.passes(width, height)], width, height, &p_image.to_rgba_vec())?;
   put_whole_image(p_image, processed, p_ctx.as_ref());
   Ok(())
 }
@@ -390,7 +390,8 @@ pub fn apply_in_area_gpu(
     if meta.area_w == 0 || meta.area_h == 0 {
       continue;
     }
-    match (provider.process)(p_gpu, meta.rect_w as u32, meta.rect_h as u32, prepared.pixels.as_ref()) {
+    let (rect_w, rect_h) = (meta.rect_w as u32, meta.rect_h as u32);
+    match (provider.process)(&[p_gpu.passes(rect_w, rect_h)], rect_w, rect_h, prepared.pixels.as_ref()) {
       Ok(processed) => apply_processed_pixels_to_image(p_image, processed, &meta, area, mask),
       Err(error) => {
         if let Some(pixels) = snapshot {
@@ -419,7 +420,8 @@ fn process_area<F>(
 
   if let Some((effect, provider)) = p_gpu {
     // A GPU error is non-fatal: fall back to the CPU path.
-    if let Ok(processed) = (provider.process)(*effect, meta.rect_w as u32, meta.rect_h as u32, prepared.pixels.as_ref()) {
+    let (rect_w, rect_h) = (meta.rect_w as u32, meta.rect_h as u32);
+    if let Ok(processed) = (provider.process)(&[effect.passes(rect_w, rect_h)], rect_w, rect_h, prepared.pixels.as_ref()) {
       apply_processed_pixels_to_image(p_image, processed, &meta, p_area, p_mask);
       return;
     }

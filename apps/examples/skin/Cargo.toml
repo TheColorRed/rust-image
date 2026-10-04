@@ -1,0 +1,11 @@
+[package]
+name = "skin-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true, features = ["gpu"] }
+
+[[bin]]
+name = "skin-test"
+path = "main.rs"

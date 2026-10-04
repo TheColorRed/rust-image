@@ -7,10 +7,8 @@ edition = "2024"
 crate-type = ["rlib"]
 
 [dependencies]
-wgpu = { workspace = true }
-pollster = { workspace = true }
-bytemuck = { workspace = true }
-futures = { workspace = true }
+# The wgpu runtime lives in the standalone `gpu-passes` package; this crate plugs it into abra.
+gpu-passes = { workspace = true, features = ["runtime"] }
 abra-core = { workspace = true }
 anyhow = { workspace = true }
 

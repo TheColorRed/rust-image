@@ -4,20 +4,25 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-abra = { workspace = true, features = ["uniffi", "live"] }
+abra = { workspace = true }
+pub-sub = { workspace = true }
+# The toolkit: engine, components, session and controls (the photo is an `Image`).
+vessel = { workspace = true, features = ["android-surface"] }
+gpu = { workspace = true, optional = true }
+# Draws GPU textures straight onto a native view, without copying them to the CPU.
+gpu-passes = { workspace = true, optional = true, features = ["vessel-target"] }
+# Pinned to what the bindings generator (uniffi-bindgen-react-native 0.31.0-6, the newest release) reads. A newer uniffi
+# makes binding generation fail and leaves the generated TypeScript stale. Raise it when a matching generator exists.
 uniffi = "=0.31"
+base64 = "0.23.1"
 
 [features]
 default = ["gpu"]
 # Renders live previews on the GPU; without it they run on the CPU.
-gpu = ["abra/gpu"]
+gpu = ["abra/gpu", "dep:gpu", "dep:gpu-passes"]
 
 [lib]
 # `cdylib` is the lib<name>.so the @ubjs/react-native player dlopens;
 # `lib` lets ubrn read the uniffi metadata.
 crate-type = ["lib", "cdylib"]
 name = "alakazam_mobile"
-
-[target.'cfg(target_os = "android")'.dependencies]
-# Turns the Surface behind a native preview view into the ANativeWindow that wgpu draws to.
-ndk-sys = "0.6"

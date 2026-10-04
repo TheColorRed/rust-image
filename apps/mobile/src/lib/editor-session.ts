@@ -3,6 +3,7 @@ import { type BehaviorSubject } from 'rxjs';
 import { batch } from '@/src/lib/batch';
 import { resolveLocalPhotoPath, type EditablePhoto } from '@/src/lib/edit-source';
 import { syncHistoryFlags } from '@/src/lib/editor-history';
+import { startEditorLive } from '@/src/lib/editor-live';
 import { startReplay } from '@/src/lib/editor-replay';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey } from '@/src/state/edits';
 import { draftUiHistory, lastDraftGroup, recordDraft } from '@/src/state/history';
@@ -59,6 +60,7 @@ function resetSessionState() {
 export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const replay = startReplay();
+  const live = startEditorLive();
 
   (async () => {
     try {
@@ -80,6 +82,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   return () => {
     cancelled = true;
     replay.unsubscribe();
+    live.unsubscribe();
     batch(resetSessionState);
   };
 }

@@ -1,5 +1,4 @@
 import { AbraImage } from '@alakazam/mobile';
-import { AlphaType, ColorType, Skia } from '@shopify/react-native-skia';
 import { PixelRatio } from 'react-native';
 import { applyAction, type EditSection } from '@/src/lib/edit-sections';
 
@@ -32,16 +31,7 @@ export function buildControlThumbnails(image: AbraImage, section: EditSection) {
         console.warn(`[edit] thumbnail for "${control.key}" has ${pixels.byteLength} bytes for ${width}x${height} RGBA — skipping.`);
         continue;
       }
-      const skImage = Skia.Image.MakeImage(
-        { width, height, colorType: ColorType.RGBA_8888, alphaType: AlphaType.Unpremul },
-        Skia.Data.fromBytes(new Uint8Array(pixels)),
-        width * 4,
-      );
-      if (skImage) {
-        thumbnails[control.key] = `data:image/png;base64,${skImage.encodeToBase64()}`;
-        skImage.dispose();
-      }
-      else console.warn(`[edit] Skia.Image.MakeImage returned null for thumbnail "${control.key}" (${width}x${height}).`);
+      thumbnails[control.key] = thumbnailImage.pngDataUri();
     } catch (error) {
       console.warn(`[edit] building thumbnail for "${control.key}" threw:`, error);
     } finally {

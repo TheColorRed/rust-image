@@ -15,7 +15,7 @@ pub use combine::*;
 pub use fs::WriterOptions;
 pub use fs::path::IntoGlobPatterns;
 pub use fs::path::{get_paths_from_folders, get_paths_from_glob};
-pub use fs::{ImageFormat, reader, writer};
+pub use fs::{ImageFormat, encode_png, reader, writer};
 pub use geometry::*;
 pub use image::image_ext::{ImageExt, ImageRef};
 pub use image_loader::*;

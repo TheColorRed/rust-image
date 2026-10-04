@@ -1,0 +1,12 @@
+{
+  "name": "@vessel/react-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The React Native view that Vessel draws on",
+  "main": "src/index.tsx",
+  "react-native": "src/index.tsx",
+  "types": "src/index.tsx",
+  "peerDependencies": {
+    "react-native": "*"
+  }
+}

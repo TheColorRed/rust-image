@@ -3,9 +3,9 @@ import { adjustments } from './edit-sections/adjustments';
 import { BLEMISH_TOOL_KEY, beauty } from './edit-sections/beauty';
 import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
-import { colorization } from './edit-sections/colorization';
 import { detail } from './edit-sections/detail';
 import { effects } from './edit-sections/effects';
+import { colorization } from './edit-sections/mood';
 import { sharpen } from './edit-sections/sharpen';
 import { transform } from './edit-sections/transform';
 
@@ -25,8 +25,14 @@ export type SliderControl = {
    * means "no change" (Brightness at 0): the control then counts as applied only once it differs from `defaultValue`.
    */
   applyOnSelect?: boolean;
-  apply: (image: AbraImageLike, value: number) => void;
-  /** When set, dragging previews this effect live (GPU where available) before the release commits it via `apply`. */
+  /** Applies the slider's effect to an image. Without it, replaying the slider applies its `live` effect, which is the same definition. */
+  apply?: (image: AbraImageLike, value: number) => void;
+  /**
+   * A Vessel component to show in place of the plain slider, for a control whose value is better picked another way. The
+   * value is still 0 to 1 on the control's scale, and the control still needs its `live` effect.
+   */
+  picker?: 'skin-tan';
+  /** When set, dragging previews this effect live (GPU where available) before the release commits it via `apply`, or this same effect when there is no `apply`. */
   live?: (value: number) => EffectSpec;
 };
 
@@ -41,9 +47,16 @@ export type ActionControl = {
    * control in the same group (across all sections). Ungrouped controls toggle independently.
    */
   group?: string;
-  /** When set, tapping previews this effect instantly (GPU where available) while the full-resolution edit replays behind it. */
-  live?: () => EffectSpec;
+  /**
+   * The effects this action applies, as one effect or several that run in order. Tapping previews them at once in a live
+   * image while the full-resolution edit replays behind it; effects without a shader run on the CPU at preview size.
+   * Without `apply`, replaying the action applies these same effects, so there is one definition of the action.
+   */
+  live?: () => EffectSpec | EffectSpec[];
 };
+
+/** An effect or a list of effects as a list. */
+export const effectList = (effects: EffectSpec | EffectSpec[]): EffectSpec[] => (Array.isArray(effects) ? effects : [effects]);
 
 /**
  * A control with no value of its own to configure — tapping it hands off to a custom, on-image
@@ -61,7 +74,13 @@ export type ToolControl = {
 /** Applies an action to `image`: its own `apply`, or else its live effect, which is the same definition. */
 export const applyAction = (control: ActionControl, image: AbraImageLike) => {
   if (control.apply) control.apply(image);
-  else if (control.live) image.applyEffect(control.live());
+  else if (control.live) for (const effect of effectList(control.live())) image.applyEffect(effect);
+};
+
+/** Applies a slider at `value` to `image`: its own `apply`, or else its live effect, which is the same definition. */
+export const applySlider = (control: SliderControl, image: AbraImageLike, value: number) => {
+  if (control.apply) control.apply(image, value);
+  else if (control.live) image.applyEffect(control.live(value));
 };
 
 /** Whether a slider's effect is on, given its committed value (undefined when it has none). */

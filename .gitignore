@@ -14,6 +14,7 @@ out
 node_modules
 dist
 cache
+*android*/
 
 # Files to ignore
 TODO.md

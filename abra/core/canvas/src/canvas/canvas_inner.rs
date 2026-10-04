@@ -122,6 +122,11 @@ impl<'a> CanvasInner<'a> {
     self.needs_recompose.set(true);
   }
 
+  /// Whether the canvas has changed since it was last composed.
+  pub fn is_dirty(&self) -> bool {
+    self.needs_recompose.get()
+  }
+
   /// Queues proportional scaling for direct layers, then recurses into child canvases.
   pub(crate) fn rescale_tree(
     &mut self, p_scale_x: Option<f32>, p_scale_y: Option<f32>, p_algorithm: Option<TransformAlgorithm>,

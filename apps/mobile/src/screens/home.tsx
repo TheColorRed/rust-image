@@ -2,7 +2,6 @@ import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
 import { useMemo } from 'react';
 import {
     ActivityIndicator,
-    Dimensions,
     FlatList,
     Image,
     Linking,
@@ -11,6 +10,7 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
@@ -18,9 +18,11 @@ import { useCommonStyles } from '@/src/lib/styles';
 import { useTheme } from '@/src/lib/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
 
-const COLUMNS = 3;
+/** The fewest columns, as in a portrait phone. A wider window fits more so the thumbnails stay about the same size. */
+const MIN_COLUMNS = 3;
+/** The smallest a thumbnail is allowed to be, in dp, before another column is added. */
+const MIN_THUMB = 120;
 const GAP = 2;
-const THUMB_SIZE = (Dimensions.get('window').width - GAP * (COLUMNS - 1)) / COLUMNS;
 
 function Permissions({
   permission,
@@ -41,17 +43,21 @@ function Permissions({
 }) {
   const { colors } = useTheme();
   const commonStyles = useCommonStyles();
+  // Follows the window, so turning the phone gives the grid the columns and thumbnails that fit the new width.
+  const { width } = useWindowDimensions();
+  const columns = Math.max(MIN_COLUMNS, Math.floor((width + GAP) / (MIN_THUMB + GAP)));
+  const thumbSize = (width - GAP * (columns - 1)) / columns;
   const styles = useMemo(
     () =>
       StyleSheet.create({
         settingsButton: { marginTop: 8 },
         grid: { paddingHorizontal: 0 },
         row: { gap: GAP },
-        thumbWrapper: { width: THUMB_SIZE, height: THUMB_SIZE, marginBottom: GAP },
+        thumbWrapper: { width: thumbSize, height: thumbSize, marginBottom: GAP },
         thumb: { width: '100%', height: '100%', backgroundColor: colors.placeholder },
         footer: { paddingVertical: 20 },
       }),
-    [colors],
+    [colors, thumbSize],
   );
 
   return (
@@ -81,8 +87,10 @@ function Permissions({
 
       {permission === 'granted' && photos.length > 0 && (
         <FlatList
+          // A list cannot change its column count in place; a new key makes a new list for the new count.
+          key={columns}
           data={photos}
-          numColumns={COLUMNS}
+          numColumns={columns}
           keyExtractor={item => item.node.id}
           contentContainerStyle={styles.grid}
           columnWrapperStyle={styles.row}
