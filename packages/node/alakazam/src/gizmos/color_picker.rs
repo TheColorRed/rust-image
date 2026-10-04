@@ -1,11 +1,6 @@
 use crate::color::Color;
 use crate::common::*;
-
-use abra::{
-  abra_core::blend::{self, blend_images},
-  drawing::prelude::fill,
-  prelude::*,
-};
+use abra::{abra_core::blend, drawing::prelude::fill, prelude::*};
 
 #[napi(object, namespace = "AlakazamGizmos")]
 pub struct HueData {
@@ -35,11 +30,11 @@ pub fn color_picker(active_color: &Color, width: u32, height: u32) -> ImageData 
   let area = Area::rect((0.0, 0.0), (width as f32, height as f32));
 
   let mut img = Image::new(width, height);
-  let img_white_to_hue = fill(&area, &white_to_hue);
-  let img_trans_to_black = fill(&area, &trans_to_black);
+  let img_white_to_hue: Image = fill(&area, &white_to_hue).into();
+  let img_trans_to_black: Image = fill(&area, &trans_to_black).into();
 
   img.draw_image_at(&img_white_to_hue, (0, 0));
-  blend_images(&mut img, &img_trans_to_black, BlendMode::Normal);
+  blend::blend(&img_trans_to_black).with_mode(BlendMode::Normal).apply(&mut img);
 
   img.into()
 }
@@ -77,7 +72,8 @@ pub fn gradient_hue(width: u32, height: u32) -> ImageData {
   let mut gradient = Gradient::hue();
   let direction = Path::line((0.0, 0.0), (0.0, height as f32));
   gradient = gradient.with_direction(direction);
-  fill(&Area::rect((0.0, 0.0), (width as f32, height as f32)), &gradient).into()
+  let image: Image = fill(&Area::rect((0.0, 0.0), (width as f32, height as f32)), &gradient).into();
+  image.into()
 }
 
 #[napi(namespace = "AlakazamGizmos")]

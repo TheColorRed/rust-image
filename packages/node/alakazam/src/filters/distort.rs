@@ -7,7 +7,7 @@ use crate::common::*;
 pub fn pinch(layer: &mut Layer, amount: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    distort::pinch(img, amount as f32, options);
+    distort::pinch(amount as f32).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -41,7 +41,7 @@ pub fn ripple(
   };
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    distort::ripple(img, amount as f32, ripple_size, ripple_shape, options);
+    distort::ripple(amount as f32).with_size(ripple_size).with_shape(ripple_shape).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }

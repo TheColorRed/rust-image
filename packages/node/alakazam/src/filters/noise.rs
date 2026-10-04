@@ -16,16 +16,14 @@ fn noise_impl(layer: &mut Layer, amount: f64, distribution: String, options: Opt
   // of the filter call, allowing us to mutate the image in-place without
   // cloning the pixels.
   layer.get_underlying_layer().with_image_mut(|img| {
-    abra::filters::prelude::noise::noise(
-      img,
-      amount as f32,
-      match distribution.as_str() {
+    abra::filters::prelude::noise::noise(amount as f32)
+      .with_distribution(match distribution.as_str() {
         "uniform" => abra::filters::prelude::noise::NoiseDistribution::Uniform,
         "gaussian" => abra::filters::prelude::noise::NoiseDistribution::Gaussian,
         _ => abra::filters::prelude::noise::NoiseDistribution::Uniform,
-      },
-      options.unwrap_or(&ApplyOptions::default()).to_apply_options(),
-    );
+      })
+      .with_options(options.unwrap_or(&ApplyOptions::default()).to_apply_options())
+      .apply(img);
   });
   layer.mark_dirty();
 }
@@ -43,7 +41,7 @@ pub fn despeckle(layer: &mut Layer, radius: f64, threshold: f64, options: Option
 fn despeckle_impl(layer: &mut Layer, radius: f64, threshold: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    abra::filters::prelude::noise::despeckle(img, radius as f32, threshold as f32, options);
+    abra::filters::prelude::noise::despeckle(radius as f32, threshold as f32).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -60,7 +58,7 @@ pub fn median(layer: &mut Layer, radius: f64, options: Option<&ApplyOptions>) {
 fn median_impl(layer: &mut Layer, radius: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    abra::filters::prelude::noise::median(img, radius as f32, Some(options));
+    abra::filters::prelude::noise::median(radius as f32).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }

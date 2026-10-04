@@ -89,7 +89,7 @@ pub fn contrast(layer: &mut Layer, value: f64, options: Option<&ApplyOptions>) {
 pub fn exposure(layer: &mut Layer, exposure: f64, offset: f64, gamma: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    levels::exposure(exposure as f32, offset as f32, gamma as f32).with_options(options).apply(img);
+    levels::exposure(exposure).with_offset(offset).with_gamma(gamma).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -103,7 +103,7 @@ pub fn exposure(layer: &mut Layer, exposure: f64, offset: f64, gamma: f64, optio
 pub fn vibrance(layer: &mut Layer, vibrance: f64, saturation: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    levels::vibrance(vibrance as f32, saturation as f32).with_options(options).apply(img);
+    levels::vibrance(vibrance).with_saturation(saturation).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }

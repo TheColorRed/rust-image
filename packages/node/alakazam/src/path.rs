@@ -3,12 +3,12 @@ use abra::abra_core::geometry::Path as AbraPath;
 
 #[napi]
 #[derive(Clone)]
-pub struct Path {
+pub struct GradientPath {
   pub(crate) inner: AbraPath,
 }
 
 #[napi]
-impl Path {
+impl GradientPath {
   #[napi(constructor)]
   pub fn new() -> Self {
     AbraPath::default().into()
@@ -23,7 +23,7 @@ impl Path {
   }
 }
 
-impl From<AbraPath> for Path {
+impl From<AbraPath> for GradientPath {
   fn from(inner: AbraPath) -> Self {
     Self { inner }
   }

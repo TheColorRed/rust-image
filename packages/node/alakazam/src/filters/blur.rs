@@ -8,7 +8,7 @@ use crate::common::*;
 pub fn gaussian_blur(layer: &mut Layer, radius: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    blur::gaussian_blur(img, radius as u32, options);
+    blur::gaussian_blur(radius as u32).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -21,7 +21,7 @@ pub fn gaussian_blur(layer: &mut Layer, radius: f64, options: Option<&ApplyOptio
 pub fn surface_blur(layer: &mut Layer, radius: f64, threshold: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    blur::surface_blur(img, radius as u32, threshold as u8, options);
+    blur::surface_blur(radius as u32, threshold as u8).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -33,7 +33,7 @@ pub fn surface_blur(layer: &mut Layer, radius: f64, threshold: f64, options: Opt
 pub fn box_blur(layer: &mut Layer, radius: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    blur::box_blur(img, radius as f64, options);
+    blur::box_blur(radius).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -89,55 +89,37 @@ pub struct LensBlurOptions {
 /// @param apply_options Optional apply options for masking and area.
 pub fn lens_blur(layer: &mut Layer, options: Option<LensBlurOptions>, apply_options: Option<&ApplyOptions>) {
   use abra::filters::prelude::blur::*;
-  let iris = match &options {
-    Some(opts) => {
-      let shape = match opts.iris.shape.as_str() {
-        "triangle" => ApertureShape::Triangle,
-        "square" => ApertureShape::Square,
-        "pentagon" => ApertureShape::Pentagon,
-        "hexagon" => ApertureShape::Hexagon,
-        "heptagon" => ApertureShape::Heptagon,
-        "octagon" => ApertureShape::Octagon,
-        _ => ApertureShape::Hexagon,
-      };
-      IrisOptions {
-        shape,
-        radius: opts.iris.radius,
-        blade_curvature: opts.iris.blade_curvature as f32,
-        rotation: opts.iris.rotation.to_radians() as f32,
-      }
+  let mut lens_blur = blur::lens_blur(options.as_ref().map_or(0, |opts| opts.iris.radius));
+  if let Some(opts) = options {
+    let shape = match opts.iris.shape.as_str() {
+      "triangle" => ApertureShape::Triangle,
+      "square" => ApertureShape::Square,
+      "pentagon" => ApertureShape::Pentagon,
+      "hexagon" => ApertureShape::Hexagon,
+      "heptagon" => ApertureShape::Heptagon,
+      "octagon" => ApertureShape::Octagon,
+      _ => ApertureShape::Hexagon,
+    };
+    lens_blur = lens_blur
+      .with_shape(shape)
+      .with_blade_curvature(opts.iris.blade_curvature as f32)
+      .with_rotation(opts.iris.rotation as f32)
+      .with_samples(opts.samples);
+    if let Some(specular) = opts.specular {
+      lens_blur = lens_blur.with_specular(specular.brightness as f32, specular.threshold as f32);
     }
-    None => IrisOptions::default(),
-  };
-  let specular = options.as_ref().and_then(|opts| {
-    opts.specular.as_ref().map(|spec_opts| SpecularOptions {
-      brightness: spec_opts.brightness as f32,
-      threshold: spec_opts.threshold as f32,
-    })
-  });
-  let noise = options.as_ref().and_then(|opts| {
-    opts.noise.as_ref().map(|noise_opts| {
-      let distribution = match noise_opts.distribution.as_str() {
-        "uniform" => NoiseDistribution::Uniform,
+    if let Some(noise) = opts.noise {
+      let distribution = match noise.distribution.as_str() {
         "gaussian" => NoiseDistribution::Gaussian,
         _ => NoiseDistribution::Uniform,
       };
-      NoiseOptions {
-        amount: noise_opts.amount as f32,
-        distribution,
-      }
-    })
-  });
-  let blur_options = LensBlurOptions {
-    iris,
-    specular,
-    noise,
-    samples: options.as_ref().map_or(0, |opts| opts.samples),
-  };
+      lens_blur = lens_blur.with_noise(noise.amount as f32, distribution);
+    }
+  }
 
   let apply_options = apply_options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    blur::lens_blur(blur_options).with_options(apply_options).apply(img);
+    lens_blur.with_options(apply_options).apply(img);
   });
   layer.mark_dirty();
 }
@@ -150,7 +132,7 @@ pub fn lens_blur(layer: &mut Layer, options: Option<LensBlurOptions>, apply_opti
 pub fn motion_blur(layer: &mut Layer, angle: f64, distance: f64, options: Option<&ApplyOptions>) {
   let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
   layer.get_underlying_layer().with_image_mut(|img| {
-    blur::motion_blur(img, angle as f32, distance as u32, options);
+    blur::motion_blur(angle as f32, distance as u32).with_options(options).apply(img);
   });
   layer.mark_dirty();
 }

@@ -3,7 +3,7 @@ use napi::bindgen_prelude::Buffer;
 use napi_derive::napi;
 
 use abra::{
-  canvas::prelude::Canvas,
+  canvas::prelude::{Canvas, CanvasResizeTarget, LayerMove},
   prelude::{Color, Image, Transform},
 };
 
@@ -238,7 +238,7 @@ impl<'a> Project<'a> {
   /// Moves a layer up one position in the layer stack.
   /// @param layer The layer to move.
   pub fn move_layer_up(&mut self, layer: &Layer) -> &Self {
-    layer.get_underlying_layer().move_up();
+    layer.get_underlying_layer().move_to(LayerMove::Up);
     self
   }
 
@@ -246,7 +246,7 @@ impl<'a> Project<'a> {
   /// Moves a layer down one position in the layer stack.
   /// @param layer The layer to move.
   pub fn move_layer_down(&mut self, layer: &Layer) -> &Self {
-    layer.get_underlying_layer().move_down();
+    layer.get_underlying_layer().move_to(LayerMove::Down);
     self
   }
 
@@ -254,7 +254,7 @@ impl<'a> Project<'a> {
   /// Moves a layer to the top of the layer stack.
   /// @param layer The layer to move.
   pub fn move_layer_to_top(&mut self, layer: &Layer) -> &Self {
-    layer.get_underlying_layer().move_to_top();
+    layer.get_underlying_layer().move_to(LayerMove::Top);
     self
   }
 
@@ -279,7 +279,7 @@ impl<'a> Project<'a> {
   /// Moves a layer to the bottom of the layer stack.
   /// @param layer The layer to move.
   pub fn move_layer_to_bottom(&mut self, layer: &Layer) -> &Self {
-    layer.get_underlying_layer().move_to_bottom();
+    layer.get_underlying_layer().move_to(LayerMove::Bottom);
     self
   }
 
@@ -334,7 +334,7 @@ impl<'a> Project<'a> {
     };
 
     if new_width != width || new_height != height {
-      canvas.transform().resize(new_width, new_height, None);
+      canvas.transform().resize(CanvasResizeTarget::Exact(abra::abra_core::Size::new(new_width, new_height)), None);
     }
     let (width, height) = canvas.dimensions::<u32>();
 

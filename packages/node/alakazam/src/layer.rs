@@ -6,7 +6,7 @@ use abra::{
   abra_core::BlendMode,
   canvas::prelude::Anchor,
   prelude::{Channels, Image, Transform},
-  transform::prelude::resize,
+  transform::prelude::{ResizeTarget, resize},
 };
 
 #[napi(object)]
@@ -160,7 +160,7 @@ impl Layer {
       img.clone()
     } else {
       let mut resized_img = img.clone();
-      resize(&mut resized_img, new_width, new_height, None);
+      resize(ResizeTarget::Exact(abra::prelude::Size::new(new_width, new_height))).apply(&mut resized_img);
       resized_img
     };
 
@@ -250,16 +250,14 @@ impl Layer {
   /// Internal helper: apply noise filter directly on the underlying image.
   pub fn apply_noise(&mut self, amount: f64, distribution: String, options: Option<&ApplyOptions>) {
     self.inner.with_image_mut(|img| {
-      abra::filters::prelude::noise::noise(
-        img,
-        amount as f32,
-        match distribution.as_str() {
+      abra::filters::prelude::noise::noise(amount as f32)
+        .with_distribution(match distribution.as_str() {
           "uniform" => abra::filters::prelude::noise::NoiseDistribution::Uniform,
           "gaussian" => abra::filters::prelude::noise::NoiseDistribution::Gaussian,
           _ => abra::filters::prelude::noise::NoiseDistribution::Uniform,
-        },
-        options.unwrap_or(&ApplyOptions::default()).to_apply_options(),
-      );
+        })
+        .with_options(options.unwrap_or(&ApplyOptions::default()).to_apply_options())
+        .apply(img);
     });
     self.mark_dirty();
   }
@@ -268,7 +266,7 @@ impl Layer {
   pub fn apply_despeckle(&mut self, radius: f64, threshold: f64, options: Option<&ApplyOptions>) {
     let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
     self.inner.with_image_mut(|img| {
-      abra::filters::prelude::noise::despeckle(img, radius as f32, threshold as f32, options);
+      abra::filters::prelude::noise::despeckle(radius as f32, threshold as f32).with_options(options).apply(img);
     });
     self.mark_dirty();
   }
@@ -277,7 +275,7 @@ impl Layer {
   pub fn apply_median(&mut self, radius: f64, options: Option<&ApplyOptions>) {
     let options = options.unwrap_or(&ApplyOptions::default()).to_apply_options();
     self.inner.with_image_mut(|img| {
-      abra::filters::prelude::noise::median(img, radius as f32, Some(options));
+      abra::filters::prelude::noise::median(radius as f32).with_options(options).apply(img);
     });
     self.mark_dirty();
   }

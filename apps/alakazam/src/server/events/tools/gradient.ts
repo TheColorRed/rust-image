@@ -40,7 +40,7 @@ ipcMain.handle('tools-gradient-apply', (event, projectId: string, options: Gradi
     const startPoint = [options.start[0], options.start[1]] as [number, number];
     const endPoint = [options.end[0], options.end[1]] as [number, number];
     const gradient = abra.Gradient.evenly([startColor, endColor]);
-    const path = abra.Path.line(startPoint, endPoint);
+    const path = abra.GradientPath.line(startPoint, endPoint);
     gradient.setDirection(path);
 
     for (const layerMetadata of layers) {

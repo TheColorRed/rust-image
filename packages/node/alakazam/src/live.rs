@@ -1,5 +1,11 @@
-use abra::live::{EffectSpec, GradientStop, LiveImage as AbraLiveImage};
-use napi::bindgen_prelude::*;
+use abra::{
+  abra_core::{Channels, Color, ColorStop, Gradient, Image},
+  adjustments::prelude::color,
+  adjustments::prelude::levels,
+  filters::prelude::blur,
+  options::prelude::Effect,
+};
+use napi::bindgen_prelude::{Buffer, Result};
 use napi_derive::napi;
 
 use crate::ImageData;
@@ -32,35 +38,40 @@ pub struct LiveEffect {
   pub stops: Option<Vec<LiveGradientStop>>,
 }
 
-fn spec(p_effect: LiveEffect) -> Result<EffectSpec> {
-  Ok(match p_effect.kind.as_str() {
-    "brightness" => EffectSpec::Brightness {
-      amount: p_effect.amount.unwrap_or(0.0).round() as i32,
-    },
-    "contrast" => EffectSpec::Contrast {
-      amount: p_effect.amount.unwrap_or(0.0),
-    },
-    "gaussianBlur" => EffectSpec::GaussianBlur {
-      radius: p_effect.radius.unwrap_or(0),
-    },
-    "linearGradient" => EffectSpec::LinearGradient {
-      stops: p_effect
+fn apply_effect(effect: LiveEffect, image: &mut Image) -> Result<()> {
+  match effect.kind.as_str() {
+    "brightness" => levels::brightness(effect.amount.unwrap_or(0.0).round() as i32).apply(image),
+    "contrast" => levels::contrast(effect.amount.unwrap_or(0.0)).apply(image),
+    "gaussianBlur" => blur::gaussian_blur(effect.radius.unwrap_or(0)).apply(image),
+    "linearGradient" => {
+      let stops = effect
         .stops
         .unwrap_or_default()
         .into_iter()
-        .map(|s| GradientStop {
-          position: s.position as f32,
-          r: s.r.min(255) as u8,
-          g: s.g.min(255) as u8,
-          b: s.b.min(255) as u8,
-          a: s.a.min(255) as u8,
+        .map(|stop| {
+          ColorStop::new(
+            Color::from_rgba(
+              stop.r.min(255) as u8,
+              stop.g.min(255) as u8,
+              stop.b.min(255) as u8,
+              stop.a.min(255) as u8,
+            ),
+            stop.position as f32,
+          )
         })
-        .collect(),
-      angle: p_effect.angle.unwrap_or(0.0) as f32,
-      opacity: p_effect.opacity.unwrap_or(1.0) as f32,
-    },
-    other => return Err(Error::from_reason(format!("unknown live effect kind: {other}"))),
-  })
+        .collect::<Vec<_>>();
+      let gradient = if stops.is_empty() {
+        Gradient::from_to(Color::transparent(), Color::transparent())
+      } else {
+        Gradient::new(stops)
+      };
+      color::LinearGradientEffect::angle(&gradient, effect.angle.unwrap_or(0.0) as f32)
+        .with_opacity(effect.opacity.unwrap_or(1.0) as f32)
+        .apply(image);
+    }
+    other => return Err(napi::Error::from_reason(format!("unknown live effect kind: {other}"))),
+  }
+  Ok(())
 }
 
 /// An image being edited interactively. Call `setEffects` on every parameter change and `poll` on each display frame;
@@ -68,7 +79,10 @@ fn spec(p_effect: LiveEffect) -> Result<EffectSpec> {
 /// renderer as an `ArrayBuffer`.
 #[napi(js_name = "LiveImage")]
 pub struct LiveImage {
-  inner: AbraLiveImage,
+  width: u32,
+  height: u32,
+  original: Vec<u8>,
+  pending: Option<ImageData>,
 }
 
 #[napi]
@@ -76,31 +90,37 @@ impl LiveImage {
   /// Starts a preview of `data` (`width * height` RGBA bytes). Pass an image already downscaled to screen size.
   #[napi(constructor)]
   pub fn new(width: u32, height: u32, data: Buffer) -> Result<Self> {
-    let inner = AbraLiveImage::new(width, height, data.to_vec()).map_err(Error::from_reason)?;
-    Ok(Self { inner })
+    if width == 0 || height == 0 || data.len() != width as usize * height as usize * 4 {
+      return Err(napi::Error::from_reason(format!("expected {width}x{height} RGBA pixels, got {} bytes", data.len())));
+    }
+    Ok(Self {
+      width,
+      height,
+      original: data.to_vec(),
+      pending: None,
+    })
   }
 
   /// Whether frames are rendered on the GPU (otherwise on the CPU, which blocks this call).
   #[napi]
   pub fn is_gpu(&self) -> bool {
-    self.inner.is_gpu()
+    false
   }
 
   /// Replaces the effect chain and starts rendering it.
   #[napi]
   pub fn set_effects(&mut self, effects: Vec<LiveEffect>) -> Result<()> {
-    let specs = effects.into_iter().map(spec).collect::<Result<Vec<_>>>()?;
-    self.inner.set_effects(&specs).map_err(Error::from_reason)
+    let mut image = Image::new_from_pixels(self.width, self.height, &self.original, Channels::RGBA);
+    for effect in effects {
+      apply_effect(effect, &mut image)?;
+    }
+    self.pending = Some(ImageData::from_image(&image));
+    Ok(())
   }
 
   /// The newest finished frame since the last call, or `null`. Never blocks.
   #[napi]
   pub fn poll(&mut self) -> Result<Option<ImageData>> {
-    let frame = self.inner.poll().map_err(Error::from_reason)?;
-    Ok(frame.map(|frame| ImageData {
-      data: Buffer::from(frame.pixels),
-      width: frame.width,
-      height: frame.height,
-    }))
+    Ok(self.pending.take())
   }
 }

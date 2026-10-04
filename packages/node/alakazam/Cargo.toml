@@ -13,7 +13,7 @@ abra = { workspace = true }
 gpu = ["abra/gpu"]
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["cdylib", "rlib"]
 name = "alakazam"
 
 [build-dependencies]

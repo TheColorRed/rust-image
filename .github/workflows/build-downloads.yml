@@ -2,6 +2,19 @@ name: Build downloadable apps
 
 on:
   workflow_dispatch:
+    inputs:
+      desktop:
+        description: Build the Windows desktop app
+        type: boolean
+        default: true
+      android:
+        description: Build the Android mobile app
+        type: boolean
+        default: true
+      ios:
+        description: Build the iOS mobile app
+        type: boolean
+        default: true
   push:
     tags:
       - 'v*'
@@ -15,6 +28,7 @@ env:
 jobs:
   desktop:
     name: Desktop (Windows)
+    if: github.event_name != 'workflow_dispatch' || inputs.desktop
     runs-on: windows-latest
 
     steps:
@@ -60,6 +74,7 @@ jobs:
 
   android-mobile:
     name: Mobile (Android release)
+    if: github.event_name != 'workflow_dispatch' || inputs.android
     runs-on: ubuntu-latest
 
     steps:
@@ -105,7 +120,10 @@ jobs:
 
   ios-mobile:
     name: Mobile (iOS XCFramework release)
+    if: github.event_name != 'workflow_dispatch' || inputs.ios
     runs-on: macos-latest
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '15.1'
 
     steps:
       - uses: actions/checkout@v7
@@ -123,7 +141,11 @@ jobs:
         run: npm ci
 
       - name: Build native iOS binding (release)
-        run: npm exec --workspace packages/react-native/alakazam -- ubrn build ios --release --and-generate --config ubrn.config.yaml
+        run: |
+          for target in aarch64_apple_ios aarch64_apple_ios_sim x86_64_apple_ios; do
+            export "CMAKE_TOOLCHAIN_FILE_$target=$GITHUB_WORKSPACE/.github/cmake/ios.cmake"
+          done
+          npm exec --workspace packages/react-native/alakazam -- ubrn build ios --release --and-generate --config ubrn.config.yaml
 
       - name: Upload iOS framework
         uses: actions/upload-artifact@v7

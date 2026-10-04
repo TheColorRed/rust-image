@@ -1,5 +1,4 @@
-use crate::{color::Color, common::*, path::Path};
-use abra::abra_core::blend::blend_images;
+use crate::{color::Color, common::*, path::GradientPath};
 use abra::abra_core::{Channels, Gradient as AbraGradient, Image, blend};
 use abra::drawing::prelude::fill;
 use abra::prelude::*;
@@ -67,14 +66,14 @@ impl Gradient {
   /// Sets the length of the gradient using a path where the first point is the start and the last point is the end.
   /// @param path The path defining the gradient direction.
   /// @return The updated gradient.
-  pub fn set_direction(&mut self, path: &Path) {
+  pub fn set_direction(&mut self, path: &GradientPath) {
     self.inner = self.inner.clone().with_direction(path.inner.clone());
   }
 
   #[napi(getter)]
   /// Gets the direction of the gradient as a path.
-  pub fn direction(&self) -> Option<Path> {
-    self.inner.direction().map(|p| Path { inner: p })
+  pub fn direction(&self) -> Option<GradientPath> {
+    self.inner.direction().map(|p| GradientPath { inner: p })
   }
 
   #[napi]
@@ -109,8 +108,8 @@ impl Gradient {
     let mut result_image = Image::new_from_pixels(img_width, img_height, rgba, Channels::RGBA);
 
     let area = Area::rect((x as f32, y as f32), (width as f32, height as f32));
-    let gradient = fill(&area, &self.inner);
-    blend_images(&mut result_image, &gradient, BlendMode::Normal);
+    let gradient: Image = fill(&area, &self.inner).into();
+    blend::blend(&gradient).with_mode(BlendMode::Normal).apply(&mut result_image);
     ImageData::from_image(&result_image)
   }
 
