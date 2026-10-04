@@ -1,7 +1,8 @@
 ---
+name: feature
 description: Creates a new feature for the abra library.
+disable-model-invocation: true
 ---
-
 <!--
 Feature Creation Prompt Guidance
 This file defines the decision framework and authoring template for proposing new capabilities.

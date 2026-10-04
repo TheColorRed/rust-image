@@ -37,3 +37,8 @@ The app build type-checks without emitting TypeScript files, then produces the
 webpack bundles. This keeps TypeScript from overwriting the bundled Electron
 entry point. CI stages the renderer as `dist/client`, packages the app, and
 uploads the portable executable.
+
+The Rust build compiles TurboJPEG from source using CMake and Visual Studio.
+Keep the checked-in `Cargo.lock`: its `cmake` dependency supports Visual Studio
+2026, used by the current `windows-latest` runner. Older `cmake` releases can
+panic when detecting that Visual Studio version.

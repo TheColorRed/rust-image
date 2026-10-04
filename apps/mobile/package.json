@@ -31,6 +31,7 @@
     "@babel/runtime": "^8.0.5",
     "@react-native-community/cli": "20.2.0",
     "@react-native-community/cli-platform-android": "20.2.0",
+    "@react-native-community/cli-platform-ios": "20.2.0",
     "@react-native-community/eslint-config": "^3.2.0",
     "@react-native/babel-preset": "0.87.1",
     "@react-native/metro-config": "0.87.1",
