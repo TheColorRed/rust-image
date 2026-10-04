@@ -72,7 +72,7 @@ jobs:
       - uses: android-actions/setup-android@v4
 
       - name: Install Android build tools
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;27.1.12297006" "cmake;3.31.6"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.31.6"
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -82,7 +82,7 @@ jobs:
 
       - name: Build Android APK (release)
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease
+        run: bash ./gradlew assembleRelease
 
       - name: Upload mobile build (release)
         uses: actions/upload-artifact@v7

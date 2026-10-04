@@ -1,0 +1,35 @@
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.7.2"
+  }
+}
+
+apply plugin: "com.android.library"
+
+def getExtOrDefault(name, fallback) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+android {
+  namespace "dev.vessel.reactnative"
+  compileSdkVersion getExtOrDefault("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdkVersion getExtOrDefault("minSdkVersion", 24)
+    targetSdkVersion getExtOrDefault("targetSdkVersion", 34)
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+}
+
+dependencies {
+  //noinspection GradleDynamicVersion
+  implementation "com.facebook.react:react-native:+"
+}

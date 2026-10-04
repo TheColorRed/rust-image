@@ -15,6 +15,12 @@ node_modules
 dist
 cache
 *android*/
+!/apps/mobile/android/
+!/packages/react-native/vessel/android/
+/packages/react-native/vessel/android/*
+!/packages/react-native/vessel/android/build.gradle
+!/packages/react-native/vessel/android/src/
+!/packages/react-native/vessel/android/src/main/java/dev/vessel/android/
 
 # Files to ignore
 TODO.md
