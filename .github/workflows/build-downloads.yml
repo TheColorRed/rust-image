@@ -113,6 +113,7 @@ jobs:
       - name: Upload mobile build (release)
         uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: alakazam-mobile-android-release-apk
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
@@ -150,6 +151,7 @@ jobs:
       - name: Upload iOS framework
         uses: actions/upload-artifact@v7
         with:
+          archive: false
           name: alakazam-mobile-ios-release-xcframework
           path: packages/react-native/alakazam/ios/alakazam_mobile.xcframework
           if-no-files-found: error
