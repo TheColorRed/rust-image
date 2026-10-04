@@ -6,7 +6,7 @@
     "android": "npm run android -w apps/mobile",
     "deploy:android": "node ./scripts/build-android.mjs",
     "watch:android": "node ./scripts/watch-android.mjs",
-    "build-bindings:android":"npm run build:android -w packages/react-native/alakazam",
+    "build-bindings:android": "npm run build:android -w packages/react-native/alakazam --",
     "dev": "npm run build-bindings && node ./apps/alakazam/scripts/move-bindings.mjs && npm run dev -w apps/alakazam --if-present",
     "build-bindings": "npm run build -w packages/node --if-present && npm run write-bindings-ready",
     "write-bindings-ready": "node ./apps/alakazam/scripts/write-bindings-ready.mjs"

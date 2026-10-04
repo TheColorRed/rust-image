@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FONTAWESOME_NPM_AUTH_TOKEN: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
+
 jobs:
   desktop:
     name: Desktop (Windows)
@@ -25,8 +28,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install JavaScript dependencies
-        env:
-          FONTAWESOME_NPM_AUTH_TOKEN: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
         run: npm ci
 
       - name: Build native desktop binding
@@ -70,6 +71,11 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
 
       - uses: android-actions/setup-android@v4
 
@@ -77,12 +83,13 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.31.6"
 
       - name: Install JavaScript dependencies
-        env:
-          FONTAWESOME_NPM_AUTH_TOKEN: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
         run: npm ci
 
       - name: Build native Android binding (release)
-        run: npm run build-bindings:android -- --release
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.1.12297006"
+          export ANDROID_CMAKE_HOME="$ANDROID_HOME/cmake/3.31.6"
+          npm run build-bindings:android -- --release
 
       - name: Build Android APK (release)
         working-directory: apps/mobile/android
@@ -113,8 +120,6 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - name: Install JavaScript dependencies
-        env:
-          FONTAWESOME_NPM_AUTH_TOKEN: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
         run: npm ci
 
       - name: Build native iOS binding (release)

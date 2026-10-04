@@ -54,7 +54,7 @@ const sdk = findSdk();
 const ndk = process.env.ANDROID_NDK_HOME ?? newestVersionDir(path.join(sdk, 'ndk'));
 if (!ndk || !existsSync(ndk)) fail(`no NDK found under ${path.join(sdk, 'ndk')}; install one with the SDK Manager.`);
 
-const cmakeDir = newestVersionDir(path.join(sdk, 'cmake'));
+const cmakeDir = process.env.ANDROID_CMAKE_HOME ?? newestVersionDir(path.join(sdk, 'cmake'));
 const cmakeBin = cmakeDir && path.join(cmakeDir, 'bin');
 if (!cmakeBin || !existsSync(path.join(cmakeBin, exe('ninja')))) {
   fail(`no SDK cmake with ninja found under ${path.join(sdk, 'cmake')}; install "CMake" with the SDK Manager.`);
