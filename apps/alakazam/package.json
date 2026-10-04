@@ -15,8 +15,8 @@
     "exitcrash": true
   },
   "scripts": {
-    "start": "webpack --config webpack.config.mjs && tsc -p src/server && electron .",
-    "build": "webpack --config webpack.config.mjs && tsc -p src/server",
+    "start": "npm run build && electron .",
+    "build": "tsc -p src/server --noEmit && webpack --config webpack.config.mjs",
     "nodemon": "cross-env NODE_ENV=development nodemon",
     "webpack:preload": "webpack --config webpack.config.mjs --mode development --watch --config-name preload",
     "webpack:renderer": "webpack serve --config webpack.config.mjs --mode development --config-name renderer",

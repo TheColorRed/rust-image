@@ -29,8 +29,13 @@ android/local.properties
 
 # Leftovers from the Expo setup
 .expo*/
-ios/
 dist/
+
+/ios/Pods/
+/ios/build/
+/ios/*.xcodeproj/
+/ios/*.xcworkspace/
+/ios/.xcode.env.local
 
 # Logs
 npm-debug.log

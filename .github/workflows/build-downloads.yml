@@ -48,27 +48,42 @@ jobs:
         run: npm run build-bindings
 
       - name: Build desktop application
+        env:
+          NODE_ENV: production
         run: |
           node apps/alakazam/scripts/move-bindings.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build -w apps/alakazam
-          Copy-Item apps/alakazam/dist/renderer apps/alakazam/dist/client -Recurse
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force apps/alakazam/dist/client | Out-Null
+          Copy-Item apps/alakazam/dist/renderer/* apps/alakazam/dist/client -Recurse -Force
 
-      # npm workspaces hoists dependencies to the repository root. Stage them next
-      # to the Electron app so the packaged executable can resolve them at runtime.
-      - name: Package Windows application
+      # JavaScript dependencies are bundled by webpack. Copy the native workspace
+      # package explicitly so the staged app does not rely on workspace symlinks.
+      - name: Package portable Windows executable
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item apps/alakazam release/desktop-source -Recurse
-          Copy-Item node_modules release/desktop-source/node_modules -Recurse
-          npx --yes @electron/packager release/desktop-source Alakazam --platform=win32 --arch=x64 --out=release/desktop --overwrite --prune=false
-          Compress-Archive -Path release/desktop/Alakazam-win32-x64 -DestinationPath release/Alakazam-windows-x64.zip
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force release/desktop-source/dist, release/desktop-source/node_modules/@alakazam/core | Out-Null
+          Copy-Item apps/alakazam/dist/* release/desktop-source/dist -Recurse -Force
+          Copy-Item packages/node/alakazam/package.json, packages/node/alakazam/alakazam.node release/desktop-source/node_modules/@alakazam/core
+          $app = Get-Content apps/alakazam/package.json -Raw | ConvertFrom-Json
+          @{ name = $app.name; version = $app.version; main = $app.main; description = 'Alakazam image editor' } |
+            ConvertTo-Json | Set-Content release/desktop-source/package.json
+          $electronVersion = node -p "require('electron/package.json').version"
+          npx --yes @electron/packager release/desktop-source Alakazam --platform=win32 --arch=x64 --electron-version=$electronVersion --out=release/desktop --overwrite --prune=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $config = (Resolve-Path apps/alakazam/electron-builder.json).Path
+          $packagedApp = (Resolve-Path release/desktop/Alakazam-win32-x64).Path
+          npx --yes electron-builder@26.15.3 --projectDir release/desktop-source --config $config --config.electronVersion=$electronVersion --prepackaged $packagedApp --win portable --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path release/Alakazam-windows-x64.exe)) { throw 'Portable Windows executable was not generated' }
 
       - name: Upload desktop build
         uses: actions/upload-artifact@v7
         with:
-          name: alakazam-desktop-windows-x64
-          path: release/Alakazam-windows-x64.zip
+          archive: false
+          path: release/Alakazam-windows-x64.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -110,17 +125,21 @@ jobs:
         working-directory: apps/mobile/android
         run: bash ./gradlew assembleRelease
 
+      - name: Stage Android APK
+        run: |
+          mkdir -p release
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release/Alakazam-android-release.apk
+
       - name: Upload mobile build (release)
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          name: alakazam-mobile-android-release-apk
-          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          path: release/Alakazam-android-release.apk
           if-no-files-found: error
           retention-days: 30
 
   ios-mobile:
-    name: Mobile (iOS XCFramework release)
+    name: Mobile (iOS unsigned IPA)
     if: github.event_name != 'workflow_dispatch' || inputs.ios
     runs-on: macos-latest
     env:
@@ -148,11 +167,43 @@ jobs:
           done
           npm exec --workspace packages/react-native/alakazam -- ubrn build ios --release --and-generate --config ubrn.config.yaml
 
-      - name: Upload iOS framework
+      - name: Install iOS app build tools
+        run: brew install xcodegen cocoapods
+
+      - name: Generate iOS app project and install Pods
+        working-directory: apps/mobile/ios
+        run: |
+          xcodegen generate --spec project.yml
+          pod install
+
+      - name: Build unsigned iOS app
+        run: |
+          xcodebuild \
+            -workspace apps/mobile/ios/Alakazam.xcworkspace \
+            -scheme Alakazam \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$GITHUB_WORKSPACE/release/Alakazam.xcarchive" \
+            -derivedDataPath "$GITHUB_WORKSPACE/apps/mobile/ios/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package unsigned iOS IPA
+        run: |
+          mkdir -p release/Payload
+          ditto release/Alakazam.xcarchive/Products/Applications/Alakazam.app release/Payload/Alakazam.app
+          test -f release/Payload/Alakazam.app/Info.plist
+          test -f release/Payload/Alakazam.app/main.jsbundle
+          cd release
+          ditto -c -k --keepParent Payload Alakazam-ios-unsigned.ipa
+
+      - name: Upload unsigned iOS IPA
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          name: alakazam-mobile-ios-release-xcframework
-          path: packages/react-native/alakazam/ios/alakazam_mobile.xcframework
+          path: release/Alakazam-ios-unsigned.ipa
           if-no-files-found: error
           retention-days: 30

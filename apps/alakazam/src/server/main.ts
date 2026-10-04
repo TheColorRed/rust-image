@@ -1,13 +1,8 @@
 import { menuTemplate } from '@/main-menu';
 import { app, BrowserWindow, ipcMain, Menu, session } from 'electron';
 import fs from 'fs';
-import { createRequire } from 'module';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolvePreload() {
   const candidates = [
@@ -54,7 +49,9 @@ const reactDevToolsPath = path.join(
 );
 
 app.whenReady().then(async () => {
-  await session.defaultSession.extensions.loadExtension(reactDevToolsPath, { allowFileAccess: true });
+  if (isDev) {
+    await session.defaultSession.extensions.loadExtension(reactDevToolsPath, { allowFileAccess: true });
+  }
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {

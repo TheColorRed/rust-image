@@ -3,9 +3,6 @@ import { BrowserWindow, ipcMain, webContents } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { auditTime, Subject } from 'rxjs';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolvePreload() {
   const candidates = [
@@ -62,7 +59,11 @@ export function showDialog(
       },
     });
     browserWindow.setMenu(null);
-    browserWindow.loadURL(`http://localhost:8080/dialog.html?type=${encodeURIComponent(dialogType)}`);
+    if (process.env.NODE_ENV === 'development') {
+      browserWindow.loadURL(`http://localhost:8080/dialog.html?type=${encodeURIComponent(dialogType)}`);
+    } else {
+      browserWindow.loadFile(path.join(__dirname, '../client/dialog.html'), { query: { type: dialogType } });
+    }
     browserWindow.setTitle(title ?? 'Alakazam');
 
     // Show developer tools if in development mode

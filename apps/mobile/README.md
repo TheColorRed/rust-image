@@ -1,30 +1,39 @@
 # apps/mobile
 
-This is a newly scaffolded Expo-managed React Native application.
+Alakazam's React Native application, backed by the Rust library.
 
-## Quick start
+## Android development
 
-1. Install dependencies:
-   - yarn
-   - or: npm install
+Run these commands from the repository root:
 
-2. Start the Metro bundler / dev tools:
-   - `npm run start` or `yarn start`
+```sh
+npm ci
+npm run start:android
+```
 
-3. Run on Android / iOS / Web:
-   - `npm run android`
-   - `npm run ios`
-   - `npm run web`
+In another terminal, build and deploy to a connected Android device:
 
-Notes:
+```sh
+npm run deploy:android
+```
 
-- This project is scaffolded as an **Expo-managed** app for convenience. You can convert to a bare React Native project by running `npm run eject` (this runs `expo prebuild --platform android,ios`) — this will add native `android/` and `ios/` folders.
-- Next suggested tasks: add ESLint/Prettier, TypeScript (optional), and CI to verify builds.
+## Unsigned iOS test builds
 
-TypeScript:
+Run the **Build downloadable apps** GitHub Actions workflow with iOS enabled.
+The iOS job builds the Rust XCFramework, generates the native app project with
+XcodeGen, installs CocoaPods, and archives the React Native app with signing
+disabled. It uploads `Alakazam-ios-unsigned.ipa` directly, without an extra ZIP
+wrapper. No Apple signing certificate or provisioning profile is needed to build
+this artifact.
 
-- A `tsconfig.json` has been added and there is an example `src/App.tsx` and `index.tsx`. To start using TypeScript fully, run `npm install` to grab the added devDependencies and then rename other files as needed.
+An IPA is itself a ZIP containing `Payload/Alakazam.app`. This unsigned file must
+be signed by a sideloading tool before installation on an iPhone. It is not a
+TestFlight or App Store build.
 
-Eslint & Prettier:
+The iOS app host is initial testing infrastructure. Vessel's native iOS surface
+is not implemented yet, so native image previews and the skin-tan picker are
+unavailable on iOS. Producing an IPA does not imply feature parity with Android.
 
-- ESLint and Prettier configs are included (`.eslintrc.js`, `.prettierrc`). Use `npm run lint` and `npm run format` after installing dependencies.
+The source of the Xcode project is `ios/project.yml`; generated Xcode projects,
+workspaces, Pods, and build outputs remain ignored. Compiling and running the
+iOS app requires macOS and Xcode.

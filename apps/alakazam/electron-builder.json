@@ -1,0 +1,14 @@
+{
+  "appId": "com.alakazam.desktop",
+  "productName": "Alakazam",
+  "directories": {
+    "output": "../"
+  },
+  "win": {
+    "target": ["portable"],
+    "signAndEditExecutable": false
+  },
+  "portable": {
+    "artifactName": "Alakazam-windows-${arch}.exe"
+  }
+}
