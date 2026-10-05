@@ -13,11 +13,6 @@
     "type": "git",
     "url": "https://github.com/TheColorRed/rust-image.git"
   },
-  "codegenConfig": {
-    "android": {
-      "javaPackageName": "com.alakazam.mobile.abra"
-    }
-  },
   "scripts": {
     "build:android": "node scripts/build-android.mjs",
     "build:android:release": "node scripts/build-android.mjs --release"
