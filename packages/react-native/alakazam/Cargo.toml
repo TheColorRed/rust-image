@@ -27,5 +27,5 @@ gpu = ["abra/gpu", "dep:gpu", "dep:gpu-passes"]
 [lib]
 # `cdylib` is the lib<name>.so the @ubjs/react-native player dlopens;
 # `lib` lets ubrn read the uniffi metadata.
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib", "cdylib"]
 name = "alakazam_mobile"

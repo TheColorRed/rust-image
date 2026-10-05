@@ -165,7 +165,7 @@ jobs:
           for target in aarch64_apple_ios aarch64_apple_ios_sim x86_64_apple_ios; do
             export "CMAKE_TOOLCHAIN_FILE_$target=$GITHUB_WORKSPACE/.github/cmake/ios.cmake"
           done
-          npm exec --workspace packages/react-native/alakazam -- ubrn build ios --release --and-generate --config ubrn.config.yaml
+          npm exec --workspace packages/react-native/alakazam -- ubrn build jsi2 ios --release --and-generate --config ubrn.config.yaml
 
       - name: Install iOS app build tools
         run: brew install xcodegen cocoapods

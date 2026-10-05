@@ -18,7 +18,7 @@ const release = args.includes('--release');
 const launch = !args.includes('--no-launch');
 const deviceArgIndex = args.findIndex((arg) => arg === '--device' || arg.startsWith('--device='));
 const device = deviceArgIndex < 0 ? undefined : args[deviceArgIndex] === '--device' ? args[deviceArgIndex + 1] : args[deviceArgIndex].slice('--device='.length);
-const forwardedArgs = args.filter((arg, index) => arg !== '--no-launch' && !arg.startsWith('--device') && args[index - 1] !== '--device');
+const forwardedArgs = args.filter((arg, index) => arg !== '--release' && arg !== '--no-launch' && !arg.startsWith('--device') && args[index - 1] !== '--device');
 const appId = release ? 'com.alakazam.mobile' : 'com.alakazam.mobile.debug';
 
 function run(p_label, p_command, p_args, p_cwd) {

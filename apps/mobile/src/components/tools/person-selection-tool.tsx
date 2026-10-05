@@ -5,6 +5,7 @@ import { combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import { computePreviewImagePoint } from '@/src/lib/preview-coordinates';
 import { editorLive } from '@/src/lib/editor-live';
+import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
 import { isSkinControlFocused$ } from '@/src/state/edits';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
@@ -61,11 +62,12 @@ export function PersonSelectionToolController() {
             },
             error => {
               if (requestId !== currentRequest || !personSelection.value.focused) return;
+              console.warn('[people] detection failed:', errorMessage(error));
               personSelection.next({
                 ...personSelection.value,
                 focused: true,
                 loading: false,
-                error: String((error as Error)?.message ?? error),
+                error: errorMessage(error),
               });
             },
           );
@@ -92,7 +94,7 @@ export function PersonSelectionToolController() {
           const selectedId = image.selectPersonAt(point.x, point.y);
           if (selectedId !== undefined) personSelection.next({ ...personSelection.value, selectedId });
         } catch (error) {
-          personSelection.next({ ...personSelection.value, error: String((error as Error)?.message ?? error) });
+          personSelection.next({ ...personSelection.value, error: errorMessage(error) });
         }
       }),
     ];
@@ -132,7 +134,7 @@ export function PersonSelectionControls() {
             image.selectPerson(undefined);
             personSelection.next({ ...personSelection.value, selectedId: null, error: null });
           } catch (error) {
-            personSelection.next({ ...personSelection.value, error: String((error as Error)?.message ?? error) });
+            personSelection.next({ ...personSelection.value, error: errorMessage(error) });
           }
         }}
         style={[styles.chip, state.selectedId === null && styles.disabled]}

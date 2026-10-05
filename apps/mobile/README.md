@@ -17,6 +17,16 @@ In another terminal, build and deploy to a connected Android device:
 npm run deploy:android
 ```
 
+For a standalone release with the bundled ONNX runtime and JavaScript:
+
+```sh
+npm run deploy:android -- --release --targets arm64-v8a
+```
+
+Rebuild the native app after AI dependencies change; an older APK will not gain
+the runtime from a JavaScript reload. Person-detection failures display the native
+error explanation rather than only the `AbraError.Ai` variant.
+
 ## Selecting people for skin effects
 
 Open **Beauty > Skin Smooth** or **Beauty > Skin Tan** to show detected people
