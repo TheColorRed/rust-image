@@ -16,6 +16,10 @@ pub(crate) const WORKGROUP_SIZE: u32 = 8;
 pub(crate) type PipelineCache = Arc<Mutex<HashMap<PipelineKey, Pipeline>>>;
 
 /// A minimal GPU context wrapper that owns a `wgpu::Device` and `wgpu::Queue`.
+///
+/// Clones share a synchronization gate: runtime submissions, device polling and surface configuration cannot overlap.
+/// This prevents configuring a surface while another renderer submits work on the same device. Direct use of the
+/// public device or queue bypasses that protection and must not race the runtime.
 #[derive(Clone)]
 pub struct GpuContext {
   /// The device handle
@@ -27,6 +31,8 @@ pub struct GpuContext {
   /// The instance the adapter came from; surfaces must be created from it.
   pub instance: wgpu::Instance,
   pub(crate) pipelines: PipelineCache,
+  // Surface configuration waits for idle and must not overlap submissions from another renderer.
+  pub(crate) submission_gate: Arc<Mutex<()>>,
 }
 
 impl GpuContext {
@@ -47,6 +53,7 @@ impl GpuContext {
       adapter,
       instance,
       pipelines: PipelineCache::default(),
+      submission_gate: Arc::default(),
     })
   }
 
@@ -71,5 +78,15 @@ impl GpuContext {
       label: p_label,
       source: wgpu::ShaderSource::Wgsl(p_source.into()),
     })
+  }
+
+  pub(crate) fn submit(&self, p_command: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
+    let _guard = self.submission_gate.lock().unwrap();
+    self.queue.submit(Some(p_command))
+  }
+
+  pub(crate) fn configure(&self, p_surface: &wgpu::Surface<'_>, p_config: &wgpu::SurfaceConfiguration) {
+    let _guard = self.submission_gate.lock().unwrap();
+    p_surface.configure(&self.device, p_config);
   }
 }

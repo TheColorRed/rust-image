@@ -158,7 +158,7 @@ mod tests {
     Some(RenderedFrame::Pixels(Arc::new(Frame {
       width: 1,
       height: 1,
-      pixels: vec![p_red, 0, 0, 255],
+      pixels: Arc::new(vec![p_red, 0, 0, 255]),
     })))
   }
 

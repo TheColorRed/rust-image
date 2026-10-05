@@ -1,42 +1,105 @@
-import { AbraImage } from '@alakazam/mobile';
+import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { applyAction, type EditSection } from '@/src/lib/edit-sections';
+import { effectList, type EditSection } from '@/src/lib/edit-sections';
+import { ownedImage } from '@/src/lib/native-image';
 
-/** Display size (dp) of a one-tap control's preview thumbnail. */
-export const THUMBNAIL_SIZE = 60;
+/** Display dimensions (dp) of a one-tap control's preview thumbnail. */
+export const THUMBNAIL_WIDTH = 112;
+export const THUMBNAIL_HEIGHT = 80;
+const THUMBNAIL_WORKERS = 2;
 
 /**
- * Builds a thumbnail per control in `section` (the image with that control's effect applied),
- * against a small downscaled copy rather than the full-resolution image so applying up to a
- * handful of effects stays cheap regardless of the source photo's size.
+ * Keeps pixels in Rust, requests at most two effects at once, and publishes each completed card.
+ * Cancellation stops scheduling and prevents retired native components from being updated.
  */
-export function buildControlThumbnails(image: AbraImage, section: EditSection) {
-  const size = Math.round(THUMBNAIL_SIZE * PixelRatio.get());
-  const basePixels = image.preview(size, size);
-  const thumbnails: Record<string, string> = {};
-  for (const control of section.controls) {
-    // Each control gets its own copy of the base pixels: the JSI bridge under `fromRgba` isn't
-    // documented as a read-only, non-detaching borrow, and a shared buffer would explain a single
-    // control's thumbnail occasionally coming out blank while its neighbors are fine.
-    const thumbnailImage = AbraImage.fromRgba(basePixels.width, basePixels.height, basePixels.data.slice(0)) as AbraImage;
-    // One control's effect throwing must not abort the loop: that would skip every later
-    // thumbnail and look, from the UI, like "this one control is just blank."
+export function buildControlThumbnails(
+  image: AbraImage,
+  section: EditSection,
+  previous: Record<string, ThumbnailPreview>,
+  publish: (key: string, preview: ThumbnailPreview) => void,
+) {
+  let cancelled = false;
+  const density = PixelRatio.get();
+  const width = Math.round(THUMBNAIL_WIDTH * density);
+  const height = Math.round(THUMBNAIL_HEIGHT * density);
+  const done = (async () => {
+    const started = Date.now();
+    let sourceMs: number | undefined;
+    let firstCardMs: number | undefined;
+    let firstEffectMs: number | undefined;
+    let firstComponentMs: number | undefined;
+    let completed = 0;
+    let source: AbraImage | undefined;
+    let next = 0;
+    let succeeded = true;
     try {
-      if (control.kind === 'action') applyAction(control, thumbnailImage);
-      // Read dimensions back rather than assuming they match the base: Rotate Left/Right swap them.
-      const width = thumbnailImage.width();
-      const height = thumbnailImage.height();
-      const pixels = thumbnailImage.rgba();
-      if (pixels.byteLength !== width * height * 4) {
-        console.warn(`[edit] thumbnail for "${control.key}" has ${pixels.byteLength} bytes for ${width}x${height} RGBA — skipping.`);
-        continue;
-      }
-      thumbnails[control.key] = thumbnailImage.pngDataUri();
+      source = ownedImage(await image.thumbnailSourceAsync(width, height));
+      sourceMs = Date.now() - started;
+      if (cancelled) return false;
+      const thumbnailSource = source;
+      const render = async () => {
+        while (!cancelled && next < section.controls.length) {
+          const control = section.controls[next++];
+          let pixels: AbraImage | undefined;
+          let created: ThumbnailPreview | undefined;
+          try {
+            if (control.kind === 'action' && control.apply) {
+              throw new Error(`Thumbnail action "${control.key}" needs a native operation or live effect`);
+            }
+            const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
+            const operation = control.kind === 'action' ? control.operation : undefined;
+            const effectStarted = Date.now();
+            pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects, operation));
+            if (cancelled) return;
+            const effectMs = Date.now() - effectStarted;
+            const componentStarted = Date.now();
+            const existing = previous[control.key];
+            if (existing) {
+              existing.setImage(pixels);
+              publish(control.key, existing);
+            } else {
+              created = new ThumbnailPreview(pixels, control.label, width, height);
+              publish(control.key, created);
+              created = undefined;
+            }
+            completed++;
+            if (firstCardMs === undefined) {
+              firstCardMs = Date.now() - started;
+              firstEffectMs = effectMs;
+              firstComponentMs = Date.now() - componentStarted;
+            }
+          } catch (error) {
+            succeeded = false;
+            if (!cancelled) console.warn(`[edit] building thumbnail for "${control.key}" threw:`, error);
+          } finally {
+            created?.uniffiDestroy();
+            pixels?.uniffiDestroy();
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: THUMBNAIL_WORKERS }, render));
+      return !cancelled && succeeded;
     } catch (error) {
-      console.warn(`[edit] building thumbnail for "${control.key}" threw:`, error);
+      if (!cancelled) console.warn('[edit] preparing native thumbnail source threw:', error);
+      return false;
     } finally {
-      thumbnailImage.uniffiDestroy();
+      source?.uniffiDestroy();
+      if (__DEV__ && !cancelled) {
+        console.debug('[thumbnails]', section.key, {
+          sourceMs,
+          firstCardMs,
+          firstEffectMs,
+          firstComponentMs,
+          totalMs: Date.now() - started,
+          completed,
+        });
+      }
     }
-  }
-  return thumbnails;
+  })();
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+    },
+  };
 }

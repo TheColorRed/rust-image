@@ -13,6 +13,8 @@ pub mod effect_spec;
 pub mod filters;
 pub mod history;
 pub mod image;
+pub mod image_operation;
+mod image_workers;
 pub mod live_effects;
 pub mod live_image;
 pub mod tools;

@@ -1,6 +1,18 @@
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+/// Horizontal alignment of text inside its content box, inherited by text descendants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlign {
+  /// Align to the left edge.
+  #[default]
+  Left,
+  /// Center horizontally.
+  Center,
+  /// Align to the right edge.
+  Right,
+}
+
 /// A typeface: the shapes of the letters. Either the small built-in bitmap face, which needs nothing, or an outline face
 /// loaded from a font file, which scales smoothly and has letters of different widths.
 ///
@@ -96,6 +108,8 @@ impl std::fmt::Debug for Face {
 /// ```ignore
 /// page.set_font_size(24);                      // everything in the page
 /// small_print.set_font_size(8);                // except this one
+/// small_print.set_font_size(Units::Percent(50.0)); // half the parent's computed font size
+/// heading.set_font_size(Units::Em(1.5));       // 1.5 times the inherited size
 /// page.set_font_face(Face::from_file("my.ttf").unwrap());
 /// ```
 #[derive(Clone, Debug, PartialEq)]

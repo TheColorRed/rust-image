@@ -17,6 +17,7 @@
 //! | Feature | Surface kind |
 //! |---|---|
 //! | `android-surface` | `AndroidWindow`: an Android `Surface` handed over by any host UI |
+//! | `ios-surface` | `IosSurface`: a retained Metal layer handed over by any host UI |
 //! | `desktop-window` | A native desktop window that Vessel opens and runs (`desktop::run`) |
 #![deny(missing_docs)]
 
@@ -28,15 +29,21 @@ use pub_sub::{Observer, Subject};
 
 #[cfg(feature = "android-native-window")]
 mod android;
-#[cfg(feature = "android-native-window")]
-mod jni;
 #[cfg(all(feature = "desktop-window", not(any(target_os = "android", target_os = "ios"))))]
 pub mod desktop;
-
+#[cfg(feature = "ios-surface")]
+mod ios;
 #[cfg(feature = "android-native-window")]
-pub use android::{AndroidWindow, AndroidWindowState, blit_rgba, register_android_window};
+mod jni;
+
 #[cfg(all(feature = "android-native-window", target_os = "android"))]
 pub use android::register_android_surface;
+#[cfg(feature = "android-native-window")]
+pub use android::{AndroidWindow, AndroidWindowState, blit_rgba, register_android_window};
+#[cfg(feature = "ios-surface")]
+pub use ios::{
+  IosSurface, vessel_ios_surface_available, vessel_ios_surface_destroyed, vessel_ios_surface_resized, vessel_ios_touch,
+};
 
 /// Something frames can be drawn on.
 pub trait Surface: Any + Send + Sync {

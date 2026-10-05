@@ -4,11 +4,12 @@ import { batch } from '@/src/lib/batch';
 import { resolveLocalPhotoPath, type EditablePhoto } from '@/src/lib/edit-source';
 import { syncHistoryFlags } from '@/src/lib/editor-history';
 import { startEditorLive } from '@/src/lib/editor-live';
-import { startReplay } from '@/src/lib/editor-replay';
+import { clearControlThumbnails, startReplay } from '@/src/lib/editor-replay';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey } from '@/src/state/edits';
 import { draftUiHistory, lastDraftGroup, recordDraft } from '@/src/state/history';
-import { controlThumbnails, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
+import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { personSelection } from '@/src/state/person-selection';
+import { ownedImage } from '@/src/lib/native-image';
 import {
   busy,
   checkpointHistory,
@@ -35,7 +36,7 @@ function resetSessionState() {
   destroy(checkpointHistory);
   destroy(draftHistory);
   previewSourceImage.next(null);
-  controlThumbnails.next({});
+  clearControlThumbnails();
   adjustments.next({});
   appliedActions.next([]);
   focusedControlKey.next(null);
@@ -68,7 +69,13 @@ export function openEditorSession(photo: EditablePhoto): () => void {
     try {
       const path = await resolveLocalPhotoPath(photo);
       if (cancelled) return;
-      const original = AbraImage.read(path) as AbraImage;
+      const started = Date.now();
+      const original = ownedImage(await AbraImage.readAsync(path));
+      if (cancelled) {
+        original.uniffiDestroy();
+        return;
+      }
+      if (__DEV__) console.debug('[image] decode and skin mask ms:', Date.now() - started);
       batch(() => {
         originalImage.next(original);
         editBaseImage.next(original.copy() as AbraImage);

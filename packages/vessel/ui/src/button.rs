@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 use vessel_api::prelude::*;
 use vessel_macros::Component;
 
+use crate::{UiBackground, background::BackgroundLayer};
+
 /// Sent on a [`Button`] when it is pressed and let go over itself, or activated with Enter or Space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Clicked;
@@ -13,6 +15,8 @@ pub struct Clicked;
 ///
 /// It is a component, so give it a size with `width` and `height` (or let it fill), add it to a parent, and listen with
 /// `button.subscribe(|_: &Clicked| ..)`. Use several; each has its own state.
+/// `with_background(&image)` paints a non-repeating image behind the label, centered using the image's `Fit` and clipped
+/// to rounded corners. Theme/color backgrounds work too. GPU images are read back for CPU composition.
 #[derive(Clone, Component)]
 #[component(plain)]
 pub struct Button {
@@ -20,9 +24,12 @@ pub struct Button {
   label: BehaviorSubject<String>,
   text_color: BehaviorSubject<Option<[u8; 4]>>,
   primary: BehaviorSubject<bool>,
+  background: BackgroundLayer,
 }
 
 impl Button {
+  component_builders!();
+
   /// A plain button with the theme's control look: its face as the background, a 1 pixel border, rounded corners, and the
   /// control text color. Like any component it has the box settings (`set_background`, `set_radius`, `set_padding`,
   /// `set_margin`, `set_border_width`, ...), and they win over the theme for this button. `primary` gives the accent look.
@@ -32,8 +39,8 @@ impl Button {
     let primary = BehaviorSubject::new(false);
     let pressed = BehaviorSubject::new(false);
 
-    let component =
-      Component::new("button").with_background(Background::Control).with_border_width(1).with_radius(Radius::Theme);
+    let component = Component::new("button").with_background(Background::Control).with_border_width(1);
+    let background = BackgroundLayer::new(&component);
     component.subject::<Canvas>().subscribe({
       let (label, text_color, primary, pressed) = (label.clone(), text_color.clone(), primary.clone(), pressed.clone());
       move |canvas| {
@@ -104,6 +111,7 @@ impl Button {
       label,
       text_color,
       primary,
+      background,
     }
   }
 
@@ -120,7 +128,19 @@ impl Button {
 
   /// Sets the face color for this button, whatever the theme says, and redraws. It is the button's `background`.
   pub fn set_color(&self, p_rgba: [u8; 4]) {
-    self.component.set_background(Background::Color(p_rgba));
+    self.set_background(Background::Color(p_rgba));
+  }
+
+  /// Replaces the theme/color or image background without changing the label or click behavior.
+  /// Use [`Background::None`] to clear it. An unreadable GPU background panics rather than silently disappearing.
+  pub fn set_background(&self, p_background: impl Into<UiBackground>) {
+    self.background.set(&self.component, p_background.into());
+  }
+
+  /// Sets a background and returns the button for chaining. See [`set_background`](Self::set_background).
+  pub fn with_background(&self, p_background: impl Into<UiBackground>) -> Self {
+    self.set_background(p_background);
+    self.clone()
   }
 
   /// Sets the face color, and returns the button so calls can be chained.
@@ -132,7 +152,7 @@ impl Button {
   /// Makes the button the accent-colored call to action (`true`) or a plain control again (`false`).
   pub fn set_primary(&self, p_primary: bool) {
     self.primary.next(p_primary);
-    self.component.set_background(if p_primary { Background::Accent } else { Background::Control });
+    self.set_background(if p_primary { Background::Accent } else { Background::Control });
     self.component.set_border_width(if p_primary { 0 } else { 1 });
   }
 
@@ -196,7 +216,7 @@ mod tests {
     assert_eq!(pixel(&frame, 0, 0)[3], 0, "the corner is rounded away");
     let text_pixels = frame.pixels.chunks_exact(4).filter(|pixel| pixel[0] == 250 && pixel[1] == 0).count();
     assert!(text_pixels > 20, "the label is drawn in the text color");
-    let middle_row = &frame.pixels[(15 * 80 * 4) as usize..(16 * 80 * 4) as usize];
+    let middle_row = &frame.pixels.as_slice()[(15 * 80 * 4) as usize..(16 * 80 * 4) as usize];
     assert!(
       middle_row.chunks_exact(4).skip(2).take(20).all(|pixel| pixel[0] == 10),
       "the label is away from the left edge"
@@ -236,7 +256,7 @@ mod tests {
     assert_eq!(pixel(&frame, 0, 0), Theme::light().border, "the theme's radius of 0 leaves the corner square");
 
     // The button's own setting wins over the theme, for just that one thing.
-    button.set_radius(12.0);
+    button.set_radius(12);
     let frame = render(&button);
     assert_eq!(pixel(&frame, 40, 5), [9, 8, 7, 255]);
     assert_eq!(pixel(&frame, 0, 0)[3], 0);

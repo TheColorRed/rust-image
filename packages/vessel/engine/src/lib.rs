@@ -22,8 +22,10 @@ mod media;
 mod offscreen;
 mod view;
 
+use std::sync::Arc;
+
 pub use pub_sub;
-#[cfg(any(feature = "android-surface", feature = "desktop-window"))]
+#[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]
 pub use surface;
 
 pub use self::{
@@ -42,7 +44,7 @@ pub struct Frame {
   /// Height in pixels.
   pub height: u32,
   /// `width * height` RGBA pixels.
-  pub pixels: Vec<u8>,
+  pub pixels: Arc<Vec<u8>>,
 }
 
 /// What an app usually needs, in one import. `subscribe`, `next` and `filter` are trait methods, so the `pub-sub` traits
@@ -51,7 +53,7 @@ pub mod prelude {
   pub use crate::{Engine, Frame, GpuFrame, GpuTarget, MediaSource, Offscreen, Pacing, RenderedFrame, View, Waker};
   pub use pub_sub::prelude::*;
 
-  #[cfg(any(feature = "android-surface", feature = "desktop-window"))]
+  #[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]
   pub use surface::Surface;
   #[cfg(all(feature = "desktop-window", not(any(target_os = "android", target_os = "ios"))))]
   pub use surface::desktop::{self, DesktopEvent, WindowFrame, WindowOptions};

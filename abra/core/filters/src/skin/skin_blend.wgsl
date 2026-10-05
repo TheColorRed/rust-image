@@ -3,12 +3,11 @@
 // The photo as it was before the effect, which has the real alpha.
 @group(0) @binding(4) var base_tex: texture_2d<f32>;
 
-// The last pass of the GPU version of `SmoothSkin` (see `passes` in skin.rs). The color channels of the input are the
-// surface-blurred photo and its alpha channel is the mask. This mixes the blur into the original through the mask, as
-// much as the amount allows, rounded to whole 0-255 levels as the CPU does, and puts the original alpha back.
+// Blends a processed skin effect (smoothing or tone) into the original photo. The input's color channels hold the
+// processed photo and its alpha channel holds the skin mask. Restores the original alpha after the masked blend.
 //
 // The uniform is one f32, 4 bytes:
-//   blend: how much of the smoothing shows, 0 to 1.
+//   blend: how much of the effect shows, 0 to 1.
 struct Params {
   blend: f32,
 }

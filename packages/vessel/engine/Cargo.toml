@@ -16,6 +16,8 @@ surface = { workspace = true, optional = true }
 default = []
 # An Android `Surface` handed over by any host UI (React Native, Flutter, a Java or Kotlin app).
 android-surface = ["dep:surface", "surface/android-surface"]
+# A Metal layer handed over by an iOS host UI.
+ios-surface = ["dep:surface", "surface/ios-surface"]
 # A native desktop window for a standalone app or game (Windows first), bordered or borderless.
 desktop-window = ["dep:surface", "surface/desktop-window"]
 

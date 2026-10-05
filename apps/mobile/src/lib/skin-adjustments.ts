@@ -1,7 +1,7 @@
-import { SKIN_SMOOTH_KEY, SKIN_TAN_KEY } from '@/src/lib/edit-sections/beauty';
+import { SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/beauty';
 
 export function isSkinAdjustment(key: string): boolean {
-  return key === SKIN_SMOOTH_KEY || key === SKIN_TAN_KEY;
+  return key === SKIN_SMOOTH_KEY || key === SKIN_TAN_KEY || key === SKIN_TONE_KEY;
 }
 
 export function adjustmentKey(key: string, personId: number | null): string {

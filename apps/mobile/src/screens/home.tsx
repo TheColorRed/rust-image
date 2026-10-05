@@ -1,23 +1,23 @@
-import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
-import { useMemo } from 'react';
-import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    Linking,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
-} from 'react-native';
-import FilePicker from '@/src/components/file-picker';
+import { FilePicker } from '@/src/components/file-picker';
 import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
 import { useCommonStyles } from '@/src/lib/styles';
 import { useTheme } from '@/src/lib/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
+import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
+import { useMemo } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Linking,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 /** The fewest columns, as in a portrait phone. A wider window fits more so the thumbnails stay about the same size. */
 const MIN_COLUMNS = 3;

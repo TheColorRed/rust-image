@@ -4,6 +4,7 @@ import {
   BLEMISH_TOOL_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
+  SKIN_TONE_KEY,
   findSection,
   type EditControl,
 } from '@/src/lib/edit-sections';
@@ -36,7 +37,11 @@ export const focusedControl$ = combineLatest([activeSectionKey$, focusedControlK
   distinctUntilChanged(),
 );
 export const isSkinControlFocused$ = focusedControl$.pipe(
-  map(control => control?.kind === 'slider' && (control.key === SKIN_SMOOTH_KEY || control.key === SKIN_TAN_KEY)),
+  map(
+    control =>
+      control?.kind === 'slider' &&
+      (control.key === SKIN_SMOOTH_KEY || control.key === SKIN_TAN_KEY || control.key === SKIN_TONE_KEY),
+  ),
   distinctUntilChanged(),
 );
 export const isBlemishToolFocused$ = focusedControl$.pipe(

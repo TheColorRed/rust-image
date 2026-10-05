@@ -12,6 +12,7 @@ const { BehaviorSubject } = require('rxjs');
 
 const smooth = 'action-skin-smooth';
 const tan = 'action-skin-tan';
+const tone = 'action-skin-tone';
 
 function loadSource(file, dependencies) {
   const filename = path.join(__dirname, '..', 'src', file);
@@ -35,7 +36,39 @@ function loadSource(file, dependencies) {
 }
 
 const helpers = loadSource('lib/skin-adjustments.ts', {
-  '@/src/lib/edit-sections/beauty': { SKIN_SMOOTH_KEY: smooth, SKIN_TAN_KEY: tan },
+  '@/src/lib/edit-sections/beauty': { SKIN_SMOOTH_KEY: smooth, SKIN_TAN_KEY: tan, SKIN_TONE_KEY: tone },
+});
+
+test('Skin Tone is neutral on selection and uses the signed Beauty slider range', () => {
+  const { beauty } = loadSource('lib/edit-sections/beauty.ts', {
+    '@alakazam/mobile': { EffectSpec: { SkinTone: { new: fields => fields } } },
+  });
+  const control = beauty.controls.find(control => control.key === tone);
+  assert.equal(control.min, -100);
+  assert.equal(control.max, 100);
+  assert.equal(control.defaultValue, 0);
+  assert.equal(control.applyOnSelect, false);
+  assert.equal(control.live(-40).amount, -40);
+  assert.equal(control.live(65).amount, 65);
+  assert.equal(helpers.adjustmentKey(tone, 1), `${tone}:person:1`);
+});
+
+test('focusing Skin Tone enables the existing person selection flow', () => {
+  const { beauty } = loadSource('lib/edit-sections/beauty.ts', { '@alakazam/mobile': {} });
+  const state = loadSource('state/edits.ts', {
+    '@/src/lib/edit-sections': {
+      SKIN_SMOOTH_KEY: smooth,
+      SKIN_TAN_KEY: tan,
+      SKIN_TONE_KEY: tone,
+      findSection: () => beauty,
+    },
+  });
+  const focused = [];
+  const subscription = state.isSkinControlFocused$.subscribe(value => focused.push(value));
+  state.focusedControlKey.next(tone);
+  state.focusedControlKey.next(null);
+  subscription.unsubscribe();
+  assert.deepEqual(focused, [false, true, false]);
 });
 
 test('skin adjustment values are independent for each person and all people', () => {
@@ -72,6 +105,8 @@ function replayFixture(selectedId) {
     [`${tan}:person:0`]: 0.7,
     [`${tan}:person:1`]: 0.3,
     [`${smooth}:person:0`]: 1.5,
+    [`${tone}:person:0`]: -40,
+    [`${tone}:person:1`]: 65,
   });
   const sections = [
     {
@@ -79,6 +114,7 @@ function replayFixture(selectedId) {
       controls: [
         { key: smooth, kind: 'slider', defaultValue: 0, live: value => ({ key: smooth, value }) },
         { key: tan, kind: 'slider', defaultValue: 0, live: value => ({ key: tan, value }) },
+        { key: tone, kind: 'slider', defaultValue: 0, live: value => ({ key: tone, value }) },
       ],
     },
   ];
@@ -114,6 +150,8 @@ test('replay applies every saved skin value without publishing intermediate sele
     { key: smooth, personId: 0, value: 1.5 },
     { key: tan, personId: 0, value: 0.7 },
     { key: tan, personId: 1, value: 0.3 },
+    { key: tone, personId: 0, value: -40 },
+    { key: tone, personId: 1, value: 65 },
   ]);
   assert.equal(selection.selectedId, 2);
 });
@@ -125,6 +163,8 @@ test('live tan omits only the active person, preserving other people and smoothi
   assert.deepEqual(applied, [
     { key: smooth, personId: 0, value: 1.5 },
     { key: tan, personId: 0, value: 0.7 },
+    { key: tone, personId: 0, value: -40 },
+    { key: tone, personId: 1, value: 65 },
   ]);
   assert.equal(selection.selectedId, 1);
 });
@@ -134,6 +174,17 @@ test('choosing all people does not discard existing individual edits', () => {
   replay.renderStackWithoutSlider(tan);
   assert.equal(applied.filter(step => step.key === tan).length, 2);
   assert.equal(selection.selectedId, null);
+});
+
+test('live tone preserves other people and existing tan and smoothing', () => {
+  const { replay, applied } = replayFixture(0);
+  replay.renderStackWithoutSlider(tone);
+  assert.deepEqual(applied, [
+    { key: smooth, personId: 0, value: 1.5 },
+    { key: tan, personId: 0, value: 0.7 },
+    { key: tan, personId: 1, value: 0.3 },
+    { key: tone, personId: 1, value: 65 },
+  ]);
 });
 
 test('committing and removing a skin slider change only the selected person', () => {
@@ -156,13 +207,15 @@ test('committing and removing a skin slider change only the selected person', ()
       saved: new BehaviorSubject(false),
     },
   });
-  const control = { key: tan };
-  history.commitSlider(control, 0.7);
+  const control = { key: tone };
+  history.commitSlider(control, -40);
   personSelection.next({ selectedId: 1 });
-  history.commitSlider(control, 0.3);
-  assert.equal(adjustments.value[helpers.adjustmentKey(tan, 0)], 0.7);
-  assert.equal(adjustments.value[helpers.adjustmentKey(tan, 1)], 0.3);
+  history.commitSlider(control, 65);
+  assert.equal(adjustments.value[helpers.adjustmentKey(tone, 0)], -40);
+  assert.equal(adjustments.value[helpers.adjustmentKey(tone, 1)], 65);
+  history.commitSlider(control, 0);
+  assert.equal(adjustments.value[helpers.adjustmentKey(tone, 1)], 0);
   history.removeSlider(control);
-  assert.equal(adjustments.value[helpers.adjustmentKey(tan, 0)], 0.7);
-  assert.equal(adjustments.value[helpers.adjustmentKey(tan, 1)], undefined);
+  assert.equal(adjustments.value[helpers.adjustmentKey(tone, 0)], -40);
+  assert.equal(adjustments.value[helpers.adjustmentKey(tone, 1)], undefined);
 });

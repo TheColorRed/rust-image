@@ -98,6 +98,22 @@ pub fn derive_component(p_input: TokenStream) -> TokenStream {
     quote! {
       #[::uniffi::export]
       impl #name {
+        /// Supplies the host's font without overriding explicit component typography.
+        pub fn set_host_font(&self, path: Option<String>, size: u32) -> bool {
+          let face = match path {
+            Some(path) => match #vessel::Face::from_file(&path) {
+              Some(face) => face,
+              None => {
+                eprintln!("[vessel] could not load host font: {path}");
+                return false;
+              }
+            },
+            None => #vessel::Face::system(),
+          };
+          #vessel::Renderable::component(&self.#field).set_default_font(#vessel::Font::new(face, size));
+          true
+        }
+
         /// Shows it on the native view `view`. A `VesselView` calls this.
         pub fn mount(&self, view: i32) {
           #vessel::mount(view, &self.#field);

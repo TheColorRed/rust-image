@@ -16,7 +16,7 @@ fn main() {
   // The parts. Their state is not stored anywhere else: a click flips a value, and the slider holds its own.
   let swap = Button::new("Swap colors").with_primary(true);
   let dim = Button::new("Dim");
-  dim.set_radius(24.0);
+  dim.set_radius(24);
   let slider = Slider::new(0.5);
   let swapped = swap.subject::<Clicked>().scan(false, |on, _| !*on);
   let dimmed = dim.subject::<Clicked>().scan(false, |on, _| !*on);
@@ -51,16 +51,6 @@ fn main() {
   page.add(&panel).add(&gradient);
 
   let app = App::new("Vessel panels").with_size(960, 540).with_quit_key("Escape").add(&page);
-
-  // Up and Down move the slider, wherever the keyboard is.
-  // app.root().subject::<KeyEvent>().subscribe(move |key| {
-  //   let step = match (key.pressed, key.key.as_str()) {
-  //     (true, "ArrowUp") => 0.1,
-  //     (true, "ArrowDown") => -0.1,
-  //     _ => return,
-  //   };
-  //   slider.set_value(slider.value() + step);
-  // });
 
   app.run().expect("the window failed");
 }

@@ -95,6 +95,22 @@ impl AbraImage {
     self.inner.lock().unwrap().clone()
   }
 
+  /// Completed edits as CPU pixels for composed thumbnail backgrounds; excludes transient live effects.
+  pub(crate) fn thumbnail_pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
+    let pixels = Arc::clone(&self.inner);
+    p_size.combine_latest(&self.edits).filter_map(move |(size, _)| {
+      if size.0 == 0 || size.1 == 0 {
+        return None;
+      }
+      let preview = preview_of(&pixels.lock().unwrap(), size.0, size.1);
+      Some(Picture::Pixels(Arc::new(Frame {
+        width: preview.width,
+        height: preview.height,
+        pixels: preview.data.into(),
+      })))
+    })
+  }
+
   pub(crate) fn skin_mask(&self) -> Option<Mask> {
     self.selected_skin_mask.peek().map(|mask| (*mask).clone()).or_else(|| self.skin_mask.lock().unwrap().clone())
   }
@@ -266,6 +282,61 @@ impl AbraImage {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl AbraImage {
+  /// Decodes a photo and computes its skin mask on the bounded image worker pool.
+  #[uniffi::constructor]
+  pub async fn read_async(path: String) -> Result<Arc<Self>, AbraError> {
+    crate::image_workers::run(move || Self::read(path)).await
+  }
+
+  /// Downscales once in native memory, without transferring pixels through JavaScript.
+  pub async fn thumbnail_source_async(&self, width: u32, height: u32) -> Result<Arc<Self>, AbraError> {
+    if width == 0 || height == 0 {
+      return Err(AbraError::InvalidPixels {
+        message: "Thumbnail dimensions must be positive".to_owned(),
+      });
+    }
+    let pixels = Arc::clone(&self.inner);
+    crate::image_workers::run(move || {
+      let pixels = pixels.lock().map_err(|_| AbraError::Render {
+        message: "Image lock poisoned".to_owned(),
+      })?;
+      let preview = preview_of(&pixels, width, height);
+      Self::from_rgba(preview.width, preview.height, preview.data)
+    })
+    .await
+  }
+
+  /// Copies a small native source and applies its control's edits away from the JavaScript thread.
+  pub async fn render_thumbnail_async(
+    &self, effects: Vec<EffectSpec>, operation: Option<crate::image_operation::ImageOperation>,
+  ) -> Result<Arc<Self>, AbraError> {
+    if operation.is_some() && !effects.is_empty() {
+      return Err(AbraError::Render {
+        message: "A thumbnail must specify effects or an operation, not both".to_owned(),
+      });
+    }
+    let pixels = Arc::clone(&self.inner);
+    crate::image_workers::run(move || {
+      let image = Self::from_image(
+        pixels
+          .lock()
+          .map_err(|_| AbraError::Render {
+            message: "Thumbnail source lock poisoned".to_owned(),
+          })?
+          .clone(),
+      );
+      if let Some(operation) = operation {
+        image.apply_operation(operation);
+      } else {
+        for effect in effects {
+          image.apply_effect(effect);
+        }
+      }
+      Ok(image)
+    })
+    .await
+  }
+
   /// Detects people away from the calling thread, so opening a skin control does not block the editor.
   pub async fn find_people_async(&self) -> Result<Vec<PersonDetection>, AbraError> {
     let image = self.clone_image();
@@ -317,7 +388,7 @@ pub(crate) fn frame_of(p_image: &Image) -> Frame {
   Frame {
     width,
     height,
-    pixels: p_image.rgba().to_vec(),
+    pixels: p_image.rgba().to_vec().into(),
   }
 }
 
@@ -459,7 +530,11 @@ mod tests {
       Picture::Gpu(frame) => frame.read_back().unwrap(),
     };
     assert_eq!((frame.width, frame.height), (width, height));
-    assert_eq!(frame.pixels, second.rgba(), "the offscreen preview must contain both completed person edits");
+    assert_eq!(
+      frame.pixels.as_slice(),
+      second.rgba(),
+      "the offscreen preview must contain both completed person edits"
+    );
     assert_eq!(updates.load(Ordering::SeqCst), 0);
   }
 }

@@ -81,8 +81,10 @@ impl SkinTanColorPicker {
       for x in 0..SIZE {
         let distance = ((x as f32 + 0.5 - center).powi(2) + (y as f32 + 0.5 - center).powi(2)).sqrt();
         // How much of the pixel is inside a shape, with a one pixel soft edge.
-        let within = |p_from: f32, p_to: f32| (p_to - distance + 0.5).clamp(0.0, 1.0) * (distance - p_from + 0.5).clamp(0.0, 1.0);
-        let shadow = (1.0 - (distance - INNER) / (center - INNER)).clamp(0.0, 1.0) * 0.35 * (distance > INNER - 1.0) as u8 as f32;
+        let within =
+          |p_from: f32, p_to: f32| (p_to - distance + 0.5).clamp(0.0, 1.0) * (distance - p_from + 0.5).clamp(0.0, 1.0);
+        let shadow =
+          (1.0 - (distance - INNER) / (center - INNER)).clamp(0.0, 1.0) * 0.35 * (distance > INNER - 1.0) as u8 as f32;
         let line = within(INNER - 1.5, INNER - 0.5) * 0.25;
         let ring = within(INNER, OUTER);
         // Black shadow, then the dark line, then the white ring on top, composited by alpha.
@@ -102,7 +104,7 @@ impl SkinTanColorPicker {
     Frame {
       width: SIZE,
       height: SIZE,
-      pixels,
+      pixels: pixels.into(),
     }
   }
 }

@@ -1,4 +1,4 @@
-import { AbraImage } from '@alakazam/mobile';
+import { AbraImage, type ThumbnailPreview } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
 
 // #region: Preview rendering
@@ -18,8 +18,8 @@ export const showingCheckpoint$ = showingCheckpoint.asObservable();
 
 // #region: Control thumbnails
 
-/** PNG data URIs keyed by control key; shown with a plain `Image`. */
-export const controlThumbnails = new BehaviorSubject<Record<string, string>>({});
+/** Native thumbnail components keyed by control key; shown with a `VesselView`. */
+export const controlThumbnails = new BehaviorSubject<Record<string, ThumbnailPreview>>({});
 export const controlThumbnails$ = controlThumbnails.asObservable();
 
 // #endregion

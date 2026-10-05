@@ -33,6 +33,22 @@ pub trait Trackable {
   fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture>;
 }
 
+struct FittedCacheEntry {
+  // Keep the source alive: allocator address reuse must never turn a new picture into a cache hit.
+  source: Arc<Frame>,
+  room: (u32, u32),
+  fit: Fit,
+  fitted: (i32, i32, u32, u32),
+  pixels: Arc<Vec<u8>>,
+}
+
+#[derive(Default)]
+struct PictureInner {
+  picture: Option<Picture>,
+  /// CPU composition reads a published GPU picture at most once, even when fit or host styling changes.
+  readback: Option<Arc<Frame>>,
+}
+
 impl<T: Trackable> Trackable for Arc<T> {
   fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
     self.as_ref().pictures(p_size)
@@ -56,7 +72,7 @@ impl<T: Trackable> Trackable for Arc<T> {
 #[component(plain)]
 pub struct Image {
   component: Component,
-  picture: Arc<Mutex<Option<Arc<Frame>>>>,
+  picture: Arc<Mutex<PictureInner>>,
   /// Counts the pictures set, so the drawing listener redraws for each one without comparing pixels.
   revision: BehaviorSubject<u64>,
   fit: BehaviorSubject<Fit>,
@@ -64,29 +80,38 @@ pub struct Image {
   on_gpu: Arc<AtomicBool>,
   /// The streams of pictures this follows, and the listening to them, kept for as long as the image lives.
   sources: Arc<Mutex<Vec<(Subject<Picture>, Subscription)>>>,
+  fitted_cache: Arc<Mutex<Option<FittedCacheEntry>>>,
 }
 
 impl Image {
+  component_builders!();
+  color_background_builder!();
+
   /// An image with nothing to show yet, fitted with [`Fit::Contain`].
   pub fn new() -> Self {
-    let picture = Arc::new(Mutex::new(None::<Arc<Frame>>));
+    let picture = Arc::new(Mutex::new(PictureInner::default()));
     let revision = BehaviorSubject::new(0u64);
     let fit = BehaviorSubject::new(Fit::default());
+    let fitted_cache = Arc::new(Mutex::new(None::<FittedCacheEntry>));
 
     let component = Component::new("image");
     component.subject::<Canvas>().subscribe({
-      let (picture, revision, fit) = (Arc::clone(&picture), revision.clone(), fit.clone());
+      let (picture, revision, fit, fitted_cache) =
+        (Arc::clone(&picture), revision.clone(), fit.clone(), Arc::clone(&fitted_cache));
       move |canvas| {
         // Reading these is what makes the image depend on them.
         revision.value();
         let fit = fit.value();
-        let picture = picture.lock().unwrap();
-        let Some(frame) = picture.as_ref() else { return };
+        let frame = {
+          let picture = picture.lock().unwrap();
+          let Some(Picture::Pixels(frame)) = picture.picture.as_ref() else { return };
+          Arc::clone(frame)
+        };
         let (left, top, width, height) = canvas.content_rect();
         if (frame.width, frame.height) == (width, height) {
-          canvas.draw_pixels(left, top, width, height, &frame.pixels);
-        } else if let Some((x, y, width, height, pixels)) = fitted(frame, width, height, fit) {
-          canvas.draw_pixels(left + x, top + y, width, height, &pixels);
+          canvas.draw_pixels(left, top, width, height, frame.pixels.as_slice());
+        } else if let Some((x, y, width, height, pixels)) = fitted_cached(&fitted_cache, &frame, width, height, fit) {
+          canvas.draw_pixels(left + x, top + y, width, height, pixels.as_slice());
         }
       }
     });
@@ -98,6 +123,7 @@ impl Image {
       fit,
       on_gpu: Arc::new(AtomicBool::new(false)),
       sources: Arc::default(),
+      fitted_cache,
     }
   }
 
@@ -134,7 +160,7 @@ impl Image {
     self.show(&Picture::Pixels(Arc::new(Frame {
       width: p_width,
       height: p_height,
-      pixels: p_rgba,
+      pixels: Arc::new(p_rgba),
     })));
   }
 
@@ -143,7 +169,11 @@ impl Image {
   pub fn show(&self, p_picture: &Picture) {
     match p_picture {
       Picture::Pixels(frame) => {
-        *self.picture.lock().unwrap() = Some(Arc::clone(frame));
+        *self.picture.lock().unwrap() = PictureInner {
+          picture: Some(Picture::Pixels(Arc::clone(frame))),
+          readback: None,
+        };
+        *self.fitted_cache.lock().unwrap() = None;
         self.back_to_pixels();
         self.revision.next(self.revision.value() + 1);
       }
@@ -160,14 +190,50 @@ impl Image {
   /// Shows a picture that lives on the GPU, drawn on the screen without being copied to the CPU. While it is shown it is
   /// the whole picture, stretched to the image's room (the fit does not apply). A surface that cannot draw from the GPU
   /// reads the picture back, so it is still shown, only slower.
+  /// When used as an image background, CPU readback is cached until another picture is published, including with the
+  /// same GPU handle. Changing the background's fit or host styling reuses that readback.
   pub fn show_gpu(&self, p_frame: Arc<dyn GpuFrame>) {
+    *self.picture.lock().unwrap() = PictureInner {
+      picture: Some(Picture::Gpu(Arc::clone(&p_frame))),
+      readback: None,
+    };
+    *self.fitted_cache.lock().unwrap() = None;
     self.on_gpu.store(true, Ordering::SeqCst);
     self.component.subject::<GpuPicture>().next(GpuPicture(Some(p_frame)));
+    self.revision.next(self.revision.value() + 1);
+  }
+
+  pub(crate) fn draw_background(&self, p_canvas: &Canvas) {
+    let size = (p_canvas.width(), p_canvas.height());
+    if self.size().peek() != size {
+      self.size().next(size);
+    }
+    self.revision.value();
+    let fit = self.fit.value();
+    let frame = {
+      let mut picture = self.picture.lock().unwrap();
+      match picture.picture.as_ref() {
+        None => return,
+        Some(Picture::Pixels(frame)) => Arc::clone(frame),
+        Some(Picture::Gpu(frame)) => {
+          if picture.readback.is_none() {
+            picture.readback = Some(Arc::new(frame.read_back().expect("background GPU image could not be read back")));
+          }
+          Arc::clone(picture.readback.as_ref().unwrap())
+        }
+      }
+    };
+    if (frame.width, frame.height) == size {
+      p_canvas.draw_background_pixels(0, 0, frame.width, frame.height, frame.pixels.as_slice());
+    } else if let Some((x, y, width, height, pixels)) = fitted_cached(&self.fitted_cache, &frame, size.0, size.1, fit) {
+      p_canvas.draw_background_pixels(x, y, width, height, pixels.as_slice());
+    }
   }
 
   /// Shows nothing.
   pub fn clear(&self) {
-    *self.picture.lock().unwrap() = None;
+    *self.picture.lock().unwrap() = PictureInner::default();
+    *self.fitted_cache.lock().unwrap() = None;
     self.back_to_pixels();
     self.revision.next(self.revision.value() + 1);
   }
@@ -192,7 +258,9 @@ impl Default for Image {
 
 /// The picture scaled to `p_width` x `p_height` of room as `p_fit` says, with where it goes inside that room:
 /// `(x, y, width, height, pixels)`. `None` when there is nothing to draw.
-pub(crate) fn fitted(p_frame: &Frame, p_width: u32, p_height: u32, p_fit: Fit) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
+pub(crate) fn fitted(
+  p_frame: &Frame, p_width: u32, p_height: u32, p_fit: Fit,
+) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
   if p_frame.width == 0 || p_frame.height == 0 || p_width == 0 || p_height == 0 {
     return None;
   }
@@ -219,18 +287,43 @@ pub(crate) fn fitted(p_frame: &Frame, p_width: u32, p_height: u32, p_fit: Fit) -
       )
     }
   };
-  let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+  let mut pixels = vec![0u8; width as usize * height as usize * 4];
   for y in 0..height {
     let from_y =
       (source.1 + (y as f32 + 0.5) * source.3 / height as f32).floor().clamp(0.0, source_height - 1.0) as usize;
     for x in 0..width {
       let from_x =
         (source.0 + (x as f32 + 0.5) * source.2 / width as f32).floor().clamp(0.0, source_width - 1.0) as usize;
-      let at = (from_y * p_frame.width as usize + from_x) * 4;
-      pixels.extend_from_slice(&p_frame.pixels[at..at + 4]);
+      let from = (from_y * p_frame.width as usize + from_x) * 4;
+      let to = ((y * width + x) * 4) as usize;
+      pixels[to..to + 4].copy_from_slice(&p_frame.pixels[from..from + 4]);
     }
   }
   Some((((p_width - width) / 2) as i32, ((p_height - height) / 2) as i32, width, height, pixels))
+}
+
+fn fitted_cached(
+  p_cache: &Arc<Mutex<Option<FittedCacheEntry>>>, p_frame: &Arc<Frame>, p_width: u32, p_height: u32, p_fit: Fit,
+) -> Option<(i32, i32, u32, u32, Arc<Vec<u8>>)> {
+  let room = (p_width, p_height);
+  let mut cache = p_cache.lock().unwrap();
+  if let Some(entry) =
+    cache.as_ref().filter(|entry| Arc::ptr_eq(&entry.source, p_frame) && entry.room == room && entry.fit == p_fit)
+  {
+    let (x, y, width, height) = entry.fitted;
+    return Some((x, y, width, height, Arc::clone(&entry.pixels)));
+  }
+
+  let (x, y, width, height, pixels) = fitted(p_frame, p_width, p_height, p_fit)?;
+  let pixels = Arc::new(pixels);
+  *cache = Some(FittedCacheEntry {
+    source: Arc::clone(p_frame),
+    room,
+    fit: p_fit,
+    fitted: (x, y, width, height),
+    pixels: Arc::clone(&pixels),
+  });
+  Some((x, y, width, height, pixels))
 }
 
 #[cfg(test)]
@@ -238,6 +331,35 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+
+  #[test]
+  fn fitted_background_pixels_are_reused_and_retired_sources_are_released() {
+    let source = Arc::new(Frame {
+      width: 2,
+      height: 1,
+      pixels: Arc::new(vec![200, 0, 0, 255, 0, 0, 200, 255]),
+    });
+    let retired = Arc::downgrade(&source);
+    let image = Image::new().with_fit(Fit::Stretch);
+    image.show(&super::Picture::Pixels(source));
+    let canvas = Canvas::new(12, 8);
+    image.draw_background(&canvas);
+    let first = Arc::clone(&image.fitted_cache.lock().unwrap().as_ref().unwrap().pixels);
+    image.draw_background(&canvas);
+    assert!(
+      Arc::ptr_eq(&first, &image.fitted_cache.lock().unwrap().as_ref().unwrap().pixels),
+      "unchanged pictures must not be rescaled"
+    );
+
+    image.set_fit(Fit::Contain);
+    image.draw_background(&canvas);
+    assert!(!Arc::ptr_eq(&first, &image.fitted_cache.lock().unwrap().as_ref().unwrap().pixels));
+    image.set_pixels(1, 1, vec![0, 200, 0, 255]);
+    assert!(retired.upgrade().is_none(), "publishing a new picture releases the retained cache source");
+    image.draw_background(&canvas);
+    image.clear();
+    assert!(image.fitted_cache.lock().unwrap().is_none());
+  }
 
   fn render(p_image: &Image) -> Frame {
     let mut component = p_image.component.clone();
@@ -368,7 +490,7 @@ mod tests {
     source.next(super::Picture::Pixels(Arc::new(Frame {
       width: 2,
       height: 1,
-      pixels: red_then_blue(),
+      pixels: Arc::new(red_then_blue()),
     })));
     assert_eq!(pixel(&render(&image), 1, 0), [0, 0, 255, 255]);
   }

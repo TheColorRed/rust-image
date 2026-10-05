@@ -1,6 +1,6 @@
-import { type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
+import { type AbraImageLike, type EffectSpec, type ImageOperation } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
-import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, beauty } from './edit-sections/beauty';
+import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY, beauty } from './edit-sections/beauty';
 import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
 import { detail } from './edit-sections/detail';
@@ -42,6 +42,8 @@ export type ActionControl = {
   key: string;
   label: string;
   apply?: (image: AbraImageLike) => void;
+  /** A native edit shared by replay and asynchronous thumbnail generation. */
+  operation?: ImageOperation;
   /**
    * Controls sharing a group are mutually exclusive: applying one clears any other applied
    * control in the same group (across all sections). Ungrouped controls toggle independently.
@@ -74,7 +76,8 @@ export type ToolControl = {
 
 /** Applies an action to `image`: its own `apply`, or else its live effect, which is the same definition. */
 export const applyAction = (control: ActionControl, image: AbraImageLike) => {
-  if (control.apply) control.apply(image);
+  if (control.operation) image.applyOperation(control.operation);
+  else if (control.apply) control.apply(image);
   else if (control.live) for (const effect of effectList(control.live())) image.applyEffect(effect);
 };
 
@@ -101,7 +104,7 @@ export type EditSection = {
 };
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
-export { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY };
+export { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY };
 
 // Ordered by what a casual, non-designer social-media poster reaches for first: filters, then
 // basic brightness/color tweaks, then face retouching — with the more technical, restoration-style

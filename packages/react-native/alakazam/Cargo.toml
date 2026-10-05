@@ -9,7 +9,7 @@ abra-body-segmentation = { workspace = true }
 abra-find-person = { workspace = true }
 pub-sub = { workspace = true }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
-vessel = { workspace = true, features = ["android-surface"] }
+vessel = { workspace = true, features = ["android-surface", "ios-surface"] }
 gpu = { workspace = true, optional = true }
 # Draws GPU textures straight onto a native view, without copying them to the CPU.
 gpu-passes = { workspace = true, optional = true, features = ["vessel-target"] }

@@ -9,7 +9,7 @@
 //! - ready-made **controls**: `Button`, `Label`, `Slider` and `Image`.
 //!
 //! Where an app shows its pictures is chosen with cargo features, none on by default: `desktop-window` for a window Vessel
-//! owns, `android-surface` for a view that another application owns.
+//! owns, `android-surface` or `ios-surface` for a view that another application owns.
 //!
 //! ```ignore
 //! use vessel::prelude::*;
@@ -25,8 +25,8 @@ pub use vessel_api as api;
 pub use vessel_api::*;
 pub use vessel_engine as engine;
 pub use vessel_engine::*;
-pub use vessel_ui as ui;
 pub use vessel_macros::Component;
+pub use vessel_ui as ui;
 pub use vessel_ui::*;
 
 /// What an app usually needs, in one import: the engine's items, the API, the controls, and the `pub-sub` traits that
@@ -34,5 +34,7 @@ pub use vessel_ui::*;
 pub mod prelude {
   pub use vessel_api::prelude::*;
   pub use vessel_macros::Component;
-  pub use vessel_ui::{Button, Changed, Clicked, Container, Fit, Image, Label, Picture, Slider, Trackable};
+  pub use vessel_ui::{
+    Button, Changed, Clicked, Container, Fit, Image, Label, Picture, Slider, Trackable, UiBackground, VerticalAlign,
+  };
 }

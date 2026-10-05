@@ -24,7 +24,7 @@ impl MediaSource for Fixed {
     Frame {
       width: 1,
       height: 1,
-      pixels: vec![1, 2, 3, 255],
+      pixels: std::sync::Arc::new(vec![1, 2, 3, 255]),
     }
   }
 }
@@ -33,7 +33,7 @@ impl MediaSource for Fixed {
 fn the_prelude_is_enough_to_run_a_view_and_listen_to_events() {
   let (sender, frames) = mpsc::channel();
   let engine = Engine::new(move |_id, frame: &Frame| {
-    let _ = sender.send(frame.pixels.clone());
+    let _ = sender.send((*frame.pixels).clone());
   });
   let changed = Arc::new(AtomicBool::new(true));
   let view = View::new(

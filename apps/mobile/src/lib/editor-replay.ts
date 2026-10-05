@@ -23,7 +23,7 @@ import {
 import { previewBox$ } from '@/src/state/gestures';
 import { controlThumbnails, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
-import { AbraImage, type AbraImageLike } from '@alakazam/mobile';
+import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { filter, switchMap, tap } from 'rxjs/operators';
 
@@ -63,7 +63,7 @@ function appliedSteps(
       : appliedActions.value;
   for (const key of keys) {
     const control = findAction(key);
-    if (!control || (!control.apply && !control.live)) continue;
+    if (!control || (!control.apply && !control.live && !control.operation)) continue;
     // The action about to be applied replaces the others in its group, so it is never left out with them.
     if (control !== pending && control.group && excludeGroups?.has(control.group)) continue;
     steps.push({ key, run: image => applyAction(control, image) });
@@ -149,7 +149,33 @@ const imageId = (image: object) => {
   return imageIds.get(image)!;
 };
 let cachedThumbnailKey = '';
-let cachedThumbnails: Record<string, string> = {};
+let thumbnailBuild: ReturnType<typeof buildControlThumbnails> | undefined;
+let thumbnailFrame: number | undefined;
+let thumbnailTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelThumbnailBuild() {
+  if (thumbnailFrame !== undefined) cancelAnimationFrame(thumbnailFrame);
+  if (thumbnailTimer !== undefined) clearTimeout(thumbnailTimer);
+  thumbnailFrame = undefined;
+  thumbnailTimer = undefined;
+  thumbnailBuild?.cancel();
+  thumbnailBuild = undefined;
+}
+
+function replaceThumbnails(thumbnails: Record<string, ThumbnailPreview>) {
+  const previous = controlThumbnails.value;
+  controlThumbnails.next(thumbnails);
+  for (const [key, thumbnail] of Object.entries(previous)) {
+    if (thumbnails[key] !== thumbnail) thumbnail.uniffiDestroy();
+  }
+}
+
+/** Clears the published sources before releasing them, including the replay cache on session teardown. */
+export function clearControlThumbnails() {
+  cancelThumbnailBuild();
+  cachedThumbnailKey = '';
+  replaceThumbnails({});
+}
 
 /**
  * Thumbnails for `section`'s controls. Controls in an exclusive group (e.g. colorizations) preview
@@ -157,7 +183,11 @@ let cachedThumbnails: Record<string, string> = {};
  * everything else previews against the current image. Reused as-is while their inputs are unchanged.
  */
 function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraImage) {
-  if (!section.previewThumbnails) return {};
+  if (!section.previewThumbnails) {
+    cachedThumbnailKey = '';
+    replaceThumbnails({});
+    return;
+  }
   const groups = new Set<string>();
   for (const control of section.controls) if (control.kind === 'action' && control.group) groups.add(control.group);
   const applied = appliedActions.value;
@@ -168,13 +198,30 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
     applied.filter(k => !inGroup.includes(k)),
     adjustments.value,
   ]);
-  if (key === cachedThumbnailKey) return cachedThumbnails;
+  if (key === cachedThumbnailKey) return;
+  cachedThumbnailKey = '';
 
   const source = inGroup.length ? renderEditStack(base, groups) : current;
-  cachedThumbnails = buildControlThumbnails(source, section);
-  cachedThumbnailKey = key;
-  if (source !== current) source.uniffiDestroy();
-  return cachedThumbnails;
+  try {
+    const previous = Object.fromEntries(
+      section.controls.flatMap(control => {
+        const preview = controlThumbnails.value[control.key];
+        return preview ? [[control.key, preview]] : [];
+      }),
+    );
+    replaceThumbnails(previous);
+    const build = buildControlThumbnails(source, section, previous, (controlKey, preview) => {
+      batch(() => replaceThumbnails({ ...controlThumbnails.value, [controlKey]: preview }));
+    });
+    thumbnailBuild = build;
+    void build.done.then(succeeded => {
+      if (thumbnailBuild !== build) return;
+      thumbnailBuild = undefined;
+      cachedThumbnailKey = succeeded ? key : '';
+    });
+  } finally {
+    if (source !== current) source.uniffiDestroy();
+  }
 }
 
 function replay() {
@@ -183,6 +230,7 @@ function replay() {
   replayHidden.next(false);
   if (!base) return busy.next(false);
 
+  const started = Date.now();
   const next = renderEditStack(base);
   currentImage.value?.uniffiDestroy();
   currentImage.next(next);
@@ -190,9 +238,21 @@ function replay() {
 
   // Keep a held before/after preview correct even if an edit finishes replaying with a finger down.
   previewSourceImage.next(showingCheckpoint.value ? (comparisonImage() ?? next) : next);
+  if (__DEV__) console.debug('[preview] full-resolution replay ms:', Date.now() - started);
 
-  controlThumbnails.next(sectionThumbnails(findSection(activeSectionKey.value), base, next));
   busy.next(false);
+  // Let React mount the main preview before starting thumbnail work.
+  thumbnailFrame = requestAnimationFrame(() => {
+    thumbnailFrame = undefined;
+    thumbnailTimer = setTimeout(() => {
+      thumbnailTimer = undefined;
+      try {
+        sectionThumbnails(findSection(activeSectionKey.value), base, next);
+      } catch (error) {
+        console.warn('[edit] preparing thumbnail edit stack threw:', error);
+      }
+    }, 0);
+  });
 }
 
 /**
@@ -200,15 +260,17 @@ function replay() {
  * (whose thumbnails, if any, must reflect the latest image) or the preview size changes. Every
  * change replays from scratch, so moving a slider back to 0 truly removes its effect.
  *
- * Deferred a frame so the busy indicator can paint before the synchronous native work starts, and
- * thumbnails are built in that same callback rather than a second one: two independent rAF-deferred
- * state updates landing in one native frame batch crashed React with "Should not already be working".
+ * Full-resolution replay is deferred so immediate feedback can paint. Thumbnail work starts in a
+ * separate timer after the main preview's update; async native results publish progressively.
  */
 export function startReplay(): Subscription {
-  return combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$])
+  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$])
     .pipe(
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
-      tap(() => busy.next(!replayHidden.value)),
+      tap(() => {
+        cancelThumbnailBuild();
+        busy.next(!replayHidden.value);
+      }),
       switchMap(
         () =>
           new Observable<void>(subscriber => {
@@ -231,4 +293,6 @@ export function startReplay(): Subscription {
       ),
     )
     .subscribe();
+  subscription.add(cancelThumbnailBuild);
+  return subscription;
 }

@@ -29,7 +29,9 @@ fn show(p_view: i32) {
     return;
   };
   // The view's size is the component's size, whatever it was given before: that is what is on the screen.
-  if let Some((width, height)) = surface::get(p_view).map(|surface| surface.size()).filter(|(width, height)| *width > 0 && *height > 0) {
+  if let Some((width, height)) =
+    surface::get(p_view).map(|surface| surface.size()).filter(|(width, height)| *width > 0 && *height > 0)
+  {
     component.size().next((width, height));
   }
   // Opened outside the lock: the session starts an engine and draws, and neither may wait for the table.
@@ -125,7 +127,8 @@ pub fn unmount(p_view: i32, p_renderable: &impl Renderable) {
 pub fn unmount_all(p_renderable: &impl Renderable) {
   let p_component = p_renderable.component();
   let mut table = mounted().lock().unwrap();
-  let views: Vec<i32> = table.iter().filter(|(_, mounted)| mounted.component.is(p_component)).map(|(view, _)| *view).collect();
+  let views: Vec<i32> =
+    table.iter().filter(|(_, mounted)| mounted.component.is(p_component)).map(|(view, _)| *view).collect();
   let removed: Vec<Mounted> = views.iter().filter_map(|view| table.remove(view)).collect();
   drop(table);
   for session in removed.into_iter().filter_map(|removed| removed.session) {
@@ -180,6 +183,68 @@ mod tests {
       assert!(start.elapsed() < Duration::from_secs(5), "{p_red} was never drawn");
       std::thread::sleep(Duration::from_millis(5));
     }
+  }
+
+  #[cfg(feature = "ios-surface")]
+  #[test]
+  fn the_ios_bridge_draws_resizes_and_sends_touch_to_a_mounted_component() {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct Host {
+      frames: Mutex<Vec<(u32, u32)>>,
+      released: AtomicUsize,
+    }
+
+    unsafe extern "C" fn draw(
+      p_context: *mut c_void, p_width: u32, p_height: u32, _pixels: *const u8, _len: usize, _w: u32, _h: u32,
+    ) -> bool {
+      unsafe { &*p_context.cast::<Host>() }.frames.lock().unwrap().push((p_width, p_height));
+      true
+    }
+
+    unsafe extern "C" fn release(p_context: *mut c_void) {
+      let host = unsafe { Arc::from_raw(p_context.cast::<Host>()) };
+      host.released.fetch_add(1, Ordering::SeqCst);
+    }
+
+    let host = Arc::new(Host::default());
+    let component = swatch(90);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    component.subject::<PointerEvent>().subscribe(move |event| sender.send(event.clone()).unwrap());
+    mount(8201, &component);
+    let context = Arc::into_raw(host.clone()).cast_mut().cast();
+    assert!(unsafe {
+      surface::vessel_ios_surface_available(8201, context, context, Some(draw), Some(release), 12, 24)
+    });
+    surface::vessel_ios_surface_resized(8201, 24, 48);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while host.frames.lock().unwrap().last() != Some(&(24, 48)) {
+      assert!(Instant::now() < deadline, "the iOS bridge did not draw the resized component");
+      std::thread::sleep(Duration::from_millis(5));
+    }
+    surface::vessel_ios_touch(8201, 0, 6.0, 9.0);
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(), PointerEvent::Moved { x: 6.0, y: 9.0 });
+    assert_eq!(
+      receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+      PointerEvent::Button {
+        button: PointerButton::Left,
+        pressed: true
+      },
+    );
+    surface::vessel_ios_touch(8201, 2, 8.0, 10.0);
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(), PointerEvent::Moved { x: 8.0, y: 10.0 });
+    assert_eq!(
+      receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+      PointerEvent::Button {
+        button: PointerButton::Left,
+        pressed: false
+      },
+    );
+    surface::vessel_ios_surface_destroyed(8201);
+    unmount(8201, &component);
+    assert_eq!(host.released.load(Ordering::SeqCst), 1);
   }
 
   #[test]

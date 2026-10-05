@@ -13,6 +13,8 @@ default = []
 # `*-surface`: inline component style, drawing inside a view that a host application owns.
 # An Android `Surface` handed over by any host UI (React Native, Flutter, a Java or Kotlin app).
 android-surface = ["android-native-window"]
+# A retained Metal layer handed over by an iOS host UI.
+ios-surface = []
 # `*-window`: a standalone app or game, where Vessel owns the window and the main loop.
 # A native desktop window (Windows first), bordered or borderless. Drawn with the CPU.
 desktop-window = ["dep:winit", "dep:softbuffer"]

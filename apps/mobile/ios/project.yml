@@ -25,6 +25,7 @@ targets:
         CFBundleDisplayName: Alakazam
         LSRequiresIPhoneOS: true
         RCTNewArchEnabled: true
+        dev.vessel.library: alakazam_mobile
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
           - arm64

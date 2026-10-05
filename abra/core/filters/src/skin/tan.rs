@@ -98,7 +98,7 @@ impl GpuProcessor for TanSkin {
 /// Tans skin and leaves the features on it sharp.
 /// - `p_color`: The tan. The skin is multiplied by it, so a color like a warm brown darkens and warms the skin, and white
 ///   changes nothing. Its alpha is how much of the tan shows: opaque is all of it, transparent is none.
-pub fn tan_skin(p_color: Color) -> TanSkin {
+pub fn skin_tan(p_color: Color) -> TanSkin {
   TanSkin {
     color: p_color,
     feather: 3.0,
@@ -135,7 +135,7 @@ mod tests {
         img.set_pixel(x, y, (60, 100, 200, 255));
       }
     }
-    tan_skin(Color::from_rgb(200, 140, 90)).apply(&mut img);
+    skin_tan(Color::from_rgb(200, 140, 90)).apply(&mut img);
     let skin = img.get_pixel(8, 24).unwrap();
     assert!(skin.0 < SKIN.0 && skin.1 < SKIN.1 && skin.2 < SKIN.2, "skin gets darker: {skin:?}");
     assert!(skin.2 as f32 / skin.0 as f32 <= SKIN.2 as f32 / SKIN.0 as f32, "and warmer: {skin:?}");
@@ -148,7 +148,7 @@ mod tests {
     let original = image.get_pixel(16, 12).unwrap();
     let white = vec![255u8, 255, 255, 255].repeat(32 * 24);
     let mask = Mask::from_image(Image::new_from_pixels(32, 24, white, Channels::RGBA));
-    let tan = tan_skin(Color::from_rgb(200, 140, 90)).with_mask(mask);
+    let tan = skin_tan(Color::from_rgb(200, 140, 90)).with_mask(mask);
 
     assert!(tan.gpu_processor().is_some());
     assert!(tan.passes(32, 24).last().unwrap().aux.is_some());
@@ -161,7 +161,7 @@ mod tests {
   fn a_white_tan_changes_nothing() {
     let mut img = flat(32, 32, SKIN);
     let original = img.to_rgba_vec();
-    tan_skin(Color::from_rgb(255, 255, 255)).apply(&mut img);
+    skin_tan(Color::from_rgb(255, 255, 255)).apply(&mut img);
     assert_eq!(img.to_rgba_vec(), original);
   }
 
@@ -172,7 +172,7 @@ mod tests {
     // A mask that is black everywhere: nothing may change.
     let black: Vec<u8> = (0..40 * 40).flat_map(|_| [0u8, 0, 0, 255]).collect();
     let mask = Mask::from_image(Image::new_from_pixels(40, 40, black, Channels::RGBA));
-    tan_skin(Color::from_rgb(200, 140, 90)).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut img);
+    skin_tan(Color::from_rgb(200, 140, 90)).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut img);
     assert_eq!(img.to_rgba_vec(), original);
   }
 }

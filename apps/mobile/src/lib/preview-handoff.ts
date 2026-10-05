@@ -20,13 +20,9 @@ export function waitForPreviewFrame(
       onError(error instanceof Error ? error : new Error(String(error)));
       return;
     }
-    if (ready) {
-      onReady();
-    } else if (Date.now() >= deadline) {
-      onError(new Error('The edited preview did not reach the display.'));
-    } else {
-      frame = requestAnimationFrame(check);
-    }
+    if (ready) onReady();
+    else if (Date.now() >= deadline) onError(new Error('The edited preview did not reach the display.'));
+    else frame = requestAnimationFrame(check);
   };
   frame = requestAnimationFrame(check);
   return () => {

@@ -3,6 +3,7 @@
 //! [`TextureFrame`] is a finished picture in GPU memory, in the form the engine passes around (`vessel_engine::GpuFrame`).
 //! [`AndroidTarget`] is the `vessel_engine::GpuTarget` for an Android window: it presents a texture on the window's swap chain.
 //! A session makes it by itself from the first texture it shows.
+//! On iOS, `IosTarget` presents directly to the host's retained Metal layer.
 //! Once a window has one, everything shown on it goes through it, pixels included, because a swap chain and a CPU blit
 //! cannot share a window.
 
@@ -13,6 +14,8 @@ use vessel_engine::surface::{self, AndroidWindow};
 use vessel_engine::{Frame, GpuFrame, GpuTarget};
 
 use crate::{GpuContext, Presenter};
+#[cfg(target_os = "ios")]
+use vessel_engine::surface::IosSurface;
 
 /// A finished picture in GPU memory, made by `context`'s GPU. Cloning is cheap: it is another handle to the same texture.
 ///
@@ -78,12 +81,15 @@ impl GpuFrame for TextureFrame {
         depth_or_array_layers: 1,
       },
     );
-    self.context.queue.submit(Some(encoder.finish()));
+    self.context.submit(encoder.finish());
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
       let _ = sender.send(result);
     });
-    device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+    {
+      let _guard = self.context.submission_gate.lock().unwrap();
+      device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+    }
     receiver.recv().ok()?.ok()?;
     let mapped = buffer.slice(..).get_mapped_range().ok()?;
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
@@ -92,11 +98,87 @@ impl GpuFrame for TextureFrame {
     }
     drop(mapped);
     buffer.unmap();
-    Some(Frame { width, height, pixels })
+    Some(Frame { width, height, pixels: Arc::new(pixels) })
   }
 
   fn target_for(&self, p_surface_id: i32) -> Option<Box<dyn GpuTarget>> {
+    #[cfg(target_os = "ios")]
+    return Some(Box::new(IosTarget::new(&self.context, p_surface_id)?));
+
+    #[cfg(not(target_os = "ios"))]
     Some(Box::new(AndroidTarget::new(&self.context, p_surface_id)?))
+  }
+}
+
+/// Draws GPU frames directly on an iOS host's Metal layer and uploads subsequent CPU frames to the same presenter.
+#[cfg(target_os = "ios")]
+pub struct IosTarget {
+  // Dropped before the surface that retains the layer.
+  presenter: Presenter,
+  surface: Arc<IosSurface>,
+  size: (u32, u32),
+}
+
+#[cfg(target_os = "ios")]
+impl IosTarget {
+  /// Creates a target using the frame's GPU, or returns `None` if that GPU cannot present to the layer.
+  pub fn new(p_context: &GpuContext, p_surface_id: i32) -> Option<Self> {
+    let surface = surface::get_as::<IosSurface>(p_surface_id)?;
+    let mut created = None;
+    surface.with_layer(|layer, size| {
+      // SAFETY: the target retains the surface until after the presenter is dropped.
+      match unsafe { Presenter::from_metal_layer(p_context, layer, size.0, size.1) } {
+        Ok(presenter) => {
+          created = Some((presenter, size));
+          true
+        }
+        Err(error) => {
+          eprintln!("vessel: could not create iOS GPU target: {error}");
+          false
+        }
+      }
+    });
+    let (presenter, size) = created?;
+    Some(Self {
+      presenter,
+      surface,
+      size,
+    })
+  }
+
+  fn draw(&mut self, p_draw: impl FnOnce(&mut Presenter) -> bool) -> bool {
+    let surface = Arc::clone(&self.surface);
+    surface.with_layer(|_, size| {
+      if self.size != size {
+        self.size = size;
+        self.presenter.resize(size.0, size.1);
+      }
+      p_draw(&mut self.presenter)
+    })
+  }
+}
+
+#[cfg(target_os = "ios")]
+impl GpuTarget for IosTarget {
+  fn present(&mut self, p_frame: &dyn GpuFrame) -> bool {
+    let Some(frame) = p_frame.as_any().downcast_ref::<TextureFrame>() else { return false };
+    self.draw(|presenter| match presenter.try_present(frame.texture()) {
+      Ok(drawn) => drawn,
+      Err(error) => {
+        eprintln!("vessel: iOS GPU presentation failed: {error}");
+        false
+      }
+    })
+  }
+
+  fn present_pixels(&mut self, p_frame: &Frame) -> bool {
+    self.draw(|presenter| match presenter.try_present_pixels(p_frame.width, p_frame.height, &p_frame.pixels) {
+      Ok(drawn) => drawn,
+      Err(error) => {
+        eprintln!("vessel: iOS pixel presentation failed: {error}");
+        false
+      }
+    })
   }
 }
 
@@ -156,5 +238,39 @@ impl GpuTarget for AndroidTarget {
 
   fn present_pixels(&mut self, p_frame: &Frame) -> bool {
     self.draw(|presenter| presenter.present_pixels(p_frame.width, p_frame.height, &p_frame.pixels).is_ok())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::LiveRenderer;
+
+  #[test]
+  fn cloned_contexts_share_a_gate_and_concurrent_readbacks_preserve_pixels() -> anyhow::Result<()> {
+    let context = GpuContext::new_default_blocking()?;
+    assert!(Arc::ptr_eq(&context.submission_gate, &context.clone().submission_gate));
+    let workers: Vec<_> = (0..4u8)
+      .map(|index| {
+        let context = context.clone();
+        std::thread::spawn(move || -> anyhow::Result<()> {
+          let color = [50 * index, 20, 100, 255];
+          let pixels = color.repeat(16 * 16);
+          let mut renderer = LiveRenderer::new(context.clone());
+          renderer.set_source(16, 16, &pixels)?;
+          for _ in 0..10 {
+            renderer.render(&[])?;
+            let frame = TextureFrame::new(&context, renderer.snapshot_texture()?);
+            let readback = frame.read_back().ok_or_else(|| anyhow::anyhow!("concurrent texture readback failed"))?;
+            assert_eq!(readback.pixels, pixels);
+          }
+          Ok(())
+        })
+      })
+      .collect();
+    for worker in workers {
+      worker.join().expect("GPU worker panicked")?;
+    }
+    Ok(())
   }
 }

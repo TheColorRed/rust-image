@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use vessel_api::prelude::*;
 use vessel_macros::Component;
@@ -43,6 +43,9 @@ pub struct Slider {
 }
 
 impl Slider {
+  component_builders!();
+  color_background_builder!();
+
   /// A slider at `p_value` (clamped to 0 to 1), in the theme's accent and track colors. Set `color` to use another accent.
   pub fn new(p_value: f32) -> Self {
     let value = BehaviorSubject::new(p_value.clamp(0.0, 1.0));
@@ -98,7 +101,7 @@ impl Slider {
           Some(frame) => {
             let thumb_height = frame.height.min(height).max(1);
             let top = (height as i32 - thumb_height as i32) / 2;
-            canvas.draw_pixels(left, top, thumb, thumb_height, &frame.pixels);
+            canvas.draw_pixels(left, top, thumb, thumb_height, frame.pixels.as_slice());
           }
           None => {
             let top = (height as i32 - thumb as i32) / 2;
@@ -341,7 +344,7 @@ mod tests {
     Arc::new(Frame {
       width: p_width,
       height: p_height,
-      pixels: p_color.repeat((p_width * p_height) as usize),
+      pixels: std::sync::Arc::new(p_color.repeat((p_width * p_height) as usize)),
     })
   }
 

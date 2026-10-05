@@ -135,6 +135,8 @@ pub enum EffectSpec {
     /// Where on the scale: 0 is white, which changes nothing, and 1 is the darkest tan.
     offset: f64,
   },
+  /// Skin tone relative to the original, -100 (lighter) to 100 (darker), with 0 unchanged.
+  SkinTone { amount: f64 },
   /// Grayscale effect.
   Grayscale,
   /// Invert effect.
@@ -177,7 +179,7 @@ impl EffectSpec {
       EffectSpec::Invert => p_target.accept(color::invert()),
       // Effects with parameters.
       EffectSpec::SkinSmooth { amount } => {
-        let effect = abra::filters::prelude::skin::smooth_skin(*amount);
+        let effect = abra::filters::prelude::skin::skin_smooth(*amount);
         if let Some(mask) = p_skin_mask {
           p_target.accept(effect.with_mask(mask.clone()));
         } else {
@@ -185,7 +187,16 @@ impl EffectSpec {
         }
       }
       EffectSpec::SkinTan { offset } => {
-        let effect = abra::filters::prelude::skin::tan_skin(skin_tan_gradient().color_at(*offset as f32));
+        let effect = abra::filters::prelude::skin::skin_tan(skin_tan_gradient().color_at(*offset as f32));
+        if let Some(mask) = p_skin_mask {
+          p_target.accept(effect.with_mask(mask.clone()));
+        } else {
+          p_target.accept(effect);
+        }
+      }
+      EffectSpec::SkinTone { amount } => {
+        // The mobile control owns its range; the reusable core effect accepts stronger adjustments.
+        let effect = abra::filters::prelude::skin::skin_tone(amount.clamp(-400.0, 400.0));
         if let Some(mask) = p_skin_mask {
           p_target.accept(effect.with_mask(mask.clone()));
         } else {
@@ -403,5 +414,40 @@ mod tests {
     let mut preview = LiveImage::new(16, 16, source).unwrap();
     effect.apply_with_skin_mask(&mut preview, Some(&mask));
     wait_for_pixels(&mut preview, image.rgba());
+  }
+
+  #[test]
+  fn skin_tone_matches_live_previews_with_detected_and_supplied_masks() {
+    use abra::adjustments::prelude::Effect;
+
+    for color in [Color::from_rgba(180, 140, 100, 123), Color::from_rgba(60, 100, 200, 77)] {
+      for mask in [
+        None,
+        Some(Mask::from_image(Image::new_from_color(16, 16, Color::white()))),
+      ] {
+        for amount in [-200.0, -100.0, 0.0, 100.0, 200.0] {
+          let mut source = Image::new_from_color(16, 16, color);
+          let original = source.to_rgba_vec();
+          let effect = EffectSpec::SkinTone { amount };
+          assert!(effect.has_gpu());
+          let cpu = abra::filters::prelude::skin::skin_tone(amount.clamp(-100.0, 100.0));
+          let cpu = if let Some(mask) = &mask { cpu.with_mask(mask.clone()) } else { cpu };
+          cpu.apply_on_cpu(&mut source);
+          if amount == 0.0 || (color.b == 200 && mask.is_none()) {
+            assert_eq!(source.rgba(), original);
+          } else {
+            assert_ne!(source.rgba(), original);
+          }
+          let mut saved = Image::new_from_color(16, 16, color);
+          effect.apply_with_skin_mask(&mut saved, mask.as_ref());
+          assert!(saved.rgba().iter().zip(source.rgba()).all(|(a, b)| a.abs_diff(*b) <= 1));
+          let mut preview = LiveImage::new(16, 16, original).unwrap();
+          effect.apply_with_skin_mask(&mut preview, mask.as_ref());
+          wait_for_frame_where(&mut preview, |frame| {
+            frame.pixels.iter().zip(source.rgba()).all(|(a, b)| a.abs_diff(*b) <= 1)
+          });
+        }
+      }
+    }
   }
 }

@@ -189,38 +189,6 @@ impl Background {
   }
 }
 
-/// How much a component's corners are rounded, like CSS `border-radius`. Not inherited.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Radius {
-  /// This many pixels (0 is square). Half the shorter side makes a pill or a circle.
-  Px(f32),
-  /// The theme's radius, so the corners follow the theme.
-  Theme,
-}
-
-impl Default for Radius {
-  /// Square corners.
-  fn default() -> Self {
-    Self::Px(0.0)
-  }
-}
-
-impl From<f32> for Radius {
-  fn from(p_pixels: f32) -> Self {
-    Self::Px(p_pixels)
-  }
-}
-
-impl Radius {
-  /// The radius in pixels under `p_theme`.
-  pub(crate) fn resolve(&self, p_theme: &Theme) -> f32 {
-    match self {
-      Self::Px(pixels) => *pixels,
-      Self::Theme => p_theme.radius,
-    }
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;

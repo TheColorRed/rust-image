@@ -507,7 +507,7 @@ mod tests {
         Some(Frame {
           width: 2,
           height: 2,
-          pixels: [66u8, 0, 0, 255].repeat(4),
+          pixels: std::sync::Arc::new([66u8, 0, 0, 255].repeat(4)),
         })
       }
     }

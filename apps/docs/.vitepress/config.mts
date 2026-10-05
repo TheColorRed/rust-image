@@ -40,6 +40,7 @@ const baseConfig = defineConfig({
   themeConfig: {
     nav: [
       { text: 'Docs', link: '/getting-started' },
+      { text: 'Vessel', link: '/vessel/' },
     ],
   }
 });

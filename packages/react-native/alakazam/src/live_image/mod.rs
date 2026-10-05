@@ -292,7 +292,7 @@ impl LiveImage {
         *ready = Some(LiveFrame {
           width: self.width,
           height: self.height,
-          pixels: image.into_rgba_vec(),
+          pixels: image.into_rgba_vec().into(),
         });
         Ok(())
       }
@@ -346,15 +346,15 @@ impl LiveImage {
     if matches!(self.backend, Backend::Cpu { ready: None }) {
       self.render();
     }
-    let effects: Vec<Arc<dyn LiveEffect>> = self.chain.iter().map(|entry| entry.effect.clone()).collect();
     match &mut self.backend {
       #[cfg(feature = "gpu")]
       Backend::Gpu(session) => {
+        let effects: Vec<Arc<dyn LiveEffect>> = self.chain.iter().map(|entry| entry.effect.clone()).collect();
         let refs: Vec<&dyn LiveEffect> = effects.iter().map(|effect| effect.as_ref()).collect();
         Ok(LiveFrame {
           width: self.width,
           height: self.height,
-          pixels: session.render_blocking(&refs)?,
+          pixels: session.render_blocking(&refs)?.into(),
         })
       }
       Backend::Cpu { ready } => ready.take().ok_or_else(|| "nothing has been rendered".to_string()),

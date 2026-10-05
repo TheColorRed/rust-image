@@ -12,7 +12,7 @@ bytemuck = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
 # Only for the Vessel target, which draws textures on a Vessel surface.
-vessel-engine = { workspace = true, optional = true, features = ["android-surface"] }
+vessel-engine = { workspace = true, optional = true, features = ["android-surface", "ios-surface"] }
 
 [features]
 default = []

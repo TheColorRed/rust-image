@@ -46,4 +46,59 @@ image.gaussianBlur(8);
 image.write('/data/user/0/…/cache/photo-edited.png');
 ```
 
-Calls are synchronous and run on the JS thread.
+Most edit calls are synchronous. Use `await AbraImage.readAsync(path)` to
+decode and compute the skin mask without blocking the JS thread.
+
+## Native effect previews
+
+`ThumbnailPreview` is a Vessel component with an image background and an
+overlaid label. Mount it through `VesselView` from `@vessel/react-native`.
+Call `setImage(image)` to replace its background without remounting it.
+The component retains the image's native rendering state, so a temporary
+`AbraImage` wrapper can be destroyed after construction or `setImage`.
+Destroy the thumbnail itself when it is no longer displayed.
+
+The mobile editor uses 112 × 80 dp landscape cards, with density-adjusted
+preview pixels, cover fitting, and a React Native press target and selection
+outline around each native view.
+Thumbnail backgrounds follow completed image edits as CPU pixels, avoiding a
+GPU upload/readback for each CPU-composed card. Transient live effects remain
+on the editor's live preview. A separate transparent gradient overlays each
+card immediately and stays in place when its photo is replaced.
+The overlay keeps RGB black throughout and increases alpha from zero on the
+first row to the configured opacity on the last row. A 40% black endpoint
+retains approximately 60% of the underlying photo's channel values.
+
+Thumbnail generation uses `await image.thumbnailSourceAsync(width, height)`
+to downscale once in Rust, followed by
+`await source.renderThumbnailAsync(effects, operation)` for each control.
+Pixels stay in native memory throughout. Decoding and thumbnail jobs share
+two native image workers; the editor submits at most two thumbnail effects
+at once, in control order (the initially visible cards first), and publishes
+each completed card immediately. Switching sections or closing the editor
+stops scheduling and discards late results without updating destroyed views.
+Completed cards are reused, and failed controls warn without removing their
+last successful preview. `ImageOperation` shares non-live edits such as
+rotation and auto-tone with full-resolution replay.
+
+Full-resolution edit replay remains synchronous, but thumbnail generation
+starts after the main-preview update has had a chance to commit. Matching
+gradient overlays share cached native pixels instead of being rebuilt per card.
+Debug builds log decode/segmentation time, full-resolution replay time, and
+thumbnail source/first-card/total time separately so bottlenecks can be measured.
+
+`VesselView` automatically supplies the platform UI font and default text size,
+scaled for screen density and accessibility text scaling. Explicit Rust font
+settings still override the host defaults. Optional `fontPath` (a local font
+file), `fontSize` (logical pixels), and `allowFontScaling` props customize these
+defaults without changing the source or remounting it. Custom fonts on unrelated
+React Native `Text` elements are not automatically inherited.
+
+`VesselView` has Android and iOS hosts. The Rust dependency enables
+`android-surface` and `ios-surface`; GPU previews use direct Metal presentation
+on iOS, and CPU components upload their pixels to the same kind of layer.
+The iOS app's `Info.plist` must name the embedded dynamic Rust framework under
+`dev.vessel.library` (the XcodeGen project sets `alakazam_mobile`). Install the
+autolinked `VesselReactNative` pod after building the Rust XCFramework.
+See the [React Native hosting guide](../../../apps/docs/public/vessel/react-native.md)
+for setup and the macOS/Xcode verification checklist.

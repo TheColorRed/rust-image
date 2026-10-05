@@ -1,6 +1,8 @@
 mod skin;
 mod smooth;
 mod tan;
+mod tone;
 
-pub use smooth::{SmoothSkin, smooth_skin};
-pub use tan::{TanSkin, tan_skin};
+pub use smooth::{SmoothSkin, skin_smooth};
+pub use tan::{TanSkin, skin_tan};
+pub use tone::{SkinTone, skin_tone};

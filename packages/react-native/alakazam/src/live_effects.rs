@@ -29,6 +29,7 @@ pub fn slider(p_key: &str, p_value: f64) -> Option<Vec<EffectSpec>> {
     },
     "action-skin-smooth" => EffectSpec::SkinSmooth { amount: p_value },
     "action-skin-tan" => EffectSpec::SkinTan { offset: p_value },
+    "action-skin-tone" => EffectSpec::SkinTone { amount: p_value },
     _ => return None,
   }])
 }
@@ -112,6 +113,9 @@ mod tests {
   #[test]
   fn sliders_and_actions_map_to_effects_and_unknown_keys_to_nothing() {
     assert_eq!(slider("action-brightness", 49.6), Some(vec![EffectSpec::Brightness { amount: 50 }]));
+    for amount in [-100.0, 0.0, 100.0] {
+      assert_eq!(slider("action-skin-tone", amount), Some(vec![EffectSpec::SkinTone { amount }]));
+    }
     assert_eq!(slider("action-nothing", 1.0), None);
     assert_eq!(action("action-mood-noir").map(|effects| effects.len()), Some(2));
     assert_eq!(action(""), Some(vec![]));

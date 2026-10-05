@@ -46,9 +46,31 @@ The amount is clamped to `0.0..=3.0`. Up to `1.0` it scales the mask, which is h
 
 The whole filter runs on the GPU when one is available, as a chain of shader passes (edge strength, widening the protected zone, skin color, feathering the mask, the surface blur, and the final blend), so the photo never leaves the GPU. The GPU result is within one level of the CPU result. On a 1920x1080 photo the GPU chain takes about 30 to 45 ms, against about 0.5 to 1.7 seconds on the CPU, which is the fallback when there is no GPU. Because the radius and the edge measurement come from the size of the whole photo, the filter always runs over the whole photo and is then limited to an area or mask, if one is given.
 
+## Skin tone
+
+`adjust_skin_tone` changes the brightness of existing skin tones without adding a tint or smoothing texture:
+
+```rust
+use abra::filters::prelude::skin::adjust_skin_tone;
+
+adjust_skin_tone(-40).apply(&mut image); // Lighter.
+adjust_skin_tone(40).apply(&mut image);  // Darker.
+adjust_skin_tone(200).apply(&mut image); // Stronger darkening is allowed by the core.
+```
+
+Negative amounts lighten, positive amounts darken, and `0` leaves the image unchanged. `adjust_skin_tone` does not clamp
+the amount to a control range. Values beyond `-100` and `100` produce stronger adjustments; each application chooses
+and enforces its own input limits.
+
+The filter uses the existing exposure effect's gamma curve to adjust midtones while keeping black and white fixed,
+so lightening retains highlight detail. It shares skin detection and feathering with `tan_skin`.
+Use `.with_mask(mask)` for a segmentation or person mask and `.with_feather(amount)` to control the boundary fade.
+Both CPU processing and GPU previews reuse the existing exposure effect and preserve the photo's alpha.
+
 ## Choosing a detail filter
 
 - Use `sharpen` to restore or emphasize local detail.
 - Use `smooth` for general softening.
 - Use `smooth_skin` when smoothing should be limited to detected skin tones and edges such as eyes and hair should stay sharp.
+- Use `adjust_skin_tone` to lighten or darken existing skin tones while preserving texture.
 - Use [Blur](./blur) for explicit blur kernels and focus effects.

@@ -17,16 +17,51 @@ fn blend(p_pixels: &mut [u8], p_size: (u32, u32), p_x: i64, p_y: i64, p_rgba: [u
   if p_x < 0 || p_y < 0 || p_x >= width as i64 || p_y >= height as i64 {
     return;
   }
-  let alpha = p_rgba[3] as f32 / 255.0 * p_coverage.clamp(0.0, 1.0);
+  let at = (p_y as usize * width as usize + p_x as usize) * 4;
+  blend_pixel(&mut p_pixels[at..at + 4], p_rgba, p_coverage);
+}
+
+fn blend_pixel(p_pixel: &mut [u8], p_rgba: [u8; 4], p_coverage: f32) {
+  let coverage = p_coverage.clamp(0.0, 1.0);
+  if coverage <= 0.0 {
+    return;
+  }
+  // Fast path: fully covered + fully opaque replaces the destination.
+  if p_rgba[3] == 255 && coverage >= 1.0 {
+    p_pixel.copy_from_slice(&p_rgba);
+    return;
+  }
+  let alpha = p_rgba[3] as f32 / 255.0 * coverage;
   if alpha <= 0.0 {
     return;
   }
-  let at = (p_y as usize * width as usize + p_x as usize) * 4;
-  let pixel = &mut p_pixels[at..at + 4];
   for channel in 0..3 {
-    pixel[channel] = (p_rgba[channel] as f32 * alpha + pixel[channel] as f32 * (1.0 - alpha)).round() as u8;
+    p_pixel[channel] = (p_rgba[channel] as f32 * alpha + p_pixel[channel] as f32 * (1.0 - alpha)).round() as u8;
   }
-  pixel[3] = ((alpha + pixel[3] as f32 / 255.0 * (1.0 - alpha)) * 255.0).round() as u8;
+  p_pixel[3] = ((alpha + p_pixel[3] as f32 / 255.0 * (1.0 - alpha)) * 255.0).round() as u8;
+}
+
+/// Paints a fully covered row, copying opaque runs and preserving the shape painter's alpha rounding elsewhere.
+fn blend_span(p_destination: &mut [u8], p_source: &[u8]) {
+  let mut index = 0;
+  while index < p_source.len() {
+    match p_source[index + 3] {
+      0 => index += 4,
+      255 => {
+        let mut end = index + 4;
+        while end < p_source.len() && p_source[end + 3] == 255 {
+          end += 4;
+        }
+        p_destination[index..end].copy_from_slice(&p_source[index..end]);
+        index = end;
+      }
+      _ => {
+        let color = p_source[index..index + 4].try_into().unwrap();
+        blend_pixel(&mut p_destination[index..index + 4], color, 1.0);
+        index += 4;
+      }
+    }
+  }
 }
 
 /// How far the point (`p_x`, `p_y`) is from the edge of a rounded rectangle, in pixels: negative inside, positive outside.
@@ -42,13 +77,30 @@ fn rounded_rect_distance(p_x: f32, p_y: f32, p_rect: (f32, f32, f32, f32), p_rad
 
 /// Visits every pixel of a picture of `p_size` that a rounded rectangle can touch, with how far the pixel is from its edge.
 fn for_rounded_rect(
-  p_size: (u32, u32), p_rect: (i32, i32, u32, u32), p_radius: f32, mut p_paint: impl FnMut(i64, i64, f32),
+  p_size: (u32, u32), p_rect: (i32, i32, u32, u32), p_radius: f32, p_clip: Option<(i32, i32, u32, u32)>,
+  mut p_paint: impl FnMut(i64, i64, f32),
 ) {
   let (x, y, width, height) = p_rect;
   // One extra pixel each way, for the smoothed edge.
-  let (left, top) = ((x as i64 - 1).max(0), (y as i64 - 1).max(0));
-  let (right, bottom) =
+  let (mut left, mut top) = ((x as i64 - 1).max(0), (y as i64 - 1).max(0));
+  let (mut right, mut bottom) =
     ((x as i64 + width as i64 + 1).min(p_size.0 as i64), (y as i64 + height as i64 + 1).min(p_size.1 as i64));
+
+  if let Some((cx, cy, cw, ch)) = p_clip {
+    let clip_left = cx.max(0) as i64;
+    let clip_top = cy.max(0) as i64;
+    let clip_right = (cx as i64 + cw as i64).min(p_size.0 as i64);
+    let clip_bottom = (cy as i64 + ch as i64).min(p_size.1 as i64);
+    left = left.max(clip_left);
+    top = top.max(clip_top);
+    right = right.min(clip_right);
+    bottom = bottom.min(clip_bottom);
+  }
+
+  if left >= right || top >= bottom {
+    return;
+  }
+
   let rect = (x as f32, y as f32, width as f32, height as f32);
   for row in top..bottom {
     for column in left..right {
@@ -58,6 +110,62 @@ fn for_rounded_rect(
 }
 
 impl Canvas {
+  /// Blends an image behind content, clipped to this canvas's box and rounded corners.
+  /// The pixels are RGBA bytes, `p_width * p_height * 4` in length.
+  pub fn draw_background_pixels(&self, p_x: i32, p_y: i32, p_width: u32, p_height: u32, p_rgba: &[u8]) {
+    assert_eq!(
+      p_rgba.len(),
+      p_width as usize * p_height as usize * 4,
+      "background image pixel length must match its size"
+    );
+    if p_width == 0 || p_height == 0 {
+      return;
+    }
+    let mut pixels = self.pixels.lock().unwrap();
+    if !self.intact(&pixels) {
+      return;
+    }
+    let (x, y) = (p_x as i64, p_y as i64);
+    let (mut left, mut top) = (x.max(0), y.max(0));
+    let (mut right, mut bottom) =
+      ((x + p_width as i64).min(self.width as i64), (y + p_height as i64).min(self.height as i64));
+    if let Some((cx, cy, cw, ch)) = self.clip {
+      left = left.max(cx as i64);
+      top = top.max(cy as i64);
+      right = right.min(cx as i64 + cw as i64);
+      bottom = bottom.min(cy as i64 + ch as i64);
+    }
+    if left >= right || top >= bottom {
+      return;
+    }
+    let radius = self.radius.clamp(0.0, self.width.min(self.height) as f32 / 2.0);
+    let corner = radius.ceil() as i64;
+    let rect = (0.0, 0.0, self.width as f32, self.height as f32);
+    for row in top..bottom {
+      // Away from corner rows the whole row has full coverage. In corner rows the central strip does too.
+      let (middle_left, middle_right) = if row >= corner && row < self.height as i64 - corner {
+        (left, right)
+      } else {
+        let start = left.max(corner).min(right);
+        (start, right.min(self.width as i64 - corner).max(start))
+      };
+      let source_start = ((row - y) as usize * p_width as usize + (middle_left - x) as usize) * 4;
+      let destination_start = (row as usize * self.width as usize + middle_left as usize) * 4;
+      let bytes = (middle_right - middle_left) as usize * 4;
+      blend_span(
+        &mut pixels[destination_start..destination_start + bytes],
+        &p_rgba[source_start..source_start + bytes],
+      );
+      for column in (left..middle_left).chain(middle_right..right) {
+        let at = ((row - y) as usize * p_width as usize + (column - x) as usize) * 4;
+        let color = p_rgba[at..at + 4].try_into().unwrap();
+        let destination = (row as usize * self.width as usize + column as usize) * 4;
+        let distance = rounded_rect_distance(column as f32 + 0.5, row as f32 + 0.5, rect, radius);
+        blend_pixel(&mut pixels[destination..destination + 4], color, 0.5 - distance);
+      }
+    }
+  }
+
   /// Fills the rectangle with its top left corner at (`p_x`, `p_y`) with `p_rgba`, rounding the corners by `p_radius`
   /// pixels (0 for square corners; half the shorter side makes a pill or, on a square, a circle).
   pub fn fill_rounded_rect(&self, p_x: i32, p_y: i32, p_width: u32, p_height: u32, p_radius: f32, p_rgba: [u8; 4]) {
@@ -66,7 +174,7 @@ impl Canvas {
       return;
     }
     let size = (self.width, self.height);
-    for_rounded_rect(size, (p_x, p_y, p_width, p_height), p_radius, |column, row, distance| {
+    for_rounded_rect(size, (p_x, p_y, p_width, p_height), p_radius, self.clip, |column, row, distance| {
       blend(&mut pixels, size, column, row, p_rgba, 0.5 - distance);
     });
   }
@@ -81,7 +189,7 @@ impl Canvas {
       return;
     }
     let size = (self.width, self.height);
-    for_rounded_rect(size, (p_x, p_y, p_width, p_height), p_radius, |column, row, distance| {
+    for_rounded_rect(size, (p_x, p_y, p_width, p_height), p_radius, self.clip, |column, row, distance| {
       let outside = (0.5 - distance).clamp(0.0, 1.0);
       let inside = (0.5 - (distance + p_thickness)).clamp(0.0, 1.0);
       blend(&mut pixels, size, column, row, p_rgba, outside - inside);
@@ -110,6 +218,20 @@ impl Canvas {
       return;
     }
     let size = (self.width, self.height);
+    let (clip_left, clip_top, clip_right, clip_bottom) = match self.clip {
+      None => (0i64, 0i64, self.width as i64, self.height as i64),
+      Some((x, y, w, h)) => {
+        let left = x.max(0) as i64;
+        let top = y.max(0) as i64;
+        let right = (x as i64 + w as i64).min(self.width as i64);
+        let bottom = (y as i64 + h as i64).min(self.height as i64);
+        (left, top, right, bottom)
+      }
+    };
+    if clip_left >= clip_right || clip_top >= clip_bottom {
+      return;
+    }
+
     if let Some(font) = self.font.face.outline() {
       let px = self.font.size as f32;
       let ascent = font.horizontal_line_metrics(px).map_or(px, |line| line.ascent);
@@ -121,7 +243,11 @@ impl Canvas {
         let top = (baseline - metrics.height as f32 - metrics.ymin as f32).round() as i64;
         for (index, covered) in coverage.iter().enumerate().filter(|(_, covered)| **covered > 0) {
           let (column, row) = ((index % metrics.width) as i64, (index / metrics.width) as i64);
-          blend(&mut pixels, size, left + column, top + row, p_rgba, *covered as f32 / 255.0);
+          let x = left + column;
+          let y = top + row;
+          if x >= clip_left && y >= clip_top && x < clip_right && y < clip_bottom {
+            blend(&mut pixels, size, x, y, p_rgba, *covered as f32 / 255.0);
+          }
         }
         pen += metrics.advance_width;
       }
@@ -140,7 +266,11 @@ impl Canvas {
           }
           for dy in 0..scale {
             for dx in 0..scale {
-              blend(&mut pixels, size, left + column * scale + dx, p_y as i64 + row as i64 * scale + dy, p_rgba, 1.0);
+              let x = left + column * scale + dx;
+              let y = p_y as i64 + row as i64 * scale + dy;
+              if x >= clip_left && y >= clip_top && x < clip_right && y < clip_bottom {
+                blend(&mut pixels, size, x, y, p_rgba, 1.0);
+              }
             }
           }
         }
@@ -153,6 +283,99 @@ impl Canvas {
 mod tests {
   use super::*;
   use crate::{Face, Font};
+
+  #[test]
+  #[ignore = "manual rendering benchmark: run with --ignored --nocapture"]
+  fn background_paint_benchmark() {
+    use std::{hint::black_box, time::Instant};
+
+    let (width, height) = (512, 384);
+    let canvas = Canvas::new(width, height);
+    let source = [190, 120, 70, 255].repeat((width * height) as usize);
+    let radius = 20.0;
+    let iterations = 100;
+    let mut fast = canvas.clone();
+    fast.set_box(radius, (0, 0, width, height));
+    let start = Instant::now();
+    for _ in 0..iterations {
+      fast.draw_background_pixels(0, 0, width, height, black_box(&source));
+    }
+    let optimized = start.elapsed();
+    black_box(fast.pixels());
+    let start = Instant::now();
+    for _ in 0..iterations {
+      let source = black_box(&source);
+      let mut pixels = canvas.pixels.lock().unwrap();
+      for_rounded_rect((width, height), (0, 0, width, height), radius, None, |column, row, distance| {
+        let at = (row as usize * width as usize + column as usize) * 4;
+        blend(&mut pixels, (width, height), column, row, source[at..at + 4].try_into().unwrap(), 0.5 - distance);
+      });
+    }
+    let per_pixel = start.elapsed();
+    black_box(canvas.pixels());
+    eprintln!(
+      "{iterations} opaque {width}x{height} backgrounds: rows={optimized:?}, per-pixel={per_pixel:?}, speedup={:.2}x",
+      per_pixel.as_secs_f64() / optimized.as_secs_f64()
+    );
+  }
+
+  #[test]
+  fn background_row_paths_match_per_pixel_painting_with_clips_alpha_and_fractional_corners() {
+    for (width, height) in [(1, 1), (7, 5), (24, 17)] {
+      let source: Vec<u8> = (0..width * height)
+        .flat_map(|index| {
+          [
+            (index * 19) as u8,
+            (index * 31) as u8,
+            (index * 7) as u8,
+            [0, 1, 127, 254, 255, 255, 255][index as usize % 7],
+          ]
+        })
+        .collect();
+      for radius in [0.0, 0.25, 0.75, 1.5, 3.125, 12.0, 100.0] {
+        for clip in [
+          None,
+          Some((-2, 1, 7, 4)),
+          Some((3, 2, 11, 8)),
+          Some((100, 100, 2, 2)),
+          Some((0, 0, 0, 0)),
+        ] {
+          for (x, y) in [(0, 0), (-3, -1), (2, 1), (100, 100)] {
+            let mut actual = Canvas::new(width, height);
+            let mut expected = Canvas::new(width, height);
+            actual.fill([91, 53, 17, 113]);
+            expected.fill([91, 53, 17, 113]);
+            actual.set_box(radius, (0, 0, width, height));
+            actual.set_clip(clip);
+            expected.set_clip(clip);
+            actual.draw_background_pixels(x, y, width, height, &source);
+            {
+              let mut pixels = expected.pixels.lock().unwrap();
+              for_rounded_rect((width, height), (0, 0, width, height), radius, clip, |column, row, distance| {
+                let (sx, sy) = (column - x as i64, row - y as i64);
+                if sx >= 0 && sy >= 0 && sx < width as i64 && sy < height as i64 {
+                  let at = (sy as usize * width as usize + sx as usize) * 4;
+                  blend(
+                    &mut pixels,
+                    (width, height),
+                    column,
+                    row,
+                    source[at..at + 4].try_into().unwrap(),
+                    0.5 - distance,
+                  );
+                }
+              });
+            }
+            assert_eq!(
+              actual.pixels(),
+              expected.pixels(),
+              "size={width}x{height}, radius={radius}, clip={clip:?}, at={x},{y}"
+            );
+          }
+        }
+      }
+    }
+  }
 
   fn pixel(p_canvas: &Canvas, p_x: u32, p_y: u32) -> [u8; 4] {
     let at = ((p_y * p_canvas.width() + p_x) * 4) as usize;

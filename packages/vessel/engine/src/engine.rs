@@ -42,7 +42,7 @@ impl Engine {
   /// registered yet, or is gone, simply misses the frame.
   pub fn for_surface(p_surface_id: i32) -> Self {
     Self::new(move |_view, frame| {
-      surface::draw_rgba(p_surface_id, frame.width, frame.height, &frame.pixels);
+      surface::draw_rgba(p_surface_id, frame.width, frame.height, frame.pixels.as_slice());
     })
   }
 }
@@ -190,7 +190,7 @@ mod tests {
       Frame {
         width: 1,
         height: 1,
-        pixels: vec![self.value.load(Ordering::SeqCst), 0, 0, 255],
+        pixels: Arc::new(vec![self.value.load(Ordering::SeqCst), 0, 0, 255]),
       }
     }
 
@@ -215,7 +215,7 @@ mod tests {
       Some(Frame {
         width: 1,
         height: 1,
-        pixels: vec![self.0, 0, 0, 255],
+        pixels: Arc::new(vec![self.0, 0, 0, 255]),
       })
     }
   }

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{Font, Theme};
+use crate::{Font, TextAlign, Theme};
 
 /// A rectangle of RGBA pixels that a component draws on.
 ///
@@ -15,9 +15,11 @@ pub struct Canvas {
   pub(crate) height: u32,
   pub(crate) pixels: Arc<Mutex<Vec<u8>>>,
   pub(crate) font: Font,
+  pub(crate) text_align: TextAlign,
   pub(crate) theme: Theme,
   pub(crate) radius: f32,
   pub(crate) content: (i32, i32, u32, u32),
+  pub(crate) clip: Option<(i32, i32, u32, u32)>,
 }
 
 impl PartialEq for Canvas {
@@ -34,10 +36,35 @@ impl Canvas {
       height: p_height,
       pixels: Arc::new(Mutex::new(vec![0; p_width as usize * p_height as usize * 4])),
       font: Font::default(),
+      text_align: TextAlign::default(),
       theme: Theme::default(),
       radius: 0.0,
       content: (0, 0, p_width, p_height),
+      clip: None,
     }
+  }
+
+  /// A canvas that uses `p_pixels` as its backing store.
+  pub(crate) fn with_pixels(p_width: u32, p_height: u32, mut p_pixels: Vec<u8>) -> Self {
+    let expected = p_width as usize * p_height as usize * 4;
+    if p_pixels.len() != expected {
+      p_pixels = vec![0; expected];
+    }
+    Self {
+      width: p_width,
+      height: p_height,
+      pixels: Arc::new(Mutex::new(p_pixels)),
+      font: Font::default(),
+      text_align: TextAlign::default(),
+      theme: Theme::default(),
+      radius: 0.0,
+      content: (0, 0, p_width, p_height),
+      clip: None,
+    }
+  }
+
+  pub(crate) fn set_clip(&mut self, p_clip: Option<(i32, i32, u32, u32)>) {
+    self.clip = p_clip;
   }
 
   /// The width in pixels.
@@ -53,6 +80,16 @@ impl Canvas {
   /// The font text is drawn in: the one the component being drawn inherited, or its own.
   pub fn font(&self) -> Font {
     self.font.clone()
+  }
+
+  /// The inherited horizontal text alignment of the component being drawn.
+  pub fn text_align(&self) -> TextAlign {
+    self.text_align
+  }
+
+  /// Sets horizontal text alignment. A component supplies its inherited value before drawing.
+  pub fn set_text_align(&mut self, p_align: TextAlign) {
+    self.text_align = p_align;
   }
 
   /// How much the component being drawn has its corners rounded, so what it draws can follow its shape.
@@ -104,8 +141,31 @@ impl Canvas {
 
   /// Sets every pixel to `p_rgba`.
   pub fn fill(&self, p_rgba: [u8; 4]) {
-    for pixel in self.pixels.lock().unwrap().chunks_exact_mut(4) {
-      pixel.copy_from_slice(&p_rgba);
+    let mut pixels = self.pixels.lock().unwrap();
+    if !self.intact(&pixels) {
+      return;
+    }
+    match self.clip {
+      None => {
+        for pixel in pixels.chunks_exact_mut(4) {
+          pixel.copy_from_slice(&p_rgba);
+        }
+      }
+      Some((x, y, w, h)) => {
+        let left = x.max(0) as i64;
+        let top = y.max(0) as i64;
+        let right = (x as i64 + w as i64).min(self.width as i64);
+        let bottom = (y as i64 + h as i64).min(self.height as i64);
+        if left >= right || top >= bottom {
+          return;
+        }
+        for row in top..bottom {
+          for column in left..right {
+            let at = (row as usize * self.width as usize + column as usize) * 4;
+            pixels[at..at + 4].copy_from_slice(&p_rgba);
+          }
+        }
+      }
     }
   }
 
@@ -113,39 +173,75 @@ impl Canvas {
   /// alpha and clipping at the canvas edges. This is how a parent puts a child's picture into its own.
   /// - `p_rgba`: `p_width * p_height` RGBA pixels.
   pub fn draw_pixels(&self, p_x: i32, p_y: i32, p_width: u32, p_height: u32, p_rgba: &[u8]) {
+    let mut pixels = self.pixels.lock().unwrap();
+    self.draw_pixels_into(pixels.as_mut_slice(), p_x, p_y, p_width, p_height, p_rgba);
+  }
+
+  pub(crate) fn draw_pixels_into(
+    &self, p_pixels: &mut [u8], p_x: i32, p_y: i32, p_width: u32, p_height: u32, p_rgba: &[u8],
+  ) {
     if p_rgba.len() < p_width as usize * p_height as usize * 4 {
       return;
     }
-    let mut pixels = self.pixels.lock().unwrap();
-    if !self.intact(&pixels) {
+    if !self.intact(p_pixels) {
       return;
     }
+    let (clip_left, clip_top, clip_right, clip_bottom) = match self.clip {
+      None => (0i64, 0i64, self.width as i64, self.height as i64),
+      Some((x, y, w, h)) => {
+        let left = x.max(0) as i64;
+        let top = y.max(0) as i64;
+        let right = (x as i64 + w as i64).min(self.width as i64);
+        let bottom = (y as i64 + h as i64).min(self.height as i64);
+        (left, top, right, bottom)
+      }
+    };
+    if clip_left >= clip_right || clip_top >= clip_bottom {
+      return;
+    }
+    let (p_x, p_y) = (p_x as i64, p_y as i64);
     // The part of the source that lands inside the canvas.
-    let first_column = (-p_x).max(0) as usize;
-    let last_column = ((self.width as i64 - p_x as i64).clamp(0, p_width as i64)) as usize;
+    let (dest_left, dest_top, dest_right, dest_bottom) = (clip_left, clip_top, clip_right, clip_bottom);
+    let first_column = (dest_left - p_x).clamp(0, p_width as i64) as usize;
+    let last_column = (dest_right - p_x).clamp(0, p_width as i64) as usize;
     if first_column >= last_column {
       return;
     }
-    for row in 0..p_height as usize {
-      let destination_row = p_y as i64 + row as i64;
-      if destination_row < 0 || destination_row >= self.height as i64 {
-        continue;
-      }
+    let first_row = (dest_top - p_y).clamp(0, p_height as i64) as usize;
+    let last_row = (dest_bottom - p_y).clamp(0, p_height as i64) as usize;
+    if first_row >= last_row {
+      return;
+    }
+    for row in first_row..last_row {
+      let destination_row = p_y + row as i64;
       let source = &p_rgba[(row * p_width as usize + first_column) * 4..(row * p_width as usize + last_column) * 4];
       let start = (destination_row as usize * self.width as usize + (p_x as i64 + first_column as i64) as usize) * 4;
-      let destination = &mut pixels[start..start + source.len()];
-      for (from, to) in source.chunks_exact(4).zip(destination.chunks_exact_mut(4)) {
-        match from[3] {
-          0 => {}
-          255 => to.copy_from_slice(from),
-          alpha => {
-            let alpha = alpha as u32;
-            for channel in 0..3 {
-              to[channel] = ((from[channel] as u32 * alpha + to[channel] as u32 * (255 - alpha)) / 255) as u8;
-            }
-            to[3] = (alpha + to[3] as u32 * (255 - alpha) / 255) as u8;
-          }
+      let destination = &mut p_pixels[start..start + source.len()];
+      let mut index = 0usize;
+      while index < source.len() {
+        let alpha = source[index + 3];
+        if alpha == 0 {
+          index += 4;
+          continue;
         }
+        if alpha == 255 {
+          // Copy spans of fully opaque pixels in one shot (common for UI).
+          let mut end = index + 4;
+          while end < source.len() && source[end + 3] == 255 {
+            end += 4;
+          }
+          destination[index..end].copy_from_slice(&source[index..end]);
+          index = end;
+          continue;
+        }
+        let alpha = alpha as u32;
+        for channel in 0..3 {
+          destination[index + channel] = ((source[index + channel] as u32 * alpha
+            + destination[index + channel] as u32 * (255 - alpha))
+            / 255) as u8;
+        }
+        destination[index + 3] = (alpha + destination[index + 3] as u32 * (255 - alpha) / 255) as u8;
+        index += 4;
       }
     }
   }
@@ -154,11 +250,30 @@ impl Canvas {
   /// the canvas, from 0 to 1 across and down, and returns red, green and blue from 0 to 1 (values outside are clamped).
   pub fn fill_with(&self, p_color: impl Fn(f32, f32) -> [f32; 3]) {
     let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
-    for (index, pixel) in self.pixels.lock().unwrap().chunks_exact_mut(4).enumerate() {
-      let (x, y) =
-        ((index as u32 % self.width.max(1)) as f32 / width, (index as u32 / self.width.max(1)) as f32 / height);
-      let [red, green, blue] = p_color(x, y);
-      pixel.copy_from_slice(&[to_byte(red), to_byte(green), to_byte(blue), 255]);
+    let mut pixels = self.pixels.lock().unwrap();
+    if !self.intact(&pixels) {
+      return;
+    }
+    let (clip_left, clip_top, clip_right, clip_bottom) = match self.clip {
+      None => (0i64, 0i64, self.width as i64, self.height as i64),
+      Some((x, y, w, h)) => {
+        let left = x.max(0) as i64;
+        let top = y.max(0) as i64;
+        let right = (x as i64 + w as i64).min(self.width as i64);
+        let bottom = (y as i64 + h as i64).min(self.height as i64);
+        (left, top, right, bottom)
+      }
+    };
+    if clip_left >= clip_right || clip_top >= clip_bottom {
+      return;
+    }
+    for row in clip_top..clip_bottom {
+      for column in clip_left..clip_right {
+        let (x, y) = (column as f32 / width, row as f32 / height);
+        let [red, green, blue] = p_color(x, y);
+        let at = (row as usize * self.width as usize + column as usize) * 4;
+        pixels[at..at + 4].copy_from_slice(&[to_byte(red), to_byte(green), to_byte(blue), 255]);
+      }
     }
   }
 }

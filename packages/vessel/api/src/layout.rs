@@ -6,11 +6,11 @@
 //! `.grow(..)` and `.span(..)`; a child that says nothing fills.
 //!
 //! The rules follow CSS closely enough to be familiar, with one difference: components have no size of their own (nothing
-//! to measure), so a child either has a fixed size or fills.
+//! to measure), so a child either has a size in [`Units`] or fills.
 
 use std::collections::HashSet;
 
-use crate::theme::{Background, Radius};
+use crate::theme::Background;
 
 /// Space on each side of a box, in pixels: the padding inside it, or the margin around it. Build one with [`Edges::all`],
 /// [`Edges::new`] or from a number or an array, in the order CSS uses: `8` is all four sides, `[8, 16]` is up and down then
@@ -154,26 +154,148 @@ pub enum Justify {
 }
 
 /// The size of one grid column or row.
+///
+/// Percentage tracks resolve against the grid's content width or height before subtracting gaps, rounded to the
+/// nearest pixel. Sized tracks shrink proportionally if they and the gaps do not fit; `Fr` tracks share what remains.
+/// Em tracks use the grid's computed font size.
+///
+/// ```
+/// use vessel_api::prelude::*;
+///
+/// let grid = Component::new("grid").with_display(Display::Grid)
+///   .with_columns([Track::Sized(Units::Percent(25.0)), Track::Sized(Units::Pixels(100)), Track::Fr(1.0)]);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Track {
-  /// Exactly this many pixels.
-  Px(u32),
+  /// A size in pixels, percent of the grid's content size along this axis, or em units of the grid's font size.
+  Sized(Units),
   /// A share of the room that is left, like CSS `fr`: `Fr(2.0)` gets twice as much as `Fr(1.0)`.
   Fr(f32),
 }
 
+impl From<Units> for Track {
+  fn from(p_units: Units) -> Self {
+    p_units.validate();
+    Self::Sized(p_units)
+  }
+}
+
+impl From<u32> for Track {
+  fn from(p_pixels: u32) -> Self {
+    Units::Pixels(p_pixels).into()
+  }
+}
+
+impl Track {
+  pub(crate) fn validate(self) {
+    if let Self::Sized(units) = self {
+      units.validate();
+    }
+  }
+}
+
 /// How much room a child wants along one axis.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Length {
   /// As much as is left over, shared with the other children that fill.
   Fill,
-  /// Exactly this many pixels, or less if the component has less.
-  Fixed(u32),
+  /// A size in pixels or percent of the containing block (the spanned cell in a grid).
+  Sized(Units),
+}
+
+/// A width, height, corner radius or font size in pixels, percent or font-relative em units.
+/// Plain `u32` values also mean pixels.
+///
+/// `Percent(50.0)` is half the parent's content width or height, before subtracting the child's margins. In a grid it
+/// is half the spanned cell instead. The result is rounded to the nearest pixel and follows resizing. Sizes are
+/// border-box: the child's padding and border are inside them. Layout still shrinks sizes to fit, like pixel sizes.
+/// For a radius, percentages use the shorter side of the component's border box, without rounding to whole pixels;
+/// `Percent(50.0)` makes a pill or circle. Radii are capped at half that side. An unset radius uses the theme.
+/// For font sizes, percentages use the inherited parent's computed font size (or the host's size for a root or a
+/// control that disables font inheritance). The result is rounded to the nearest pixel.
+/// `Em(1.5)` means 1.5 times the inherited font size when setting a font size. For width, height and radius it uses
+/// the component's computed font size; grid tracks use the grid's computed font size. Font changes update these sizes.
+///
+/// ```
+/// use vessel_api::prelude::*;
+///
+/// let panel = Component::new("panel").with_width(Units::Percent(50.0)).with_height(Units::Pixels(100));
+/// panel.set_width(Units::Percent(75.0));
+/// let pixel_sized = Component::new("fixed").width(100).height(50);
+/// let round = Component::new("round").with_radius(Units::Percent(50.0));
+/// round.set_radius(Units::Pixels(8));
+/// round.inherit_radius(); // restore the theme radius
+/// let text = Component::new("text").with_font_size(Units::Em(1.5)).with_width(Units::Em(10.0));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Units {
+  /// Exactly this many pixels.
+  Pixels(u32),
+  /// This percentage of the containing block. Must be finite and non-negative; values above 100 are allowed.
+  Percent(f32),
+  /// A multiple of the computed font size (the inherited size when setting font size).
+  /// Must be finite and non-negative.
+  Em(f32),
+}
+
+impl From<u32> for Units {
+  fn from(p_pixels: u32) -> Self {
+    Self::Pixels(p_pixels)
+  }
+}
+
+impl From<f64> for Units {
+  fn from(p_percent: f64) -> Self {
+    Self::Percent(p_percent as f32)
+  }
+}
+
+impl From<f32> for Units {
+  fn from(p_percent: f32) -> Self {
+    Self::Percent(p_percent)
+  }
+}
+
+impl From<Units> for Length {
+  fn from(p_units: Units) -> Self {
+    p_units.validate();
+    Self::Sized(p_units)
+  }
+}
+
+impl Units {
+  pub(crate) fn validate(self) {
+    if let Self::Percent(percent) = self {
+      assert!(percent.is_finite() && percent >= 0.0, "percentages must be finite and non-negative");
+    }
+    if let Self::Em(em) = self {
+      assert!(em.is_finite() && em >= 0.0, "em units must be finite and non-negative");
+    }
+  }
+
+  pub(crate) fn resolve(self, p_basis: u32, p_font_size: u32) -> f64 {
+    match self {
+      Self::Pixels(pixels) => pixels as f64,
+      Self::Percent(percent) => p_basis as f64 * percent as f64 / 100.0,
+      Self::Em(em) => p_font_size as f64 * em as f64,
+    }
+  }
+}
+
+impl Length {
+  fn pixels(self, p_basis: u32, p_font_size: u32) -> Option<u32> {
+    match self {
+      Self::Fill => None,
+      Self::Sized(units) => Some(units.resolve(p_basis, p_font_size).round() as u32),
+    }
+  }
 }
 
 /// What a child asks of its parent's layout, set on the child by whoever uses it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Hints {
+  /// The child's computed font size, supplied by its component during layout.
+  pub font_size: u32,
   pub width: Length,
   pub height: Length,
   /// The share of the spare room along a flex line a child that fills gets, like CSS `flex-grow`.
@@ -187,6 +309,7 @@ pub(crate) struct Hints {
 impl Default for Hints {
   fn default() -> Self {
     Self {
+      font_size: 16,
       width: Length::Fill,
       height: Length::Fill,
       grow: 1.0,
@@ -199,6 +322,8 @@ impl Default for Hints {
 /// How a component places its children.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Container {
+  /// The grid's computed font size, supplied by its component during layout.
+  pub font_size: u32,
   pub display: Display,
   pub direction: Direction,
   pub wrap: bool,
@@ -207,7 +332,7 @@ pub(crate) struct Container {
   pub margin: Edges,
   pub border_width: u32,
   pub border_color: Option<[u8; 4]>,
-  pub radius: Radius,
+  pub radius: Option<Units>,
   pub background: Background,
   pub justify: Justify,
   pub align: Align,
@@ -254,10 +379,10 @@ fn shares(p_total: u32, p_weights: &[f32]) -> Vec<u32> {
 }
 
 /// Where a child of `p_length` goes inside `p_room` pixels starting at `p_start`, as (start, size).
-fn place(p_length: Length, p_start: u32, p_room: u32, p_at: Align) -> (u32, u32) {
-  match p_length {
-    Length::Fill => (p_start, p_room),
-    Length::Fixed(pixels) => {
+fn place(p_length: Length, p_basis: u32, p_start: u32, p_room: u32, p_at: Align, p_font_size: u32) -> (u32, u32) {
+  match p_length.pixels(p_basis, p_font_size) {
+    None => (p_start, p_room),
+    Some(pixels) => {
       let size = pixels.min(p_room);
       let spare = p_room - size;
       let offset = match p_at {
@@ -274,15 +399,19 @@ fn stack_child(p_inner: Rect, p_hints: &Hints) -> Rect {
   let margin = p_hints.margin;
   let (x, width) = place(
     p_hints.width,
+    p_inner.width,
     p_inner.x as u32 + margin.left,
     p_inner.width.saturating_sub(margin.horizontal()),
     Align::Start,
+    p_hints.font_size,
   );
   let (y, height) = place(
     p_hints.height,
+    p_inner.height,
     p_inner.y as u32 + margin.top,
     p_inner.height.saturating_sub(margin.vertical()),
     Align::Start,
+    p_hints.font_size,
   );
   Rect {
     x: x as i32,
@@ -294,6 +423,7 @@ fn stack_child(p_inner: Rect, p_hints: &Hints) -> Rect {
 
 /// What flex needs to know about one child, in terms of "along the line" and "across it".
 struct Item {
+  font_size: u32,
   along: Length,
   across: Length,
   grow: f32,
@@ -305,13 +435,21 @@ struct Item {
 
 impl Item {
   /// The room it takes along the line before any spare room is shared: its margins and, if it has a fixed size, that.
-  fn committed(&self) -> u32 {
-    self.along_margin.0 + self.along_margin.1 + if let Length::Fixed(pixels) = self.along { pixels } else { 0 }
+  fn committed(&self, p_basis: u32) -> u32 {
+    self
+      .along_margin
+      .0
+      .saturating_add(self.along_margin.1)
+      .saturating_add(self.along.pixels(p_basis, self.font_size).unwrap_or(0))
   }
 
   /// The room it needs across the line: its margins and, if it has a fixed size, that.
-  fn across_needed(&self) -> u32 {
-    self.across_margin.0 + self.across_margin.1 + if let Length::Fixed(pixels) = self.across { pixels } else { 0 }
+  fn across_needed(&self, p_basis: u32) -> u32 {
+    self
+      .across_margin
+      .0
+      .saturating_add(self.across_margin.1)
+      .saturating_add(self.across.pixels(p_basis, self.font_size).unwrap_or(0))
   }
 }
 
@@ -329,6 +467,7 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
       let margin = hints.margin;
       if row {
         Item {
+          font_size: hints.font_size,
           along: hints.width,
           across: hints.height,
           grow: hints.grow,
@@ -337,6 +476,7 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
         }
       } else {
         Item {
+          font_size: hints.font_size,
           along: hints.height,
           across: hints.width,
           grow: hints.grow,
@@ -356,10 +496,14 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
   let mut used = 0u32;
   for (index, item) in items.iter().enumerate() {
     let line_has_children = lines.last().is_some_and(|line| !line.is_empty());
-    let needed = if line_has_children { used + gap + item.committed() } else { item.committed() };
+    let needed = if line_has_children {
+      used.saturating_add(gap).saturating_add(item.committed(along_room))
+    } else {
+      item.committed(along_room)
+    };
     if p_container.wrap && line_has_children && needed > along_room {
       lines.push(vec![index]);
-      used = item.committed();
+      used = item.committed(along_room);
     } else {
       lines.last_mut().expect("there is always a line").push(index);
       used = needed;
@@ -371,7 +515,7 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
   let line_across: Vec<u32> = if p_container.wrap {
     let mut heights: Vec<u32> = lines
       .iter()
-      .map(|line| line.iter().map(|&index| items[index].across_needed()).max().unwrap_or(0).min(across_room))
+      .map(|line| line.iter().map(|&index| items[index].across_needed(across_room)).max().unwrap_or(0).min(across_room))
       .collect();
     let taken: u32 = heights.iter().sum::<u32>() + gap * (heights.len() as u32 - 1);
     let empty: Vec<usize> = (0..heights.len()).filter(|&line| heights[line] == 0).collect();
@@ -396,8 +540,8 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
   for (line, &line_height) in lines.iter().zip(&line_across) {
     let count = line.len();
     let room = along_room.saturating_sub(gap * (count as u32 - 1));
-    let committed: Vec<u32> = line.iter().map(|&index| items[index].committed()).collect();
-    let fixed: u32 = committed.iter().sum();
+    let committed: Vec<u32> = line.iter().map(|&index| items[index].committed(along_room)).collect();
+    let fixed = committed.iter().fold(0u64, |total, &pixels| total + pixels as u64);
 
     // The room each child takes along the line, margins included: what it is committed to, shrunk together if it does not
     // all fit, or grown for the children that fill, which share what the others leave.
@@ -405,13 +549,13 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
     let weights_fill: Vec<f32> =
       line.iter().map(|&index| if items[index].along == Length::Fill { items[index].grow } else { 0.0 }).collect();
     let mut spare = 0;
-    let outer: Vec<u32> = if fixed > room {
+    let outer: Vec<u32> = if fixed > room as u64 {
       shares(room, &weights_committed)
     } else if weights_fill.iter().sum::<f32>() > 0.0 {
-      let grown = shares(room - fixed, &weights_fill);
+      let grown = shares(room - fixed as u32, &weights_fill);
       committed.iter().zip(grown).map(|(committed, grown)| committed + grown).collect()
     } else {
-      spare = room - fixed;
+      spare = room - fixed as u32;
       committed.clone()
     };
 
@@ -440,8 +584,14 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
       let along = along_at + item.along_margin.0;
       let along_size = outer[position].saturating_sub(item.along_margin.0 + item.along_margin.1);
       let across_room_inside = line_height.saturating_sub(item.across_margin.0 + item.across_margin.1);
-      let (across, across_size) =
-        place(item.across, across_at + item.across_margin.0, across_room_inside, p_container.align);
+      let (across, across_size) = place(
+        item.across,
+        across_room,
+        across_at + item.across_margin.0,
+        across_room_inside,
+        p_container.align,
+        item.font_size,
+      );
       rects[index] = if row {
         Rect {
           x: along as i32,
@@ -464,19 +614,25 @@ fn flex(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
   rects
 }
 
-/// The sizes of a grid's columns or rows in `p_room` pixels: pixel tracks as asked, or shrunk together if they do not fit,
+/// The sizes of a grid's columns or rows in `p_room` pixels: sized tracks as asked, or shrunk together if they do not fit,
 /// and `fr` tracks sharing what is left.
-fn track_sizes(p_tracks: &[Track], p_room: u32, p_gap: u32) -> Vec<u32> {
+fn track_sizes(p_tracks: &[Track], p_room: u32, p_gap: u32, p_font_size: u32) -> Vec<u32> {
   let room = p_room.saturating_sub(p_gap * (p_tracks.len() as u32).saturating_sub(1));
-  let pixels = |p_track: &Track| if let Track::Px(pixels) = p_track { *pixels } else { 0 };
-  let fixed: u32 = p_tracks.iter().map(pixels).sum();
-  if fixed > room {
-    return shares(room, &p_tracks.iter().map(|track| pixels(track) as f32).collect::<Vec<_>>());
+  let pixels: Vec<u32> = p_tracks
+    .iter()
+    .map(|track| {
+      track.validate();
+      if let Track::Sized(units) = track { units.resolve(p_room, p_font_size).round() as u32 } else { 0 }
+    })
+    .collect();
+  let fixed: u64 = pixels.iter().map(|&pixels| pixels as u64).sum();
+  if fixed > room as u64 {
+    return shares(room, &pixels.iter().map(|&pixels| pixels as f32).collect::<Vec<_>>());
   }
   let weights: Vec<f32> =
     p_tracks.iter().map(|track| if let Track::Fr(share) = track { *share } else { 0.0 }).collect();
-  let grown = shares(room - fixed, &weights);
-  p_tracks.iter().zip(grown).map(|(track, grown)| pixels(track) + grown).collect()
+  let grown = shares(room - fixed as u32, &weights);
+  pixels.into_iter().zip(grown).map(|(pixels, grown)| pixels + grown).collect()
 }
 
 /// Children in cells. Each is put in the first free place, left to right and then down, covering as many cells as it spans.
@@ -519,8 +675,8 @@ fn grid(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
   rows.resize(rows.len().max(used_rows), Track::Fr(1.0));
 
   let gap = p_container.gap;
-  let widths = track_sizes(&columns, p_inner.width, gap);
-  let heights = track_sizes(&rows, p_inner.height, gap);
+  let widths = track_sizes(&columns, p_inner.width, gap, p_container.font_size);
+  let heights = track_sizes(&rows, p_inner.height, gap, p_container.font_size);
   let starts = |p_sizes: &[u32], p_origin: i32| -> Vec<u32> {
     let mut at = p_origin as u32;
     p_sizes
@@ -548,10 +704,22 @@ fn grid(p_container: &Container, p_inner: Rect, p_hints: &[Hints]) -> Vec<Rect> 
     .map(|(hints, &(column, row, across, down))| {
       let margin = hints.margin;
       let (cell_width, cell_height) = (covering(&widths, column, across), covering(&heights, row, down));
-      let (x, width) =
-        place(hints.width, left[column] + margin.left, cell_width.saturating_sub(margin.horizontal()), across_align);
-      let (y, height) =
-        place(hints.height, top[row] + margin.top, cell_height.saturating_sub(margin.vertical()), p_container.align);
+      let (x, width) = place(
+        hints.width,
+        cell_width,
+        left[column] + margin.left,
+        cell_width.saturating_sub(margin.horizontal()),
+        across_align,
+        hints.font_size,
+      );
+      let (y, height) = place(
+        hints.height,
+        cell_height,
+        top[row] + margin.top,
+        cell_height.saturating_sub(margin.vertical()),
+        p_container.align,
+        hints.font_size,
+      );
       Rect {
         x: x as i32,
         y: y as i32,
@@ -567,6 +735,7 @@ mod tests {
   use super::*;
 
   const FILL: Hints = Hints {
+    font_size: 16,
     width: Length::Fill,
     height: Length::Fill,
     grow: 1.0,
@@ -581,8 +750,16 @@ mod tests {
 
   fn fixed(p_width: u32, p_height: u32) -> Hints {
     Hints {
-      width: Length::Fixed(p_width),
-      height: Length::Fixed(p_height),
+      width: Length::Sized(Units::Pixels(p_width)),
+      height: Length::Sized(Units::Pixels(p_height)),
+      ..FILL
+    }
+  }
+
+  fn percent(p_width: f32, p_height: f32) -> Hints {
+    Hints {
+      width: Units::Percent(p_width).into(),
+      height: Units::Percent(p_height).into(),
       ..FILL
     }
   }
@@ -628,6 +805,96 @@ mod tests {
       ..Container::default()
     };
     assert_eq!(layout(&container, (100, 50), &[FILL]), vec![rect(5, 5, 90, 40)]);
+  }
+
+  #[test]
+  fn percentages_use_the_content_box_before_child_margins_and_round_to_pixels() {
+    let container = Container {
+      padding: Edges::all(4),
+      border_width: 1,
+      ..Container::default()
+    };
+    let child = margin(percent(50.0, 25.0), Edges::all(2));
+    assert_eq!(layout(&container, (111, 90), &[child]), vec![rect(7, 7, 51, 20)]);
+    assert_eq!(layout(&container, (210, 170), &[child]), vec![rect(7, 7, 100, 40)]);
+  }
+
+  #[test]
+  fn invalid_percentages_are_rejected_explicitly() {
+    for percent in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+      assert!(std::panic::catch_unwind(|| Length::from(Units::Percent(percent))).is_err());
+    }
+  }
+
+  #[test]
+  fn zero_and_oversized_percentages_follow_pixel_size_constraints() {
+    for container in [Container::default(), flex(Direction::Row), grid(vec![], vec![])] {
+      assert_eq!(layout(&container, (100, 40), &[percent(0.0, 0.0)]), vec![rect(0, 0, 0, 0)]);
+      assert_eq!(layout(&container, (100, 40), &[percent(200.0, 200.0)]), vec![rect(0, 0, 100, 40)]);
+      assert_eq!(layout(&container, (0, 0), &[percent(50.0, 50.0)]), vec![rect(0, 0, 0, 0)]);
+    }
+  }
+
+  #[test]
+  fn percentage_sizes_share_flex_room_with_pixel_and_fill_sizes_on_both_axes() {
+    let hints = [percent(25.0, 50.0), fixed(10, 10), FILL];
+    assert_eq!(
+      layout(&flex(Direction::Row), (100, 40), &hints),
+      vec![rect(0, 0, 25, 20), rect(25, 0, 10, 10), rect(35, 0, 65, 40)]
+    );
+    assert_eq!(
+      layout(&flex(Direction::Column), (40, 100), &hints),
+      vec![rect(0, 0, 10, 50), rect(0, 50, 10, 10), rect(0, 60, 40, 40)]
+    );
+  }
+
+  #[test]
+  fn percentages_resolve_before_flex_wrapping_and_use_the_parent_cross_size() {
+    let container = Container {
+      wrap: true,
+      gap: 2,
+      align: Align::Center,
+      ..flex(Direction::Row)
+    };
+    assert_eq!(
+      layout(&container, (100, 100), &[percent(60.0, 25.0), percent(60.0, 25.0)]),
+      vec![rect(0, 0, 60, 25), rect(0, 27, 60, 25)]
+    );
+  }
+
+  #[test]
+  fn percentage_sizes_shrink_together_when_a_flex_line_is_overcommitted() {
+    assert_eq!(
+      layout(&flex(Direction::Row), (100, 40), &[percent(75.0, 50.0), percent(75.0, 50.0)]),
+      vec![rect(0, 0, 50, 20), rect(50, 0, 50, 20)]
+    );
+    assert_eq!(
+      layout(&flex(Direction::Row), (100, 40), &[percent(f32::MAX, 50.0), percent(f32::MAX, 50.0)]),
+      vec![rect(0, 0, 50, 20), rect(50, 0, 50, 20)]
+    );
+  }
+
+  #[test]
+  fn grid_percentages_use_the_spanned_cell_including_gaps_and_honor_alignment() {
+    let container = Container {
+      gap: 10,
+      align: Align::Center,
+      justify: Justify::End,
+      ..grid(
+        vec![Track::Sized(Units::Pixels(40)), Track::Sized(Units::Pixels(50))],
+        vec![Track::Sized(Units::Pixels(30))],
+      )
+    };
+    let child = Hints {
+      span: (2, 1),
+      margin: Edges::all(2),
+      ..percent(50.0, 50.0)
+    };
+    assert_eq!(layout(&container, (100, 30), &[child]), vec![rect(48, 7, 50, 15)]);
+    assert_eq!(
+      layout(&container, (100, 30), &[percent(50.0, 50.0), percent(50.0, 50.0)]),
+      vec![rect(20, 7, 20, 15), rect(75, 7, 25, 15)]
+    );
   }
 
   // --- flex
@@ -705,7 +972,7 @@ mod tests {
       ..flex(Direction::Row)
     };
     let fills_across = Hints {
-      width: Length::Fixed(10),
+      width: Length::Sized(Units::Pixels(10)),
       ..FILL
     };
     let rects = layout(&container, (100, 40), &[fixed(10, 10), fills_across]);
@@ -766,7 +1033,10 @@ mod tests {
 
   #[test]
   fn a_grid_child_sits_inside_its_margin_in_its_cell() {
-    let container = grid(vec![Track::Px(50), Track::Px(50)], vec![Track::Px(20)]);
+    let container = grid(
+      vec![Track::Sized(Units::Pixels(50)), Track::Sized(Units::Pixels(50))],
+      vec![Track::Sized(Units::Pixels(20))],
+    );
     let rects = layout(&container, (100, 20), &[FILL, margin(FILL, Edges::all(5))]);
     assert_eq!(rects, vec![rect(0, 0, 50, 20), rect(55, 5, 40, 10)]);
   }
@@ -791,8 +1061,56 @@ mod tests {
   // --- grid
 
   #[test]
+  fn percentage_tracks_use_content_size_before_gaps_and_share_the_rest_with_fractional_tracks() {
+    let tracks = [
+      Track::Sized(Units::Percent(25.0)),
+      Track::Sized(Units::Pixels(10)),
+      Track::Fr(1.0),
+    ];
+    assert_eq!(track_sizes(&tracks, 100, 5, 16), vec![25, 10, 55]);
+    assert_eq!(track_sizes(&tracks, 200, 5, 16), vec![50, 10, 130]);
+    let container = Container {
+      padding: Edges::all(5),
+      border_width: 1,
+      gap: 5,
+      ..grid(tracks.to_vec(), vec![Track::Sized(Units::Percent(50.0)), Track::Fr(1.0)])
+    };
+    let rects = layout(&container, (112, 92), &[FILL; 6]);
+    assert_eq!(rects[0], rect(6, 6, 25, 40));
+    assert_eq!(rects[2], rect(51, 6, 55, 40));
+    assert_eq!(rects[3], rect(6, 51, 25, 35));
+  }
+
+  #[test]
+  fn percentage_tracks_round_and_shrink_without_overflow() {
+    assert_eq!(track_sizes(&[Track::Sized(Units::Percent(50.0)), Track::Fr(1.0)], 101, 0, 16), vec![51, 50]);
+    let oversized = [
+      Track::Sized(Units::Percent(75.0)),
+      Track::Sized(Units::Percent(75.0)),
+      Track::Fr(1.0),
+    ];
+    assert_eq!(track_sizes(&oversized, 100, 5, 16), vec![45, 45, 0]);
+    assert_eq!(track_sizes(&oversized, 0, 5, 16), vec![0, 0, 0]);
+    let huge = [Track::Sized(Units::Percent(f32::MAX)); 2];
+    assert_eq!(track_sizes(&huge, 100, 0, 16), vec![50, 50]);
+    assert_eq!(track_sizes(&[Track::Sized(Units::Percent(0.0)), Track::Fr(1.0)], 100, 0, 16), vec![0, 100]);
+  }
+
+  #[test]
+  fn tracks_convert_units_and_pixels_without_duplicating_unit_variants() {
+    assert_eq!(Track::from(20), Track::Sized(Units::Pixels(20)));
+    assert_eq!(Track::from(Units::Percent(25.0)), Track::Sized(Units::Percent(25.0)));
+    for percent in [-1.0, f32::NAN, f32::INFINITY] {
+      assert!(std::panic::catch_unwind(|| track_sizes(&[Track::Sized(Units::Percent(percent))], 100, 0, 16)).is_err());
+    }
+  }
+
+  #[test]
   fn a_grid_places_children_in_cells_by_its_tracks() {
-    let container = grid(vec![Track::Px(20), Track::Fr(1.0), Track::Fr(3.0)], vec![Track::Px(10), Track::Fr(1.0)]);
+    let container = grid(
+      vec![Track::Sized(Units::Pixels(20)), Track::Fr(1.0), Track::Fr(3.0)],
+      vec![Track::Sized(Units::Pixels(10)), Track::Fr(1.0)],
+    );
     let rects = layout(&container, (100, 40), &[FILL, FILL, FILL, FILL, FILL, FILL]);
     assert_eq!(rects[0], rect(0, 0, 20, 10));
     assert_eq!(rects[1], rect(20, 0, 20, 10));
@@ -803,7 +1121,10 @@ mod tests {
 
   #[test]
   fn a_child_can_span_several_cells() {
-    let container = grid(vec![Track::Fr(1.0), Track::Fr(1.0), Track::Fr(1.0)], vec![Track::Px(10), Track::Px(10)]);
+    let container = grid(
+      vec![Track::Fr(1.0), Track::Fr(1.0), Track::Fr(1.0)],
+      vec![Track::Sized(Units::Pixels(10)), Track::Sized(Units::Pixels(10))],
+    );
     let wide = Hints { span: (2, 1), ..FILL };
     let rects = layout(&container, (90, 20), &[wide, FILL, FILL]);
     assert_eq!(rects[0], rect(0, 0, 60, 10));

@@ -5,6 +5,7 @@ import { type EditSection } from '../edit-sections';
 export const BLEMISH_TOOL_KEY = 'action-blemish';
 export const SKIN_SMOOTH_KEY = 'action-skin-smooth';
 export const SKIN_TAN_KEY = 'action-skin-tan';
+export const SKIN_TONE_KEY = 'action-skin-tone';
 
 export const beauty: EditSection = {
   key: 'section-beauty',
@@ -34,6 +35,18 @@ export const beauty: EditSection = {
       applyOnSelect: false,
       picker: 'skin-tan',
       live: value => EffectSpec.SkinTan.new({ offset: value }),
+    },
+    {
+      kind: 'slider',
+      key: SKIN_TONE_KEY,
+      label: 'Skin Tone',
+      // Negative lightens the original skin; positive darkens it.
+      min: -400,
+      max: 400,
+      step: 1,
+      defaultValue: 0,
+      applyOnSelect: false,
+      live: value => EffectSpec.SkinTone.new({ amount: value }),
     },
     { kind: 'tool', key: BLEMISH_TOOL_KEY, label: 'Blemish' },
   ],

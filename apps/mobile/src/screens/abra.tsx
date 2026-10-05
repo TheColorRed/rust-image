@@ -1,7 +1,7 @@
 import { AbraImage, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
 import { useEffect, useRef, useState } from 'react';
 import { Button, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import FilePicker, { type PickedImage } from '@/src/components/file-picker';
+import { FilePicker, type PickedImage } from '@/src/components/file-picker';
 import { Slider } from '@/src/components/slider';
 import { VesselView } from '@vessel/react-native';
 import { useLiveSession } from '@/src/hooks/useLiveSession';

@@ -9,10 +9,10 @@ use pub_sub::{BehaviorSubject, Observable, Observer, Subject, Subscription};
 use vessel_engine::{Frame, GpuFrame, MediaSource, Pacing, Waker};
 
 use crate::layout::Edges;
-use crate::layout::{Align, Container, Direction, Display, Hints, Justify, Length, Rect, Track, layout};
+use crate::layout::{Align, Container, Direction, Display, Hints, Justify, Length, Rect, Track, Units, layout};
+use crate::theme::Background;
 use crate::theme::ThemePatch;
-use crate::theme::{Background, Radius};
-use crate::{Canvas, Face, Font, GpuPicture, KeyEvent, PointerEvent, Quit, Theme};
+use crate::{Canvas, Face, Font, GpuPicture, KeyEvent, PointerEvent, Quit, TextAlign, Theme};
 
 /// A child, and the picture it last drew, kept until it changes.
 struct Slot {
@@ -27,6 +27,17 @@ struct Inner {
   size: BehaviorSubject<(u32, u32)>,
   /// True when the component needs drawing again.
   dirty: AtomicBool,
+  /// True when this component itself must be redrawn (not only one of its children).
+  dirty_self: AtomicBool,
+  /// True when at least one descendant changed (layout may or may not change).
+  dirty_children: AtomicBool,
+  /// Cached last composed frame, for partial (dirty-rect) updates.
+  cached_frame: Mutex<Option<Frame>>,
+  /// This component's drawing before its children and border, restored under child-only updates.
+  /// Only parents need a separate layer; leaves already keep their final frame.
+  cached_paint: Mutex<Option<Frame>>,
+  /// Cached child layout (child identity + rect), to know when a partial update is safe.
+  cached_placed: Mutex<Option<Vec<(usize, Rect)>>>,
   /// Wakes the engine, so a change is drawn even if the engine is asleep.
   waker: Mutex<Option<Waker>>,
   /// One `Subject` for each type of event the component has sent or been listened to for.
@@ -41,8 +52,9 @@ struct Inner {
   upstream: Mutex<Vec<Box<dyn Any + Send + Sync>>>,
 
   /// The text size and typeface this component sets for itself and everything inside it, or `None` to use its parent's.
-  font_size: Mutex<Option<u32>>,
+  font_size: Mutex<Option<Units>>,
   font_face: Mutex<Option<Face>>,
+  text_align: Mutex<Option<TextAlign>>,
   /// What a host says to use where nothing in the app has set a font. Read from the top of the tree.
   host_font: Mutex<Option<Font>>,
   /// False for a form control: it does not take the font from its parents, only from the host (like a browser's `<button>`).
@@ -68,16 +80,29 @@ struct Inner {
 }
 
 impl Inner {
-  /// Notes that the component needs drawing again, and wakes the engine. A change in a child is a change in its parent,
-  /// because the parent's picture contains the child's.
-  fn changed(&self) {
-    self.dirty.store(true, Ordering::SeqCst);
+  fn wake(&self) {
     if let Some(waker) = self.waker.lock().unwrap().as_ref() {
       waker.wake();
     }
-    let parent = self.parent.lock().unwrap().upgrade();
-    if let Some(parent) = parent {
-      parent.changed();
+  }
+
+  /// Notes that this component itself needs drawing again.
+  fn changed_self(&self) {
+    self.dirty.store(true, Ordering::SeqCst);
+    self.dirty_self.store(true, Ordering::SeqCst);
+    self.wake();
+    if let Some(parent) = self.parent.lock().unwrap().upgrade() {
+      parent.changed_children();
+    }
+  }
+
+  /// Notes that a descendant changed, so the parent's picture needs updating.
+  fn changed_children(&self) {
+    self.dirty.store(true, Ordering::SeqCst);
+    self.dirty_children.store(true, Ordering::SeqCst);
+    self.wake();
+    if let Some(parent) = self.parent.lock().unwrap().upgrade() {
+      parent.changed_children();
     }
   }
 }
@@ -102,6 +127,7 @@ impl WeakComponent {
 /// A [`Component`] is, and so is a reusable component: a struct that keeps a `Component` inside and implements
 /// `Deref<Target = Component>`, so its events, layout methods and `add` are available directly. The `Component` derive
 /// writes that for an app's own type and checks that the field it names is renderable.
+/// References and smart pointers to renderable types are renderable too, so a parent can add a borrowed control.
 pub trait Renderable {
   /// The component that is drawn.
   fn component(&self) -> &Component;
@@ -113,9 +139,12 @@ impl Renderable for Component {
   }
 }
 
-impl<T: Deref<Target = Component>> Renderable for T {
+impl<T: Deref> Renderable for T
+where
+  T::Target: Renderable,
+{
   fn component(&self) -> &Component {
-    self.deref()
+    self.deref().component()
   }
 }
 
@@ -156,7 +185,7 @@ macro_rules! setting {
     #[doc = concat!("Sets ", $about, ".")]
     pub fn $set(&self, p_value: impl Into<$type>) {
       self.inner.container.lock().unwrap().$field = p_value.into();
-      self.inner.changed();
+      self.inner.changed_self();
     }
 
     #[doc = concat!("Sets ", $about, ", and returns the component so calls can be chained.")]
@@ -169,7 +198,7 @@ macro_rules! setting {
     #[doc = concat!("Sets ", $about, ".")]
     pub fn $set(&self, p_value: $type) {
       self.inner.container.lock().unwrap().$field = p_value;
-      self.inner.changed();
+      self.inner.changed_self();
     }
 
     #[doc = concat!("Sets ", $about, ", and returns the component so calls can be chained.")]
@@ -181,7 +210,8 @@ macro_rules! setting {
 }
 
 impl Component {
-  /// Creates a component with no size and nothing to draw yet. Its children are stacked until
+  /// Creates a component with no size and nothing to draw yet. Corner rounding follows the theme until explicitly set.
+  /// Its children are stacked until
   /// [`with_display`](Self::with_display) says otherwise.
   /// - `p_name`: A name for telling components apart when debugging.
   pub fn new(p_name: impl Into<String>) -> Self {
@@ -190,6 +220,11 @@ impl Component {
         name: p_name.into(),
         size: BehaviorSubject::new((0, 0)),
         dirty: AtomicBool::new(true),
+        dirty_self: AtomicBool::new(true),
+        dirty_children: AtomicBool::new(false),
+        cached_frame: Mutex::new(None),
+        cached_paint: Mutex::new(None),
+        cached_placed: Mutex::new(None),
         waker: Mutex::new(None),
         events: Mutex::new(HashMap::new()),
         watching: Mutex::new(Vec::new()),
@@ -198,6 +233,7 @@ impl Component {
         upstream: Mutex::new(Vec::new()),
         font_size: Mutex::new(None),
         font_face: Mutex::new(None),
+        text_align: Mutex::new(None),
         host_font: Mutex::new(None),
         inherits_font: AtomicBool::new(true),
         theme: Mutex::new(ThemePatch::new()),
@@ -219,7 +255,7 @@ impl Component {
     component.events::<GpuPicture>().subscribe(move |picture| {
       if let Some(inner) = weak.upgrade() {
         *inner.gpu_frame.lock().unwrap() = picture.0.clone();
-        inner.changed();
+        inner.changed_self();
       }
     });
     component
@@ -248,7 +284,7 @@ impl Component {
     let weak = Arc::downgrade(&self.inner);
     let subscription = p_source.subscribe(move |_| {
       if let Some(inner) = weak.upgrade() {
-        inner.changed();
+        inner.changed_self();
       }
     });
     self.inner.watching.lock().unwrap().push(subscription);
@@ -315,14 +351,30 @@ impl Component {
     u32,
     "the width in pixels of the border drawn just inside the component's edge (0 for none), like CSS `border-width`"
   );
-  setting!(
-    into
-    with_radius,
-    set_radius,
-    radius,
-    Radius,
-    "how much the component's corners are rounded: a number of pixels or `Radius::Theme`, like CSS `border-radius`. Not inherited"
-  );
+  /// Sets corner rounding in pixels or percent of the shorter border-box side. Plain integers mean pixels.
+  /// `Units::Percent(50.0)` makes a pill or circle. Values are capped at half the shorter side.
+  /// This setting is not inherited; call [`inherit_radius`](Self::inherit_radius) to follow the theme again.
+  ///
+  /// # Panics
+  /// Panics if a percentage is negative or not finite.
+  pub fn set_radius(&self, p_radius: impl Into<Units>) {
+    let radius = p_radius.into();
+    radius.validate();
+    self.inner.container.lock().unwrap().radius = Some(radius);
+    self.inner.changed_self();
+  }
+
+  /// Sets corner rounding and returns the component. See [`set_radius`](Self::set_radius).
+  pub fn with_radius(&self, p_radius: impl Into<Units>) -> Self {
+    self.set_radius(p_radius);
+    self.clone()
+  }
+
+  /// Removes the explicit corner rounding so it follows the theme, as a new component does.
+  pub fn inherit_radius(&self) {
+    self.inner.container.lock().unwrap().radius = None;
+    self.inner.changed_self();
+  }
   setting!(
     with_background,
     set_background,
@@ -332,10 +384,17 @@ impl Component {
   );
   setting!(with_justify, set_justify, justify, Justify, "how spare room along the line is shared out");
   setting!(with_align, set_align, align, Align, "where children sit across the line they are in");
-  /// Sets the widths of a grid component's columns, for example `[Track::Px(200), Track::Fr(1.0)]`.
+  /// Sets the widths of a grid component's columns, for example `[Track::Sized(Units::Pixels(200)), Track::Fr(1.0)]`.
+  ///
+  /// # Panics
+  /// Panics if a sized track's percentage is negative or not finite.
   pub fn set_columns(&self, p_columns: impl IntoIterator<Item = Track>) {
-    self.inner.container.lock().unwrap().columns = p_columns.into_iter().collect();
-    self.inner.changed();
+    let columns: Vec<Track> = p_columns.into_iter().collect();
+    for track in &columns {
+      track.validate();
+    }
+    self.inner.container.lock().unwrap().columns = columns;
+    self.inner.changed_self();
   }
 
   /// Sets the widths of a grid component's columns, and returns the component so calls can be chained.
@@ -345,9 +404,16 @@ impl Component {
   }
 
   /// Sets the heights of a grid component's rows.
+  ///
+  /// # Panics
+  /// Panics if a sized track's percentage is negative or not finite.
   pub fn set_rows(&self, p_rows: impl IntoIterator<Item = Track>) {
-    self.inner.container.lock().unwrap().rows = p_rows.into_iter().collect();
-    self.inner.changed();
+    let rows: Vec<Track> = p_rows.into_iter().collect();
+    for track in &rows {
+      track.validate();
+    }
+    self.inner.container.lock().unwrap().rows = rows;
+    self.inner.changed_self();
   }
 
   /// Sets the heights of a grid component's rows, and returns the component so calls can be chained.
@@ -360,12 +426,13 @@ impl Component {
   /// from the nearest parent that did, otherwise from the host (see [`set_default_font`](Self::set_default_font)), and
   /// failing that the built-in default. A canvas given to `draw` already has it, as [`Canvas::font`].
   pub fn font(&self) -> Font {
-    let (mut size, mut face) = (None, None);
+    let mut sizes = Vec::new();
+    let mut face = None;
     let mut inner = Arc::clone(&self.inner);
     let mut reading = true;
     let host = loop {
       if reading {
-        size = size.or(*inner.font_size.lock().unwrap());
+        sizes.push(*inner.font_size.lock().unwrap());
         face = face.or_else(|| inner.font_face.lock().unwrap().clone());
         // A form control reads its own settings and then goes straight to the host.
         reading = inner.inherits_font.load(Ordering::SeqCst);
@@ -377,19 +444,63 @@ impl Component {
       }
     };
     let base = host.unwrap_or_default();
-    Font::new(face.unwrap_or(base.face), size.unwrap_or(base.size))
+    let size = sizes.into_iter().rev().fold(base.size, |inherited, units| {
+      units.map_or(inherited, |units| units.resolve(inherited, inherited).round() as u32)
+    });
+    Font::new(face.unwrap_or(base.face), size)
   }
 
-  /// Sets the text size in pixels for this component and everything inside it that has not set its own, and redraws them.
-  pub fn set_font_size(&self, p_size: u32) {
-    *self.inner.font_size.lock().unwrap() = Some(p_size);
+  /// Sets the text size in pixels, percent or em units relative to the inherited font size, and redraws its children.
+  /// Plain integers mean pixels. Relative sizes are rounded to the nearest pixel and follow changes to the parent's font.
+  /// A component that disables font inheritance uses the host's font size as its percentage basis.
+  ///
+  /// # Panics
+  /// Panics if a percentage or em value is negative or not finite.
+  pub fn set_font_size(&self, p_size: impl Into<Units>) {
+    let size = p_size.into();
+    size.validate();
+    *self.inner.font_size.lock().unwrap() = Some(size);
     self.style_changed();
   }
 
   /// Sets the text size, and returns the component so calls can be chained.
-  pub fn with_font_size(&self, p_size: u32) -> Self {
+  pub fn with_font_size(&self, p_size: impl Into<Units>) -> Self {
     self.set_font_size(p_size);
     self.clone()
+  }
+
+  /// The nearest explicit horizontal text alignment, or left alignment if none is set.
+  /// Text alignment inherits independently of font inheritance.
+  pub fn text_align(&self) -> TextAlign {
+    let mut inner = Arc::clone(&self.inner);
+    loop {
+      if let Some(align) = *inner.text_align.lock().unwrap() {
+        return align;
+      }
+      let parent = inner.parent.lock().unwrap().upgrade();
+      match parent {
+        Some(parent) => inner = parent,
+        None => return TextAlign::default(),
+      }
+    }
+  }
+
+  /// Sets horizontal text alignment for this component and descendants without an override.
+  pub fn set_text_align(&self, p_align: TextAlign) {
+    *self.inner.text_align.lock().unwrap() = Some(p_align);
+    self.style_changed();
+  }
+
+  /// Sets horizontal text alignment and returns the component.
+  pub fn with_text_align(&self, p_align: TextAlign) -> Self {
+    self.set_text_align(p_align);
+    self.clone()
+  }
+
+  /// Restores horizontal text alignment inherited from the parent.
+  pub fn inherit_text_align(&self) {
+    *self.inner.text_align.lock().unwrap() = None;
+    self.style_changed();
   }
 
   /// Sets the typeface for this component and everything inside it that has not set its own, and redraws them.
@@ -476,7 +587,7 @@ impl Component {
   /// is used.
   pub fn set_border_color(&self, p_rgba: [u8; 4]) {
     self.inner.container.lock().unwrap().border_color = Some(p_rgba);
-    self.inner.changed();
+    self.inner.changed_self();
   }
 
   /// Sets the color of the border, and returns the component so calls can be chained.
@@ -489,27 +600,56 @@ impl Component {
   fn style_changed(&self) {
     fn mark(p_inner: &Inner) {
       p_inner.dirty.store(true, Ordering::SeqCst);
+      p_inner.dirty_self.store(true, Ordering::SeqCst);
+      p_inner.dirty_children.store(true, Ordering::SeqCst);
       for slot in p_inner.children.lock().unwrap().iter() {
         mark(&slot.component.inner);
       }
     }
     mark(&self.inner);
-    self.inner.changed();
+    self.inner.changed_self();
   }
 
-  /// Asks its parent's layout for exactly `p_pixels` of width. Set it on the child, where it is used, not where it is
-  /// defined. Returns the component so calls can be chained.
-  pub fn width(&self, p_pixels: u32) -> Self {
-    self.inner.hints.lock().unwrap().width = Length::Fixed(p_pixels);
-    self.inner.changed();
+  /// Asks its parent's layout for a width in pixels or percent (see [`Units`]). Plain numbers mean pixels.
+  ///
+  /// # Panics
+  /// Panics if a percentage is negative or not finite.
+  pub fn set_width(&self, p_width: impl Into<Units>) {
+    let width = Length::from(p_width.into());
+    self.inner.hints.lock().unwrap().width = width;
+    self.inner.changed_self();
+  }
+
+  /// Sets the width (see [`set_width`](Self::set_width)), and returns the component so calls can be chained.
+  pub fn with_width(&self, p_width: impl Into<Units>) -> Self {
+    self.set_width(p_width);
     self.clone()
   }
 
-  /// Asks its parent's layout for exactly `p_pixels` of height. Returns the component so calls can be chained.
-  pub fn height(&self, p_pixels: u32) -> Self {
-    self.inner.hints.lock().unwrap().height = Length::Fixed(p_pixels);
-    self.inner.changed();
+  /// Shorthand for [`with_width`](Self::with_width). Set it on the child, where it is used, not where it is defined.
+  pub fn width(&self, p_width: impl Into<Units>) -> Self {
+    self.with_width(p_width)
+  }
+
+  /// Asks its parent's layout for a height in pixels or percent (see [`Units`]). Plain numbers mean pixels.
+  ///
+  /// # Panics
+  /// Panics if a percentage is negative or not finite.
+  pub fn set_height(&self, p_height: impl Into<Units>) {
+    let height = Length::from(p_height.into());
+    self.inner.hints.lock().unwrap().height = height;
+    self.inner.changed_self();
+  }
+
+  /// Sets the height (see [`set_height`](Self::set_height)), and returns the component so calls can be chained.
+  pub fn with_height(&self, p_height: impl Into<Units>) -> Self {
+    self.set_height(p_height);
     self.clone()
+  }
+
+  /// Shorthand for [`with_height`](Self::with_height).
+  pub fn height(&self, p_height: impl Into<Units>) -> Self {
+    self.with_height(p_height)
   }
 
   /// Asks its parent's layout for all the room that is left, in both directions, shared equally with the other children
@@ -520,7 +660,7 @@ impl Component {
       span,
       ..Hints::default()
     };
-    self.inner.changed();
+    self.inner.changed_self();
     self.clone()
   }
 
@@ -528,14 +668,14 @@ impl Component {
   /// with `grow(2.0)` gets twice as much as one with `grow(1.0)`. Returns the component so calls can be chained.
   pub fn grow(&self, p_share: f32) -> Self {
     self.inner.hints.lock().unwrap().grow = p_share;
-    self.inner.changed();
+    self.inner.changed_self();
     self.clone()
   }
 
   /// Makes this child cover `p_columns` grid columns and `p_rows` rows. Returns the component so calls can be chained.
   pub fn span(&self, p_columns: u16, p_rows: u16) -> Self {
     self.inner.hints.lock().unwrap().span = (p_columns, p_rows);
-    self.inner.changed();
+    self.inner.changed_self();
     self.clone()
   }
 
@@ -571,7 +711,7 @@ impl Component {
     });
     self.inner.watching.lock().unwrap().push(quit);
 
-    self.inner.changed();
+    self.inner.changed_self();
     self.clone()
   }
 
@@ -600,7 +740,7 @@ impl Component {
   /// A reusable component adds its own event types (`Clicked`, `Changed`) the same way.
   pub fn subject<E: Send + Sync + 'static>(&self) -> Subject<E> {
     if TypeId::of::<E>() == TypeId::of::<Canvas>() {
-      self.inner.changed();
+      self.inner.changed_self();
     }
     self.events::<E>()
   }
@@ -625,11 +765,14 @@ impl Component {
     let hints: Vec<Hints> = children
       .iter()
       .map(|slot| Hints {
+        font_size: slot.component.font().size,
         margin: slot.component.inner.container.lock().unwrap().margin,
         ..*slot.component.inner.hints.lock().unwrap()
       })
       .collect();
-    let rects = layout(&self.inner.container.lock().unwrap(), self.inner.size.value(), &hints);
+    let mut style = self.inner.container.lock().unwrap().clone();
+    style.font_size = self.font().size;
+    let rects = layout(&style, self.inner.size.value(), &hints);
     children.iter().map(|slot| slot.component.clone()).zip(rects).collect()
   }
 
@@ -746,7 +889,7 @@ impl Component {
           let again = weak.clone();
           let subscription = (read.on_change)(Arc::new(move || {
             if let Some(inner) = again.upgrade() {
-              inner.changed();
+              inner.changed_self();
             }
           }));
           inner.tracked.lock().unwrap().insert(read.id, subscription);
@@ -758,27 +901,179 @@ impl Component {
     self.inner.tracked.lock().unwrap().retain(|id, _| seen.lock().unwrap().contains(id));
   }
 
-  /// Draws the component and everything inside it. Only the children that changed are drawn again.
+  /// Draws the component and everything inside it. Child-only updates restore this component's cached drawing
+  /// under the dirty region, without running its drawing listeners or changing their reactive subscriptions.
   fn compose(&self) -> Frame {
+    fn intersects(p_rect: &Rect, p_clip: (i32, i32, i32, i32)) -> bool {
+      let (left, top, right, bottom) = p_clip;
+      let r_left = p_rect.x;
+      let r_top = p_rect.y;
+      let r_right = p_rect.x + p_rect.width as i32;
+      let r_bottom = p_rect.y + p_rect.height as i32;
+      r_left < right && r_right > left && r_top < bottom && r_bottom > top
+    }
+
     let (width, height) = self.inner.size.value();
 
     // Every child is given its rectangle first. A new size marks things as changed, which is why the flag is cleared only
     // afterwards: laying out is not a reason to draw again.
     let placed = self.layout_children();
+
     // Cleared before drawing, so a change that happens while drawing asks for another frame.
+    let dirty_self = self.inner.dirty_self.swap(false, Ordering::SeqCst);
+    let _dirty_children = self.inner.dirty_children.swap(false, Ordering::SeqCst);
     self.inner.dirty.store(false, Ordering::SeqCst);
 
-    let mut canvas = Canvas::new(width, height);
-    canvas.set_font(self.font());
+    let placed_ids: Vec<(usize, Rect)> =
+      placed.iter().map(|(child, rect)| (Arc::as_ptr(&child.inner) as usize, *rect)).collect();
+
+    let layout_unchanged = {
+      let cached = self.inner.cached_placed.lock().unwrap();
+      cached.as_ref().is_some_and(|old| *old == placed_ids)
+    };
+
     let theme = self.theme();
     let style = self.inner.container.lock().unwrap().clone();
-    let radius = style.radius.resolve(&theme);
-    // The box first: the background, following the rounded corners.
+    let border = style.border_width;
+    let border_color = style.border_color.unwrap_or(theme.border);
+
+    // Compose children (only the ones that changed) and compute the dirty union in parent coordinates.
+    let (dirty_union, child_frames): (Option<(i32, i32, i32, i32)>, Vec<Option<Frame>>) = {
+      let mut children = self.inner.children.lock().unwrap();
+      let mut dirty_union: Option<(i32, i32, i32, i32)> = None; // left, top, right, bottom
+      let mut frames = Vec::with_capacity(children.len());
+      for (slot, (_, rect)) in children.iter_mut().zip(&placed) {
+        let child_dirty = slot.cache.is_none() || slot.component.inner.dirty.load(Ordering::SeqCst);
+        if child_dirty {
+          slot.cache = Some(slot.component.compose());
+          let left = rect.x;
+          let top = rect.y;
+          let right = rect.x + rect.width as i32;
+          let bottom = rect.y + rect.height as i32;
+          dirty_union = Some(match dirty_union {
+            None => (left, top, right, bottom),
+            Some((l, t, r, b)) => (l.min(left), t.min(top), r.max(right), b.max(bottom)),
+          });
+        }
+        frames.push(slot.cache.clone());
+      }
+      (dirty_union, frames)
+    };
+
+    // If we can safely reuse the existing pixels, only touch the dirty area.
+    let paint = self.inner.cached_paint.lock().unwrap().clone();
+    let can_partial = !dirty_self
+      && layout_unchanged
+      && (dirty_union.is_none() || paint.as_ref().is_some_and(|frame| (frame.width, frame.height) == (width, height)));
+
+    if can_partial {
+      let cached = self.inner.cached_frame.lock().unwrap().take();
+      if let Some(cached) = cached {
+        if cached.width == width && cached.height == height {
+          // No child actually re-rendered: return the cached frame.
+          if dirty_union.is_none() {
+            *self.inner.cached_frame.lock().unwrap() = Some(cached.clone());
+            *self.inner.cached_placed.lock().unwrap() = Some(placed_ids);
+            return cached;
+          }
+
+          let (mut left, mut top, mut right, mut bottom) = dirty_union.unwrap();
+          // Expand for AA safety.
+          left -= 1;
+          top -= 1;
+          right += 1;
+          bottom += 1;
+          left = left.clamp(0, width as i32);
+          top = top.clamp(0, height as i32);
+          right = right.clamp(0, width as i32);
+          bottom = bottom.clamp(0, height as i32);
+
+          if left < right && top < bottom {
+            let clip_w = (right - left) as u32;
+            let clip_h = (bottom - top) as u32;
+
+            let mut pixels_vec = match Arc::try_unwrap(cached.pixels) {
+              Ok(vec) => vec,
+              Err(shared) => (*shared).clone(),
+            };
+
+            // Replace the dirty region with the parent's prepared drawing, including transparent pixels.
+            // Blending the old background here would accumulate alpha or leave retired foreground pixels behind.
+            let paint = paint.as_ref().unwrap();
+            for row in top as usize..bottom as usize {
+              let start = (row * width as usize + left as usize) * 4;
+              let end = (row * width as usize + right as usize) * 4;
+              pixels_vec[start..end].copy_from_slice(&paint.pixels[start..end]);
+            }
+
+            let mut canvas = Canvas::with_pixels(width, height, pixels_vec);
+            canvas.set_font(self.font());
+            canvas.set_text_align(self.text_align());
+            canvas.set_clip(Some((left, top, clip_w, clip_h)));
+
+            let shorter = width.min(height);
+            let radius = style
+              .radius
+              .map_or(theme.radius as f64, |units| units.resolve(shorter, canvas.font().size))
+              .clamp(0.0, shorter as f64 / 2.0) as f32;
+
+            {
+              let mut pixels = canvas.pixels.lock().unwrap();
+              if canvas.intact(&pixels) {
+                let clip = (left, top, right, bottom);
+                for (frame, (_, rect)) in child_frames.iter().zip(&placed) {
+                  if !intersects(rect, clip) {
+                    continue;
+                  }
+                  if let Some(frame) = frame {
+                    canvas.draw_pixels_into(
+                      pixels.as_mut_slice(),
+                      rect.x,
+                      rect.y,
+                      frame.width,
+                      frame.height,
+                      frame.pixels.as_slice(),
+                    );
+                  }
+                }
+              }
+            }
+
+            if border > 0 {
+              canvas.stroke_rounded_rect(0, 0, width, height, radius, border as f32, border_color);
+            }
+
+            let pixels = Arc::new(canvas.into_pixels());
+            let frame = Frame {
+              width,
+              height,
+              pixels: Arc::clone(&pixels),
+            };
+            *self.inner.cached_frame.lock().unwrap() = Some(frame.clone());
+            *self.inner.cached_placed.lock().unwrap() = Some(placed_ids);
+            return frame;
+          }
+
+          // Dirty union collapsed to empty after clamping; return cached frame.
+          *self.inner.cached_frame.lock().unwrap() = Some(cached.clone());
+          *self.inner.cached_placed.lock().unwrap() = Some(placed_ids);
+          return cached;
+        }
+      }
+    }
+
+    // Full redraw path.
+    let mut canvas = Canvas::new(width, height);
+    canvas.set_font(self.font());
+    canvas.set_text_align(self.text_align());
+    let shorter = width.min(height);
+    let radius = style
+      .radius
+      .map_or(theme.radius as f64, |units| units.resolve(shorter, canvas.font().size))
+      .clamp(0.0, shorter as f64 / 2.0) as f32;
     if let Some(color) = style.background.resolve(&theme) {
       canvas.fill_rounded_rect(0, 0, width, height, radius, color);
     }
-    // Where the content goes: inside the border and the padding.
-    let border = style.border_width;
     let content = (
       (style.padding.left + border) as i32,
       (style.padding.top + border) as i32,
@@ -786,30 +1081,52 @@ impl Component {
       height.saturating_sub(style.padding.vertical() + border * 2),
     );
     canvas.set_box(radius, content);
-    let border_color = style.border_color.unwrap_or(theme.border);
     canvas.set_theme(theme);
     self.draw_tracking_reads(|| self.events::<Canvas>().next(canvas.clone()));
 
-    let mut children = self.inner.children.lock().unwrap();
-    for (slot, (_, rect)) in children.iter_mut().zip(&placed) {
-      if slot.cache.is_none() || slot.component.inner.dirty.load(Ordering::SeqCst) {
-        slot.cache = Some(slot.component.compose());
-      }
-      if let Some(frame) = &slot.cache {
-        canvas.draw_pixels(rect.x, rect.y, frame.width, frame.height, &frame.pixels);
+    // Retain the prepared background/content separately from foreground children. Reactive subscriptions from
+    // this draw remain attached while child-only updates reuse it; any of those properties invalidates this layer.
+    *self.inner.cached_paint.lock().unwrap() = if child_frames.is_empty() {
+      None
+    } else {
+      Some(Frame {
+        width,
+        height,
+        pixels: Arc::new(canvas.pixels()),
+      })
+    };
+
+    {
+      let mut pixels = canvas.pixels.lock().unwrap();
+      if canvas.intact(&pixels) {
+        for (frame, (_, rect)) in child_frames.iter().zip(&placed) {
+          if let Some(frame) = frame {
+            canvas.draw_pixels_into(
+              pixels.as_mut_slice(),
+              rect.x,
+              rect.y,
+              frame.width,
+              frame.height,
+              frame.pixels.as_slice(),
+            );
+          }
+        }
       }
     }
 
-    // The border goes over everything else.
     if border > 0 {
       canvas.stroke_rounded_rect(0, 0, width, height, radius, border as f32, border_color);
     }
 
-    Frame {
+    let pixels = Arc::new(canvas.into_pixels());
+    let frame = Frame {
       width,
       height,
-      pixels: canvas.into_pixels(),
-    }
+      pixels: Arc::clone(&pixels),
+    };
+    *self.inner.cached_frame.lock().unwrap() = Some(frame.clone());
+    *self.inner.cached_placed.lock().unwrap() = Some(placed_ids);
+    frame
   }
 }
 
@@ -1251,6 +1568,168 @@ mod tests {
   }
 
   #[test]
+  fn em_font_sizes_compose_with_percentages_and_host_inheritance() {
+    let root = Component::new("root").with_font_size(Units::Em(1.5));
+    root.set_default_font(Font::new(Face::bitmap(), 20));
+    let child = Component::new("child").with_font_size(Units::Em(2.0));
+    let leaf = Component::new("leaf").with_font_size(Units::Percent(50.0));
+    root.add(&child);
+    child.add(&leaf);
+    assert_eq!((root.font().size, child.font().size, leaf.font().size), (30, 60, 30));
+    root.set_default_font(Font::new(Face::bitmap(), 10));
+    assert_eq!((root.font().size, child.font().size, leaf.font().size), (15, 30, 15));
+    child.set_inherits_font(false);
+    assert_eq!((child.font().size, leaf.font().size), (20, 10));
+    child.inherit_font();
+    assert_eq!((child.font().size, leaf.font().size), (10, 5));
+  }
+
+  #[test]
+  fn em_dimensions_follow_the_child_font_in_stack_flex_and_grid() {
+    for display in [Display::Stack, Display::Flex, Display::Grid] {
+      let parent = Component::new("parent").with_size(200, 100).with_display(display).with_font_size(10);
+      let child =
+        Component::new("child").with_font_size(Units::Em(2.0)).with_width(Units::Em(3.0)).with_height(Units::Em(1.5));
+      parent.add(&child);
+      parent.clone().render(Duration::ZERO);
+      assert_eq!(child.size().value(), (60, 30), "{display:?}");
+      parent.set_font_size(20);
+      parent.clone().render(Duration::ZERO);
+      assert_eq!(child.size().value(), (120, 60), "{display:?}");
+      parent.set_font_size(50);
+      parent.clone().render(Duration::ZERO);
+      assert_eq!(child.size().value(), (200, 100), "em sizes still shrink to fit: {display:?}");
+    }
+  }
+
+  #[test]
+  fn em_grid_tracks_use_the_grid_font_not_the_child_font() {
+    let grid = Component::new("grid")
+      .with_display(Display::Grid)
+      .with_size(200, 100)
+      .with_font_size(10)
+      .with_columns([Track::Sized(Units::Em(4.0)), Track::Fr(1.0)])
+      .with_rows([Track::Sized(Units::Em(2.0)), Track::Fr(1.0)]);
+    let first = Component::new("first").with_font_size(50);
+    let second = Component::new("second");
+    grid.add(&first).add(&second);
+    grid.clone().render(Duration::ZERO);
+    assert_eq!(first.size().value(), (40, 20));
+    assert_eq!(second.size().value(), (160, 20));
+    grid.set_font_size(20);
+    grid.clone().render(Duration::ZERO);
+    assert_eq!(first.size().value(), (80, 40));
+    assert_eq!(second.size().value(), (120, 40));
+  }
+
+  #[test]
+  fn em_radii_preserve_fractional_pixels_follow_fonts_and_clamp() {
+    let seen = Arc::new(Mutex::new(0.0));
+    let component = Component::new("rounded").with_size(100, 60).with_font_size(13).with_radius(Units::Em(0.5));
+    component.subject::<Canvas>().subscribe({
+      let seen = Arc::clone(&seen);
+      move |canvas| *seen.lock().unwrap() = canvas.radius()
+    });
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 6.5);
+    component.set_font_size(20);
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 10.0);
+    component.set_radius(Units::Em(10.0));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 30.0);
+  }
+
+  #[test]
+  fn invalid_em_values_leave_existing_settings_usable() {
+    let component = Component::new("em")
+      .with_size(100, 80)
+      .with_display(Display::Grid)
+      .with_font_size(12)
+      .with_radius(3)
+      .with_columns([Track::Sized(Units::Em(2.0))])
+      .with_rows([Track::Sized(Units::Em(1.0))]);
+    let child = Component::new("child").with_width(Units::Em(1.0)).with_height(Units::Em(0.5));
+    component.add(&child);
+    for value in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+      let em = Units::Em(value);
+      let setters: [fn(&Component, Units); 4] = [
+        |component, units| component.set_font_size(units),
+        |component, units| component.set_radius(units),
+        |component, units| component.set_width(units),
+        |component, units| component.set_height(units),
+      ];
+      for setter in setters {
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| setter(&child, em))).is_err());
+      }
+      assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| component.set_columns([Track::Sized(em)]))).is_err()
+      );
+      assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| component.set_rows([Track::Sized(em)]))).is_err()
+      );
+    }
+    component.clone().render(Duration::ZERO);
+    assert_eq!(child.font().size, 12);
+    assert_eq!(child.size().value(), (12, 6));
+    child.set_width(Units::Em(0.0));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(child.size().value(), (0, 6));
+  }
+
+  #[test]
+  fn percentage_font_sizes_resolve_each_ancestor_once_and_follow_changes() {
+    let page = Component::new("page").with_font_size(Units::Pixels(20));
+    let child = Component::new("child").with_font_size(Units::Percent(150.0));
+    let grandchild = Component::new("grandchild").with_font_size(Units::Percent(50.0));
+    let inherited = Component::new("inherited");
+    page.add(&child);
+    child.add(&grandchild);
+    grandchild.add(&inherited);
+    assert_eq!((child.font().size, grandchild.font().size, inherited.font().size), (30, 15, 15));
+    page.set_font_size(30);
+    assert_eq!((child.font().size, grandchild.font().size, inherited.font().size), (45, 23, 23));
+    child.inherit_font();
+    assert_eq!((child.font().size, grandchild.font().size), (30, 15));
+    grandchild.set_font_size(Units::Pixels(9));
+    assert_eq!(inherited.font().size, 9);
+  }
+
+  #[test]
+  fn percentage_font_sizes_use_the_host_at_roots_and_inheritance_boundaries() {
+    let page = Component::new("page").with_font_size(Units::Percent(200.0));
+    page.set_default_font(Font::new(Face::bitmap(), 13));
+    let control = Component::new("control").with_font_size(Units::Percent(150.0));
+    let child = Component::new("child").with_font_size(Units::Percent(50.0));
+    control.set_inherits_font(false);
+    page.add(&control);
+    control.add(&child);
+    assert_eq!((page.font().size, control.font().size, child.font().size), (26, 20, 10));
+    page.set_default_font(Font::new(Face::bitmap(), 20));
+    assert_eq!((page.font().size, control.font().size, child.font().size), (40, 30, 15));
+    control.set_inherits_font(true);
+    assert_eq!((control.font().size, child.font().size), (60, 30));
+    page.inherit_font();
+    assert_eq!((control.font().size, child.font().size), (30, 15));
+  }
+
+  #[test]
+  fn invalid_font_percentages_leave_the_previous_font_usable() {
+    let component = Component::new("font").with_font_size(Units::Pixels(12));
+    for percent in [-1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+      assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          component.set_font_size(Units::Percent(percent));
+        }))
+        .is_err()
+      );
+      assert_eq!(component.font().size, 12);
+    }
+    component.set_font_size(Units::Percent(0.0));
+    assert_eq!(component.font().size, 0);
+  }
+
+  #[test]
   fn a_component_that_does_not_inherit_the_font_uses_its_own_settings_then_the_hosts() {
     let (control, page) = (Component::new("control"), Component::new("page"));
     page.add(&control);
@@ -1313,6 +1792,7 @@ mod tests {
     let child = swatch("child", [0, 255, 0, 255]);
     let boxed = Component::new("boxed")
       .with_size(20, 20)
+      .with_radius(0)
       .with_background(Background::Color([255, 0, 0, 255]))
       .with_border_width(2)
       .with_border_color([0, 0, 255, 255])
@@ -1327,7 +1807,7 @@ mod tests {
     assert_eq!(child.size().value(), (10, 10));
 
     // Rounded corners cut the background and the border away at the corners.
-    boxed.set_radius(8.0);
+    boxed.set_radius(8);
     let frame = frames.recv_timeout(WAIT).unwrap();
     assert_eq!(pixel(&frame, 0, 0)[3], 0);
     assert_eq!(pixel(&frame, 10, 0), [0, 0, 255, 255], "but the straight part of the border is still there");
@@ -1336,13 +1816,82 @@ mod tests {
   #[test]
   fn a_canvas_knows_where_the_content_goes_and_how_round_the_corners_are() {
     let seen = Arc::new(Mutex::new(None));
-    let component = Component::new("c").with_size(30, 20).with_padding([2, 4]).with_border_width(1).with_radius(5.0);
+    let component = Component::new("c").with_size(30, 20).with_padding([2, 4]).with_border_width(1).with_radius(5);
     component.subject::<Canvas>().subscribe({
       let seen = Arc::clone(&seen);
       move |canvas| *seen.lock().unwrap() = Some((canvas.content_rect(), canvas.radius()))
     });
     component.clone().render(Duration::ZERO);
     assert_eq!(*seen.lock().unwrap(), Some(((5, 3, 20, 14), 5.0)));
+  }
+
+  #[test]
+  fn invalid_grid_tracks_leave_existing_settings_usable() {
+    let component = Component::new("grid")
+      .with_display(Display::Grid)
+      .with_size(100, 80)
+      .with_columns([Track::Sized(Units::Percent(25.0)), Track::Fr(1.0)])
+      .with_rows([Track::Sized(Units::Percent(50.0))]);
+    let child = Component::new("child");
+    component.add(&child);
+    for percent in [-1.0, f32::NAN, f32::INFINITY] {
+      let tracks = [Track::Sized(Units::Percent(percent))];
+      assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| component.set_columns(tracks))).is_err());
+      assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| component.set_rows(tracks))).is_err());
+    }
+    component.clone().render(Duration::ZERO);
+    assert_eq!(child.size().value(), (25, 40));
+  }
+
+  #[test]
+  fn unit_radii_follow_size_and_can_return_to_the_theme_default() {
+    let seen = Arc::new(Mutex::new(0.0));
+    let component = Component::new("rounded")
+      .with_size(80, 40)
+      .with_padding(5)
+      .with_border_width(2)
+      .with_radius(Units::Percent(25.0));
+    component.subject::<Canvas>().subscribe({
+      let seen = Arc::clone(&seen);
+      move |canvas| *seen.lock().unwrap() = canvas.radius()
+    });
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 10.0, "the basis is the shorter border-box side, not the content");
+    component.size().next((20, 60));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 5.0);
+    component.set_radius(Units::Percent(200.0));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 10.0, "radius is capped at half the shorter side");
+    component.set_radius(Units::Pixels(3));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 3.0);
+    component.set_theme(ThemePatch::new().radius(7.0));
+    component.inherit_radius();
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 7.0);
+    component.set_theme(ThemePatch::new().radius(2.0));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 2.0);
+    component.size().next((0, 60));
+    component.clone().render(Duration::ZERO);
+    assert_eq!(*seen.lock().unwrap(), 0.0);
+  }
+
+  #[test]
+  fn percentage_radii_retain_fractional_resolution_and_reject_invalid_values() {
+    let component = Component::new("rounded").with_size(7, 9).with_radius(Units::Percent(25.0));
+    component.subject::<Canvas>().subscribe(|canvas| assert_eq!(canvas.radius(), 1.75));
+    component.clone().render(Duration::ZERO);
+    for percent in [-1.0, f32::NAN, f32::INFINITY] {
+      assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          component.set_radius(Units::Percent(percent));
+        }))
+        .is_err()
+      );
+    }
+    component.clone().render(Duration::ZERO);
   }
 
   #[test]
@@ -1423,7 +1972,7 @@ mod tests {
     let grid = Component::new("grid")
       .with_size(40, 20)
       .with_display(Display::Grid)
-      .with_columns([Track::Px(10), Track::Fr(1.0)])
+      .with_columns([Track::Sized(Units::Pixels(10)), Track::Fr(1.0)])
       .with_rows([Track::Fr(1.0), Track::Fr(1.0)]);
     let (a, b, c) = (swatch("a", [1, 0, 0, 255]), swatch("b", [2, 0, 0, 255]), swatch("c", [3, 0, 0, 255]));
     grid.add(&a).add(&b).add(c.span(2, 1));

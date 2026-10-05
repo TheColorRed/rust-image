@@ -327,7 +327,7 @@ impl LiveRenderer {
       compute.set_bind_group(0, &bind_group, &[]);
       compute.dispatch_workgroups(width.div_ceil(WORKGROUP_SIZE), height.div_ceil(WORKGROUP_SIZE), 1);
     }
-    self.ctx.queue.submit(Some(encoder.finish()));
+    self.ctx.submit(encoder.finish());
 
     self.output = if passes.is_empty() { Output::Source } else { Output::Work((passes.len() - 1) % 2) };
     Ok(())
@@ -368,7 +368,7 @@ impl LiveRenderer {
         depth_or_array_layers: 1,
       },
     );
-    self.ctx.queue.submit(Some(encoder.finish()));
+    self.ctx.submit(encoder.finish());
     Ok(snapshot.texture)
   }
 
@@ -395,6 +395,7 @@ impl LiveRenderer {
 
     if self.readback.as_ref().is_none_or(|readback| readback.width != width || readback.height != height) {
       if self.readback.is_some() {
+        let _guard = self.ctx.submission_gate.lock().unwrap();
         self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
       }
       let slots = (0..READBACK_SLOTS)
@@ -444,7 +445,7 @@ impl LiveRenderer {
         depth_or_array_layers: 1,
       },
     );
-    self.ctx.queue.submit(Some(encoder.finish()));
+    self.ctx.submit(encoder.finish());
 
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     slot.buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
@@ -466,13 +467,19 @@ impl LiveRenderer {
   /// that cannot keep up always sees the most recent state rather than a backlog. Returns `None` when nothing new
   /// has finished.
   pub fn poll_frame(&mut self) -> Result<Option<Frame>> {
-    self.ctx.device.poll(wgpu::PollType::Poll)?;
+    {
+      let _guard = self.ctx.submission_gate.lock().unwrap();
+      self.ctx.device.poll(wgpu::PollType::Poll)?;
+    }
     self.take_newest_frame()
   }
 
   /// Like [`poll_frame`](Self::poll_frame), but first waits for all requested frames to finish.
   pub fn wait_frame(&mut self) -> Result<Option<Frame>> {
-    self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
+    {
+      let _guard = self.ctx.submission_gate.lock().unwrap();
+      self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
+    }
     self.take_newest_frame()
   }
 

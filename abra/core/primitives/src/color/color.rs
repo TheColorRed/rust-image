@@ -55,6 +55,21 @@ impl Default for Color {
   }
 }
 
+/// A wrapper for color channel values, allowing conversion from `f32` and `u8`.
+pub struct ColorNumber(u8);
+
+impl From<f32> for ColorNumber {
+  fn from(p_value: f32) -> Self {
+    ColorNumber((p_value * 255.0) as u8)
+  }
+}
+
+impl From<u8> for ColorNumber {
+  fn from(p_value: u8) -> Self {
+    ColorNumber(p_value)
+  }
+}
+
 impl Color {
   /// Creates a color from RGB values (alpha set to 255).
   pub fn from_rgb(p_r: u8, p_g: u8, p_b: u8) -> Self {
@@ -70,8 +85,8 @@ impl Color {
     }
   }
   /// Sets the alpha value of the color.
-  pub fn set_alpha(mut self, p_a: u8) -> Self {
-    self.a = p_a;
+  pub fn set_alpha(mut self, p_a: impl Into<ColorNumber>) -> Self {
+    self.a = p_a.into().0;
     self
   }
   /// Creates a color from HSV values (hue 0-360, saturation/value 0-1; alpha set to 255).

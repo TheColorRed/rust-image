@@ -127,11 +127,7 @@ impl GpuProcessor for SmoothSkin {
     let step = radius.div_ceil(SAMPLE_RADIUS_MAX);
     let threshold = ((SURFACE_THRESHOLD as f32 * boost).round() as u32).min(BOOSTED_THRESHOLD_MAX);
 
-    let mut passes = if self.mask.is_some() {
-      Vec::new()
-    } else {
-      skin_mask_passes(p_width, p_height, 1.0)
-    };
+    let mut passes = if self.mask.is_some() { Vec::new() } else { skin_mask_passes(p_width, p_height, 1.0) };
     passes.push(GpuPass::new(include_str!("../blur/surface.wgsl"), ints(&[radius.div_ceil(step), threshold, step])));
     let blend_pass = if let Some(mask) = &self.mask {
       GpuPass::new(include_str!("./skin_blend_mask.wgsl"), floats(&[blend]))
@@ -148,7 +144,7 @@ impl GpuProcessor for SmoothSkin {
 /// Smooths skin and leaves the features on it sharp.
 /// - `p_amount`: From `0.0` to `3.0`. Up to `1.0` it is how much of the smoothing shows. Past `1.0` the smoothing itself
 ///   gets stronger by that factor, which gives a blurrier, flatter skin.
-pub fn smooth_skin(p_amount: impl IntoNumber) -> SmoothSkin {
+pub fn skin_smooth(p_amount: impl IntoNumber) -> SmoothSkin {
   SmoothSkin {
     amount: p_amount.into::<f64>().clamp(0.0, MAX_AMOUNT as f64) as f32,
     feather: 10.0,
@@ -203,7 +199,7 @@ mod tests {
       }
     }
     let original = img.clone();
-    smooth_skin(1.0).apply(&mut img);
+    skin_smooth(1.0).apply(&mut img);
     // Away from the borders between bands, only the skin band changes.
     let middle = |band: usize| band * 24 + 8..band * 24 + 16;
     assert!(grain(&img, middle(0), 8..40) < grain(&original, middle(0), 8..40) * 0.7, "skin is smoothed");
@@ -224,7 +220,7 @@ mod tests {
     }
     let before = grain(&img, 4..28, 4..28);
     let line_before = img.get_pixel(32, 32).unwrap();
-    smooth_skin(1.0).apply(&mut img);
+    skin_smooth(1.0).apply(&mut img);
     let after = grain(&img, 4..28, 4..28);
     assert!(after < before * 0.7, "the grain should drop: {before} -> {after}");
     let line_after = img.get_pixel(32, 32).unwrap();
@@ -246,7 +242,7 @@ mod tests {
     }
     let smoothed = |amount: f64| {
       let mut img = base.clone();
-      smooth_skin(amount).apply(&mut img);
+      skin_smooth(amount).apply(&mut img);
       img
     };
     let (one, three) = (smoothed(1.0), smoothed(3.0));
@@ -261,7 +257,7 @@ mod tests {
   fn zero_amount_changes_nothing() {
     let mut img = grainy(32, 32, SKIN);
     let original = img.to_rgba_vec();
-    smooth_skin(0.0).apply(&mut img);
+    skin_smooth(0.0).apply(&mut img);
     assert_eq!(img.to_rgba_vec(), original);
   }
 
@@ -272,7 +268,7 @@ mod tests {
     // A mask that is black everywhere: nothing may change.
     let black: Vec<u8> = (0..40 * 40).flat_map(|_| [0u8, 0, 0, 255]).collect();
     let mask = Mask::from_image(Image::new_from_pixels(40, 40, black, Channels::RGBA));
-    smooth_skin(1.0).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut img);
+    skin_smooth(1.0).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut img);
     assert_eq!(img.to_rgba_vec(), original);
   }
 
@@ -282,7 +278,7 @@ mod tests {
     let before = grain(&image, 4..28, 4..28);
     let white = vec![255u8, 255, 255, 255].repeat(32 * 32);
     let mask = Mask::from_image(Image::new_from_pixels(32, 32, white, Channels::RGBA));
-    let smoothing = smooth_skin(1.0).with_mask(mask);
+    let smoothing = skin_smooth(1.0).with_mask(mask);
 
     assert!(smoothing.gpu_processor().is_some());
     assert!(smoothing.passes(32, 32).last().unwrap().aux.is_some());
@@ -295,12 +291,12 @@ mod tests {
   fn an_area_limits_the_smoothing_but_not_what_it_sees() {
     let whole_image = {
       let mut img = grainy(64, 64, SKIN);
-      smooth_skin(1.0).apply(&mut img);
+      skin_smooth(1.0).apply(&mut img);
       img
     };
     let mut in_area = grainy(64, 64, SKIN);
     let original = in_area.to_rgba_vec();
-    smooth_skin(1.0)
+    skin_smooth(1.0)
       .with_options(ApplyOptions::new().with_area(Area::rect((0.0, 0.0), (32.0, 64.0))))
       .apply(&mut in_area);
     let (area, whole) = (in_area.to_rgba_vec(), whole_image.to_rgba_vec());
