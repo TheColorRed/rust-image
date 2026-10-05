@@ -9,7 +9,7 @@
 // Extra arguments are passed through to ubrn, e.g. `--release` or
 // `--targets arm64-v8a`.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,4 +79,13 @@ const args = [ubrnCli, 'build', 'jsi2', 'android', '--and-generate', '--config',
 
 console.log(`build-android: NDK ${path.basename(ndk)}, cmake ${path.basename(cmakeDir)}`);
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' });
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+
+const gradleFile = path.join(packageRoot, 'android', 'build.gradle');
+const gradle = readFileSync(gradleFile, 'utf8');
+const namespace = 'com.alakazam.mobile.abra';
+const updatedGradle = gradle.replace(/^(\s*namespace\s+")[^"]+("\s*)$/m, `$1${namespace}$2`);
+if (updatedGradle === gradle && !gradle.includes(`namespace "${namespace}"`)) {
+  fail('generated android/build.gradle is missing its namespace');
+}
+if (updatedGradle !== gradle) writeFileSync(gradleFile, updatedGradle);
