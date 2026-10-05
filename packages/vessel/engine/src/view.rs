@@ -11,7 +11,7 @@ use std::{
 
 use pub_sub::Subscription;
 
-use crate::{MediaSource, Pacing, Waker, gpu::Rendered};
+use crate::{MediaSource, Pacing, Waker, gpu::RenderedFrame as Rendered};
 
 struct Inner<M> {
   id: String,
@@ -132,7 +132,7 @@ impl<M: Send + 'static> ErasedView for View<M> {
     }
     Some(match media.render_gpu(p_delta) {
       Some(frame) => Rendered::Gpu(frame),
-      None => Rendered::Pixels(media.render(p_delta)),
+      None => Rendered::Pixels(Arc::new(media.render(p_delta))),
     })
   }
 }

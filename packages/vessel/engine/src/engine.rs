@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
   Frame, GpuFrame, Pacing, Waker,
-  gpu::Rendered,
+  gpu::RenderedFrame as Rendered,
   view::{ErasedView, View},
 };
 
@@ -84,8 +84,12 @@ impl Engine {
 
   /// Starts running `p_view`. It stays until its subscription is dropped or the engine closes.
   pub fn add<M: Send + 'static>(&self, p_view: &View<M>) {
+    self.add_erased(Box::new(p_view.clone()));
+  }
+
+  pub(crate) fn add_erased(&self, p_view: Box<dyn ErasedView>) {
     p_view.attach(self.shared.waker.clone());
-    self.shared.views.lock().unwrap().push(Box::new(p_view.clone()));
+    self.shared.views.lock().unwrap().push(p_view);
     self.shared.waker.wake();
   }
 
@@ -94,12 +98,22 @@ impl Engine {
     self.stop();
   }
 
+  pub(crate) fn close_offscreen(mut self) {
+    self.shared.running.store(false, Ordering::SeqCst);
+    self.shared.waker.wake();
+    // There is no surface to retire. Let the in-flight job release its resources without blocking the UI's teardown.
+    self.thread.take();
+  }
+
   fn stop(&mut self) {
     self.shared.running.store(false, Ordering::SeqCst);
     self.shared.waker.wake();
-    if let Some(thread) = self.thread.take() {
-      let _ = thread.join();
+    let Some(thread) = self.thread.take() else { return };
+    // An offscreen subscriber can release its renderer from the engine's own output callback.
+    if thread.thread().id() == std::thread::current().id() {
+      return;
     }
+    let _ = thread.join();
     // If the loop panicked it left the lock poisoned. Stopping must still work: it often runs while something else is
     // already being torn down, where a second panic would abort the whole process.
     self.shared.views.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();

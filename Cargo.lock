@@ -50,6 +50,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "abra-body-segmentation"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
+]
+
+[[package]]
 name = "abra-core"
 version = "1.0.0"
 dependencies = [
@@ -66,6 +75,15 @@ dependencies = [
  "resvg",
  "saphyr",
  "turbojpeg",
+]
+
+[[package]]
+name = "abra-find-person"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
 ]
 
 [[package]]
@@ -138,7 +156,10 @@ name = "alakazam-mobile"
 version = "0.1.0"
 dependencies = [
  "abra",
+ "abra-body-segmentation",
+ "abra-find-person",
  "base64 0.23.1",
+ "futures",
  "gpu",
  "gpu-passes",
  "pub-sub",
@@ -321,6 +342,19 @@ dependencies = [
  "serde",
  "serde_derive",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "async-compat"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c97d7ff3c25d6c10d64170c12acaf5d4245e76dece3779c1d92b153a64f11df"
+dependencies = [
+ "futures-core",
+ "futures-io",
+ "once_cell",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -2552,6 +2586,7 @@ version = "2.0.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4336a1e2b38848325241c72889086886004e589b7c74f335e60a8e8db5138a0b"
 dependencies = [
+ "libloading 0.9.0",
  "ndarray",
  "ort-sys",
  "smallvec",
@@ -3375,6 +3410,7 @@ name = "skin-test"
 version = "1.0.0"
 dependencies = [
  "abra",
+ "abra-body-segmentation",
 ]
 
 [[package]]
@@ -3736,6 +3772,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tokio"
+version = "1.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+dependencies = [
+ "pin-project-lite",
+]
+
+[[package]]
 name = "toml"
 version = "0.9.12+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3978,6 +4023,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eec017b112701681f6fbbe5d92014b5c468eb0b177a94389de03ceec40665095"
 dependencies = [
  "anyhow",
+ "async-compat",
  "bytes",
  "once_cell",
  "static_assertions",

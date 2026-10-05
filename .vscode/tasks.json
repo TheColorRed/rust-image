@@ -13,28 +13,21 @@
         }
       },
       "command": "cargo",
-      "args": [
-        "run",
-        "--bin",
-        "alakazam"
-      ],
+      "args": ["run", "--bin", "alakazam"],
       "group": {
         "kind": "build",
         "isDefault": true
-      },
+      }
     },
     {
       "label": "Build",
       "type": "shell",
       "command": "~/.cargo/bin/cargo",
-      "args": [
-        "build",
-        "--release",
-      ],
+      "args": ["build", "--release"],
       "group": {
         "kind": "build",
         "isDefault": false
-      },
-    },
+      }
+    }
   ]
 }

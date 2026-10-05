@@ -17,6 +17,33 @@ In another terminal, build and deploy to a connected Android device:
 npm run deploy:android
 ```
 
+## Selecting people for skin effects
+
+Open **Beauty > Skin Smooth** or **Beauty > Skin Tan** to show detected people
+and the person-selection controls alongside the effect's slider or color picker.
+Tap a person in the preview to target them, or choose **All people** to apply
+skin effects to everyone. Leaving the skin control hides the selection UI and
+outlines; other tabs keep their normal controls.
+Touching the skin slider or color picker hides the outlines without clearing the
+selected person, so the effect is unobstructed. Tap the photo again to show them.
+Each person keeps their own Smooth and Tan values. Switching people changes the
+target and slider value, without moving or removing edits already made to others.
+Replaying edits uses explicit person masks without changing the live selection,
+and the completed image replaces the preview after the entire stack is rendered.
+Live preview frames are rendered off-screen on Vessel's engine thread. Pending
+changes are coalesced to the newest pending state while completed frames keep
+displaying during continuous drags. GPU output is copied to a stable off-screen texture before publication
+(without CPU readback), so the displayed frame cannot be overwritten by the next
+render. CPU-only effects use the same off-screen scheduling.
+On release, the live effect stays visible until Vessel confirms that the
+committed photo frame reached the surface; there is no fixed-delay handoff.
+
+Run the skin-adjustment regression tests from the repository root:
+
+```sh
+node --test apps/mobile/tests/skin-adjustments.test.cjs apps/mobile/tests/preview-handoff.test.cjs
+```
+
 ## Unsigned iOS test builds
 
 Run the **Build downloadable apps** GitHub Actions workflow with iOS enabled.

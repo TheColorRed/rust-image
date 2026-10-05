@@ -18,6 +18,7 @@ pub use vessel::Frame as LiveFrame;
 
 use abra::abra_core::image::gpu::{GpuAux, LiveEffect};
 use abra::abra_core::{Channels, Image};
+use abra_body_segmentation::Mask;
 use abra::options::prelude::{ApplyTarget, Effect, Options};
 use masked::MaskedEffect;
 use std::sync::Arc;
@@ -307,6 +308,12 @@ impl LiveImage {
   pub fn picture<'a>(
     &mut self, p_effects: impl IntoIterator<Item = &'a crate::effect_spec::EffectSpec>,
   ) -> Option<vessel::Picture> {
+    self.picture_with_skin_mask(p_effects, None)
+  }
+
+  pub(crate) fn picture_with_skin_mask<'a>(
+    &mut self, p_effects: impl IntoIterator<Item = &'a crate::effect_spec::EffectSpec>, p_skin_mask: Option<&Mask>,
+  ) -> Option<vessel::Picture> {
     if !self.is_direct() {
       self.set_direct(true);
     }
@@ -314,7 +321,7 @@ impl LiveImage {
       live.clear();
       for effect in p_effects {
         let id = live.new_id();
-        effect.apply(live.slot(id));
+        effect.apply_with_skin_mask(live.slot(id), p_skin_mask);
       }
     });
     #[cfg(feature = "gpu")]

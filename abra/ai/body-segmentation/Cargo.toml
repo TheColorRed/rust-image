@@ -1,0 +1,13 @@
+[package]
+name = "abra-body-segmentation"
+version = "1.0.0"
+edition = "2024"
+description = "Pre-trained models for body segmentation"
+
+[dependencies]
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+mask = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

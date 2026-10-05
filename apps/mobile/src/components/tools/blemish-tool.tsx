@@ -3,26 +3,24 @@ import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
+import { computePreviewImagePoint, type PreviewPoint } from '@/src/lib/preview-coordinates';
 import { blemishApplyRequested$, saveRequested } from '@/src/state/commands';
 import { isBlemishToolFocused, isBlemishToolFocused$, wasBlemishToolFocused } from '@/src/state/edits';
 import { currentImage } from '@/src/state/session';
-import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue, springPreview } from '@/src/state/gestures';
+import {
+  previewBox,
+  previewPressed$,
+  previewScaleValue,
+  previewTranslateValue,
+  springPreview,
+  type PreviewBox,
+} from '@/src/state/gestures';
 
 /** Screen radii (dp) of the blemish tool's reticle: the inner circle is what gets healed, the
  * outer one is roughly how far around it the tool samples for matching texture. Fixed on screen —
  * pinch-zooming the image underneath is how the user controls how much of the photo they cover. */
 export const BLEMISH_INNER_RADIUS = 26;
 export const BLEMISH_OUTER_RADIUS = 42;
-
-interface PreviewBox {
-  width: number;
-  height: number;
-}
-
-interface PreviewPoint {
-  x: number;
-  y: number;
-}
 
 /** Renders the two-ring reticle. Fixed on screen — position it outside whatever transformed view
  * carries the pinch-zoom, so it marks a constant spot while the image moves underneath it. */
@@ -81,18 +79,17 @@ export function BlemishToolController() {
       }),
 
       // Double-tapping a spot pans it to the reticle's center, rather than requiring a drag to line
-      // it up — the same math and pan bounds as the pinch gesture. `locationX/Y` is relative to the
-      // preview's untransformed touch target, which lines up with previewBox-local coordinates.
+      // it up — the same math and pan bounds as the pinch gesture.
       previewPressed$.subscribe(event => {
         const box = previewBox.value;
         if (!isBlemishToolFocused() || !box) return;
-        const { locationX, locationY, pageX, pageY } = event.nativeEvent;
+        const { x, y, pageX, pageY } = event;
         const now = Date.now();
         const last = lastTap;
         lastTap = { time: now, x: pageX, y: pageY };
         if (!last || now - last.time > 300 || Math.hypot(pageX - last.x, pageY - last.y) > 40) return;
         lastTap = null;
-        springPreview(computeCenteringTranslate({ x: locationX, y: locationY }, box, previewScaleValue.value));
+        springPreview(computeCenteringTranslate({ x, y }, box, previewScaleValue.value));
       }),
 
       // Blemish mode permits overscroll so an edge can reach the fixed reticle. Restore the ordinary
@@ -135,30 +132,20 @@ export function computeBlemishTarget(
   const imgHeight = image.height();
   if (imgWidth === 0 || imgHeight === 0) return null;
 
-  // Reversing "screen = center + scale*(local-center) + translate" for a screen point that IS the
-  // center gives local = center - translate/scale.
-  const localX = box.width / 2 - translate.x / scale;
-  const localY = box.height / 2 - translate.y / scale;
-
-  // `fit="contain"` letterboxes the image within the box; map through that before going from
-  // normalized (0..1) position to actual image pixels.
+  const point = computePreviewImagePoint(imgWidth, imgHeight, box, scale, translate, {
+    x: box.width / 2,
+    y: box.height / 2,
+  });
+  if (!point) return null;
   const containScale = Math.min(box.width / imgWidth, box.height / imgHeight);
-  const displayedWidth = imgWidth * containScale;
-  const displayedHeight = imgHeight * containScale;
-  const offsetX = (box.width - displayedWidth) / 2;
-  const offsetY = (box.height - displayedHeight) / 2;
-  const u = (localX - offsetX) / displayedWidth;
-  const v = (localY - offsetY) / displayedHeight;
-  if (u < 0 || u > 1 || v < 0 || v > 1) return null; // reticle is over the letterboxed margin, not the photo
 
   const displayScale = containScale * scale;
   const radius = Math.min(Math.min(imgWidth, imgHeight) / 2, Math.max(2, BLEMISH_INNER_RADIUS / displayScale));
-  return { x: u * imgWidth, y: v * imgHeight, radius };
+  return { ...point, radius };
 }
 
 /**
- * The pan translate that would bring `point` (in previewBox-local coordinates — the same space
- * `event.nativeEvent.locationX/Y` reports on the untransformed preview touch target) to the
+ * The pan translate that would bring `point` (in untransformed previewBox-local coordinates) to the
  * screen center, clamped to the same pan bounds pinch-zooming itself respects.
  * - `point`: the tapped spot, in previewBox-local coordinates.
  * - `box`: the preview's on-screen size.

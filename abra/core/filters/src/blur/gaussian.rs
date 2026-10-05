@@ -135,8 +135,10 @@ impl GpuProcessor for GaussianBlur {
       return Vec::new();
     }
     // The weights go to the shader as a table, three bytes each (they never need more than 17 bits).
-    let table: Vec<u8> =
-      gaussian_weights(self.radius).iter().flat_map(|&weight| [weight as u8, (weight >> 8) as u8, (weight >> 16) as u8, 255]).collect();
+    let table: Vec<u8> = gaussian_weights(self.radius)
+      .iter()
+      .flat_map(|&weight| [weight as u8, (weight >> 8) as u8, (weight >> 16) as u8, 255])
+      .collect();
     let table: std::sync::Arc<[u8]> = table.into();
     let pass = |direction: u32| {
       let uniforms: Vec<u8> = [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
@@ -181,10 +183,10 @@ pub fn gaussian_blur(p_radius: impl IntoNumber) -> GaussianBlur {
 
 #[cfg(test)]
 mod tests {
-  use options::{Effect, ApplyOptions};
+  use options::{ApplyOptions, Effect};
 
   use super::gaussian_blur;
-  use abra_core::{Area, Image};
+  use abra_core::{Area, Image, image::gpu::GpuProcessor};
 
   fn test_pixels(p_width: u32, p_height: u32) -> Vec<u8> {
     let mut pixels = Vec::new();
@@ -192,7 +194,12 @@ mod tests {
       for x in 0..p_width {
         // Hard edges and a bright dot, so blurring visibly matters and clamped borders are exercised.
         let value = if (x / 5 + y / 4) % 2 == 0 { 230 } else { 20 };
-        pixels.extend_from_slice(&[value, (x * 7) as u8, (y * 9) as u8, if x == 3 && y == 3 { 40 } else { 255 }]);
+        pixels.extend_from_slice(&[
+          value,
+          (x * 7) as u8,
+          (y * 9) as u8,
+          if x == 3 && y == 3 { 40 } else { 255 },
+        ]);
       }
     }
     pixels
@@ -207,7 +214,7 @@ mod tests {
 
     for radius in [1u32, 2, 5, 12, 23, 40] {
       let expected = super::separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, radius);
-      let actual = renderer.process(&[&gaussian_blur(radius)], width, height, &pixels)?;
+      let actual = renderer.process(&[gaussian_blur(radius).passes(width, height)], width, height, &pixels)?;
       assert_eq!(actual.len(), expected.len());
       for (index, (a, e)) in actual.iter().zip(&expected).enumerate() {
         assert_eq!(a, e, "radius {radius}, byte {index}: gpu {a} vs cpu {e}");
@@ -233,7 +240,11 @@ mod tests {
     for value in [1u8, 100, 200, 255] {
       let pixels: Vec<u8> = (0..30 * 30).flat_map(|_| [value, value, value, 255]).collect();
       for radius in [1u32, 3, 12] {
-        assert_eq!(super::separable_gaussian_blur_pixels(&pixels, 30, 30, radius), pixels, "value {value}, radius {radius}");
+        assert_eq!(
+          super::separable_gaussian_blur_pixels(&pixels, 30, 30, radius),
+          pixels,
+          "value {value}, radius {radius}"
+        );
       }
     }
   }
@@ -243,7 +254,7 @@ mod tests {
     use gpu::{GpuContext, LiveRenderer};
     let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
     let pixels = test_pixels(9, 9);
-    assert_eq!(renderer.process(&[&gaussian_blur(0)], 9, 9, &pixels)?, pixels);
+    assert_eq!(renderer.process(&[gaussian_blur(0).passes(9, 9)], 9, 9, &pixels)?, pixels);
     Ok(())
   }
 

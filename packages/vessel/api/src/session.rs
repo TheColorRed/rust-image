@@ -50,15 +50,19 @@ impl Output {
     // A blank first frame draws nothing worth showing, and drawing it with the CPU would claim the window for the CPU, which
     // keeps it from ever being drawn on by the GPU.
     if !self.drawn_any && p_frame.pixels.chunks_exact(4).all(|pixel| pixel[3] == 0) {
-      return true;
+      return false;
     }
-    let drawn = self.surface_id.is_some_and(|id| surface::draw_rgba(id, p_frame.width, p_frame.height, &p_frame.pixels));
+    let drawn =
+      self.surface_id.is_some_and(|id| surface::draw_rgba(id, p_frame.width, p_frame.height, &p_frame.pixels));
     self.drawn_any |= drawn;
     drawn
   }
 
   /// Shows a frame that lives on the GPU: from GPU memory when there is a target, otherwise by reading it back.
   fn show_gpu(&mut self, p_frame: &Arc<dyn GpuFrame>) -> bool {
+    if !self.surface_id.is_some_and(surface::is_alive) {
+      return false;
+    }
     // The first GPU frame on a surface decides whether it can be drawn from GPU memory: the frame knows its GPU.
     if self.target.is_none()
       && !self.no_target
@@ -83,7 +87,7 @@ impl Output {
   }
 }
 
-/// Sent on [`Session::drawn`] each time a frame reaches the surface.
+/// Sent on [`Session::drawn`] and the component's `subject::<Drawn>()` each time a frame reaches the surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Drawn {
   /// The width in pixels of the frame.
@@ -124,7 +128,7 @@ impl Session {
     let drawn = Subject::new();
     let engine = Engine::with_gpu_sink(
       {
-        let (output, drawn) = (Arc::clone(&output), drawn.clone());
+        let (output, drawn, component) = (Arc::clone(&output), drawn.clone(), p_component.clone());
         move |_view, frame| {
           let was_drawn = {
             let mut output = output.lock().unwrap();
@@ -133,15 +137,17 @@ impl Session {
             was_drawn
           };
           if was_drawn {
-            drawn.next(Drawn {
+            let event = Drawn {
               width: frame.width,
               height: frame.height,
-            });
+            };
+            drawn.next(event);
+            component.next(event);
           }
         }
       },
       {
-        let (output, drawn) = (Arc::clone(&output), drawn.clone());
+        let (output, drawn, component) = (Arc::clone(&output), drawn.clone(), p_component.clone());
         move |_view, frame| {
           let was_drawn = {
             let mut output = output.lock().unwrap();
@@ -151,7 +157,9 @@ impl Session {
           };
           if was_drawn {
             let (width, height) = frame.size();
-            drawn.next(Drawn { width, height });
+            let event = Drawn { width, height };
+            drawn.next(event);
+            component.next(event);
           }
         }
       },
@@ -209,10 +217,12 @@ impl Session {
       }
     };
     if shown {
-      self.drawn.next(Drawn {
+      let event = Drawn {
         width: size.0,
         height: size.1,
-      });
+      };
+      self.drawn.next(event);
+      self.component.next(event);
       return true;
     }
     // Put back, unless a newer frame arrived meanwhile.
@@ -379,6 +389,22 @@ mod tests {
     session.close();
   }
 
+  #[test]
+  fn placeholder_frames_do_not_signal_presentation_on_the_component() {
+    let component = Component::new("placeholder").with_size(2, 2);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    component.subject::<Drawn>().subscribe(move |drawn| sender.send(*drawn).unwrap());
+    let session = Session::open(&component);
+    let surface = recorder(9010, (2, 2));
+    session.attach_surface(9010);
+    assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
+    assert!(surface.frames.lock().unwrap().is_empty());
+    component.set_background(crate::Background::Color([42, 0, 0, 255]));
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(2)).unwrap(), Drawn { width: 2, height: 2 });
+    assert_eq!(newest(&surface, |_| true), (2, 2, 42));
+    session.close();
+  }
+
   /// A GPU frame whose surfaces get a target that records into the log.
   struct Picture(Arc<Mutex<Vec<&'static str>>>);
 
@@ -424,6 +450,24 @@ mod tests {
   }
 
   #[test]
+  fn an_offscreen_gpu_frame_waits_for_its_surface_without_readback() {
+    let component = Component::new("gpu-waiting").with_size(2, 2);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    component.subject::<GpuPicture>().next(GpuPicture(Some(Arc::new(Picture(Arc::clone(&log))))));
+    let session = Session::open(&component);
+    let start = Instant::now();
+    while session.output.lock().unwrap().waiting.is_none() {
+      assert!(start.elapsed() < Duration::from_secs(2), "offscreen GPU frame was not retained");
+      std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(log.lock().unwrap().is_empty());
+    let _surface = recorder(9011, (2, 2));
+    assert!(session.attach_surface(9011));
+    wait_for(&log, "gpu", 1);
+    session.close();
+  }
+
+  #[test]
   fn the_first_gpu_frame_makes_the_target_and_after_that_nothing_is_copied_or_blitted_on_the_cpu() {
     let level = BehaviorSubject::new(1u8);
     let component = swatch(&level).with_size(2, 2);
@@ -439,7 +483,11 @@ mod tests {
     level.next(9);
     wait_for(&log, "pixels", 1);
 
-    assert_eq!(surface.frames.lock().unwrap().len(), blitted, "nothing was blitted on the CPU behind the target's back");
+    assert_eq!(
+      surface.frames.lock().unwrap().len(),
+      blitted,
+      "nothing was blitted on the CPU behind the target's back"
+    );
     session.close();
   }
 

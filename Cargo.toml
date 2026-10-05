@@ -5,6 +5,8 @@ members = [
   "abra/core/*",
   "abra/ai/core",
   "abra/ai/super-resolution",
+  "abra/ai/body-segmentation",
+  "abra/ai/find-person",
   "abra/plugins/*",
   # Examples
   "apps/examples/*",
@@ -59,7 +61,6 @@ anyhow = { version = "1.0.104" }
 saphyr = { version = "0.1.0" }
 ctor = { version = "1.0.13" }
 paste = { version = "1.0.15" }
-ort = { version = "2.0.0-rc.13" }
 napi = { version = "3.13.0", default-features = false, features = ["napi4"] }
 napi-derive = { version = "3.6.9" }
 swash = { version = "0.2.10" }
@@ -95,6 +96,8 @@ collage = { path = "./abra/plugins/collage" }
 # Abra AI Packages
 abra-ai-core = { path = "./abra/ai/core" }
 abra-super-resolution = { path = "./abra/ai/super-resolution" }
+abra-body-segmentation = { path = "./abra/ai/body-segmentation" }
+abra-find-person = { path = "./abra/ai/find-person" }
 
 [workspace.dependencies.uuid]
 version = "1.24.0"

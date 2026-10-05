@@ -1,6 +1,8 @@
 import { AbraImage } from '@alakazam/mobile';
 import { batch } from '@/src/lib/batch';
 import { EDIT_SECTIONS, type ActionControl, type SliderControl } from '@/src/lib/edit-sections';
+import { adjustmentKey } from '@/src/lib/skin-adjustments';
+import { personSelection } from '@/src/state/person-selection';
 import { adjustments, appliedActions, resetVersion } from '@/src/state/edits';
 import {
   canRedo,
@@ -70,17 +72,19 @@ function commitSlider(control: SliderControl, value: number) {
   saved.next(false);
   recordDraft.next('push');
   lastDraftGroup.next(null);
-  adjustments.next({ ...adjustments.value, [control.key]: value });
+  const key = adjustmentKey(control.key, personSelection.value.selectedId);
+  adjustments.next({ ...adjustments.value, [key]: value });
 }
 
 /** A slider's effect was turned off: it has no value again, so it is not part of the stack. Does nothing if it was already off. */
 function removeSlider(control: SliderControl) {
-  if (adjustments.value[control.key] === undefined) return;
+  const key = adjustmentKey(control.key, personSelection.value.selectedId);
+  if (adjustments.value[key] === undefined) return;
   replayHidden.next(!!control.live);
   saved.next(false);
   recordDraft.next('push');
   lastDraftGroup.next(null);
-  const { [control.key]: _removed, ...rest } = adjustments.value;
+  const { [key]: _removed, ...rest } = adjustments.value;
   adjustments.next(rest);
 }
 
@@ -188,7 +192,10 @@ export const undoHistory = () => batch(() => (isDraftDirty() ? stepDraft(-1) : s
 export const redoHistory = () => batch(() => (draftHistory.value?.canRedo() ? stepDraft(1) : stepCheckpoint(1)));
 
 // Each of these emits several subjects; batching turns that into a single React render.
-const batched = <A extends unknown[]>(fn: (...args: A) => void) => (...args: A) => batch(() => fn(...args));
+const batched =
+  <A extends unknown[]>(fn: (...args: A) => void) =>
+  (...args: A) =>
+    batch(() => fn(...args));
 const toggleActionBatched = batched(toggleAction);
 export { toggleActionBatched as toggleAction };
 const commitSliderBatched = batched(commitSlider);

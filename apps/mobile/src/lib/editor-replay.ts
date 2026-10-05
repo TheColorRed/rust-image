@@ -9,6 +9,8 @@ import {
   type EditSection,
 } from '@/src/lib/edit-sections';
 import { comparisonImage, recordDraftStep } from '@/src/lib/editor-history';
+import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
+import { personSelection } from '@/src/state/person-selection';
 import { buildControlThumbnails } from '@/src/lib/editor-thumbnails';
 import {
   activeSectionKey,
@@ -55,7 +57,10 @@ function appliedSteps(
   pending?: ActionControl,
 ): Step[] {
   const steps: Step[] = [];
-  const keys = pending && !appliedActions.value.includes(pending.key) ? [...appliedActions.value, pending.key] : appliedActions.value;
+  const keys =
+    pending && !appliedActions.value.includes(pending.key)
+      ? [...appliedActions.value, pending.key]
+      : appliedActions.value;
   for (const key of keys) {
     const control = findAction(key);
     if (!control || (!control.apply && !control.live)) continue;
@@ -66,6 +71,23 @@ function appliedSteps(
   for (const section of EDIT_SECTIONS) {
     for (const control of section.controls) {
       if (control.kind !== 'slider') continue;
+      if (isSkinAdjustment(control.key)) {
+        const effect = control.live;
+        if (!effect) throw new Error(`Skin control has no effect definition: ${control.key}`);
+        const activeKey = adjustmentKey(control.key, personSelection.value.selectedId);
+        for (const target of skinAdjustmentTargets(adjustments.value, control.key)) {
+          if (slider?.key === control.key && target.key === activeKey) continue;
+          if (!isSliderApplied(control, target.value)) continue;
+          steps.push({
+            key: target.key,
+            value: target.value,
+            run: image => {
+              image.applyEffectToPerson(effect(target.value), target.personId ?? undefined);
+            },
+          });
+        }
+        continue;
+      }
       const dragged = slider?.key === control.key;
       if (dragged && slider.value === undefined) continue;
       const committed = dragged ? slider.value : adjustments.value[control.key];
@@ -84,8 +106,12 @@ function appliedSteps(
 /** Renders the whole edit stack onto a fresh copy of the edit base. */
 function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>) {
   const next = base.copy() as AbraImage;
-  for (const step of appliedSteps(excludeGroups)) step.run(next);
+  runSteps(next, appliedSteps(excludeGroups));
   return next;
+}
+
+function runSteps(image: AbraImage, steps: Step[]) {
+  for (const step of steps) step.run(image);
 }
 
 /** Whether any control other than the slider is applied, so a drag of it has to start from the stack rendered without it. */
@@ -99,7 +125,7 @@ export function renderStackWithoutSlider(sliderKey: string): AbraImage | null {
   const base = editBaseImage.value;
   if (!base) return null;
   const next = base.copy() as AbraImage;
-  for (const step of appliedSteps(undefined, { key: sliderKey })) step.run(next);
+  runSteps(next, appliedSteps(undefined, { key: sliderKey }));
   return next;
 }
 

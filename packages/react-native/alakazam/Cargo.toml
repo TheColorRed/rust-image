@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 abra = { workspace = true }
+abra-body-segmentation = { workspace = true }
+abra-find-person = { workspace = true }
 pub-sub = { workspace = true }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
 vessel = { workspace = true, features = ["android-surface"] }
@@ -13,8 +15,9 @@ gpu = { workspace = true, optional = true }
 gpu-passes = { workspace = true, optional = true, features = ["vessel-target"] }
 # Pinned to what the bindings generator (uniffi-bindgen-react-native 0.31.0-6, the newest release) reads. A newer uniffi
 # makes binding generation fail and leaves the generated TypeScript stale. Raise it when a matching generator exists.
-uniffi = "=0.31"
+uniffi = { version = "=0.31", features = ["tokio"] }
 base64 = "0.23.1"
+futures = { workspace = true }
 
 [features]
 default = ["gpu"]

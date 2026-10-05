@@ -1,17 +1,9 @@
 import { PixelRatio } from 'react-native';
 import { combineLatest, type Subscription } from 'rxjs';
-import { skip } from 'rxjs/operators';
 import { LiveRenderer } from '@/src/lib/live-renderer';
 import { previewBox, previewBox$ } from '@/src/state/gestures';
-import { liveSurface, previewSourceImage$ } from '@/src/state/preview';
+import { liveSurface } from '@/src/state/preview';
 import { editBaseImage, editBaseImage$ } from '@/src/state/session';
-
-/**
- * How long the live frames stay over the committed photo after an edit lands, so the hand-off between them can't flash.
- * The committed image is drawn a frame or two after it is set, and taking the live frames away sooner shows the
- * un-edited photo for an instant, which is very visible on a big change such as Invert.
- */
-const HANDOFF_MS = 150;
 
 /** The editor photo's live renderer: effects drawn over the committed photo while a control is tapped or dragged. */
 export const editorLive = new LiveRenderer(liveSurface);
@@ -41,23 +33,15 @@ export function ensureBase(): boolean {
 
 /**
  * Keeps the editor's live renderer connected for the whole editing session: it opens as soon as there is an edit base
- * and a preview size, so the first tap or drag only pays for its effects, and it hides its frames once the committed
- * photo has caught up. Returns the teardown, which lets go of the GPU.
+ * and a preview size, so the first tap or drag only pays for its effects. The preview component handles the handoff
+ * after native presentation. Returns the teardown, which lets go of the GPU.
  */
 export function startEditorLive(): Subscription {
   const subscription = combineLatest([editBaseImage$, previewBox$]).subscribe(([base, box]) => {
     if (base && box) ensureBase();
     else editorLive.release();
   });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  subscription.add(
-    previewSourceImage$.pipe(skip(1)).subscribe(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => editorLive.hide(), HANDOFF_MS);
-    }),
-  );
   subscription.add(() => {
-    clearTimeout(timer);
     editorLive.release();
   });
   return subscription;

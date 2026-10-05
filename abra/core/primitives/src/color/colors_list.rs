@@ -104,6 +104,10 @@ impl Color {
   pub fn tan() -> Self {
     Self::from_rgb(210, 180, 140)
   }
+  /// Beige color using RGB(245, 245, 220)
+  pub fn beige() -> Self {
+    Self::from_rgb(245, 245, 220)
+  }
   /// Brown color using RGB(165, 42, 42)
   pub fn brown() -> Self {
     Self::from_rgb(139, 90, 43)

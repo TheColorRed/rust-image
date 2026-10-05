@@ -1,6 +1,6 @@
 use abra_core::{
   Channel, Image,
-  image::gpu::{GpuOp, GpuPass, GpuProcessor},
+  image::gpu::{GpuPass, GpuProcessor},
 };
 use options::{Effect, Options};
 

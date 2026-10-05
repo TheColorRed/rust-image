@@ -6,7 +6,8 @@ import { isBlemishToolFocused } from '@/src/state/edits';
 // #region: Preview layout
 
 /** On-screen size of the preview area; gesture bounds and blemish targeting are relative to it. */
-export const previewBox = new BehaviorSubject<{ width: number; height: number } | null>(null);
+export type PreviewBox = { width: number; height: number };
+export const previewBox = new BehaviorSubject<PreviewBox | null>(null);
 export const previewBox$ = previewBox.asObservable();
 /** Pending rAF handle debouncing `onLayout` into `previewBox`. */
 export const previewLayoutFrame = new BehaviorSubject<number | null>(null);
@@ -55,7 +56,9 @@ type Touches = GestureResponderEvent['nativeEvent']['touches'];
 export type PreviewTouchEvent = { type: 'grant' | 'move' | 'release' | 'terminate'; touches: Touches };
 export const previewTouch = new Subject<PreviewTouchEvent>();
 
-export const previewPressed = new Subject<GestureResponderEvent>();
+/** A tap relative to the untransformed preview, independent of which image child received it. */
+export type PreviewPress = { x: number; y: number; pageX: number; pageY: number };
+export const previewPressed = new Subject<PreviewPress>();
 export const previewPressed$ = previewPressed.asObservable();
 
 // #endregion
@@ -93,7 +96,9 @@ export function resetPreviewTransform() {
 /** Springs the preview to `to` (and optionally `to.scale`) with the native driver. */
 export function springPreview(to: { x: number; y: number; scale?: number }) {
   Animated.parallel([
-    ...(to.scale === undefined ? [] : [Animated.spring(previewScale.value, { toValue: to.scale, useNativeDriver: true })]),
+    ...(to.scale === undefined
+      ? []
+      : [Animated.spring(previewScale.value, { toValue: to.scale, useNativeDriver: true })]),
     Animated.spring(previewTranslateX.value, { toValue: to.x, useNativeDriver: true }),
     Animated.spring(previewTranslateY.value, { toValue: to.y, useNativeDriver: true }),
   ]).start();

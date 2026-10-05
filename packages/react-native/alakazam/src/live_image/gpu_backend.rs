@@ -34,8 +34,8 @@ impl GpuBackend {
     self.chain.restore_source()?;
     let run: Vec<&dyn GpuEffect> = p_effects.iter().map(|effect| effect.as_ref() as &dyn GpuEffect).collect();
     gpu_render(&mut self.chain.session, &run)?;
-    let texture = self.chain.session.output_texture().ok_or("nothing has been rendered")?;
-    Ok(Some(gpu_passes::target::TextureFrame::new(self.context, texture.clone())))
+    let texture = self.chain.session.snapshot_texture().map_err(|error| error.to_string())?;
+    Ok(Some(gpu_passes::target::TextureFrame::new(self.context, texture)))
   }
 
   /// Runs the chain and returns the final pixels, waiting for the GPU.
@@ -72,7 +72,14 @@ mod tests {
       let pixels: Vec<u8> = p_image
         .to_rgba_vec()
         .chunks_exact(4)
-        .flat_map(|p| [(p[0] as f32 * self.0) as u8, (p[1] as f32 * self.0) as u8, (p[2] as f32 * self.0) as u8, p[3]])
+        .flat_map(|p| {
+          [
+            (p[0] as f32 * self.0) as u8,
+            (p[1] as f32 * self.0) as u8,
+            (p[2] as f32 * self.0) as u8,
+            p[3],
+          ]
+        })
         .collect();
       p_image.set_rgba(pixels);
     }
@@ -117,7 +124,8 @@ mod tests {
     let chain: [&dyn LiveEffect; 3] = [&Bright(0.5), &Invert, &Bright(0.5)];
     let out = backend.render_blocking(&chain).unwrap();
 
-    let mut expected = Image::new_from_pixels(13, 7, backend.render_blocking(&[]).unwrap(), abra::abra_core::Channels::RGBA);
+    let mut expected =
+      Image::new_from_pixels(13, 7, backend.render_blocking(&[]).unwrap(), abra::abra_core::Channels::RGBA);
     for effect in chain {
       effect.apply_cpu(&mut expected);
     }
@@ -131,8 +139,7 @@ mod tests {
     // A GPU-only chain leaves its result in the session; the next chain must not start from it.
     backend.render_blocking(&[&Bright(0.5)]).unwrap();
     let out = backend.render_blocking(&[&Invert]).unwrap();
-    let expected: Vec<u8> =
-      original.chunks_exact(4).flat_map(|p| [255 - p[0], 255 - p[1], 255 - p[2], p[3]]).collect();
+    let expected: Vec<u8> = original.chunks_exact(4).flat_map(|p| [255 - p[0], 255 - p[1], 255 - p[2], p[3]]).collect();
     close(&out, &expected);
   }
 
@@ -145,14 +152,43 @@ mod tests {
   }
 
   #[test]
+  fn offscreen_textures_remain_stable_across_later_renders() {
+    use vessel::GpuFrame;
+
+    let Some(mut backend) = backend() else { return };
+    let first = backend.render_texture(&[Arc::new(Bright(0.5))]).unwrap().unwrap();
+    let expected = first.read_back().unwrap();
+    for factor in [0.2, 0.8, 1.0] {
+      backend.render_texture(&[Arc::new(Bright(factor))]).unwrap().unwrap();
+    }
+    assert_eq!(first.read_back().unwrap().pixels, expected.pixels);
+
+    let original = backend.render_texture(&[]).unwrap().unwrap();
+    let expected = original.read_back().unwrap();
+    backend.render_blocking(&[&Bright(0.3)]).unwrap();
+    assert_eq!(original.read_back().unwrap().pixels, expected.pixels);
+  }
+
+  #[test]
   fn a_masked_shader_effect_matches_its_cpu_result() {
     let Some(mut backend) = backend() else { return };
-    let weights: Vec<f32> = (0..13 * 7).map(|i| if i % 13 < 4 { 1.0 } else if i % 13 < 8 { 0.5 } else { 0.0 }).collect();
+    let weights: Vec<f32> = (0..13 * 7)
+      .map(|i| {
+        if i % 13 < 4 {
+          1.0
+        } else if i % 13 < 8 {
+          0.5
+        } else {
+          0.0
+        }
+      })
+      .collect();
     let masked = crate::live_image::masked::MaskedEffect::new(Arc::new(Bright(0.5)), 13, 7, &weights);
     assert!(masked.has_gpu());
 
     let out = backend.render_blocking(&[&masked]).unwrap();
-    let mut expected = Image::new_from_pixels(13, 7, backend.render_blocking(&[]).unwrap(), abra::abra_core::Channels::RGBA);
+    let mut expected =
+      Image::new_from_pixels(13, 7, backend.render_blocking(&[]).unwrap(), abra::abra_core::Channels::RGBA);
     masked.apply_cpu(&mut expected);
     close(&out, expected.rgba());
   }

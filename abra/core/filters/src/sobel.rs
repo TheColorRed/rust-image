@@ -23,7 +23,8 @@ pub fn sobel_magnitude(p_image: &Image, p_step: usize) -> Vec<f32> {
   let rgba = p_image.rgba();
   let brightness: Vec<f32> =
     rgba.chunks_exact(4).map(|p| luma(p[0] as f32, p[1] as f32, p[2] as f32, LumaStandard::Rec601)).collect();
-  let at = |x: isize, y: isize| brightness[y.clamp(0, h as isize - 1) as usize * w + x.clamp(0, w as isize - 1) as usize];
+  let at =
+    |x: isize, y: isize| brightness[y.clamp(0, h as isize - 1) as usize * w + x.clamp(0, w as isize - 1) as usize];
   let step = p_step.max(1) as isize;
 
   let mut out = vec![0.0f32; w * h];

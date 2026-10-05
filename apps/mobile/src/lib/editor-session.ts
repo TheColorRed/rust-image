@@ -8,6 +8,7 @@ import { startReplay } from '@/src/lib/editor-replay';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey } from '@/src/state/edits';
 import { draftUiHistory, lastDraftGroup, recordDraft } from '@/src/state/history';
 import { controlThumbnails, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
+import { personSelection } from '@/src/state/person-selection';
 import {
   busy,
   checkpointHistory,
@@ -43,6 +44,7 @@ function resetSessionState() {
   recordDraft.next('none');
   lastDraftGroup.next(null);
   showingCheckpoint.next(false);
+  personSelection.next({ focused: false, loading: false, people: [], selectedId: null, error: null });
   saved.next(false);
   busy.next(false);
   loadError.next(null);

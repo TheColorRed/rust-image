@@ -1,6 +1,7 @@
 import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-native-documents/picker';
 import { useMemo, useState } from 'react';
-import { Alert, Button, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { ImagePlus } from 'lucide-react-native';
+import { Alert, Button, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '@/src/lib/theme';
 
 export interface PickedImage {
@@ -14,6 +15,9 @@ export interface PickedImage {
 export interface FilePickerProps {
   onPick?: (asset: PickedImage) => void;
   title?: string;
+  subtitle?: string;
+  variant?: 'default' | 'card';
+  showPreview?: boolean;
   style?: any;
 }
 
@@ -21,13 +25,42 @@ export interface FilePickerProps {
  * Android-native image picker using the system document picker.
  * Uses the platform file chooser to select an existing image and returns its metadata + URI.
  */
-export default function FilePicker({ onPick, title = 'Pick image from device', style }: FilePickerProps) {
+export default function FilePicker({
+  onPick,
+  title = 'Pick image from device',
+  subtitle = 'Browse this device or a connected photo app',
+  variant = 'default',
+  showPreview = true,
+  style,
+}: FilePickerProps) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
       StyleSheet.create({
         container: { width: '100%', padding: 16, gap: 8 },
         row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+        card: {
+          minHeight: 96,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 16,
+          paddingHorizontal: 18,
+          paddingVertical: 16,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 16,
+          backgroundColor: colors.surface,
+        },
+        cardIcon: {
+          width: 56,
+          height: 56,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 14,
+          backgroundColor: colors.chip,
+        },
+        cardTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
+        cardSubtitle: { marginTop: 4, fontSize: 13, color: colors.textSecondary },
         badge: { color: colors.success, fontSize: 12 },
         error: { color: colors.danger },
         preview: { gap: 6 },
@@ -74,14 +107,32 @@ export default function FilePicker({ onPick, title = 'Pick image from device', s
 
   return (
     <View style={[styles.container, style]}>
-      <View style={styles.row}>
-        <Button title={title} onPress={openPicker} />
-        {Platform.OS === 'android' && <Text style={styles.badge}>Android native picker</Text>}
-      </View>
+      {variant === 'card' ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`${title}. ${subtitle}`}
+          activeOpacity={0.75}
+          onPress={openPicker}
+          style={styles.card}
+        >
+          <View style={styles.cardIcon}>
+            <ImagePlus size={32} color={colors.accent} strokeWidth={1.8} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardSubtitle}>{subtitle}</Text>
+          </View>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.row}>
+          <Button title={title} onPress={openPicker} />
+          {Platform.OS === 'android' && <Text style={styles.badge}>Android native picker</Text>}
+        </View>
+      )}
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      {selected && (
+      {showPreview && selected && (
         <View style={styles.preview}>
           <Text style={styles.label}>Selected image</Text>
           <Image source={{ uri: selected.uri }} style={styles.image} resizeMode="cover" />

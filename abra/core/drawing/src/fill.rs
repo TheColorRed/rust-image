@@ -1,4 +1,5 @@
 use abra_core::{Area, Fill, Image, Path, PointF};
+use rayon::prelude::*;
 
 use crate::shaders::fill_feather_shader::FillFeatherShader;
 use crate::{PolygonCoverage, Rasterizer, SampleGrid, SourceOverCompositor, shader_from_fill_with_path};
@@ -10,6 +11,7 @@ pub struct FillArea<'a> {
   area: Area,
   fill: Fill<'a>,
   position: Option<PointF>,
+  mask: Option<Image>,
 }
 
 impl<'a> FillArea<'a> {
@@ -17,6 +19,13 @@ impl<'a> FillArea<'a> {
   /// of the area's bounds, so the area lands where it was drawn.
   pub fn with_position(mut self, p_position: impl Into<PointF>) -> Self {
     self.position = Some(p_position.into());
+    self
+  }
+
+  /// Multiplies fill opacity by a grayscale mask. The mask's red channel is used and its dimensions must match the
+  /// rasterized area's bounds. A `Mask` can be passed directly through its conversion into `Image`.
+  pub fn with_mask(mut self, p_mask: impl Into<Image>) -> Self {
+    self.mask = Some(p_mask.into());
     self
   }
 
@@ -62,6 +71,19 @@ impl<'a> FillArea<'a> {
     let rasterizer = Rasterizer::new(&coverage, shader.as_ref(), &compositor, sample_grid);
     rasterizer.rasterize(&mut image);
 
+    if let Some(mask) = &self.mask {
+      assert_eq!(
+        mask.dimensions::<u32>(),
+        image.dimensions::<u32>(),
+        "Fill mask dimensions must match the rasterized area bounds"
+      );
+      let mask_pixels = mask.rgba();
+      let pixels = image.colors().as_slice_mut().expect("Image colors must be contiguous");
+      pixels.par_chunks_exact_mut(4).zip(mask_pixels.par_chunks_exact(4)).for_each(|(pixel, mask_pixel)| {
+        pixel[3] = ((pixel[3] as u16 * mask_pixel[0] as u16 + 127) / 255) as u8;
+      });
+    }
+
     image
   }
 
@@ -92,6 +114,7 @@ pub fn fill<'a>(p_area: impl Into<Area>, p_fill: impl Into<Fill<'a>>) -> FillAre
     area: p_area.into(),
     fill: p_fill.into(),
     position: None,
+    mask: None,
   }
 }
 
@@ -120,7 +143,7 @@ pub fn fill<'a>(p_area: impl Into<Area>, p_fill: impl Into<Fill<'a>>) -> FillAre
 #[cfg(test)]
 mod fill_area_tests {
   use super::*;
-  use abra_core::Color;
+  use abra_core::{Channels, Color};
 
   #[test]
   fn apply_draws_the_area_where_it_is() {
@@ -144,5 +167,20 @@ mod fill_area_tests {
   fn to_image_is_the_size_of_the_bounds() {
     let image = fill(Area::rect((4.0, 4.0), (3.0, 2.0)), Color::from_rgba(255, 0, 0, 255)).to_image();
     assert_eq!(image.dimensions::<u32>(), (3, 2));
+  }
+
+  #[test]
+  fn with_mask_multiplies_fill_alpha() {
+    let mask = Image::new_from_pixels(
+      3,
+      3,
+      [255u8, 128, 0].repeat(3).into_iter().flat_map(|value| [value, value, value, 255]).collect::<Vec<u8>>(),
+      Channels::RGBA,
+    );
+    let filled = fill(Area::rect((0.0, 0.0), (3.0, 3.0)), Color::from_rgba(255, 0, 0, 255)).with_mask(mask).to_image();
+
+    assert_eq!(filled.get_pixel(0, 1).unwrap().3, 255);
+    assert_eq!(filled.get_pixel(1, 1).unwrap().3, 128);
+    assert_eq!(filled.get_pixel(2, 1).unwrap().3, 0);
   }
 }

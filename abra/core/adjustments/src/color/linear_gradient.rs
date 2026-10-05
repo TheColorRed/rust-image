@@ -129,7 +129,12 @@ fn composite(p_base: [u8; 4], p_gradient: [u8; 4], p_opacity: u32) -> [u8; 4] {
     let sum = gradient as u32 * source_alpha * 255 + base as u32 * base_alpha * (255 - source_alpha);
     ((sum + divisor / 2) / divisor).min(255) as u8
   };
-  [channel(p_gradient[0], p_base[0]), channel(p_gradient[1], p_base[1]), channel(p_gradient[2], p_base[2]), out_alpha as u8]
+  [
+    channel(p_gradient[0], p_base[0]),
+    channel(p_gradient[1], p_base[1]),
+    channel(p_gradient[2], p_base[2]),
+    out_alpha as u8,
+  ]
 }
 
 impl LinearGradientEffect {
@@ -182,14 +187,25 @@ impl GpuProcessor for LinearGradientEffect {
   fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
     let plan = self.plan(p_width, p_height);
     let mut uniforms: Vec<u8> = Vec::with_capacity(32);
-    for value in [plan.a as u32, plan.b as u32, plan.c as u32, plan.shift, plan.opacity, 0, 0, 0] {
+    for value in [
+      plan.a as u32,
+      plan.b as u32,
+      plan.c as u32,
+      plan.shift,
+      plan.opacity,
+      0,
+      0,
+      0,
+    ] {
       uniforms.extend_from_slice(&value.to_le_bytes());
     }
-    vec![GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_aux(GpuAux {
-      width: LUT_SIZE,
-      height: 1,
-      rgba: self.lut.clone(),
-    })]
+    vec![
+      GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_aux(GpuAux {
+        width: LUT_SIZE,
+        height: 1,
+        rgba: self.lut.clone(),
+      }),
+    ]
   }
 }
 
@@ -206,7 +222,12 @@ impl LinearGradientEffect {
     for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
       let (x, y) = ((index as u32 % width) as i32, (index as u32 / width) as i32);
       let table = plan.table_index(x, y) * 4;
-      let gradient = [self.lut[table], self.lut[table + 1], self.lut[table + 2], self.lut[table + 3]];
+      let gradient = [
+        self.lut[table],
+        self.lut[table + 1],
+        self.lut[table + 2],
+        self.lut[table + 3],
+      ];
       pixel.copy_from_slice(&composite([pixel[0], pixel[1], pixel[2], pixel[3]], gradient, plan.opacity));
     }
     p_image.set_rgba(pixels);
@@ -308,7 +329,7 @@ mod tests {
     let base = base_pixels();
     for (angle, opacity) in [(0.0, 1.0), (90.0, 1.0), (33.0, 1.0), (215.0, 0.5), (90.0, 0.0)] {
       let effect = LinearGradientEffect::angle(&gradient, angle).with_opacity(opacity);
-      let out = renderer.process(&[&effect], WIDTH, HEIGHT, &base)?;
+      let out = renderer.process(&[effect.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?;
       assert_close(&out, &expected(&effect, &gradient, &base));
     }
     Ok(())
@@ -319,7 +340,7 @@ mod tests {
     let mut renderer = renderer()?;
     let gradient = Gradient::from_to(Color::from_rgba(255, 0, 0, 255), Color::from_rgba(0, 0, 255, 255));
     let effect = LinearGradientEffect::angle(&gradient, 90.0);
-    let out = renderer.process(&[&effect], WIDTH, HEIGHT, &base_pixels())?;
+    let out = renderer.process(&[effect.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base_pixels())?;
     let row = 10 * WIDTH as usize * 4;
     assert!(out[row] > 240 && out[row + 2] < 15, "left edge should be the first stop");
     let last = row + (WIDTH as usize - 1) * 4;
@@ -337,7 +358,7 @@ mod tests {
     let mut frames = Vec::new();
     for angle in [0.0, 30.0, 60.0, 90.0] {
       effect.set_angle(angle);
-      renderer.render(&[&effect])?;
+      renderer.render(&[effect.passes(WIDTH, HEIGHT)])?;
       frames.push(renderer.read_pixels()?);
     }
 
@@ -364,7 +385,12 @@ mod tests {
       ];
       for (start, end) in lines {
         let plan = LinearGradientEffect::between(&gradient, start, end).plan(width, height);
-        for (x, y) in [(0, 0), (width as i32 - 1, 0), (0, height as i32 - 1), (width as i32 - 1, height as i32 - 1)] {
+        for (x, y) in [
+          (0, 0),
+          (width as i32 - 1, 0),
+          (0, height as i32 - 1),
+          (width as i32 - 1, height as i32 - 1),
+        ] {
           assert!(plan.table_index(x, y) <= last, "{width}x{height} from {start:?} to {end:?} at ({x}, {y})");
         }
       }
@@ -386,7 +412,7 @@ mod tests {
     let mut renderer = renderer()?;
     let gradient = Gradient::from_to(Color::from_rgba(255, 0, 0, 255), Color::from_rgba(0, 0, 255, 255));
     let effect = LinearGradientEffect::between(&gradient, (5.0, 5.0), (5.0, 5.0));
-    let out = renderer.process(&[&effect], WIDTH, HEIGHT, &base_pixels())?;
+    let out = renderer.process(&[effect.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base_pixels())?;
     // With no line, every pixel takes the first stop.
     for pixel in out.chunks_exact(4) {
       assert_close(pixel, &[255, 0, 0, 255]);

@@ -1,18 +1,7 @@
-import { ImagePreview } from '@alakazam/mobile';
-import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  PixelRatio,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type LayoutChangeEvent,
-} from 'react-native';
-import { useObservable } from 'react-rx';
-import { combineLatest } from 'rxjs';
+import { BlemishReticle } from '@/src/components/tools/blemish-tool';
 import { comparisonImage } from '@/src/lib/editor-history';
+import { editorLive } from '@/src/lib/editor-live';
+import { waitForPreviewFrame } from '@/src/lib/preview-handoff';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import {
   restorePreviewRequested,
@@ -20,7 +9,7 @@ import {
   showCheckpointRequested,
   showCheckpointRequested$,
 } from '@/src/state/commands';
-import { isBlemishToolFocused$ } from '@/src/state/edits';
+import { isBlemishToolFocused$, isSkinControlFocused$ } from '@/src/state/edits';
 import {
   ensurePreviewPanResponder,
   previewBox,
@@ -47,13 +36,39 @@ import {
   showingCheckpoint,
   topInset$,
 } from '@/src/state/preview';
-import { busy$, currentImage, loadError$, saved, saved$ } from '@/src/state/session';
+import { busy$, currentImage, loadError as previewError, loadError$, saved, saved$ } from '@/src/state/session';
+import { personOutlinesVisible$, personSelection, personSelection$ } from '@/src/state/person-selection';
+import { ImagePreview } from '@alakazam/mobile';
 import { VesselView } from '@vessel/react-native';
-import { editorLive } from '@/src/lib/editor-live';
-import { BlemishReticle } from '@/src/components/tools/blemish-tool';
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+} from 'react-native';
+import { useObservable, useSyncObservable } from 'react-rx';
+import { combineLatest } from 'rxjs';
 
 /** How long the "Edits applied" toast stays up; it has no dismiss control of its own. */
 const SAVED_TOAST_MS = 2000;
+const CHECKPOINT_HOLD_MS = 250;
+const PERSON_OUTLINE_COLORS = [
+  '#FF4FA3',
+  '#FF453A',
+  '#34C759',
+  '#0A84FF',
+  '#FFD60A',
+  '#FF9F0A',
+  '#BF5AF2',
+  '#64D2FF',
+  '#A8E66B',
+  '#FF6B6B',
+] as const;
 
 /**
  * The photo itself: renders `previewSourceImage` at the preview box's size, owns pinch/pan, the
@@ -63,19 +78,51 @@ export function EditorPreview() {
   const topInset = useObservable(topInset$, 0);
   const photo = useObservable(previewSize$, null);
   const liveViewRef = useRef<ElementRef<NonNullable<typeof VesselView>> | null>(null);
+  const checkpointHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkpointPreviewActive = useRef(false);
+  const touchTargetRef = useRef<ElementRef<typeof Pressable> | null>(null);
   const [baseView, setBaseView] = useState<ImagePreview | null>(null);
-  const liveView = useObservable(editorLive.view, null);
+  const liveView = useSyncObservable(editorLive.view, null);
   const box = useObservable(previewBox$, null);
   const loadError = useObservable(loadError$, null);
   const busy = useObservable(busy$, false);
   const isSaved = useObservable(saved$, false);
   const blemishFocused = useObservable(isBlemishToolFocused$, false);
+  const skinControlFocused = useObservable(isSkinControlFocused$, false);
+  const personSelectionState = useObservable(personSelection$, personSelection.value);
+  const outlinesVisible = useSyncObservable(personOutlinesVisible$, false);
   const scale = useObservable(previewScale$, previewScale.value);
   const translateX = useObservable(previewTranslateX$, previewTranslateX.value);
   const translateY = useObservable(previewTranslateY$, previewTranslateY.value);
   const panResponder = useObservable(previewPanResponder$, null);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const beginCheckpointHold = useCallback(() => {
+    if (checkpointHoldTimer.current) clearTimeout(checkpointHoldTimer.current);
+    checkpointPreviewActive.current = false;
+    checkpointHoldTimer.current = setTimeout(() => {
+      checkpointHoldTimer.current = null;
+      checkpointPreviewActive.current = true;
+      showCheckpointRequested.next();
+    }, CHECKPOINT_HOLD_MS);
+  }, []);
+
+  const endCheckpointHold = useCallback(() => {
+    if (checkpointHoldTimer.current) clearTimeout(checkpointHoldTimer.current);
+    checkpointHoldTimer.current = null;
+    if (!checkpointPreviewActive.current) return;
+    checkpointPreviewActive.current = false;
+    restorePreviewRequested.next();
+  }, []);
+
+  const handlePreviewPress = useCallback((event: GestureResponderEvent) => {
+    const { pageX, pageY } = event.nativeEvent;
+    // locationX/Y can be relative to the transformed photo or outline child that was hit.
+    touchTargetRef.current?.measureInWindow((left, top) => {
+      previewPressed.next({ x: pageX - left, y: pageY - top, pageX, pageY });
+    });
+  }, []);
 
   // Debounced to a frame: a layout that shifts while an edit replay is in flight would otherwise
   // land two rAF-deferred state updates in one native frame batch.
@@ -98,6 +145,10 @@ export function EditorPreview() {
     tracking.add(startPreviewGestures());
     return () => {
       tracking.unsubscribe();
+      if (checkpointHoldTimer.current) clearTimeout(checkpointHoldTimer.current);
+      checkpointHoldTimer.current = null;
+      if (checkpointPreviewActive.current) restorePreviewRequested.next();
+      checkpointPreviewActive.current = false;
       resetPreviewTransform();
       if (previewLayoutFrame.value !== null) cancelAnimationFrame(previewLayoutFrame.value);
       previewLayoutFrame.next(null);
@@ -108,7 +159,10 @@ export function EditorPreview() {
   // replaces the previous preview, which lets go of the view as it goes.
   useEffect(() => {
     let current: ImagePreview | null = null;
+    let cancelHandoff: (() => void) | undefined;
     const release = () => {
+      cancelHandoff?.();
+      cancelHandoff = undefined;
       current?.uniffiDestroy();
       current = null;
       setBaseView(null);
@@ -119,6 +173,17 @@ export function EditorPreview() {
       current = new ImagePreview(source);
       setBaseView(current);
       previewSize.next({ width: source.width(), height: source.height() });
+      const activity = editorLive.activity;
+      cancelHandoff = waitForPreviewFrame(
+        current,
+        () => {
+          if (editorLive.activity === activity) editorLive.hide();
+        },
+        error => {
+          console.warn('[preview] could not present the edited frame:', error);
+          previewError.next(error.message);
+        },
+      );
     });
     return () => {
       subscription.unsubscribe();
@@ -166,11 +231,11 @@ export function EditorPreview() {
       {...(panResponder?.panHandlers ?? {})}
     >
       <Pressable
+        ref={touchTargetRef}
         style={styles.touchTarget}
-        delayLongPress={250}
-        onLongPress={() => showCheckpointRequested.next()}
-        onPressOut={() => restorePreviewRequested.next()}
-        onPress={event => previewPressed.next(event)}
+        onPressIn={beginCheckpointHold}
+        onPressOut={endCheckpointHold}
+        onPress={handlePreviewPress}
       >
         {loadError && <Text style={styles.error}>{loadError}</Text>}
         {!loadError && !photo && <ActivityIndicator size="large" color={colors.textPrimary} />}
@@ -185,6 +250,16 @@ export function EditorPreview() {
               pointerEvents="none"
               style={photoStyle(box, photo, false)}
             />
+            {skinControlFocused && personSelectionState.focused && outlinesVisible && (
+              <PersonDetectionOverlay
+                people={personSelectionState.people}
+                selectedId={personSelectionState.selectedId}
+                loading={personSelectionState.loading}
+                error={personSelectionState.error}
+                imageSize={photo}
+                previewSize={box}
+              />
+            )}
           </Animated.View>
         )}
         {blemishFocused && <BlemishReticle />}
@@ -199,11 +274,100 @@ export function EditorPreview() {
   );
 }
 
+function PersonDetectionOverlay({
+  people,
+  selectedId,
+  loading,
+  error,
+  imageSize,
+  previewSize,
+}: {
+  people: typeof personSelection.value.people;
+  selectedId: number | null;
+  loading: boolean;
+  error: string | null;
+  imageSize: { width: number; height: number };
+  previewSize: { width: number; height: number };
+}) {
+  const fit = Math.min(previewSize.width / imageSize.width, previewSize.height / imageSize.height);
+  const offsetX = (previewSize.width - imageSize.width * fit) / 2;
+  const offsetY = (previewSize.height - imageSize.height * fit) / 2;
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View
+        style={{
+          position: 'absolute',
+          top: 12,
+          alignSelf: 'center',
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+          borderRadius: 14,
+          backgroundColor: 'rgba(0,0,0,0.68)',
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+          {error
+            ? error
+            : loading
+              ? 'Finding people…'
+              : people.length === 0
+                ? 'No people detected; skin effects still work'
+                : selectedId === null
+                  ? 'Tap a person to target skin effects'
+                  : `Person ${selectedId + 1} selected`}
+        </Text>
+      </View>
+      {people.map(person => {
+        const selected = person.id === selectedId;
+        return (
+          <View
+            key={person.id}
+            style={{
+              position: 'absolute',
+              left: offsetX + person.x * fit,
+              top: offsetY + person.y * fit,
+              width: person.width * fit,
+              height: person.height * fit,
+              borderWidth: selected ? 3 : 2,
+              borderColor: PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length],
+              backgroundColor: selected
+                ? `${PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length]}22`
+                : 'transparent',
+            }}
+          >
+            <Text
+              style={{
+                position: 'absolute',
+                top: -2,
+                left: -2,
+                paddingHorizontal: 5,
+                paddingVertical: 2,
+                overflow: 'hidden',
+                color: '#fff',
+                backgroundColor: PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length],
+                fontSize: 11,
+                fontWeight: '700',
+              }}
+            >
+              {person.id + 1}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 /**
  * Fits the photo's aspect ratio inside the preview box, centered. The live view keeps this size while hidden so its
  * surface is already the right size when the first frame is drawn on it.
  */
-function photoStyle(p_box: { width: number; height: number }, p_photo: { width: number; height: number }, p_visible: boolean) {
+function photoStyle(
+  p_box: { width: number; height: number },
+  p_photo: { width: number; height: number },
+  p_visible: boolean,
+) {
   const fit = Math.min(p_box.width / p_photo.width, p_box.height / p_photo.height);
   const width = Math.max(1, p_photo.width * fit);
   const height = Math.max(1, p_photo.height * fit);

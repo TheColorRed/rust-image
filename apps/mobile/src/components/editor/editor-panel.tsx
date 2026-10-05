@@ -1,12 +1,20 @@
 import { SkinTanPicker } from '@/src/components/editor/skin-tan-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { PersonSelectionControls, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
 import { useLiveAction } from '@/src/hooks/useLiveAction';
 import { useLiveSlider } from '@/src/hooks/useLiveSlider';
-import { EDIT_SECTIONS, appliesOnSelect, findSection, isSliderApplied } from '@/src/lib/edit-sections';
+import {
+  BLEMISH_TOOL_KEY,
+  EDIT_SECTIONS,
+  appliesOnSelect,
+  findSection,
+  isSliderApplied,
+} from '@/src/lib/edit-sections';
 import { editorLive } from '@/src/lib/editor-live';
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
 import { THUMBNAIL_SIZE } from '@/src/lib/editor-thumbnails';
+import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import { useTheme } from '@/src/lib/theme';
 import {
   actionPreviewRequested,
@@ -31,16 +39,17 @@ import {
   appliedActions$,
   focusedControl$,
   focusedControlKey,
-  isBlemishToolFocused$,
+  isSkinControlFocused$,
   resetVersion$,
 } from '@/src/state/edits';
 import { canRedo$, canRedoDraft$, canUndo$, canUndoDraft$ } from '@/src/state/history';
 import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
+import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { replayHidden } from '@/src/state/session';
 import { ChevronLeft, Redo2, RedoDot, Undo2, UndoDot, X } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View, type ImageStyle, type StyleProp } from 'react-native';
-import { useObservable } from 'react-rx';
+import { useObservable, useSyncObservable } from 'react-rx';
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
 export function EditorPanel() {
@@ -55,7 +64,7 @@ export function EditorPanel() {
   const activeSection = findSection(activeKey);
   useLiveAction();
   const focusedControl = useObservable(focusedControl$, undefined);
-  const isBlemishToolFocused = useObservable(isBlemishToolFocused$, false);
+  const isSkinControlFocused = useObservable(isSkinControlFocused$, false);
   const canUndoHistory = canUndoDraft || canUndo;
   const canRedoHistory = canRedoDraft || canRedo;
 
@@ -78,7 +87,11 @@ export function EditorPanel() {
           toggleAction(control);
         } else {
           focusedControlKey.next(control.key);
-          if (control.kind === 'slider' && appliesOnSelect(control) && adjustmentsState.value[control.key] === undefined) {
+          if (
+            control.kind === 'slider' &&
+            appliesOnSelect(control) &&
+            adjustmentsState.value[control.key] === undefined
+          ) {
             commitSlider(control, control.defaultValue);
           }
         }
@@ -91,6 +104,7 @@ export function EditorPanel() {
   return (
     <View style={[styles.panel, { paddingBottom: bottomInset + 12 }]}>
       <BlemishToolController />
+      <PersonSelectionToolController />
       <View style={styles.history}>
         <Pressable
           style={styles.historyButton}
@@ -118,10 +132,13 @@ export function EditorPanel() {
         </Pressable>
       </View>
       <View style={styles.controls}>
-        {isBlemishToolFocused ? (
+        {focusedControl?.kind === 'tool' && focusedControl.key === BLEMISH_TOOL_KEY ? (
           <BlemishControls onBack={() => focusedControlKey.next(null)} onApply={() => blemishApplyRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
-          <SliderEditor />
+          <>
+            {isSkinControlFocused && <PersonSelectionControls />}
+            <SliderEditor />
+          </>
         ) : activeSection.previewThumbnails ? (
           <ThumbnailControls />
         ) : (
@@ -149,14 +166,16 @@ function SliderEditor() {
   const control = useObservable(focusedControl$, undefined);
   const adjustments = useObservable(adjustments$, {});
   const resetVersion = useObservable(resetVersion$, 0);
+  const selection = useObservable(personSelection$, personSelection.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onLiveChange = useLiveSlider(control?.kind === 'slider' ? control : undefined);
-  const preview = useObservable(editorLive.view, null);
+  const preview = useSyncObservable(editorLive.view, null);
 
   if (control?.kind !== 'slider') {
     return null;
   }
+  const targetKey = adjustmentKey(control.key, selection.selectedId);
 
   return (
     <View style={styles.sliderRow}>
@@ -174,30 +193,35 @@ function SliderEditor() {
       >
         <X color={colors.textPrimary} size={16} />
       </Pressable>
-      <View style={styles.sliderFill}>
+      <View
+        style={styles.sliderFill}
+        onTouchStart={() => {
+          if (personSelection.value.focused) personOutlinesVisible.next(false);
+        }}
+      >
         {control.picker === 'skin-tan' ? (
           <SkinTanPicker
-            key={control.key + '-' + resetVersion}
+            key={targetKey + '-' + resetVersion}
             preview={preview}
-            value={adjustments[control.key] ?? control.defaultValue}
+            value={adjustments[targetKey] ?? control.defaultValue}
             onTouch={() => editorLive.show()}
             onRelease={value => sliderCommitRequested.next({ control, value })}
           />
         ) : (
-        <Slider
-          key={control.key + '-' + resetVersion}
-          label={control.label}
-          min={control.min}
-          max={control.max}
-          step={control.step ?? 1}
-          initialValue={adjustments[control.key] ?? control.defaultValue}
-          resetValue={control.defaultValue}
-          triggerType="release"
-          onChange={onLiveChange}
-          reset
-          onTrigger={value => sliderCommitRequested.next({ control, value })}
-          onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
-        />
+          <Slider
+            key={targetKey + '-' + resetVersion}
+            label={control.label}
+            min={control.min}
+            max={control.max}
+            step={control.step ?? 1}
+            initialValue={adjustments[targetKey] ?? control.defaultValue}
+            resetValue={control.defaultValue}
+            triggerType="release"
+            onChange={onLiveChange}
+            reset
+            onTrigger={value => sliderCommitRequested.next({ control, value })}
+            onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
+          />
         )}
       </View>
     </View>
@@ -283,7 +307,10 @@ function ChipControls() {
         const adjusted =
           control.kind === 'action'
             ? appliedActions.includes(control.key)
-            : control.kind === 'slider' && isSliderApplied(control, adjustments[control.key]);
+            : control.kind === 'slider' &&
+              (isSkinAdjustment(control.key)
+                ? skinAdjustmentTargets(adjustments, control.key).some(target => isSliderApplied(control, target.value))
+                : isSliderApplied(control, adjustments[control.key]));
         return (
           <Pressable
             key={control.key}

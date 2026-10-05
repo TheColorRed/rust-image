@@ -6,6 +6,7 @@
 use abra::abra_core::{Color, ColorStop, Gradient};
 use abra::adjustments::prelude::{color, levels};
 use abra::live::{EffectSink, GpuProbe};
+use abra_body_segmentation::Mask;
 
 use levels::FilterType;
 
@@ -145,6 +146,7 @@ pub enum EffectSpec {
 pub fn skin_tan_gradient() -> Gradient {
   Gradient::evenly(vec![
     Color::white(),
+    Color::tan(),
     Color::light_brown(),
     Color::brown(),
     Color::dark_brown(),
@@ -164,14 +166,31 @@ impl EffectSpec {
   /// Applies this effect to `p_target`, an image or a live image, exactly as the effect's own `apply` would.
   /// This is the one place the editor maps its parameter lists onto effects.
   pub fn apply(&self, p_target: impl EffectSink) {
+    self.apply_with_skin_mask(p_target, None);
+  }
+
+  /// Applies this effect, using a precomputed image skin mask when the effect supports it.
+  pub(crate) fn apply_with_skin_mask(&self, p_target: impl EffectSink, p_skin_mask: Option<&Mask>) {
     match self {
       // Effects without parameters.
       EffectSpec::Grayscale => p_target.accept(color::grayscale()),
       EffectSpec::Invert => p_target.accept(color::invert()),
       // Effects with parameters.
-      EffectSpec::SkinSmooth { amount } => p_target.accept(abra::filters::prelude::skin::smooth_skin(*amount)),
+      EffectSpec::SkinSmooth { amount } => {
+        let effect = abra::filters::prelude::skin::smooth_skin(*amount);
+        if let Some(mask) = p_skin_mask {
+          p_target.accept(effect.with_mask(mask.clone()));
+        } else {
+          p_target.accept(effect);
+        }
+      }
       EffectSpec::SkinTan { offset } => {
-        p_target.accept(abra::filters::prelude::skin::tan_skin(skin_tan_gradient().color_at(*offset as f32)))
+        let effect = abra::filters::prelude::skin::tan_skin(skin_tan_gradient().color_at(*offset as f32));
+        if let Some(mask) = p_skin_mask {
+          p_target.accept(effect.with_mask(mask.clone()));
+        } else {
+          p_target.accept(effect);
+        }
       }
       EffectSpec::Threshold { amount } => p_target.accept(color::threshold(*amount)),
       EffectSpec::Brightness { amount } => p_target.accept(levels::brightness(*amount)),
@@ -230,7 +249,15 @@ pub fn effect_has_gpu(effect: EffectSpec) -> bool {
 impl AbraImage {
   /// Applies one effect to the image. Uses the same definition as live previews.
   pub fn apply_effect(&self, effect: EffectSpec) {
-    self.with_image_mut(|img| effect.apply(img));
+    let skin_mask = self.skin_mask();
+    self.with_image_mut(|img| effect.apply_with_skin_mask(img, skin_mask.as_ref()));
+  }
+
+  /// Applies an effect with an explicit person mask without changing the live selection.
+  pub fn apply_effect_to_person(&self, effect: EffectSpec, person_id: Option<u32>) -> Result<(), crate::AbraError> {
+    let skin_mask = self.skin_mask_for_person(person_id)?;
+    self.with_image_mut(|img| effect.apply_with_skin_mask(img, skin_mask.as_ref()));
+    Ok(())
   }
 }
 
@@ -357,5 +384,24 @@ mod tests {
     let mut preview = preview();
     spec.apply(&mut preview);
     wait_for_frame_where(&mut preview, |frame| frame.pixels.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1));
+  }
+
+  #[test]
+  fn skin_tan_uses_the_cached_mask_for_images_and_live_previews() {
+    let source = vec![60u8, 100, 200, 255].repeat(16 * 16);
+    let mask = Mask::from_image(Image::new_from_color(16, 16, Color::white()));
+    let effect = EffectSpec::SkinTan { offset: 1.0 };
+
+    let mut unmasked = Image::new_from_pixels(16, 16, source.clone(), Channels::RGBA);
+    effect.apply(&mut unmasked);
+    assert_eq!(unmasked.rgba(), source, "blue should be excluded by color detection");
+
+    let mut image = Image::new_from_pixels(16, 16, source.clone(), Channels::RGBA);
+    effect.apply_with_skin_mask(&mut image, Some(&mask));
+    assert_ne!(image.rgba(), source, "the supplied mask should allow the effect on blue pixels");
+
+    let mut preview = LiveImage::new(16, 16, source).unwrap();
+    effect.apply_with_skin_mask(&mut preview, Some(&mask));
+    wait_for_pixels(&mut preview, image.rgba());
   }
 }

@@ -1,4 +1,4 @@
-﻿use super::skin::{floats, ints, skin_mask, skin_mask_passes};
+﻿use super::skin::{floats, ints, skin_mask, skin_mask_passes, supplied_skin_mask, supplied_skin_mask_aux};
 use crate::common::*;
 
 use crate::blur::surface_blur;
@@ -6,6 +6,7 @@ use abra_core::{
   IntoNumber,
   image::gpu::{GpuPass, GpuProcessor},
 };
+use mask::Mask;
 use options::Effect;
 
 // The smoothing is a surface blur, which blurs flat areas and stays sharp at edges. Its radius is a fraction of the long
@@ -27,13 +28,14 @@ const BOOSTED_THRESHOLD_MAX: u32 = 90;
 
 /// Smooths skin and leaves the features on it sharp. Create one with [`smooth_skin`].
 ///
-/// It works out a mask of where to smooth (skin-colored pixels that are not on or near an edge), blurs the whole photo
-/// with a surface blur, and mixes the blur in through the mask. On the GPU the same steps run as a chain of shader passes
-/// and the photo never leaves the GPU.
+/// By default, it uses a color-based mask of skin pixels away from image edges. Use [`with_mask`](Self::with_mask) to
+/// supply a replacement mask, such as one from a segmentation model. It blurs the photo with a surface blur and mixes
+/// the result through the mask. Both modes can run on the GPU when available.
 #[derive(Clone)]
 pub struct SmoothSkin {
   amount: f32,
   feather: f32,
+  mask: Option<Mask>,
   options: Options,
 }
 
@@ -42,6 +44,13 @@ impl SmoothSkin {
   /// `1.0` is the standard and `2.0` is twice as wide. Below `0.0` counts as `0.0`, the narrowest.
   pub fn with_feather(mut self, p_feather: impl IntoNumber) -> Self {
     self.feather = p_feather.into::<f32>().max(0.0);
+    self
+  }
+
+  /// Replaces color-based skin detection with a supplied grayscale mask.
+  /// The mask is resized to the image dimensions and softened using `with_feather`.
+  pub fn with_mask(mut self, p_mask: Mask) -> Self {
+    self.mask = Some(p_mask);
     self
   }
 }
@@ -73,7 +82,11 @@ impl Effect for SmoothSkin {
     let step = radius.div_ceil(SAMPLE_RADIUS_MAX);
     let threshold = ((SURFACE_THRESHOLD as f32 * boost).round() as u32).min(BOOSTED_THRESHOLD_MAX) as u8;
 
-    let mask = skin_mask(p_image, 1.0);
+    let mask = self
+      .mask
+      .as_ref()
+      .map(|mask| supplied_skin_mask(p_image, mask, self.feather))
+      .unwrap_or_else(|| skin_mask(p_image, 1.0));
 
     // Mix the blurred photo in through the mask, as much as the amount allows.
     let mut smoothed = p_image.clone();
@@ -114,9 +127,20 @@ impl GpuProcessor for SmoothSkin {
     let step = radius.div_ceil(SAMPLE_RADIUS_MAX);
     let threshold = ((SURFACE_THRESHOLD as f32 * boost).round() as u32).min(BOOSTED_THRESHOLD_MAX);
 
-    let mut passes = skin_mask_passes(p_width, p_height, 1.0);
+    let mut passes = if self.mask.is_some() {
+      Vec::new()
+    } else {
+      skin_mask_passes(p_width, p_height, 1.0)
+    };
     passes.push(GpuPass::new(include_str!("../blur/surface.wgsl"), ints(&[radius.div_ceil(step), threshold, step])));
-    passes.push(GpuPass::new(include_str!("./skin_blend.wgsl"), floats(&[blend])).with_base());
+    let blend_pass = if let Some(mask) = &self.mask {
+      GpuPass::new(include_str!("./skin_blend_mask.wgsl"), floats(&[blend]))
+        .with_aux(supplied_skin_mask_aux(mask, p_width, p_height, self.feather))
+        .with_base()
+    } else {
+      GpuPass::new(include_str!("./skin_blend.wgsl"), floats(&[blend])).with_base()
+    };
+    passes.push(blend_pass);
     passes
   }
 }
@@ -124,10 +148,11 @@ impl GpuProcessor for SmoothSkin {
 /// Smooths skin and leaves the features on it sharp.
 /// - `p_amount`: From `0.0` to `3.0`. Up to `1.0` it is how much of the smoothing shows. Past `1.0` the smoothing itself
 ///   gets stronger by that factor, which gives a blurrier, flatter skin.
-pub fn smooth_skin(p_amount: impl Into<f64>) -> SmoothSkin {
+pub fn smooth_skin(p_amount: impl IntoNumber) -> SmoothSkin {
   SmoothSkin {
-    amount: p_amount.into().clamp(0.0, MAX_AMOUNT as f64) as f32,
+    amount: p_amount.into::<f64>().clamp(0.0, MAX_AMOUNT as f64) as f32,
     feather: 10.0,
+    mask: None,
     options: None,
   }
 }
@@ -249,6 +274,21 @@ mod tests {
     let mask = Mask::from_image(Image::new_from_pixels(40, 40, black, Channels::RGBA));
     smooth_skin(1.0).with_options(ApplyOptions::new().with_mask(mask)).apply(&mut img);
     assert_eq!(img.to_rgba_vec(), original);
+  }
+
+  #[test]
+  fn supplied_mask_replaces_color_detection() {
+    let mut image = grainy(32, 32, (60, 100, 200));
+    let before = grain(&image, 4..28, 4..28);
+    let white = vec![255u8, 255, 255, 255].repeat(32 * 32);
+    let mask = Mask::from_image(Image::new_from_pixels(32, 32, white, Channels::RGBA));
+    let smoothing = smooth_skin(1.0).with_mask(mask);
+
+    assert!(smoothing.gpu_processor().is_some());
+    assert!(smoothing.passes(32, 32).last().unwrap().aux.is_some());
+    smoothing.apply_on_cpu(&mut image);
+
+    assert!(grain(&image, 4..28, 4..28) < before * 0.7);
   }
 
   #[test]

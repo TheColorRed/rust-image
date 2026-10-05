@@ -2,7 +2,10 @@ use crate::common::*;
 
 use crate::sobel::sobel_magnitude;
 use abra_core::color::rgb_to_ycbcr;
-use abra_core::image::gpu::GpuPass;
+use abra_core::image::gpu::{GpuAux, GpuPass};
+use abra_core::{ResizeTarget, Size, Transform, TransformAlgorithm};
+use mask::Mask;
+use std::sync::Arc;
 
 // Skin is found by color in YCbCr, which keeps brightness (Y) apart from color (Cb, Cr), so skin in shadow and in sun
 // both match. These are close to the ranges commonly used for skin, with the low end of Cr raised a little so that
@@ -75,6 +78,42 @@ fn box_blur_f32_inplace(p_mask: &mut [f32], p_width: usize, p_height: usize, p_r
   transpose(&scratch, p_height, p_width, p_mask);
 }
 
+pub(super) fn feather_mask(p_mask: &mut [f32], p_width: usize, p_height: usize, p_feather: f32) {
+  let long_side = p_width.max(p_height) as f32;
+  let feather = (long_side * FEATHER_FRACTION * p_feather).round() as usize;
+  box_blur_f32_inplace(p_mask, p_width, p_height, feather.clamp(1, (p_width.max(p_height) / 4).max(1)));
+}
+
+pub(super) fn supplied_skin_mask(p_image: &Image, p_mask: &Mask, p_feather: f32) -> Vec<f32> {
+  let (width, height) = p_image.dimensions::<usize>();
+  supplied_skin_mask_values(p_mask, width as u32, height as u32, p_feather)
+}
+
+pub(super) fn supplied_skin_mask_aux(p_mask: &Mask, p_width: u32, p_height: u32, p_feather: f32) -> GpuAux {
+  let mask = supplied_skin_mask_values(p_mask, p_width, p_height, p_feather);
+  let rgba: Vec<u8> = mask
+    .into_iter()
+    .flat_map(|value| {
+      let gray = (value * 255.0).round().clamp(0.0, 255.0) as u8;
+      [gray, gray, gray, 255]
+    })
+    .collect();
+  GpuAux {
+    width: p_width,
+    height: p_height,
+    rgba: Arc::from(rgba),
+  }
+}
+
+fn supplied_skin_mask_values(p_mask: &Mask, p_width: u32, p_height: u32, p_feather: f32) -> Vec<f32> {
+  let mut mask_image = p_mask.image().clone();
+  mask_image.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), TransformAlgorithm::Bilinear);
+  let (width, height) = (p_width as usize, p_height as usize);
+  let mut values: Vec<f32> = mask_image.rgba().par_chunks_exact(4).map(|pixel| pixel[0] as f32 / 255.0).collect();
+  feather_mask(&mut values, width, height, p_feather);
+  values
+}
+
 /// How much each pixel of the photo is skin, from 0 to 1, one value per pixel: skin-colored pixels that are not on or
 /// near an edge, with the border faded out. `p_feather` is how far it fades, as a multiple of the standard fade: 1 is the
 /// standard, 2 is twice as wide, and 0 is as narrow as it can be.
@@ -90,7 +129,9 @@ pub(super) fn skin_mask(p_image: &Image, p_feather: f32) -> Vec<f32> {
     .map(|pixel| {
       let (y, cb, cr) = rgb_to_ycbcr(pixel[0], pixel[1], pixel[2]);
       let ramp = |value: f32, (low, high): (f32, f32)| {
-        ((value - (low - CHROMA_MARGIN)) / CHROMA_MARGIN).min(((high + CHROMA_MARGIN) - value) / CHROMA_MARGIN).clamp(0.0, 1.0)
+        ((value - (low - CHROMA_MARGIN)) / CHROMA_MARGIN)
+          .min(((high + CHROMA_MARGIN) - value) / CHROMA_MARGIN)
+          .clamp(0.0, 1.0)
       };
       ramp(cb, CB_RANGE) * ramp(cr, CR_RANGE) * ((y - Y_DARK) / (Y_FULL - Y_DARK)).clamp(0.0, 1.0)
     })
@@ -111,8 +152,7 @@ pub(super) fn skin_mask(p_image: &Image, p_feather: f32) -> Vec<f32> {
   mask.par_iter_mut().zip(protection.par_iter()).for_each(|(value, kept)| *value *= 1.0 - (kept * EDGE_GAIN).min(1.0));
 
   // Fade the border of the mask so the effect does not end in a line.
-  let feather = (long_side * FEATHER_FRACTION * p_feather).round() as usize;
-  box_blur_f32_inplace(&mut mask, w, h, feather.clamp(1, (w.max(h) / 4).max(1)));
+  feather_mask(&mut mask, w, h, p_feather);
   mask
 }
 
@@ -126,9 +166,11 @@ pub(super) fn skin_mask_passes(p_width: u32, p_height: u32, p_feather: f32) -> V
   let long_side = p_width.max(p_height) as f32;
   let edge_step = ((long_side / REFERENCE_SIZE).round() as u32).max(1);
   let spread = ((long_side * EDGE_SPREAD).round() as u32).clamp(1, EDGE_SPREAD_MAX as u32);
-  let feather = ((long_side * FEATHER_FRACTION * p_feather).round() as u32).clamp(1, (p_width.max(p_height) / 4).max(1));
+  let feather =
+    ((long_side * FEATHER_FRACTION * p_feather).round() as u32).clamp(1, (p_width.max(p_height) / 4).max(1));
 
-  let blur = |radius: u32, across: bool| GpuPass::new(include_str!("./plane_blur.wgsl"), ints(&[radius, across as u32]));
+  let blur =
+    |radius: u32, across: bool| GpuPass::new(include_str!("./plane_blur.wgsl"), ints(&[radius, across as u32]));
 
   let mut edges_uniform = ints(&[edge_step]);
   edges_uniform.extend(floats(&[EDGE_START, EDGE_FULL]));
@@ -138,7 +180,16 @@ pub(super) fn skin_mask_passes(p_width: u32, p_height: u32, p_feather: f32) -> V
     blur(spread, false),
     GpuPass::new(
       include_str!("./skin_combine.wgsl"),
-      floats(&[CB_RANGE.0, CB_RANGE.1, CR_RANGE.0, CR_RANGE.1, CHROMA_MARGIN, Y_DARK, Y_FULL, EDGE_GAIN]),
+      floats(&[
+        CB_RANGE.0,
+        CB_RANGE.1,
+        CR_RANGE.0,
+        CR_RANGE.1,
+        CHROMA_MARGIN,
+        Y_DARK,
+        Y_FULL,
+        EDGE_GAIN,
+      ]),
     ),
     blur(feather, true),
     blur(feather, false),

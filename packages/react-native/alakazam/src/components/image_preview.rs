@@ -5,7 +5,10 @@
 //! GPU the picture is a texture that goes to the screen without being copied to the CPU. Everything else (when to draw, the
 //! native view, the GPU target) is the engine's.
 
-use std::sync::Arc;
+use std::sync::{
+  Arc,
+  atomic::{AtomicBool, Ordering},
+};
 
 use vessel::prelude::*;
 
@@ -16,6 +19,7 @@ use crate::{AbraImage, live_effects};
 #[derive(uniffi::Object, Component)]
 pub struct ImagePreview {
   image: Image,
+  presented: Arc<AtomicBool>,
 }
 
 /// Everything React can tell a view.
@@ -33,6 +37,11 @@ impl ImagePreview {
   #[uniffi::constructor]
   pub fn new(p_image: Arc<AbraImage>) -> Arc<Self> {
     let image = Image::new().track(&p_image);
+    let presented = Arc::new(AtomicBool::new(false));
+    image.subject::<Drawn>().subscribe({
+      let presented = Arc::clone(&presented);
+      move |_| presented.store(true, Ordering::SeqCst)
+    });
     let messages = image.subject::<Message>();
 
     messages.filter(|message| matches!(message, Message::SliderMove(..))).subscribe({
@@ -57,12 +66,17 @@ impl ImagePreview {
       }
     });
 
-    Arc::new(Self { image })
+    Arc::new(Self { image, presented })
   }
 
   /// Tells the view what changed.
   pub fn send(&self, message: Message) {
     self.image.subject::<Message>().next(message);
+  }
+
+  /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.
+  pub fn has_frame(&self) -> bool {
+    self.presented.load(Ordering::SeqCst)
   }
 }
 
@@ -142,8 +156,14 @@ mod tests {
   fn the_photo_is_shown_as_it_is_and_controls_change_it_live() {
     // The view appears after the component is mounted on it, which is how a React Native view mounts.
     let view = view(7001);
+    assert!(!view.has_frame());
     let surface = surface_of(7001);
     assert_eq!(newest(&surface, |_| true), 100, "the photo as it is");
+    let start = Instant::now();
+    while !view.has_frame() {
+      assert!(start.elapsed() < Duration::from_secs(5), "presentation was not acknowledged");
+      std::thread::sleep(Duration::from_millis(5));
+    }
 
     view.send(Message::SliderMove("action-brightness".to_string(), 50.0));
     assert_eq!(newest(&surface, |pixel| pixel == 150), 150);

@@ -54,7 +54,6 @@
     "winit",
     "workgroups"
   ],
-  "slint.includePaths": ["packages/app/ui"],
   "search.exclude": {
     "**/node_modules": true,
     "**/bower_components": true,
@@ -74,14 +73,6 @@
         "underline": false
       }
     }
-  },
-  "chat.tools.terminal.autoApprove": {
-    "/.+/": true,
-    "cargo run": true,
-    "cargo build": true,
-    "./target/release/layers-test.exe": true,
-    "./target/debug/layers-test.exe": true,
-    "~/.cargo/bin/cargo.EXE": true
   },
   "git.ignoreLimitWarning": true,
   "rust-analyzer.lens.references.method.enable": true,

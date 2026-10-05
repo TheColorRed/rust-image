@@ -20,6 +20,12 @@ type Open = {
  */
 export class LiveRenderer {
   private open: Open | null = null;
+  private activityVersion = 0;
+
+  /** Changes whenever a new live interaction starts, so an older committed frame cannot hide it. */
+  get activity(): number {
+    return this.activityVersion;
+  }
 
   /** The open preview, for a `VesselView` to show; `null` when there is none. */
   readonly view = new BehaviorSubject<ImagePreview | null>(null);
@@ -89,6 +95,7 @@ export class LiveRenderer {
 
   /** Lets go of the preview and the GPU connection. */
   release() {
+    this.activityVersion++;
     const open = this.open;
     this.open = null;
     this.view.next(null);
@@ -97,6 +104,7 @@ export class LiveRenderer {
   }
 
   private publish(open: Open) {
+    this.activityVersion++;
     const current = this.surface.value;
     if (current?.width !== open.width || current.height !== open.height) {
       this.surface.next({ width: open.width, height: open.height });

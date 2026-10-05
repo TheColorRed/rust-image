@@ -1,0 +1,13 @@
+[package]
+name = "abra-find-person"
+version = "1.0.0"
+edition = "2024"
+description = "Pre-trained models for finding a person in an image"
+
+[dependencies]
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+mask = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

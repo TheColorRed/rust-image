@@ -1,6 +1,6 @@
 import { type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
-import { BLEMISH_TOOL_KEY, beauty } from './edit-sections/beauty';
+import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, beauty } from './edit-sections/beauty';
 import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
 import { detail } from './edit-sections/detail';
@@ -56,7 +56,8 @@ export type ActionControl = {
 };
 
 /** An effect or a list of effects as a list. */
-export const effectList = (effects: EffectSpec | EffectSpec[]): EffectSpec[] => (Array.isArray(effects) ? effects : [effects]);
+export const effectList = (effects: EffectSpec | EffectSpec[]): EffectSpec[] =>
+  Array.isArray(effects) ? effects : [effects];
 
 /**
  * A control with no value of its own to configure — tapping it hands off to a custom, on-image
@@ -100,7 +101,7 @@ export type EditSection = {
 };
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
-export { BLEMISH_TOOL_KEY };
+export { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY };
 
 // Ordered by what a casual, non-designer social-media poster reaches for first: filters, then
 // basic brightness/color tweaks, then face retouching — with the more technical, restoration-style
@@ -117,4 +118,5 @@ export const EDIT_SECTIONS: EditSection[] = [
   cleanup,
 ];
 
-export const findSection = (key: string): EditSection => EDIT_SECTIONS.find(section => section.key === key) ?? EDIT_SECTIONS[0];
+export const findSection = (key: string): EditSection =>
+  EDIT_SECTIONS.find(section => section.key === key) ?? EDIT_SECTIONS[0];

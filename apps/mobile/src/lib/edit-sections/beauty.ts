@@ -1,8 +1,10 @@
-import { EffectSpec } from "@alakazam/mobile";
-import { EditSection } from "../edit-sections";
+import { EffectSpec } from '@alakazam/mobile';
+import { type EditSection } from '../edit-sections';
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
 export const BLEMISH_TOOL_KEY = 'action-blemish';
+export const SKIN_SMOOTH_KEY = 'action-skin-smooth';
+export const SKIN_TAN_KEY = 'action-skin-tan';
 
 export const beauty: EditSection = {
   key: 'section-beauty',
@@ -10,7 +12,7 @@ export const beauty: EditSection = {
   controls: [
     {
       kind: 'slider',
-      key: 'action-skin-smooth',
+      key: SKIN_SMOOTH_KEY,
       label: 'Skin Smooth',
       min: 0,
       // Up to 1 is how much of the smoothing shows; past 1 the smoothing itself gets stronger, up to 3.
@@ -22,7 +24,7 @@ export const beauty: EditSection = {
     },
     {
       kind: 'slider',
-      key: 'action-skin-tan',
+      key: SKIN_TAN_KEY,
       label: 'Skin Tan',
       // Where on the tan scale: none at 0, the darkest at 1.
       min: 0,

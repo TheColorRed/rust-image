@@ -1,7 +1,7 @@
 use crate::common::*;
 
 use abra_core::Size;
-use abra_core::image::gpu::{GpuOp, GpuPass, GpuProcessor};
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 use abra_core::transform::{ResizeTarget, Transform, TransformAlgorithm};
 use abra_core::{Channel, Histogram};
 

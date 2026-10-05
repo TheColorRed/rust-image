@@ -10,8 +10,16 @@ ndarray = { workspace = true }
 rayon = { workspace = true }
 saphyr = { workspace = true }
 
-# ONNX Runtime support (required)
-ort = { workspace = true }
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ort = { version = "2.0.0-rc.13" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+  "api-27",
+  "ndarray",
+  "std",
+  "load-dynamic",
+] }
 
 [features]
 default = []

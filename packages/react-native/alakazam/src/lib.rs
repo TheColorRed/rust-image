@@ -30,6 +30,10 @@ pub enum AbraError {
   InvalidPixels { message: String },
   /// Rendering a live preview failed.
   Render { message: String },
+  /// Running person detection or skin segmentation failed.
+  Ai { message: String },
+  /// The requested person index is not present in the image.
+  InvalidPersonSelection { index: u32 },
 }
 
 impl std::fmt::Display for AbraError {
@@ -38,6 +42,8 @@ impl std::fmt::Display for AbraError {
       AbraError::Io { message } => write!(f, "IO error: {message}"),
       AbraError::InvalidPixels { message } => write!(f, "Invalid pixels: {message}"),
       AbraError::Render { message } => write!(f, "Render error: {message}"),
+      AbraError::Ai { message } => write!(f, "AI error: {message}"),
+      AbraError::InvalidPersonSelection { index } => write!(f, "No detected person at index {index}"),
     }
   }
 }

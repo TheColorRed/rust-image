@@ -45,9 +45,10 @@ pub trait GpuTarget: Send {
 }
 
 /// What a view made for the engine to draw.
-pub(crate) enum Rendered {
+#[derive(Clone)]
+pub enum RenderedFrame {
   /// Pixels in CPU memory.
-  Pixels(Frame),
+  Pixels(Arc<Frame>),
   /// A picture in GPU memory.
   Gpu(Arc<dyn GpuFrame>),
 }

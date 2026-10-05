@@ -199,12 +199,17 @@ impl LiveRenderer {
       return Err(anyhow!("image must not be empty"));
     }
     if p_rgba.len() != (p_width as usize) * (p_height as usize) * 4 {
-      return Err(anyhow!("expected {} bytes of RGBA, got {}", (p_width as usize) * (p_height as usize) * 4, p_rgba.len()));
+      return Err(anyhow!(
+        "expected {} bytes of RGBA, got {}",
+        (p_width as usize) * (p_height as usize) * 4,
+        p_rgba.len()
+      ));
     }
     if self.size() != Some((p_width, p_height)) {
       let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC;
       self.source = Some((Target::new(&self.ctx, "live::source", p_width, p_height, usage), p_width, p_height));
-      let work_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
+      let work_usage =
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
       self.work = Some([
         Target::new(&self.ctx, "live::work_a", p_width, p_height, work_usage),
         Target::new(&self.ctx, "live::work_b", p_width, p_height, work_usage),
@@ -247,8 +252,11 @@ impl LiveRenderer {
     });
     for (ordinal, (pass, snapshot)) in passes.iter().enumerate() {
       let pipeline = self.pipeline(&PipelineKey::of(pass))?;
-      let (input_texture, input) =
-        if ordinal == 0 { (&source.texture, &source.view) } else { (&work[(ordinal - 1) % 2].texture, &work[(ordinal - 1) % 2].view) };
+      let (input_texture, input) = if ordinal == 0 {
+        (&source.texture, &source.view)
+      } else {
+        (&work[(ordinal - 1) % 2].texture, &work[(ordinal - 1) % 2].view)
+      };
       let output = &work[ordinal % 2].view;
 
       if *snapshot {
@@ -332,6 +340,36 @@ impl LiveRenderer {
       (Output::Work(index), _, Some(work)) => Some(&work[index].texture),
       _ => None,
     }
+  }
+
+  /// Copies the completed output into its own texture, without reading it back to the CPU.
+  ///
+  /// Unlike [`output_texture`](Self::output_texture), this picture is not overwritten when the source or the working
+  /// textures are reused for the next render. Use it when a consumer may keep displaying an earlier frame.
+  pub fn snapshot_texture(&self) -> Result<wgpu::Texture> {
+    let source = self.output_texture().ok_or_else(|| anyhow!("nothing has been rendered"))?;
+    let (width, height) = (source.width(), source.height());
+    let snapshot = Target::new(
+      &self.ctx,
+      "live::snapshot",
+      width,
+      height,
+      wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+    );
+    let mut encoder = self.ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+      label: Some("live::snapshot"),
+    });
+    encoder.copy_texture_to_texture(
+      source.as_image_copy(),
+      snapshot.texture.as_image_copy(),
+      wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+      },
+    );
+    self.ctx.queue.submit(Some(encoder.finish()));
+    Ok(snapshot.texture)
   }
 
   /// Waits for the last [`render`](Self::render) and copies the result back as `width * height` RGBA pixels.
@@ -654,7 +692,8 @@ impl LiveRenderer {
       return;
     };
 
-    let reusable = self.aux[p_ordinal].as_ref().is_some_and(|slot| slot.width == aux.width && slot.height == aux.height);
+    let reusable =
+      self.aux[p_ordinal].as_ref().is_some_and(|slot| slot.width == aux.width && slot.height == aux.height);
     if !reusable {
       let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
       self.aux[p_ordinal] = Some(AuxSlot {

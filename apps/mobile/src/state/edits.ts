@@ -1,6 +1,12 @@
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
-import { BLEMISH_TOOL_KEY, findSection, type EditControl } from '@/src/lib/edit-sections';
+import {
+  BLEMISH_TOOL_KEY,
+  SKIN_SMOOTH_KEY,
+  SKIN_TAN_KEY,
+  findSection,
+  type EditControl,
+} from '@/src/lib/edit-sections';
 
 // #region: Edit controls
 
@@ -27,6 +33,10 @@ export const getFocusedControl = (): EditControl | undefined => {
 export const isBlemishToolFocused = () => getFocusedControl()?.key === BLEMISH_TOOL_KEY;
 export const focusedControl$ = combineLatest([activeSectionKey$, focusedControlKey$]).pipe(
   map(([sectionKey, key]) => (key ? findSection(sectionKey).controls.find(control => control.key === key) : undefined)),
+  distinctUntilChanged(),
+);
+export const isSkinControlFocused$ = focusedControl$.pipe(
+  map(control => control?.kind === 'slider' && (control.key === SKIN_SMOOTH_KEY || control.key === SKIN_TAN_KEY)),
   distinctUntilChanged(),
 );
 export const isBlemishToolFocused$ = focusedControl$.pipe(

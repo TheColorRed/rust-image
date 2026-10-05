@@ -6,7 +6,7 @@
 // Gradle is run directly because `react-native run-android` fails to find gradlew.bat on this setup. Metro is not
 // started; run `npm run start:android` in another terminal.
 //
-// Usage: npm run deploy:android [-- --release] [-- --no-launch]
+// Usage: npm run deploy:android [-- --release] [-- --no-launch] [-- --device <serial>]
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,10 @@ const isWindows = process.platform === 'win32';
 const args = process.argv.slice(2);
 const release = args.includes('--release');
 const launch = !args.includes('--no-launch');
-const appId = 'com.alakazam.mobile';
+const deviceArgIndex = args.findIndex((arg) => arg === '--device' || arg.startsWith('--device='));
+const device = deviceArgIndex < 0 ? undefined : args[deviceArgIndex] === '--device' ? args[deviceArgIndex + 1] : args[deviceArgIndex].slice('--device='.length);
+const forwardedArgs = args.filter((arg, index) => arg !== '--no-launch' && !arg.startsWith('--device') && args[index - 1] !== '--device');
+const appId = release ? 'com.alakazam.mobile' : 'com.alakazam.mobile.debug';
 
 function run(p_label, p_command, p_args, p_cwd) {
   console.log(`\n==> ${p_label}`);
@@ -30,20 +33,31 @@ function run(p_label, p_command, p_args, p_cwd) {
 run(
   'Build Rust libraries and bindings',
   'npm',
-  ['run', release ? 'build:android:release' : 'build:android', '-w', 'packages/react-native/alakazam'],
+  ['run', release ? 'build:android:release' : 'build:android', '-w', 'packages/react-native/alakazam', '--', ...forwardedArgs],
   root,
 );
 
 const androidDir = path.join(root, 'apps', 'mobile', 'android');
 const gradlew = isWindows ? `"${path.join(androidDir, 'gradlew.bat')}"` : path.join(androidDir, 'gradlew');
+const variant = release ? 'Release' : 'Debug';
 run(
-  'Install the app with Gradle',
+  device ? 'Assemble the app with Gradle' : 'Install the app with Gradle',
   gradlew,
-  [release ? 'app:installRelease' : 'app:installDebug', '-PreactNativeDevServerPort=8081'],
+  [device ? `app:assemble${variant}` : `app:install${variant}`, '-PreactNativeDevServerPort=8081'],
   androidDir,
 );
 
+const adbArgs = (p_args) => (device ? ['-s', device, ...p_args] : p_args);
+if (device) {
+  const apk = path.join(androidDir, 'app', 'build', 'outputs', 'apk', release ? 'release' : 'debug', `app-${release ? 'release' : 'debug'}.apk`);
+  run('Install the app on the selected device', 'adb', adbArgs(['install', '-r', apk]), root);
+}
+
+if (!release) {
+  run('Forward Metro to the device', 'adb', adbArgs(['reverse', 'tcp:8081', 'tcp:8081']), root);
+}
+
 if (launch) {
-  run('Launch the app', 'adb', ['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], root);
+  run('Launch the app', 'adb', adbArgs(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1']), root);
 }
 console.log('\ndeploy-android: done.');

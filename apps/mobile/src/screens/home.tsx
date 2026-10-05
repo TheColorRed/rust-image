@@ -13,6 +13,7 @@ import {
     useWindowDimensions,
     View,
 } from 'react-native';
+import FilePicker from '@/src/components/file-picker';
 import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
 import { useCommonStyles } from '@/src/lib/styles';
 import { useTheme } from '@/src/lib/theme';
@@ -128,26 +129,60 @@ export default function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={commonStyles.header}>
         <Text style={commonStyles.headerTitle}>Alakazam</Text>
-        {permission === 'granted' && (
-          <Text style={commonStyles.headerSubtitle}>
-            {photos.length} photo{photos.length === 1 ? '' : 's'}
-          </Text>
-        )}
       </View>
 
-      <Permissions
-        permission={permission}
-        photos={photos}
-        refreshing={refreshing}
-        loadMore={loadMore}
-        refresh={refresh}
-        loadingMore={loadingMore}
-        onOpenPhoto={onOpenPhoto}
-      />
+      <View style={[styles.importSection, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Open an image</Text>
+        <FilePicker
+          title="Choose a photo"
+          subtitle="Browse this device or a connected photo app"
+          variant="card"
+          showPreview={false}
+          onPick={asset => onOpenPhoto({ uri: asset.uri, fileName: asset.name ?? null })}
+        />
+      </View>
+
+      <View style={styles.albumSection}>
+        <View style={styles.albumHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Camera album</Text>
+          {permission === 'granted' && (
+            <Text style={[styles.albumCount, { color: colors.textMuted }]}>
+              {photos.length} photo{photos.length === 1 ? '' : 's'}
+            </Text>
+          )}
+        </View>
+        <View style={styles.albumContents}>
+          <Permissions
+            permission={permission}
+            photos={photos}
+            refreshing={refreshing}
+            loadMore={loadMore}
+            refresh={refresh}
+            loadingMore={loadingMore}
+            onOpenPhoto={onOpenPhoto}
+          />
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  importSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sectionTitle: { fontSize: 17, fontWeight: '600' },
+  albumSection: { flex: 1, paddingTop: 12 },
+  albumHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  albumCount: { fontSize: 13 },
+  albumContents: { flex: 1 },
 });
