@@ -1,3 +1,4 @@
+import { personDetectionDownloaded } from '@alakazam/mobile';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
@@ -7,6 +8,7 @@ import { computePreviewImagePoint } from '@/src/lib/preview-coordinates';
 import { editorLive } from '@/src/lib/editor-live';
 import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
+import { aiModelsVersion$ } from '@/src/state/ai-models';
 import { isSkinControlFocused$ } from '@/src/state/edits';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
@@ -17,11 +19,12 @@ export function PersonSelectionToolController() {
   useEffect(() => {
     let requestId = 0;
     const subscriptions = [
-      combineLatest([isSkinControlFocused$, currentImage$, editBaseImage$])
+      combineLatest([isSkinControlFocused$, currentImage$, editBaseImage$, aiModelsVersion$])
         .pipe(
-          map(([isOpen, image, editBase]) => [isOpen, editBase ?? image] as const),
+          map(([isOpen, image, editBase, version]) => [isOpen, editBase ?? image, version] as const),
           distinctUntilChanged(
-            ([previousOpen, previousImage], [isOpen, image]) => previousOpen === isOpen && previousImage === image,
+            ([previousOpen, previousImage, previousVersion], [isOpen, image, version]) =>
+              previousOpen === isOpen && previousImage === image && previousVersion === version,
           ),
         )
         .subscribe(([isOpen, image]) => {
@@ -41,6 +44,12 @@ export function PersonSelectionToolController() {
               loading: false,
               error: 'No image is open.',
             });
+            return;
+          }
+          // Without the body model there is nothing to detect; skin effects apply to the whole photo. Detection starts once
+          // the model is downloaded.
+          if (!personDetectionDownloaded()) {
+            personSelection.next({ ...personSelection.value, focused: true, loading: false, error: null });
             return;
           }
           personSelection.next({
@@ -140,7 +149,7 @@ export function PersonSelectionControls() {
         style={[styles.chip, state.selectedId === null && styles.disabled]}
         disabled={state.selectedId === null}
       >
-        <Text style={styles.label}>All people</Text>
+        <Text style={styles.label}>All bodies</Text>
       </Pressable>
     </View>
   );

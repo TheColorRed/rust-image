@@ -1,15 +1,17 @@
 import { ImagePlus } from 'lucide-react-native';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '@/src/lib/theme';
 
 export interface CardProps {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   onPress?: () => void;
+  /** Turns the card into a titled group that holds these rows instead of an icon, subtitle and tap target. */
+  children?: ReactNode;
 }
 
-export function Card({ title, subtitle, onPress }: CardProps) {
+export function Card({ title, subtitle, onPress, children }: CardProps) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
@@ -37,9 +39,26 @@ export function Card({ title, subtitle, onPress }: CardProps) {
         title: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
         subtitle: { marginTop: 4, fontSize: 13, color: colors.textSecondary },
         content: { flex: 1 },
+        group: {
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 16,
+          backgroundColor: colors.surface,
+          overflow: 'hidden',
+        },
+        groupTitle: { padding: 16, fontSize: 18, fontWeight: '600', color: colors.textPrimary },
       }),
     [colors],
   );
+
+  if (children) {
+    return (
+      <View style={styles.group}>
+        <Text style={styles.groupTitle}>{title}</Text>
+        {children}
+      </View>
+    );
+  }
 
   const content = (
     <>
@@ -48,7 +67,7 @@ export function Card({ title, subtitle, onPress }: CardProps) {
       </View>
       <View style={styles.content}>
         <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
     </>
   );
@@ -56,7 +75,7 @@ export function Card({ title, subtitle, onPress }: CardProps) {
   return typeof onPress === 'function' ? (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${subtitle}`}
+      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
       activeOpacity={0.75}
       onPress={onPress}
       style={styles.card}

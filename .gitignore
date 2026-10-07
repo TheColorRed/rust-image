@@ -27,3 +27,4 @@ cache
 TODO.md
 *.node
 settings.yml
+.vscode/stores

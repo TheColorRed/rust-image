@@ -84,6 +84,18 @@ impl Color {
   pub fn yellow() -> Self {
     Self::from_rgb(255, 255, 0)
   }
+  /// Gold color using RGB(255, 215, 0)
+  pub fn gold() -> Self {
+    Self::from_rgb(255, 215, 0)
+  }
+  /// Golden color using RGB(255, 223, 0)
+  pub fn golden() -> Self {
+    Self::from_rgb(255, 223, 0)
+  }
+  /// Bronze color using RGB(205, 127, 50)
+  pub fn bronze() -> Self {
+    Self::from_rgb(205, 127, 50)
+  }
   /// Orange color using RGB(255, 165, 0)
   pub fn orange() -> Self {
     Self::from_rgb(255, 165, 0)

@@ -161,7 +161,8 @@ fn an_area_limits_the_effect_like_it_does_on_an_image() {
   let options = || ApplyOptions::new().with_area(abra::abra_core::Area::rect((3.0, 3.0), (8.0, 8.0)).with_feather(3));
   let mut preview = preview();
   abra::adjustments::prelude::levels::brightness(60).with_options(options()).apply(&mut preview);
-  let expected = one_shot(|image| abra::adjustments::prelude::levels::brightness(60).with_options(options()).apply(&mut *image));
+  let expected =
+    one_shot(|image| abra::adjustments::prelude::levels::brightness(60).with_options(options()).apply(&mut *image));
 
   let original = original_pixels();
   assert_ne!(expected, original, "the effect must change something inside the area");
@@ -176,11 +177,16 @@ fn a_mask_limits_the_effect_like_it_does_on_an_image() {
   // Left half white (full effect), right half black (no effect).
   let mask_pixels: Vec<u8> =
     (0..16 * 16).flat_map(|i| if i % 16 < 8 { [255, 255, 255, 255] } else { [0, 0, 0, 255] }).collect();
-  let mask = || abra::mask::prelude::Mask::from_image(Image::new_from_pixels(16, 16, mask_pixels.clone(), Channels::RGBA));
+  let mask =
+    || abra::mask::prelude::Mask::from_image(Image::new_from_pixels(16, 16, mask_pixels.clone(), Channels::RGBA));
   let mut preview = preview();
-  abra::adjustments::prelude::levels::brightness(60).with_options(ApplyOptions::new().with_mask(mask())).apply(&mut preview);
+  abra::adjustments::prelude::levels::brightness(60)
+    .with_options(ApplyOptions::new().with_mask(mask()))
+    .apply(&mut preview);
   let expected = one_shot(|image| {
-    abra::adjustments::prelude::levels::brightness(60).with_options(ApplyOptions::new().with_mask(mask())).apply(&mut *image)
+    abra::adjustments::prelude::levels::brightness(60)
+      .with_options(ApplyOptions::new().with_mask(mask()))
+      .apply(&mut *image)
   });
 
   let original = original_pixels();
@@ -196,7 +202,8 @@ fn an_area_on_exposure_matches_a_one_shot() {
   let options = || ApplyOptions::new().with_area(abra::abra_core::Area::rect((0.0, 0.0), (8.0, 16.0)));
   let mut preview = preview();
   abra::adjustments::prelude::levels::exposure(1.5).with_options(options()).apply(&mut preview);
-  let expected = one_shot(|image| abra::adjustments::prelude::levels::exposure(1.5).with_options(options()).apply(&mut *image));
+  let expected =
+    one_shot(|image| abra::adjustments::prelude::levels::exposure(1.5).with_options(options()).apply(&mut *image));
   wait_for_pixels(&mut preview, &expected);
 }
 
@@ -218,7 +225,8 @@ fn an_area_limits_an_effect_that_only_runs_on_the_cpu() {
   let options = || ApplyOptions::new().with_area(abra::abra_core::Area::rect((0.0, 0.0), (8.0, 16.0)));
   let mut preview = preview();
   abra::adjustments::prelude::color::grayscale().with_options(options()).apply(&mut preview);
-  let expected = one_shot(|image| abra::adjustments::prelude::color::grayscale().with_options(options()).apply(&mut *image));
+  let expected =
+    one_shot(|image| abra::adjustments::prelude::color::grayscale().with_options(options()).apply(&mut *image));
   let original = original_pixels();
   assert_ne!(expected[..3], original[..3], "left half turns gray");
   assert_eq!(expected[12 * 4..12 * 4 + 3], original[12 * 4..12 * 4 + 3], "right half is untouched");
@@ -279,7 +287,8 @@ fn vibrance_on_the_gpu_matches_the_cpu_within_rounding() {
 fn vibrance_with_saturation_on_the_gpu_matches_the_cpu_within_rounding() {
   let mut preview = preview();
   abra::adjustments::prelude::levels::vibrance(40).with_saturation(25).apply(&mut preview);
-  let expected = one_shot(|image| abra::adjustments::prelude::levels::vibrance(40).with_saturation(25).apply(&mut *image));
+  let expected =
+    one_shot(|image| abra::adjustments::prelude::levels::vibrance(40).with_saturation(25).apply(&mut *image));
   let vibrance_only = one_shot(|image| abra::adjustments::prelude::levels::vibrance(40).apply(&mut *image));
   assert_ne!(expected, vibrance_only, "the saturation step must change something");
   wait_for_frame_where(&mut preview, |frame| frame.pixels.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1));

@@ -20,6 +20,7 @@ use abra::tools::prelude::*;
 | [Remover](./remover)         | Heal blemishes, spots, and scratches by blending in the surrounding image. |
 | [Straighten](./straighten)   | Rotate an image until a line you pick is level or plumb.                   |
 | [Perspective](./perspective) | Flatten an angled rectangle, such as a building, sign, or page.            |
+| [Skin](./skin)               | Smooth, tan, or adjust tone through a reusable detected skin mask.         |
 
 ## Applying a tool
 

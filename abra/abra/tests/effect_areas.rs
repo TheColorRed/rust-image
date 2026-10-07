@@ -33,7 +33,7 @@ fn mixed_by_weights<E: Effect>(p_effect: &E) -> Vec<u8> {
   let area = area();
   let ctx = ApplyContext {
     area: Some(vec![&area]),
-    mask_image: None,
+    mask: None,
     hardware: Hardware::Cpu,
   };
   let weights = area_weights(SIZE, SIZE, &ctx).into_iter().map(weight_to_byte);

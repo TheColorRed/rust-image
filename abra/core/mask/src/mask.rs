@@ -1,4 +1,6 @@
-use abra_core::{Area, Color, Image, PointF, blend};
+use abra_core::{Area, Color, GrayPlane, Image, PointF, ResizeTarget, Size, Transform, TransformAlgorithm, blend};
+pub use abra_core::rgba_to_gray;
+use std::borrow::Cow;
 
 use drawing::fill;
 
@@ -44,39 +46,123 @@ impl IntoOptionalPointF for (f64, f64) {
   }
 }
 
-/// A mask defines an area used for masking operations in image processing.
-/// It encapsulates a geometric area that can be applied to images.
-/// The mask can be created from various geometric shapes and used to
-/// control the visibility of image regions.
+/// A mask says how much of an operation reaches each pixel of an image.
 ///
-/// A color of white (`255`) in the mask represents fully opaque areas,
-/// a black color (`0`) represents fully transparent areas, and gray values in between
-/// represent varying levels of transparency.
-
+/// It holds one byte per pixel: `255` means fully applied, `0` means untouched, and values in between apply
+/// partially. A mask is a quarter of the size of the same picture as an RGBA image. Clones share their bytes until one
+/// of them changes.
 #[derive(Clone, Debug)]
 pub struct Mask {
-  /// The image representation of the mask.
-  image_mask: Image,
+  plane: GrayPlane,
+}
+
+/// Converts an owned or borrowed mask into a copy-on-write mask reference.
+pub trait IntoMaskCow<'a> {
+  /// Converts this value without cloning borrowed masks.
+  fn into_mask_cow(self) -> Cow<'a, Mask>;
+}
+
+impl<'a> IntoMaskCow<'a> for &'a Mask {
+  fn into_mask_cow(self) -> Cow<'a, Mask> {
+    Cow::Borrowed(self)
+  }
+}
+
+impl<'a> IntoMaskCow<'a> for Mask {
+  fn into_mask_cow(self) -> Cow<'a, Mask> {
+    Cow::Owned(self)
+  }
 }
 
 impl Mask {
-  /// Creates a new empty Mask from an existing Image.
-  /// - `p_image`: The Image to create the mask from.
+  /// Creates a mask the size of an existing image that lets everything through (all `255`).
+  /// - `p_src_image`: The image whose size the mask takes.
   pub fn new_from_image(p_src_image: &Image) -> Mask {
     let (width, height) = p_src_image.dimensions::<u32>();
-    let image = Image::new_from_color(width, height, Color::from_rgba(255, 255, 255, 255));
-    Mask { image_mask: image }
+    Mask::from_values(width, height, vec![255; width as usize * height as usize])
   }
 
-  /// Create a mask by consuming an Image.
+  /// Creates a mask from one value per pixel.
+  /// - `p_width`, `p_height`: The size of the mask.
+  /// - `p_values`: The values, row by row from the top left. Its length must be `p_width * p_height`.
+  pub fn from_values(p_width: u32, p_height: u32, p_values: Vec<u8>) -> Mask {
+    Mask {
+      plane: GrayPlane::new(p_width, p_height, p_values),
+    }
+  }
+
+  /// Creates a mask from the brightness of each pixel of an image: white is `255` and black is `0`. The image's
+  /// alpha is ignored.
   pub fn from_image(p_img: Image) -> Mask {
-    Mask { image_mask: p_img }
+    Mask {
+      plane: GrayPlane::from_image(&p_img),
+    }
+  }
+
+  /// The mask's values and size, which is what effects read.
+  pub fn plane(&self) -> &GrayPlane {
+    &self.plane
+  }
+
+  /// The width of the mask in pixels.
+  pub fn width(&self) -> u32 {
+    self.plane.width()
+  }
+
+  /// The height of the mask in pixels.
+  pub fn height(&self) -> u32 {
+    self.plane.height()
+  }
+
+  /// The size of the mask as a tuple of `T` (generic integer type).
+  pub fn dimensions<T>(&self) -> (T, T)
+  where
+    T: TryFrom<u64>,
+    <T as TryFrom<u64>>::Error: std::fmt::Debug,
+  {
+    self.plane.dimensions()
+  }
+
+  /// The mask values, one per pixel, row by row from the top left.
+  pub fn values(&self) -> &[u8] {
+    self.plane.values()
+  }
+
+  /// The mask value at a pixel, or `None` outside the mask.
+  pub fn get(&self, p_x: u32, p_y: u32) -> Option<u8> {
+    self.plane.get(p_x, p_y)
+  }
+
+  /// The mask as a gray RGBA image, for drawing or saving.
+  pub fn to_image(&self) -> Image {
+    self.plane.to_image()
+  }
+
+  /// A copy of the mask scaled to a new size.
+  /// - `p_width`, `p_height`: The new size.
+  /// - `p_algorithm`: How values between pixels are worked out.
+  pub fn resized(&self, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm) -> Mask {
+    let mut image = self.to_image();
+    image.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), p_algorithm);
+    Mask::from_image(image)
+  }
+}
+
+impl From<Mask> for GrayPlane {
+  fn from(p_mask: Mask) -> GrayPlane {
+    p_mask.plane
+  }
+}
+
+impl From<&Mask> for GrayPlane {
+  fn from(p_mask: &Mask) -> GrayPlane {
+    p_mask.plane.clone()
   }
 }
 
 impl From<Mask> for Image {
   fn from(p_mask: Mask) -> Image {
-    p_mask.image().clone()
+    p_mask.to_image()
   }
 }
 
@@ -95,25 +181,22 @@ impl Mask {
     let color = self.to_color(p_color);
     let position = p_at.into_optional_point_f().unwrap_or(PointF::new(0, 0));
     let filled_image = fill(p_area, &color).to_image();
-    blend::blend(&filled_image).with_offset((position.x as i32, position.y as i32)).apply(&mut self.image_mask);
-  }
-
-  /// The underlying mask image.
-  pub fn image(&self) -> &Image {
-    &self.image_mask
+    let mut image = self.to_image();
+    blend::blend(&filled_image).with_offset((position.x as i32, position.y as i32)).apply(&mut image);
+    // A new buffer, so clones made earlier keep the old values.
+    self.plane = Mask::from_image(image).plane;
   }
 
   /// Apply the mask to an image by adjusting the image's alpha channel.
   ///
-  /// The mask is interpreted as a grayscale image where:
-  /// - 255 (white) -> alpha 255 (fully opaque / visible)
-  /// - 0 (black) -> alpha 0 (fully transparent / hidden)
+  /// The mask value becomes the alpha:
+  /// - 255 -> alpha 255 (fully opaque / visible)
+  /// - 0 -> alpha 0 (fully transparent / hidden)
   ///
   /// The mask size must match the image size. If you need positioning, use `Image::set_from` or a temporary canvas.
   pub fn apply_to_image(&self, p_image: &mut Image) {
-    let mask_bytes = self.image().rgba();
     if let Some(pixels) = p_image.colors().as_slice_mut() {
-      apply_mask_to_pixels_rgba(pixels, &mask_bytes);
+      apply_mask_to_pixels_rgba(pixels, self.values());
     }
   }
 
@@ -129,21 +212,6 @@ impl Mask {
 /// - 127 (gray) => ~127 alpha (~50% opacity)
 pub fn mask_value_to_alpha(p_value: u8) -> u8 {
   p_value
-}
-
-/// Computes a grayscale mask value from an RGBA pixel using a standard
-/// luma approximation and ignores the input alpha channel.
-/// Computes grayscale (luma) from an RGBA pixel using the ITU-R BT.601
-/// approximation. Exposed publicly so other crates can reuse the
-/// standard luma transform to avoid duplicated code.
-#[inline]
-pub fn rgba_to_gray(p_rgba: &[u8]) -> u8 {
-  // ITU-R BT.601 luma transform (approximation with integer math)
-  // gray = 0.299 R + 0.587 G + 0.114 B
-  let r = p_rgba[0] as u32;
-  let g = p_rgba[1] as u32;
-  let b = p_rgba[2] as u32;
-  (((299 * r + 587 * g + 114 * b) + 500) / 1000) as u8
 }
 
 /// Applies a mask to an image by setting the image's alpha channel from the provided mask data.
@@ -172,9 +240,10 @@ pub fn apply_mask_to_pixels_rgba(p_pixels: &mut [u8], p_mask: &[u8]) {
 }
 
 fn apply_mask_to_rgba_pixels(p_pixels: &mut [u8], p_mask: &[u8], p_px_count: usize) {
-  let mask_gray: Vec<u8> = match p_mask.len() {
-    len if len == p_px_count => p_mask.to_vec(),
-    len if len == p_px_count * 4 => p_mask.chunks(4).map(|px| rgba_to_gray(px)).collect(),
+  // A grayscale mask is used as it is; only an RGBA mask needs converting.
+  let mask_gray: Cow<[u8]> = match p_mask.len() {
+    len if len == p_px_count => Cow::Borrowed(p_mask),
+    len if len == p_px_count * 4 => Cow::Owned(p_mask.chunks(4).map(rgba_to_gray).collect()),
     other => panic!("Invalid mask size: expected {} (gray) or {} (rgba) but got {}", p_px_count, p_px_count * 4, other),
   };
 
@@ -189,23 +258,61 @@ mod tests {
   use abra_core::{Area, Color, Image};
 
   #[test]
+  fn borrowed_mask_input_keeps_the_original_reference() {
+    let mask = Mask::from_image(Image::new(1, 1));
+    let mask_ref = &mask;
+
+    assert!(matches!(mask_ref.into_mask_cow(), Cow::Borrowed(borrowed) if std::ptr::eq(borrowed, mask_ref)));
+  }
+
+  #[test]
+  fn a_mask_holds_one_byte_per_pixel() {
+    let mask = Mask::from_image(Image::new_from_color(20, 10, Color::from_rgba(255, 255, 255, 255)));
+
+    assert_eq!(mask.dimensions::<u32>(), (20, 10));
+    assert_eq!(mask.values().len(), 200);
+    assert_eq!(mask.get(19, 9), Some(255));
+    assert_eq!(mask.get(20, 0), None);
+  }
+
+  #[test]
+  fn an_image_round_trips_through_a_mask() {
+    let mut image = Image::new_from_color(2, 1, Color::from_rgba(255, 255, 255, 255));
+    image.set_pixel(0, 0, (40, 40, 40, 255));
+    let mask = Mask::from_image(image);
+
+    assert_eq!(mask.values(), &[40, 255]);
+    assert_eq!(mask.to_image().rgba(), &[40, 40, 40, 255, 255, 255, 255, 255]);
+  }
+
+  #[test]
+  fn resizing_keeps_a_uniform_mask_uniform() {
+    let mask = Mask::from_values(4, 4, vec![200; 16]).resized(8, 6, TransformAlgorithm::Bilinear);
+
+    assert_eq!(mask.dimensions::<u32>(), (8, 6));
+    assert!(mask.values().iter().all(|value| *value == 200));
+  }
+
+  #[test]
   fn mask_clone_shares_buffer_and_cow_on_draw() {
     let img = Image::new_from_color(20, 20, Color::from_rgba(255, 255, 255, 255));
     let mut mask = Mask::from(img);
-    let ptr1 = mask.image().rgba().as_ptr();
+    let ptr1 = mask.values().as_ptr();
     let mask_clone = mask.clone();
-    let ptr2 = mask_clone.image().rgba().as_ptr();
-    assert_eq!(ptr1, ptr2, "Mask clones should share underlying Image buffer");
+    let ptr2 = mask_clone.values().as_ptr();
+    assert_eq!(ptr1, ptr2, "Mask clones should share their values");
 
-    // Mutate the original mask - should trigger copy-on-write in Image
+    // Drawing on the original must leave the clone alone.
     let area = Area::rect((1.0, 1.0), (2.0, 2.0));
     mask.draw_area(&area, Color::black(), None);
-    assert_ne!(mask.image().rgba().as_ptr(), ptr2, "Mutation should have caused the original mask's image to COW");
+    assert_ne!(mask.values().as_ptr(), ptr2, "Drawing should have given the original mask its own values");
     assert_eq!(
-      mask_clone.image().rgba().as_ptr(),
+      mask_clone.values().as_ptr(),
       ptr2,
       "Clone's buffer pointer should still be same after original mutated"
     );
+    assert_eq!(mask_clone.get(1, 1), Some(255), "the clone is unchanged");
+    assert_eq!(mask.get(1, 1), Some(0), "the original was drawn on");
   }
 
   #[test]
@@ -240,9 +347,9 @@ mod tests {
     // set first pixel to black on mask
     mask_img.set_pixel(0, 0, (0, 0, 0, 255));
     let mask = Mask::from(mask_img);
-    let before_ptr = mask.image().rgba().as_ptr();
+    let before_ptr = mask.values().as_ptr();
     mask.apply_to_image(&mut img);
-    let after_ptr = mask.image().rgba().as_ptr();
+    let after_ptr = mask.values().as_ptr();
     assert_eq!(before_ptr, after_ptr, "apply_to_image should not mutate or clone the mask's internal buffer");
   }
 
@@ -253,7 +360,7 @@ mod tests {
     let area = Area::rect((1.0, 1.0), (8.0, 8.0)).with_feather(2);
     mask.draw_area(&area, Color::black(), None);
     // center should be black (0) - fully drawn area
-    let center_alpha = mask.image().get_pixel(5, 5).unwrap().0; // grayscale value in mask image
+    let center_alpha = mask.get(5, 5).unwrap();
     assert_eq!(center_alpha, 0);
     // ensure we have at least one partially transparent pixel within the area (alpha not strictly 0 or 255)
     let mut found_partial = false;
@@ -263,7 +370,7 @@ mod tests {
     let max_y = 8usize;
     for y in min_y..=max_y {
       for x in min_x..=max_x {
-        let alpha = mask.image().get_pixel(x as u32, y as u32).unwrap().0;
+        let alpha = mask.get(x as u32, y as u32).unwrap();
         if alpha > 0 && alpha < 255 {
           found_partial = true;
           break;
@@ -289,7 +396,7 @@ mod tests {
     let mut topmost: Option<u32> = None;
     for y in 0..200u32 {
       for x in 0..200u32 {
-        if mask.image().get_pixel(x, y).unwrap().0 != 255 {
+        if mask.get(x, y).unwrap() != 255 {
           topmost = Some(y);
           break;
         }
@@ -316,7 +423,7 @@ mod tests {
     let mut topmost: Option<u32> = None;
     for y in 0..200u32 {
       for x in 0..200u32 {
-        if mask.image().get_pixel(x, y).unwrap().0 != 255 {
+        if mask.get(x, y).unwrap() != 255 {
           topmost = Some(y);
           break;
         }

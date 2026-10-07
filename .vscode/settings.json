@@ -24,6 +24,7 @@
     "ndarray",
     "NEDI",
     "oneshot",
+    "onnx",
     "pointf",
     "posterize",
     "Posterizes",

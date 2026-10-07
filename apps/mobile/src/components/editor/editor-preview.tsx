@@ -310,12 +310,12 @@ function PersonDetectionOverlay({
           {error
             ? error
             : loading
-              ? 'Finding people…'
+              ? 'Finding bodies…'
               : people.length === 0
-                ? 'No people detected; skin effects still work'
+                ? 'No bodies detected; skin effects still work'
                 : selectedId === null
-                  ? 'Tap a person to target skin effects'
-                  : `Person ${selectedId + 1} selected`}
+                  ? 'Tap a body to target skin effects'
+                  : `Body ${selectedId + 1} selected`}
         </Text>
       </View>
       {people.map(person => {

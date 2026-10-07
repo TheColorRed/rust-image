@@ -8,6 +8,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 abra-core = { workspace = true }
+adjustments = { workspace = true }
 drawing = { workspace = true }
 filters = { workspace = true }
+humanoid = { workspace = true }
+mask = { workspace = true }
 options = { workspace = true }

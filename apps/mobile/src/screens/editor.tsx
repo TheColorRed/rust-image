@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AiModelPrompt } from '@/src/components/editor/ai-model-prompt';
 import { EditorPanel } from '@/src/components/editor/editor-panel';
 import { EditorPreview } from '@/src/components/editor/editor-preview';
 import { EditorToolbar } from '@/src/components/editor/editor-toolbar';
@@ -39,6 +40,7 @@ export default function EditScreen({ photo, onClose }: EditScreenProps) {
       <EditorPreview />
       <EditorToolbar onClose={onClose} />
       <EditorPanel />
+      <AiModelPrompt />
     </View>
   );
 }

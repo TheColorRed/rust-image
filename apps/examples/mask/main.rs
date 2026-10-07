@@ -14,7 +14,7 @@ pub fn main() {
   mask.draw_area(&heart.with_feather(30), Color::black(), (5, 200));
 
   // Save the mask image for debugging
-  mask.image().write("out/mask.png", None).expect("Failed to save mask");
+  mask.to_image().write("out/mask.png", None).expect("Failed to save mask");
 
   // Apply the mask to the image and save the result
   let mut masked = image;

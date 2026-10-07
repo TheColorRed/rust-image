@@ -14,6 +14,18 @@ pub struct FillArea<'a> {
   mask: Option<Image>,
 }
 
+/// A target that can receive the rasterized result of a fill.
+pub trait FillTarget {
+  /// Draws a rasterized fill at its requested position.
+  fn draw_fill(&mut self, p_image: &Image, p_position: (i32, i32));
+}
+
+impl FillTarget for Image {
+  fn draw_fill(&mut self, p_image: &Image, p_position: (i32, i32)) {
+    self.draw_image_at(p_image, p_position);
+  }
+}
+
 impl<'a> FillArea<'a> {
   /// Sets where [`FillArea::apply`] draws the top-left corner of the filled area. Defaults to the top-left corner
   /// of the area's bounds, so the area lands where it was drawn.
@@ -87,15 +99,15 @@ impl<'a> FillArea<'a> {
     image
   }
 
-  /// Draws the filled area into an existing image.
-  pub fn apply(&self, p_image: &mut Image) {
+  /// Draws the filled area into the specified target.
+  pub fn apply(&self, p_target: &mut impl FillTarget) {
     let filled = self.to_image();
     let position = self.position.unwrap_or_else(|| {
       let (min_x, min_y, _, _) = self.area.bounds().edges::<f32>();
       PointF::new(min_x, min_y)
     });
     let position: (i32, i32) = position.into();
-    p_image.draw_image_at(&filled, position);
+    p_target.draw_fill(&filled, position);
   }
 }
 
@@ -108,11 +120,11 @@ impl From<FillArea<'_>> for Image {
 /// Fills an area with a color, gradient, or image.
 /// # Arguments
 /// - `p_area`: The area to fill.
-/// - `p_fill`: The fill style to use.
-pub fn fill<'a>(p_area: impl Into<Area>, p_fill: impl Into<Fill<'a>>) -> FillArea<'a> {
+/// - `p_fill_source`: The source fill style to use.
+pub fn fill<'a>(p_area: impl Into<Area>, p_fill_source: impl Into<Fill<'a>>) -> FillArea<'a> {
   FillArea {
     area: p_area.into(),
-    fill: p_fill.into(),
+    fill: p_fill_source.into(),
     position: None,
     mask: None,
   }

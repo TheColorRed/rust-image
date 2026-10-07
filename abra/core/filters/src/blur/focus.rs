@@ -1,8 +1,8 @@
 use crate::common::*;
 
 use crate::blur::{GaussianBlur, LensBlur, gaussian_blur};
-use abra_core::Channels;
-use mask::{Mask, rgba_to_gray};
+use abra_core::GrayPlane;
+use mask::Mask;
 use options::Effect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,21 +198,20 @@ impl FocusBlur {
 
   /// Builds a mask covering the whole image: black where it stays sharp, white where it is fully blurred.
   /// When `p_mask` is given it is multiplied in, so the blur only lands where both masks allow it.
-  fn focus_mask(&self, p_width: u32, p_height: u32, p_mask: Option<&Image>) -> Mask {
+  fn focus_mask(&self, p_width: u32, p_height: u32, p_mask: Option<&GrayPlane>) -> Mask {
     let (width, height) = (p_width as f32, p_height as f32);
-    let user_mask = p_mask.map(|m| m.rgba()).filter(|m| m.len() == (p_width * p_height * 4) as usize);
-    let mut pixels = vec![255u8; (p_width * p_height * 4) as usize];
-    pixels.par_chunks_mut(4).enumerate().for_each(|(i, chunk)| {
+    let user_mask = p_mask.map(|m| m.values()).filter(|m| m.len() == (p_width * p_height) as usize);
+    let mut values = vec![255u8; (p_width * p_height) as usize];
+    values.par_iter_mut().enumerate().for_each(|(i, value)| {
       let x = (i as u32 % p_width) as f32 + 0.5;
       let y = (i as u32 / p_width) as f32 + 0.5;
       let mut weight = self.geometry.weight(x, y, width, height, self.shape);
       if let Some(user_mask) = user_mask {
-        weight *= rgba_to_gray(&user_mask[i * 4..i * 4 + 4]) as f32 / 255.0;
+        weight *= user_mask[i] as f32 / 255.0;
       }
-      let value = (weight * 255.0).round() as u8;
-      chunk[..3].fill(value);
+      *value = (weight * 255.0).round() as u8;
     });
-    Mask::from_image(Image::new_from_pixels(p_width, p_height, pixels, Channels::RGBA))
+    Mask::from_values(p_width, p_height, values)
   }
 }
 

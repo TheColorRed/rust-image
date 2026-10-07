@@ -1,10 +1,15 @@
 import RNSlider from '@react-native-community/slider';
 import { RotateCcw } from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 
 const DEBOUNCE_MS = 300;
+/**
+ * Space kept on each side of the track, beyond the screen padding, so a drag that starts near the thumb's end stops
+ * short of the edge where the system's back swipe begins.
+ */
+const TRACK_EDGE_MARGIN = 20;
 
 const formatValue = (value: number, step: number) => {
   const rounded = step >= 1 ? Math.round(value) : Math.round(value * 10) / 10;
@@ -34,9 +39,16 @@ export interface SliderProps {
   onReset?: () => void;
   /** Trigged when the slider value is triggered based on `triggerType`. */
   onTrigger?: (value: number) => void;
+  /** Shown at the start of the header line, before the label. */
+  leading?: ReactNode;
+  /** Shown at the end of the header line, after the reset button. */
+  trailing?: ReactNode;
 }
 
-/** A labelled slider with a live value readout and an optional reset-to-original button. */
+/**
+ * A labelled slider with a live value readout and an optional reset-to-original button. The label, value and reset
+ * button sit on a header line, and the track gets its own line, almost the full width.
+ */
 export function Slider({
   min,
   max,
@@ -49,6 +61,8 @@ export function Slider({
   onChange,
   onReset,
   onTrigger,
+  leading,
+  trailing,
 }: SliderProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -90,8 +104,20 @@ export function Slider({
   }
 
   return (
-    <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
+    <View>
+      <View style={styles.header}>
+        {leading}
+        <Text style={styles.label} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={styles.value}>{formatValue(value, step)}</Text>
+        {reset && (
+          <Pressable onPress={handleReset} hitSlop={8} style={styles.resetButton}>
+            <RotateCcw color={colors.textSecondary} size={16} />
+          </Pressable>
+        )}
+        {trailing}
+      </View>
       <RNSlider
         style={styles.slider}
         minimumValue={min}
@@ -104,22 +130,16 @@ export function Slider({
         onValueChange={handleChange}
         onSlidingComplete={handleSlidingComplete}
       />
-      <Text style={styles.value}>{formatValue(value, step)}</Text>
-      {reset && (
-        <Pressable onPress={handleReset} hitSlop={8} style={styles.resetButton}>
-          <RotateCcw color={colors.textSecondary} size={16} />
-        </Pressable>
-      )}
     </View>
   );
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    label: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', width: 78 },
-    slider: { flex: 1, height: 36 },
-    value: { color: colors.textSecondary, fontSize: 13, fontWeight: '600', width: 40, textAlign: 'right' },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    label: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    value: { color: colors.accent, fontSize: 14, fontWeight: '700', minWidth: 44, textAlign: 'right' },
+    slider: { height: 40, marginHorizontal: TRACK_EDGE_MARGIN },
     resetButton: {
       width: 28,
       height: 28,

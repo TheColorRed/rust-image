@@ -2,15 +2,15 @@ use std::sync::{Arc, Mutex};
 
 use abra::prelude::*;
 use abra::transform::prelude::{ResizeTarget, resize};
-use abra_body_segmentation::{Mask, segment_skin};
-use abra_find_person::{PersonInstance, find_people as detect_people, person_skin_mask};
+use abra_body_segmentation::Mask;
+use abra_find_person::{PersonInstance, person_skin_mask};
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 use vessel::prelude::{
   BehaviorSubject, Frame, Observable, Observer, Offscreen, Picture, RenderedFrame, Subject, Trackable,
 };
 
-use crate::{AbraError, effect_spec::EffectSpec, live_image::LiveImage};
+use crate::{AbraError, effect_spec::EffectSpec, live_image::LiveImage, models};
 
 /// RGBA pixels (unpremultiplied, `width * height * 4` bytes) for display.
 #[derive(uniffi::Record)]
@@ -119,7 +119,7 @@ impl AbraImage {
     let mut people = self.people.lock().unwrap();
     if people.is_none() {
       let image = self.inner.lock().unwrap().clone();
-      *people = Some(detect_people(&image).map_err(|error| AbraError::Ai {
+      *people = Some(models::person_segmenter()?.process(&image).map_err(|error| AbraError::Ai {
         message: error.to_string(),
       })?);
     }
@@ -144,11 +144,23 @@ impl AbraImage {
       mask
     } else {
       let image = self.inner.lock().unwrap().clone();
-      let mask = segment_skin(&image).map_err(|error| AbraError::Ai {
-        message: error.to_string(),
-      })?;
-      *self.skin_mask.lock().unwrap() = Some(mask.clone());
-      mask
+      let ai_mask = models::skin_segmenter().and_then(|segmenter| {
+        segmenter.process(&image).map_err(|error| AbraError::Ai {
+          message: error.to_string(),
+        })
+      });
+      match ai_mask {
+        Ok(mask) => {
+          *self.skin_mask.lock().unwrap() = Some(mask.clone());
+          mask
+        }
+        // Without the skin model, color-based detection still finds the skin; it is limited to the body below.
+        // Not cached: the cache holds the AI mask, which can arrive later.
+        Err(error) => {
+          eprintln!("[image] skin segmentation unavailable, using color detection inside the body: {error}");
+          abra::humanoid::prelude::skin_mask(&image, 0.0)
+        }
+      }
     };
     let selected_skin = person_skin_mask(&person.mask, &skin_mask).map_err(|error| AbraError::Ai {
       message: error.to_string(),
@@ -169,7 +181,11 @@ impl AbraImage {
   #[uniffi::constructor]
   pub fn read(path: String) -> Result<Arc<Self>, AbraError> {
     let image = Image::read(&path).map_err(|message| AbraError::Io { message })?;
-    let skin_mask = match segment_skin(&image) {
+    let skin_mask = match models::skin_segmenter().and_then(|segmenter| {
+      segmenter.process(&image).map_err(|error| AbraError::Ai {
+        message: error.to_string(),
+      })
+    }) {
       Ok(mask) => Some(mask),
       Err(error) => {
         eprintln!("[image] skin segmentation unavailable: {error}");
@@ -257,6 +273,9 @@ impl AbraImage {
       return Ok(None);
     }
     let people = self.detected_people()?;
+    // Bodies can overlap (a baby held by a parent). Prefer one whose outline is under the tap, then the smallest, so the
+    // inner body can be picked.
+    let mask_index = y as usize * width as usize + x as usize;
     let selected = people
       .iter()
       .enumerate()
@@ -266,7 +285,10 @@ impl AbraImage {
           && y >= person.bounds.y as f64
           && y < (person.bounds.y + person.bounds.height) as f64
       })
-      .max_by(|(_, left), (_, right)| left.confidence.total_cmp(&right.confidence))
+      .min_by_key(|(_, person)| {
+        let under_outline = person.mask.values().get(mask_index).is_some_and(|value| *value > 127);
+        (!under_outline, person.bounds.width as u64 * person.bounds.height as u64)
+      })
       .map(|(id, _)| id as u32);
     if let Some(id) = selected {
       self.choose_person(Some(id))?;
@@ -337,6 +359,23 @@ impl AbraImage {
     .await
   }
 
+  /// Computes the AI skin mask for this image if it has none yet, so skin effects use it instead of color detection.
+  /// Call after downloading the skin model.
+  pub async fn detect_skin_async(&self) -> Result<(), AbraError> {
+    let image = self.clone_image();
+    let skin_mask = Arc::clone(&self.skin_mask);
+    crate::image_workers::run(move || {
+      let mut cached = skin_mask.lock().unwrap();
+      if cached.is_none() {
+        *cached = Some(models::skin_segmenter()?.process(&image).map_err(|error| AbraError::Ai {
+          message: error.to_string(),
+        })?);
+      }
+      Ok(())
+    })
+    .await
+  }
+
   /// Detects people away from the calling thread, so opening a skin control does not block the editor.
   pub async fn find_people_async(&self) -> Result<Vec<PersonDetection>, AbraError> {
     let image = self.clone_image();
@@ -350,7 +389,7 @@ impl AbraImage {
             message: "Person detection cache lock poisoned".to_owned(),
           })?;
           if cached.is_none() {
-            *cached = Some(detect_people(&image).map_err(|error| AbraError::Ai {
+            *cached = Some(models::person_segmenter()?.process(&image).map_err(|error| AbraError::Ai {
               message: error.to_string(),
             })?);
           }
@@ -459,6 +498,37 @@ mod tests {
   use std::sync::atomic::{AtomicUsize, Ordering};
 
   #[test]
+  fn tapping_inside_an_overlapping_body_picks_the_inner_one() {
+    let (width, height) = (20, 20);
+    let body = |x: u32, y: u32, w: u32, h: u32, confidence: f32| {
+      let pixels: Vec<u8> = (0..height)
+        .flat_map(|row| {
+          (0..width).flat_map(move |col| {
+            let value = if (x..x + w).contains(&col) && (y..y + h).contains(&row) { 255 } else { 0 };
+            [value, value, value, 255]
+          })
+        })
+        .collect();
+      PersonInstance {
+        bounds: PersonBounds {
+          x,
+          y,
+          width: w,
+          height: h,
+        },
+        confidence,
+        mask: Mask::from_image(Image::new_from_pixels(width, height, pixels, Channels::RGBA)),
+      }
+    };
+    let image = AbraImage::from_image_with_skin_mask(Image::new_from_color(width, height, Color::white()), None);
+    // The outer body is the more confident one and its box holds the inner body, as with a parent holding a baby.
+    *image.people.lock().unwrap() = Some(vec![body(0, 0, 20, 20, 0.95), body(8, 8, 6, 6, 0.6)]);
+
+    assert_eq!(image.select_person_at(10.0, 10.0).unwrap(), Some(1), "the tap is on the inner body");
+    assert_eq!(image.select_person_at(2.0, 2.0).unwrap(), Some(0), "the tap is only on the outer body");
+  }
+
+  #[test]
   fn targeted_replay_preserves_live_selection_and_other_people() {
     let width = 16;
     let height = 16;
@@ -489,7 +559,7 @@ mod tests {
       .collect();
     *image.people.lock().unwrap() = Some(people);
     image.select_person(Some(1)).unwrap();
-    let selected_mask = image.selected_skin_mask.peek().unwrap().image().rgba().to_vec();
+    let selected_mask = image.selected_skin_mask.peek().unwrap().values().to_vec();
     let updates = Arc::new(AtomicUsize::new(0));
     let listener_updates = Arc::clone(&updates);
     let _subscription = image.selected_skin_mask.subscribe(move |_| {
@@ -500,7 +570,7 @@ mod tests {
     image.apply_effect_to_person(EffectSpec::SkinTan { offset: 0.7 }, Some(0)).unwrap();
 
     assert_eq!(image.selected_person(), Some(1));
-    assert_eq!(image.selected_skin_mask.peek().unwrap().image().rgba(), selected_mask);
+    assert_eq!(image.selected_skin_mask.peek().unwrap().values(), selected_mask);
     let first = image.clone_image();
     for y in 0..height {
       for x in 0..width {

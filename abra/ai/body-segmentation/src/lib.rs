@@ -5,11 +5,9 @@
 //! skin classes into an Abra [`Mask`].
 
 use abra_ai_core::{AiError, onnx::OnnxSession};
-use abra_core::{Channels, Image, ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{Image, ResizeTarget, Size, Transform, TransformAlgorithm};
 pub use mask::Mask;
-use std::sync::OnceLock;
-
-const MODEL_BYTES: &[u8] = include_bytes!("../models/selfie_multiclass_256x256.onnx");
+use std::path::Path;
 
 const MODEL_SIZE: u32 = 256;
 const CLASS_COUNT: usize = 6;
@@ -21,26 +19,17 @@ pub struct BodySegmentation {
   session: OnnxSession,
 }
 
-static BODY_SEGMENTATION: OnceLock<Result<BodySegmentation, String>> = OnceLock::new();
-
-/// Segments face and body skin in an image, loading and caching the model on first use.
-pub fn segment_skin(p_image: &Image) -> Result<Mask, AiError> {
-  let segmenter = BODY_SEGMENTATION
-    .get_or_init(|| BodySegmentation::load().map_err(|error| error.to_string()))
-    .as_ref()
-    .map_err(|error| AiError::model_load_failed(error.clone()))?;
-  segmenter.process(p_image)
-}
-
 pub mod prelude {
-  pub use crate::{BodySegmentation, Mask, segment_skin};
+  pub use crate::{BodySegmentation, Mask};
   pub use abra_ai_core::AiError;
 }
 
 impl BodySegmentation {
-  /// Loads the bundled MediaPipe Selfie Multiclass ONNX model.
-  pub fn load() -> Result<Self, AiError> {
-    let session = OnnxSession::from_bytes(MODEL_BYTES, None)?;
+  /// Loads a MediaPipe Selfie Multiclass ONNX model from `p_model_path`.
+  ///
+  /// The caller decides where the model lives. It must have this model's input and output layout.
+  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    let session = OnnxSession::from_file(p_model_path, None)?;
     Ok(Self { session })
   }
 
@@ -73,10 +62,7 @@ impl BodySegmentation {
     }
 
     let gray_mask = skin_mask_values(&logits)?;
-    let rgba_mask: Vec<u8> = gray_mask.into_iter().flat_map(|value| [value, value, value, 255]).collect();
-    let mut mask_image = Image::new_from_pixels(MODEL_SIZE, MODEL_SIZE, rgba_mask, Channels::RGBA);
-    mask_image.resize(ResizeTarget::Exact(Size::new(width, height)), TransformAlgorithm::Bilinear);
-    Ok(Mask::from_image(mask_image))
+    Ok(Mask::from_values(MODEL_SIZE, MODEL_SIZE, gray_mask).resized(width, height, TransformAlgorithm::Bilinear))
   }
 }
 
@@ -126,10 +112,15 @@ mod tests {
   }
 
   #[test]
-  fn public_helper_returns_a_mask_at_the_input_dimensions() {
+  fn returns_a_mask_at_the_input_dimensions() {
+    let model = concat!(env!("CARGO_MANIFEST_DIR"), "/models/selfie_multiclass_256x256.onnx");
+    // Without Git LFS the file is a small pointer, not a model.
+    if std::fs::metadata(model).map(|metadata| metadata.len()).unwrap_or(0) < 1_000_000 {
+      return;
+    }
     let image = Image::new(32, 24);
-    let mask = segment_skin(&image).expect("segmentation should succeed");
+    let mask = BodySegmentation::load(model).expect("model should load").process(&image).expect("segmentation should succeed");
 
-    assert_eq!(mask.image().dimensions::<u32>(), (32, 24));
+    assert_eq!(mask.dimensions::<u32>(), (32, 24));
   }
 }

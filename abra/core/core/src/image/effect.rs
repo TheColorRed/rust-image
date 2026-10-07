@@ -10,7 +10,7 @@ use crate::image::apply_area::{
   ApplyContext, apply_in_area, apply_in_area_gpu, apply_to_whole_image_in_area, apply_to_whole_image_in_area_gpu,
 };
 use crate::image::gpu::{CpuProcessor, GpuEffect, GpuProcessor, Hardware, ready_gpu_provider};
-use crate::{Area, Image, ImageRef};
+use crate::{Area, GrayPlane, Image, ImageRef};
 use std::sync::Arc;
 
 pub type Options = Option<ApplyOptions>;
@@ -35,7 +35,7 @@ pub struct ApplyOptions {
   /// If set, the filter will use this mask to determine how strong to apply the effect.
   /// Black areas will have no effect, white areas will have full effect,
   /// and grayscale will represent partial effect.
-  mask: Option<Arc<Image>>,
+  mask: Option<GrayPlane>,
   /// Optional area to be applied by the filter.
   /// If set, the filter will only be applied within this area.
   /// If an area has a feather on its edges, then the filter will be applied
@@ -195,15 +195,15 @@ impl ApplyOptions {
   pub fn ctx(&self) -> ApplyContext<'_> {
     ApplyContext {
       area: self.area.as_ref().map(|v| v.iter().collect()),
-      mask_image: self.mask.as_ref().map(|m| m.rgba()),
+      mask: self.mask.as_ref().map(|m| m.values()),
       hardware: self.hardware.unwrap_or_default(),
     }
   }
   /// Sets a mask to be used by the filter.
-  /// - `p_mask`: The mask to apply, as an image or anything that converts into one, such as a `Mask`. Black = no
+  /// - `p_mask`: The mask to apply, as a `Mask`, a [`GrayPlane`] or an image (its brightness is used). Black = no
   ///   effect, white = full effect, grayscale = partial effect.
-  pub fn with_mask(mut self, p_mask: impl Into<Image>) -> Self {
-    self.mask = Some(Arc::new(p_mask.into()));
+  pub fn with_mask(mut self, p_mask: impl Into<GrayPlane>) -> Self {
+    self.mask = Some(p_mask.into());
     self
   }
   /// Sets an area to be used by the filter.
@@ -218,9 +218,9 @@ impl ApplyOptions {
     self.area = Some(Arc::from(p_area.into()));
     self
   }
-  /// Returns the mask image if set.
-  pub fn mask(&self) -> Option<&Image> {
-    self.mask.as_deref()
+  /// Returns the mask if set.
+  pub fn mask(&self) -> Option<&GrayPlane> {
+    self.mask.as_ref()
   }
   /// Returns a reference to the area if set.
   pub fn area(&self) -> Option<&[Area]> {
@@ -236,7 +236,12 @@ impl ApplyOptions {
         _ => false,
       }
     }
-    same(&self.mask, &p_other.mask) && same(&self.area, &p_other.area) && self.hardware == p_other.hardware
+    let same_mask = match (&self.mask, &p_other.mask) {
+      (None, None) => true,
+      (Some(a), Some(b)) => a.shares_values_with(b),
+      _ => false,
+    };
+    same_mask && same(&self.area, &p_other.area) && self.hardware == p_other.hardware
   }
   /// Returns the hardware preference if set.
   pub fn hardware(&self) -> Option<&Hardware> {
@@ -254,7 +259,7 @@ impl ApplyOptions {
 pub fn get_ctx<'a>(p_opts: Option<&'a ApplyOptions>) -> Option<ApplyContext<'a>> {
   p_opts.map(|o| ApplyContext {
     area: o.area().map(|v| v.iter().collect()),
-    mask_image: o.mask().map(|m| m.rgba()),
+    mask: o.mask().map(|m| m.values()),
     hardware: o.hardware().copied().unwrap_or_default(),
   })
 }

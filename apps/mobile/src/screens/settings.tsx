@@ -39,7 +39,7 @@ export default function SettingsScreen() {
     <View style={styles.container}>
       <View style={commonStyles.header}>
         <AppText size="heading" bold>
-          ⚙️ Settings
+          Settings
         </AppText>
       </View>
 

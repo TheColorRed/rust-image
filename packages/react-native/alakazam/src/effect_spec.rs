@@ -179,28 +179,28 @@ impl EffectSpec {
       EffectSpec::Invert => p_target.accept(color::invert()),
       // Effects with parameters.
       EffectSpec::SkinSmooth { amount } => {
-        let effect = abra::filters::prelude::skin::skin_smooth(*amount);
+        let effect = abra::tools::prelude::skin_smooth(*amount);
         if let Some(mask) = p_skin_mask {
-          p_target.accept(effect.with_mask(mask.clone()));
+          effect.with_mask(mask.clone()).apply_to(p_target);
         } else {
-          p_target.accept(effect);
+          effect.apply_to(p_target);
         }
       }
       EffectSpec::SkinTan { offset } => {
-        let effect = abra::filters::prelude::skin::skin_tan(skin_tan_gradient().color_at(*offset as f32));
+        let effect = abra::tools::prelude::skin_tan(skin_tan_gradient().color_at(*offset as f32));
         if let Some(mask) = p_skin_mask {
-          p_target.accept(effect.with_mask(mask.clone()));
+          effect.with_mask(mask.clone()).apply_to(p_target);
         } else {
-          p_target.accept(effect);
+          effect.apply_to(p_target);
         }
       }
       EffectSpec::SkinTone { amount } => {
         // The mobile control owns its range; the reusable core effect accepts stronger adjustments.
-        let effect = abra::filters::prelude::skin::skin_tone(amount.clamp(-400.0, 400.0));
+        let effect = abra::tools::prelude::skin_tone(amount.clamp(-400.0, 400.0));
         if let Some(mask) = p_skin_mask {
-          p_target.accept(effect.with_mask(mask.clone()));
+          effect.with_mask(mask.clone()).apply_to(p_target);
         } else {
-          p_target.accept(effect);
+          effect.apply_to(p_target);
         }
       }
       EffectSpec::Threshold { amount } => p_target.accept(color::threshold(*amount)),
@@ -430,9 +430,9 @@ mod tests {
           let original = source.to_rgba_vec();
           let effect = EffectSpec::SkinTone { amount };
           assert!(effect.has_gpu());
-          let cpu = abra::filters::prelude::skin::skin_tone(amount.clamp(-100.0, 100.0));
-          let cpu = if let Some(mask) = &mask { cpu.with_mask(mask.clone()) } else { cpu };
-          cpu.apply_on_cpu(&mut source);
+          let tool = abra::tools::prelude::skin_tone(amount.clamp(-100.0, 100.0));
+          let tool = if let Some(mask) = &mask { tool.with_mask(mask.clone()) } else { tool };
+          tool.apply_to(&mut source);
           if amount == 0.0 || (color.b == 200 && mask.is_none()) {
             assert_eq!(source.rgba(), original);
           } else {

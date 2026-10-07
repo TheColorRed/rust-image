@@ -18,19 +18,27 @@ pub use vessel::Frame as LiveFrame;
 
 use abra::abra_core::image::gpu::{GpuAux, LiveEffect};
 use abra::abra_core::{Channels, Image};
-use abra_body_segmentation::Mask;
 use abra::options::prelude::{ApplyTarget, Effect, Options};
+use abra_body_segmentation::Mask;
 use masked::MaskedEffect;
 use std::sync::Arc;
 
 // `EffectSink` is abra's trait for "something an effect can be applied to"; a live image is one.
 impl abra::live::EffectSink for &mut LiveImage {
+  fn source_image(&self) -> Option<Image> {
+    Some(Image::new_from_pixels(self.width, self.height, self.original.clone(), Channels::RGBA))
+  }
+
   fn accept<E: abra::live::SpecEffect>(self, p_effect: E) {
     p_effect.apply(self);
   }
 }
 
 impl abra::live::EffectSink for LiveSlot<'_> {
+  fn source_image(&self) -> Option<Image> {
+    Some(Image::new_from_pixels(self.image.width, self.image.height, self.image.original.clone(), Channels::RGBA))
+  }
+
   fn accept<E: abra::live::SpecEffect>(self, p_effect: E) {
     p_effect.apply(self);
   }
@@ -237,7 +245,8 @@ impl LiveImage {
 
   /// The weights that limit an effect to the area and mask in `p_options`, or `None` if it has neither.
   fn weights_for(&self, p_options: &Options) -> Option<GpuAux> {
-    let ctx = abra::options::prelude::get_ctx(p_options.as_ref()).filter(|ctx| ctx.area.is_some() || ctx.mask_image.is_some())?;
+    let ctx = abra::options::prelude::get_ctx(p_options.as_ref())
+      .filter(|ctx| ctx.area.is_some() || ctx.mask.is_some())?;
     let weights = abra::abra_core::image::apply_area::area_weights(self.width, self.height, &ctx);
     Some(masked::weights_texture(self.width, self.height, &weights))
   }
@@ -278,11 +287,7 @@ impl LiveImage {
       Backend::Gpu(session) => {
         self.texture = None;
         // Rendered now only for a surface that draws textures; otherwise `pixels` renders when it is asked for.
-        if self.direct {
-          session.render_texture(&effects).map(|texture| self.texture = texture)
-        } else {
-          Ok(())
-        }
+        if self.direct { session.render_texture(&effects).map(|texture| self.texture = texture) } else { Ok(()) }
       }
       Backend::Cpu { ready } => {
         let mut image = Image::new_from_pixels(self.width, self.height, self.original.clone(), Channels::RGBA);
@@ -462,7 +467,10 @@ mod tests {
   fn an_effect_without_an_area_or_mask_has_no_weights() {
     let mut live = live();
     let id = live.new_id();
-    Probe { options: Some(ApplyOptions::new()) }.apply(live.slot(id));
+    Probe {
+      options: Some(ApplyOptions::new()),
+    }
+    .apply(live.slot(id));
     assert!(weights(&live, id).is_none());
   }
 }

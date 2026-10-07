@@ -6,10 +6,12 @@ import { ThemeProvider, useTheme } from '@/src/lib/theme';
 import EditScreen, { type EditablePhoto } from '@/src/screens/editor';
 import HomeScreen from '@/src/screens/home';
 import SettingsScreen from '@/src/screens/settings';
+import StorageScreen from '@/src/screens/storage';
 
 const TABS: TabItem[] = [
   { name: 'home', label: 'Home' },
   { name: 'settings', label: 'Settings' },
+  { name: 'storage', label: 'Storage' },
 ];
 
 export default function App() {
@@ -39,6 +41,7 @@ function AppContent() {
           <View style={styles.screen}>
             {activeTab === 'home' && <HomeScreen onOpenPhoto={setEditingPhoto} />}
             {activeTab === 'settings' && <SettingsScreen />}
+            {activeTab === 'storage' && <StorageScreen />}
           </View>
           <BottomTabBar tabs={TABS} activeTab={activeTab} onTabPress={setActiveTab} />
         </SafeAreaView>

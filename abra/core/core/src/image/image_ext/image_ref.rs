@@ -44,3 +44,9 @@ impl<'a> From<&'a mut Image> for ImageRef<'a> {
     ImageRef::new(ptr, None)
   }
 }
+
+impl Into<Image> for ImageRef<'static> {
+  fn into(self) -> Image {
+    unsafe { std::ptr::read(&*self as *const Image) }
+  }
+}

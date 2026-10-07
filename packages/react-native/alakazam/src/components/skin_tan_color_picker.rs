@@ -8,12 +8,10 @@ use vessel::prelude::{Component, Frame, Observable, Observer, Slider};
 
 use crate::{
   components::image_preview::{ImagePreview, Message},
+  consts::SKIN_TAN_KEY,
   effect_spec::skin_tan_gradient,
   image::frame_of,
 };
-
-/// The key the picker sends to the preview, and the editor's control for tanning.
-const KEY: &str = "action-skin-tan";
 
 /// A bar of tans with a handle: the user drags it to pick how tanned the skin in the photo gets. The preview shows each
 /// position as it is picked; the value is read when the user lets go, to apply it to the edit.
@@ -33,7 +31,7 @@ impl SkinTanColorPicker {
 
     // Send each position to the image_preview component.
     let preview = p_preview.subject::<Message>();
-    slider.changes().subscribe(move |changed| preview.next(Message::SliderMove(KEY.into(), changed.0 as f64)));
+    slider.changes().subscribe(move |changed| preview.next(Message::SliderMove(SKIN_TAN_KEY.into(), changed.0 as f64)));
 
     Arc::new(Self { slider })
   }

@@ -6,7 +6,7 @@ use abra::{
 };
 use vessel::prelude::*;
 
-use crate::AbraImage;
+use crate::{AbraImage, consts::THUMBNAIL_GRADIENT_OPACITY};
 
 #[derive(uniffi::Object, Component)]
 pub struct ThumbnailPreview {
@@ -15,7 +15,6 @@ pub struct ThumbnailPreview {
 }
 
 struct ThumbnailSource(Arc<AbraImage>);
-const GRADIENT_OPACITY: f32 = 0.55;
 
 impl Trackable for ThumbnailSource {
   fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
@@ -39,7 +38,7 @@ fn gradient_overlay(p_width: u32, p_height: u32) -> Image {
   static LAST: OnceLock<Mutex<Option<Arc<Frame>>>> = OnceLock::new();
   let mut cached = LAST.get_or_init(|| Mutex::new(None)).lock().unwrap();
   if cached.as_ref().is_none_or(|frame| (frame.width, frame.height) != (width, height)) {
-    let gradient = Gradient::evenly(vec![Color::transparent(), Color::black().set_alpha(GRADIENT_OPACITY)])
+    let gradient = Gradient::evenly(vec![Color::transparent(), Color::black().set_alpha(THUMBNAIL_GRADIENT_OPACITY)])
       .with_direction(Path::line((0, height as f32 * 0.20), (0, height)));
     let pixels = fill(Area::rect((0, 0), (width, height)), &gradient).to_image();
     *cached = Some(Arc::new(Frame {
@@ -105,7 +104,7 @@ mod tests {
     overlay.size().next((112, 80));
     let mut component = overlay.component().clone();
     let frame = component.render(Duration::ZERO);
-    let last_alpha = (GRADIENT_OPACITY * 255.0) as u8;
+    let last_alpha = (THUMBNAIL_GRADIENT_OPACITY * 255.0) as u8;
     let mut previous_alpha = 0;
     for y in 0..80 {
       let sample = pixel(&frame, 56, y);
@@ -125,7 +124,7 @@ mod tests {
       let frame = rendered(&preview, color);
       for y in [8, 40, 70] {
         let actual = pixel(&frame, 56, y);
-        let alpha = ((GRADIENT_OPACITY * 255.0) as u8 as f32 * (y - 3) as f32 / 73.0) as u8;
+        let alpha = ((THUMBNAIL_GRADIENT_OPACITY * 255.0) as u8 as f32 * (y - 3) as f32 / 73.0) as u8;
         for channel in 0..3 {
           let expected = (color[channel] as f32 * (1.0 - alpha as f32 / 255.0)).round() as u8;
           assert!(actual[channel].abs_diff(expected) <= 3, "color={color:?}, row={y}, actual={actual:?}");
@@ -245,7 +244,7 @@ mod tests {
       let frame = rendered(&preview, white);
       let top = pixel(&frame, 56, 8)[0];
       let bottom = pixel(&frame, 56, 70)[0];
-      let expected = |y: u32| (200.0 * (1.0 - GRADIENT_OPACITY * y as f32 / 79.0)).round() as u8;
+      let expected = |y: u32| (200.0 * (1.0 - THUMBNAIL_GRADIENT_OPACITY * y as f32 / 79.0)).round() as u8;
       assert!(top.abs_diff(expected(8)) <= 4, "{width}x{height}: top={top}");
       assert!(bottom.abs_diff(expected(70)) <= 4, "{width}x{height}: bottom={bottom}");
       preview.set_image(source([0, 0, 200, 255]));

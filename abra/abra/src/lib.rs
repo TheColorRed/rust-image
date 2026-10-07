@@ -48,6 +48,11 @@ pub mod options {
     pub use ::options::*;
   }
 }
+pub mod humanoid {
+  pub mod prelude {
+    pub use ::humanoid::*;
+  }
+}
 pub mod typography {
   pub mod prelude {
     pub use ::typography::*;

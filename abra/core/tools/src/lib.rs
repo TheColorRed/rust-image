@@ -1,9 +1,11 @@
-pub mod perspective;
+pub mod alignment;
+pub mod atlas;
 pub mod remover;
-pub mod straighten;
+pub mod skin;
 pub mod tool;
 
-pub use perspective::*;
+pub use alignment::*;
+pub use atlas::*;
 pub use remover::*;
-pub use straighten::*;
+pub use skin::*;
 pub use tool::*;

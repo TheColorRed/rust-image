@@ -18,6 +18,7 @@ pub use fs::path::{get_paths_from_folders, get_paths_from_glob};
 pub use fs::{ImageFormat, encode_png, reader, writer};
 pub use geometry::*;
 pub use image::image_ext::{ImageExt, ImageRef};
+pub use image::{GrayPlane, rgba_to_gray};
 pub use image_loader::*;
 pub use loader::*;
 pub use performance::{Performance, PerformanceOptions};

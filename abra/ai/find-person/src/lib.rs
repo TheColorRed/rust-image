@@ -1,17 +1,19 @@
 //! YOLO26 instance segmentation for selecting people in an image.
 
 use abra_ai_core::{AiError, onnx::OnnxSession};
-use abra_core::{Channels, Image, ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{Image, ResizeTarget, Size, Transform, TransformAlgorithm};
 pub use mask::Mask;
-use std::sync::OnceLock;
+use std::path::Path;
 
-const MODEL_BYTES: &[u8] = include_bytes!("../models/yolo26n-seg.onnx");
 const INPUT_SIZE: u32 = 640;
 const DETECTION_COUNT: usize = 300;
 const DETECTION_SIZE: usize = 38;
 const MASK_CHANNELS: usize = 32;
 const PERSON_CLASS: i32 = 0;
 const CONFIDENCE_THRESHOLD: f32 = 0.25;
+/// A box side this close to the edge of the photo (as a fraction of the photo) is moved onto the edge. The model draws
+/// boxes of people who are cut off by the frame a little short of it.
+const EDGE_SNAP: f32 = 0.04;
 
 /// The bounds of one detected person, in source-image pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,61 +32,48 @@ pub struct PersonInstance {
   pub mask: Mask,
 }
 
-/// Finds person instances using the bundled YOLO26n segmentation model.
+/// Finds person instances using a YOLO26n segmentation model supplied by the caller.
 pub struct PersonSegmenter {
   session: OnnxSession,
 }
 
-static PERSON_SEGMENTER: OnceLock<Result<PersonSegmenter, String>> = OnceLock::new();
-
-/// Detects people and returns an individual silhouette mask for each one.
-///
-/// The model is loaded and cached on first use. The returned masks include the full person silhouette; intersect them
-/// with a skin mask before applying skin-only effects.
-pub fn find_people(p_image: &Image) -> Result<Vec<PersonInstance>, AiError> {
-  let segmenter = PERSON_SEGMENTER
-    .get_or_init(|| PersonSegmenter::load().map_err(|error| error.to_string()))
-    .as_ref()
-    .map_err(|error| AiError::model_load_failed(error.clone()))?;
-  segmenter.process(p_image)
-}
-
 /// Multiplies a person silhouette mask by a skin-probability mask.
 pub fn person_skin_mask(p_person: &Mask, p_skin: &Mask) -> Result<Mask, AiError> {
-  let (width, height) = p_person.image().dimensions::<u32>();
-  let (skin_width, skin_height) = p_skin.image().dimensions::<u32>();
+  let (width, height) = p_person.dimensions::<u32>();
+  let (skin_width, skin_height) = p_skin.dimensions::<u32>();
   if width == 0 || height == 0 || skin_width == 0 || skin_height == 0 {
     return Err(AiError::invalid_input("Cannot combine empty masks"));
   }
 
-  let mut skin_image = p_skin.image().clone();
-  if (skin_width, skin_height) != (width, height) {
-    skin_image.resize(ResizeTarget::Exact(Size::new(width, height)), TransformAlgorithm::Bilinear);
-  }
-  let pixels = p_person
-    .image()
-    .rgba()
-    .chunks_exact(4)
-    .zip(skin_image.rgba().chunks_exact(4))
-    .flat_map(|(person, skin)| {
-      let value = ((person[0] as u16 * skin[0] as u16 + 127) / 255) as u8;
-      [value, value, value, 255]
-    })
-    .collect::<Vec<_>>();
-  Ok(Mask::from_image(Image::new_from_pixels(width, height, pixels, Channels::RGBA)))
+  let resized;
+  let skin = if (skin_width, skin_height) == (width, height) {
+    p_skin
+  } else {
+    resized = p_skin.resized(width, height, TransformAlgorithm::Bilinear);
+    &resized
+  };
+  let values = p_person
+    .values()
+    .iter()
+    .zip(skin.values())
+    .map(|(person, skin)| ((*person as u16 * *skin as u16 + 127) / 255) as u8)
+    .collect();
+  Ok(Mask::from_values(width, height, values))
 }
 
 pub mod prelude {
-  pub use crate::{PersonBounds, PersonInstance, PersonSegmenter, find_people, person_skin_mask};
+  pub use crate::{PersonBounds, PersonInstance, PersonSegmenter, person_skin_mask};
   pub use abra_ai_core::AiError;
   pub use mask::Mask;
 }
 
 impl PersonSegmenter {
-  /// Loads the bundled YOLO26n-seg ONNX model.
-  pub fn load() -> Result<Self, AiError> {
+  /// Loads a YOLO26n-seg ONNX model from `p_model_path`.
+  ///
+  /// The caller decides where the model lives. It must have this model's input and output layout.
+  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
     Ok(Self {
-      session: OnnxSession::from_bytes(MODEL_BYTES, None)?,
+      session: OnnxSession::from_file(p_model_path, None)?,
     })
   }
 
@@ -188,6 +177,13 @@ fn decode_people(
     if x2 <= x1 || y2 <= y1 {
       continue;
     }
+    // The photo sits inside the padded model input; a side near one of its edges is moved onto that edge.
+    let snap = |value: f32, edge: f32, reach: f32| if (value - edge).abs() <= reach { edge } else { value };
+    let (left, top) = (p_layout.pad_x as f32, p_layout.pad_y as f32);
+    let (right, bottom) = (left + p_layout.resized_width as f32, top + p_layout.resized_height as f32);
+    let (reach_x, reach_y) = (EDGE_SNAP * p_layout.resized_width as f32, EDGE_SNAP * p_layout.resized_height as f32);
+    let (x1, x2) = (snap(x1, left, reach_x), snap(x2, right, reach_x));
+    let (y1, y2) = (snap(y1, top, reach_y), snap(y2, bottom, reach_y));
 
     let Some(bounds) = source_bounds(x1, y1, x2, y2, p_width, p_height, p_layout) else {
       continue;
@@ -207,6 +203,26 @@ fn decode_people(
       confidence,
       mask,
     });
+  }
+  // Where bodies overlap (a baby held by a parent), a pixel belongs to the body whose mask is strongest there, so a
+  // body's mask does not include the body in front of it.
+  if people.len() > 1 {
+    let strengths: Vec<&[u8]> = people.iter().map(|person| person.mask.values()).collect();
+    let resolved: Vec<Mask> = (0..people.len())
+      .map(|index| {
+        let values = (0..strengths[index].len())
+          .map(|pixel| {
+            let strength = strengths[index][pixel];
+            let outranked = strengths.iter().enumerate().any(|(other, values)| other != index && values[pixel] > strength);
+            if outranked { 0 } else { strength }
+          })
+          .collect();
+        Mask::from_values(p_width, p_height, values)
+      })
+      .collect();
+    for (person, mask) in people.iter_mut().zip(resolved) {
+      person.mask = mask;
+    }
   }
   Ok(people)
 }
@@ -233,7 +249,7 @@ fn instance_mask(
   p_coefficients: &[f32], p_prototypes: &[f32], p_mask_width: usize, p_mask_height: usize, p_box: (f32, f32, f32, f32),
   p_width: u32, p_height: u32, p_layout: Letterbox,
 ) -> Mask {
-  let mut prototype_pixels = Vec::with_capacity(p_mask_width * p_mask_height * 4);
+  let mut prototype_values = Vec::with_capacity(p_mask_width * p_mask_height);
   for y in 0..p_mask_height {
     for x in 0..p_mask_width {
       let index = y * p_mask_width + x;
@@ -246,31 +262,32 @@ fn instance_mask(
         let exp = logit.exp();
         exp / (1.0 + exp)
       };
-      let value = (probability * 255.0).round() as u8;
-      prototype_pixels.extend([value, value, value, 255]);
+      prototype_values.push((probability * 255.0).round() as u8);
     }
   }
 
-  let mut prototype =
-    Image::new_from_pixels(p_mask_width as u32, p_mask_height as u32, prototype_pixels, Channels::RGBA);
-  prototype.resize(ResizeTarget::Exact(Size::new(INPUT_SIZE, INPUT_SIZE)), TransformAlgorithm::Bilinear);
-  let model_pixels = prototype.rgba();
-  let mut cropped_pixels = Vec::with_capacity((p_layout.resized_width * p_layout.resized_height * 4) as usize);
+  let prototype = Mask::from_values(p_mask_width as u32, p_mask_height as u32, prototype_values).resized(
+    INPUT_SIZE,
+    INPUT_SIZE,
+    TransformAlgorithm::Bilinear,
+  );
+  let model_values = prototype.values();
+  let mut cropped_values = Vec::with_capacity((p_layout.resized_width * p_layout.resized_height) as usize);
   for y in p_layout.pad_y..p_layout.pad_y + p_layout.resized_height {
     for x in p_layout.pad_x..p_layout.pad_x + p_layout.resized_width {
-      let index = ((y * INPUT_SIZE + x) * 4) as usize;
+      let index = (y * INPUT_SIZE + x) as usize;
       let inside_box = (x as f32 + 0.5) >= p_box.0
         && (x as f32 + 0.5) < p_box.2
         && (y as f32 + 0.5) >= p_box.1
         && (y as f32 + 0.5) < p_box.3;
-      let value = if inside_box { model_pixels[index] } else { 0 };
-      cropped_pixels.extend([value, value, value, 255]);
+      cropped_values.push(if inside_box { model_values[index] } else { 0 });
     }
   }
-  let mut mask_image =
-    Image::new_from_pixels(p_layout.resized_width, p_layout.resized_height, cropped_pixels, Channels::RGBA);
-  mask_image.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), TransformAlgorithm::Bilinear);
-  Mask::from_image(mask_image)
+  Mask::from_values(p_layout.resized_width, p_layout.resized_height, cropped_values).resized(
+    p_width,
+    p_height,
+    TransformAlgorithm::Bilinear,
+  )
 }
 
 #[cfg(test)]
@@ -313,8 +330,51 @@ mod tests {
         height: 40
       }
     );
-    assert_eq!(people[0].mask.image().dimensions::<u32>(), (64, 64));
-    assert_eq!(people[0].mask.image().rgba()[0], 0, "pixels outside the person box are excluded");
+    assert_eq!(people[0].mask.dimensions::<u32>(), (64, 64));
+    assert_eq!(people[0].mask.values()[0], 0, "pixels outside the person box are excluded");
+  }
+
+  #[test]
+  fn a_box_that_stops_just_short_of_the_photo_edge_is_moved_onto_it() {
+    let mut detections = vec![0.0; DETECTION_COUNT * DETECTION_SIZE];
+    // 64x64 photo scaled to 640: the box stops 15 px (about 2%) above the bottom and 120 px (19%) from the right.
+    detections[0..6].copy_from_slice(&[100.0, 100.0, 520.0, 625.0, 0.9, PERSON_CLASS as f32]);
+    let mut prototypes = vec![0.0; MASK_CHANNELS * 4];
+    prototypes[..4].fill(1.0);
+    let outputs = vec![
+      (vec![1, DETECTION_COUNT, DETECTION_SIZE], detections),
+      (vec![1, MASK_CHANNELS, 2, 2], prototypes),
+    ];
+    let people = decode_people(&outputs, 64, 64, Letterbox::new(64, 64)).unwrap();
+
+    let bounds = people[0].bounds;
+    assert_eq!(bounds.y + bounds.height, 64, "the bottom reaches the photo's edge");
+    assert_eq!(bounds.x + bounds.width, 52, "a side far from an edge is left alone");
+  }
+
+  #[test]
+  fn an_overlapping_body_is_cut_out_of_the_body_behind_it() {
+    let mut detections = vec![0.0; DETECTION_COUNT * DETECTION_SIZE];
+    // Two bodies with the same box. The first one's mask is weakly on everywhere; the second one's is strong in the
+    // bottom half, like a baby held in the lower part of a parent's arms.
+    detections[0..6].copy_from_slice(&[0.0, 0.0, 640.0, 640.0, 0.9, PERSON_CLASS as f32]);
+    detections[6] = 1.0;
+    detections[DETECTION_SIZE..DETECTION_SIZE + 6].copy_from_slice(&[0.0, 0.0, 640.0, 640.0, 0.8, PERSON_CLASS as f32]);
+    detections[DETECTION_SIZE + 7] = 1.0;
+    let mut prototypes = vec![0.0; MASK_CHANNELS * 4];
+    prototypes[..4].fill(2.0);
+    prototypes[4..8].copy_from_slice(&[0.0, 0.0, 6.0, 6.0]);
+    let outputs = vec![
+      (vec![1, DETECTION_COUNT, DETECTION_SIZE], detections),
+      (vec![1, MASK_CHANNELS, 2, 2], prototypes),
+    ];
+    let people = decode_people(&outputs, 64, 64, Letterbox::new(64, 64)).unwrap();
+
+    let value = |person: &PersonInstance, y: u32| person.mask.get(32, y).unwrap();
+    assert!(value(&people[0], 4) > 128, "the first body keeps the top, where nothing is in front of it");
+    assert_eq!(value(&people[0], 60), 0, "the second body is cut out of the first");
+    assert!(value(&people[1], 60) > 128, "the second body keeps its own area");
+    assert_eq!(value(&people[1], 4), 0, "the second body has no claim on the top");
   }
 
   #[test]
@@ -322,6 +382,6 @@ mod tests {
     let person = Mask::from_image(Image::new_from_color(1, 1, Color::from_rgba(128, 128, 128, 255)));
     let skin = Mask::from_image(Image::new_from_color(1, 1, Color::from_rgba(128, 128, 128, 255)));
     let combined = person_skin_mask(&person, &skin).unwrap();
-    assert_eq!(combined.image().rgba()[0], 64);
+    assert_eq!(combined.values()[0], 64);
   }
 }

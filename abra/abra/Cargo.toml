@@ -12,6 +12,7 @@ adjustments = { workspace = true }
 filters = { workspace = true }
 mask = { workspace = true }
 options = { workspace = true }
+humanoid = { workspace = true }
 typography = { workspace = true }
 tools = { workspace = true }
 gpu = { workspace = true, optional = true }

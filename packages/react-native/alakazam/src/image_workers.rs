@@ -2,8 +2,13 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use crate::AbraError;
 
-const WORKERS: usize = 2;
 type Job = Box<dyn FnOnce() + Send>;
+
+/// How many image jobs (decoding, thumbnails, downloads) run at the same time: half of the threads this device
+/// offers, and at least one. Each job also uses Abra's own parallel threads and holds a whole photo in memory.
+fn worker_count() -> usize {
+  (std::thread::available_parallelism().map_or(2, |threads| threads.get()) / 2).max(1)
+}
 
 fn workers() -> Result<&'static mpsc::Sender<Job>, AbraError> {
   static POOL: OnceLock<Result<mpsc::Sender<Job>, String>> = OnceLock::new();
@@ -11,7 +16,7 @@ fn workers() -> Result<&'static mpsc::Sender<Job>, AbraError> {
     .get_or_init(|| {
       let (sender, receiver) = mpsc::channel::<Job>();
       let receiver = Arc::new(Mutex::new(receiver));
-      for index in 0..WORKERS {
+      for index in 0..worker_count() {
         let receiver = Arc::clone(&receiver);
         std::thread::Builder::new()
           .name(format!("abra-image-{index}"))
@@ -66,7 +71,7 @@ mod tests {
     let caller = std::thread::current().id();
     let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     let (sender, receiver) = mpsc::channel();
-    let jobs = (0..WORKERS + 1)
+    let jobs = (0..worker_count() + 1)
       .map(|_| {
         let release = Arc::clone(&release);
         let sender = sender.clone();
@@ -80,15 +85,20 @@ mod tests {
       })
       .collect::<Vec<_>>();
     let runner = std::thread::spawn(move || futures::executor::block_on(futures::future::join_all(jobs)));
-    let first = receiver.recv_timeout(std::time::Duration::from_secs(5));
-    let second = receiver.recv_timeout(std::time::Duration::from_secs(5));
-    let third = receiver.try_recv();
+    // One job per worker starts at once, each on its own thread.
+    let started: Vec<String> =
+      (0..worker_count()).map(|_| receiver.recv_timeout(std::time::Duration::from_secs(5)).unwrap()).collect();
+    // With every worker busy, the extra job has to wait.
+    let extra = receiver.recv_timeout(std::time::Duration::from_millis(200));
     *release.0.lock().unwrap() = true;
     release.1.notify_all();
     let results = runner.join().unwrap();
-    assert_ne!(first.as_ref().unwrap(), second.as_ref().unwrap());
-    assert!(first.unwrap().starts_with("abra-image-"));
-    assert!(third.is_err(), "the pool must never run more than two jobs at once");
+    let mut distinct = started.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(distinct.len(), worker_count(), "each worker runs one job at a time");
+    assert!(started.iter().all(|name| name.starts_with("abra-image-")));
+    assert!(extra.is_err(), "the pool must never run more than {} jobs at once", worker_count());
     assert!(results.into_iter().all(|result| result.is_ok()));
   }
 

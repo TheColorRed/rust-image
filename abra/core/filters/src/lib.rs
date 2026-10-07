@@ -6,7 +6,6 @@ pub mod edges;
 pub mod noise;
 pub mod repair;
 pub mod sharpen;
-pub mod skin;
 pub mod smooth;
 pub mod sobel;
 

@@ -75,6 +75,7 @@ filters = { path = "./abra/core/filters" }
 mask = { path = "./abra/core/mask" }
 options = { path = "./abra/core/options" }
 primitives = { path = "./abra/core/primitives" }
+humanoid = { path = "./abra/core/humanoid" }
 tools = { path = "./abra/core/tools" }
 
 gpu = { path = "./abra/core/gpu" }

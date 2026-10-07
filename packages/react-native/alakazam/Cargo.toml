@@ -7,6 +7,9 @@ edition = "2024"
 abra = { workspace = true }
 abra-body-segmentation = { workspace = true }
 abra-find-person = { workspace = true }
+saphyr = { workspace = true }
+sha2 = { version = "0.11.0" }
+ureq = { version = "3.4.2" }
 pub-sub = { workspace = true }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
 vessel = { workspace = true, features = ["android-surface", "ios-surface"] }

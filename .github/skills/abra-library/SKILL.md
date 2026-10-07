@@ -71,6 +71,10 @@ Some examples include:
 
 See the [code management document](./references/code-management.md) for guidelines on handling code modifications within the Abra library.
 
+## Code Placement
+
+See the [code placement document](./references/code-placement.md) for guidelines on where to place new code or refactor existing code.
+
 ## Testing Changes
 
 Use the examples folder in the `/apps/examples/<feature>` directory to test changes. See the [testing document](./references/testing-changes.md) for more information.

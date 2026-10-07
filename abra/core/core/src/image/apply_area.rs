@@ -10,7 +10,7 @@
 //! This module should be considered the canonical implementation for area/feather/mask handling.
 use crate::geometry::Area;
 use crate::image::gpu::{GpuEffect, GpuProvider, Hardware, ready_gpu_provider};
-use crate::{Channels, Image, LumaStandard, PointF, Rect, luma, polygon_contains};
+use crate::{Channels, Image, PointF, Rect, polygon_contains};
 use rayon::prelude::*;
 use std::borrow::Cow;
 
@@ -18,7 +18,8 @@ use std::borrow::Cow;
 /// without depending on the options crate.
 pub struct ApplyContext<'a> {
   pub area: Option<Vec<&'a Area>>,
-  pub mask_image: Option<&'a [u8]>,
+  /// The mask values, one byte per pixel of the full image.
+  pub mask: Option<&'a [u8]>,
   pub hardware: Hardware,
 }
 
@@ -130,12 +131,11 @@ fn distance_to_outline(p_points: &[PointF], p_point: PointF) -> f32 {
 /// Compute a per-pixel alpha mask (0.0 .. 1.0) for a prepared area based on `Area` feathering and optional `Mask`.
 /// - `p_prepared`: prepared area metadata
 /// - `p_area`: optional area (may be None). If None, mask is all ones.
-/// - `p_mask_image`: optional RGBA mask image bytes (full image size RGBA bytes). If provided its luma scales the
-///   mask.
+/// - `p_mask`: optional mask values, one byte per pixel of the full image. If provided they scale the weights.
 ///
 /// Inside the area, a feathered edge fades linearly from 0 at the outline to 1 at `feather` pixels in, measured as
 /// the distance to the nearest point of the outline.
-fn compute_area_mask(p_prepared: &PreparedAreaMeta, p_area: Option<&Area>, p_mask_image: Option<&[u8]>) -> Vec<f32> {
+fn compute_area_mask(p_prepared: &PreparedAreaMeta, p_area: Option<&Area>, p_mask: Option<&[u8]>) -> Vec<f32> {
   let width = p_prepared.rect_w as usize;
   let height = p_prepared.rect_h as usize;
   let mut mask = vec![1.0f32; width * height];
@@ -162,14 +162,14 @@ fn compute_area_mask(p_prepared: &PreparedAreaMeta, p_area: Option<&Area>, p_mas
     });
   }
 
-  if let Some(mask_image) = p_mask_image {
+  if let Some(mask_values) = p_mask {
     let image_width = p_prepared.image_width;
     mask.par_chunks_mut(width).enumerate().for_each(|(py, row)| {
       let gy = p_prepared.rect_min_y as usize + py;
       for (px, value) in row.iter_mut().enumerate() {
-        let index = (gy * image_width + p_prepared.rect_min_x as usize + px) * 4;
-        if let Some(pixel) = mask_image.get(index..index + 3) {
-          *value *= luma(pixel[0] as f32, pixel[1] as f32, pixel[2] as f32, LumaStandard::Rec601) / 255.0;
+        let index = gy * image_width + p_prepared.rect_min_x as usize + px;
+        if let Some(&gray) = mask_values.get(index) {
+          *value *= gray as f32 / 255.0;
         }
       }
     });
@@ -204,7 +204,7 @@ pub fn mix_by_weights(p_before: &[u8], p_after: &[u8], p_weights: impl IntoItera
 /// Puts `p_processed` (the whole image, processed) into `p_image`, limited by the areas and mask in `p_ctx`: only where
 /// they allow, and mixed in at the edges. With neither, it simply replaces the image.
 fn put_whole_image(p_image: &mut Image, p_processed: Vec<u8>, p_ctx: Option<&ApplyContext<'_>>) {
-  let Some(ctx) = p_ctx.filter(|ctx| ctx.area.is_some() || ctx.mask_image.is_some()) else {
+  let Some(ctx) = p_ctx.filter(|ctx| ctx.area.is_some() || ctx.mask.is_some()) else {
     p_image.set_rgba(p_processed);
     return;
   };
@@ -224,7 +224,7 @@ pub fn apply_to_whole_image_in_area<F>(p_image: &mut Image, p_ctx: Option<ApplyC
 where
   F: FnOnce(&mut Image),
 {
-  let limited = p_ctx.as_ref().is_some_and(|ctx| ctx.area.is_some() || ctx.mask_image.is_some());
+  let limited = p_ctx.as_ref().is_some_and(|ctx| ctx.area.is_some() || ctx.mask.is_some());
   if !limited {
     p_processor(p_image);
     return;
@@ -283,7 +283,7 @@ fn blend_area_pixels(p_image: &mut Image, p_processed: &[u8], p_prepared_meta: &
 /// through the area/mask alpha.
 fn apply_processed_pixels_to_image(
   p_image: &mut Image, p_processed: Vec<u8>, p_prepared: &PreparedAreaMeta, p_area: Option<&Area>,
-  p_mask_image: Option<&[u8]>,
+  p_mask: Option<&[u8]>,
 ) {
   let (image_w, image_h) = p_image.dimensions::<usize>();
   let full_image_processed = p_prepared.area_min_x == 0
@@ -291,12 +291,12 @@ fn apply_processed_pixels_to_image(
     && p_prepared.area_w as usize == image_w
     && p_prepared.area_h as usize == image_h
     && p_area.map_or(0, Area::feather) == 0
-    && p_mask_image.is_none();
+    && p_mask.is_none();
 
   if full_image_processed {
     p_image.set_rgba(p_processed);
   } else {
-    let mask = compute_area_mask(p_prepared, p_area, p_mask_image);
+    let mask = compute_area_mask(p_prepared, p_area, p_mask);
     blend_area_pixels(p_image, &p_processed, p_prepared, &mask);
   }
 }
@@ -323,11 +323,11 @@ pub fn area_weights(p_width: u32, p_height: u32, p_ctx: &ApplyContext<'_>) -> Ve
     rect_h: height,
   };
   match &p_ctx.area {
-    None => compute_area_mask(&meta, None, p_ctx.mask_image),
+    None => compute_area_mask(&meta, None, p_ctx.mask),
     Some(areas) => {
       let mut weights = vec![0.0f32; p_width as usize * p_height as usize];
       for area in areas {
-        for (weight, other) in weights.iter_mut().zip(compute_area_mask(&meta, Some(area), p_ctx.mask_image)) {
+        for (weight, other) in weights.iter_mut().zip(compute_area_mask(&meta, Some(area), p_ctx.mask)) {
           *weight = weight.max(other);
         }
       }
@@ -351,7 +351,7 @@ pub fn apply_in_area<F>(
   F: FnMut(&mut Image),
 {
   let kernel_padding = p_kernel_padding.into();
-  let mask = p_ctx.as_ref().and_then(|c| c.mask_image);
+  let mask = p_ctx.as_ref().and_then(|c| c.mask);
   let hardware = p_ctx.as_ref().map(|c| c.hardware).unwrap_or_default();
   let gpu = p_gpu.and_then(|effect| ready_gpu_provider(hardware).map(|provider| (effect, provider)));
 
@@ -376,7 +376,7 @@ pub fn apply_in_area_gpu(
 ) -> Result<(), String> {
   let provider = ready_gpu_provider(Hardware::Gpu).ok_or("no GPU is available")?;
   let kernel_padding = p_kernel_padding.into();
-  let mask = p_ctx.as_ref().and_then(|c| c.mask_image);
+  let mask = p_ctx.as_ref().and_then(|c| c.mask);
   let areas: Vec<Option<&Area>> = match p_ctx.as_ref().and_then(|c| c.area.clone()) {
     Some(areas) => areas.into_iter().map(Some).collect(),
     None => vec![None],
@@ -445,7 +445,7 @@ mod tests {
   fn gpu_context() -> Option<ApplyContext<'static>> {
     Some(ApplyContext {
       area: None,
-      mask_image: None,
+      mask: None,
       hardware: Hardware::Gpu,
     })
   }
@@ -489,7 +489,7 @@ mod tests {
   fn area_weights_cover_the_whole_image() {
     let ctx = ApplyContext {
       area: None,
-      mask_image: None,
+      mask: None,
       hardware: Hardware::Auto,
     };
     assert_eq!(area_weights(4, 3, &ctx), vec![1.0; 12]);
@@ -497,7 +497,7 @@ mod tests {
     let area = Area::rect((1.0, 1.0), (2.0, 1.0));
     let ctx = ApplyContext {
       area: Some(vec![&area]),
-      mask_image: None,
+      mask: None,
       hardware: Hardware::Auto,
     };
     let weights = area_weights(4, 3, &ctx);

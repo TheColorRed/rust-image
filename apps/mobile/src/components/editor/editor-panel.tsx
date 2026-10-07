@@ -178,53 +178,67 @@ function SliderEditor() {
   }
   const targetKey = adjustmentKey(control.key, selection.selectedId);
 
+  const back = (
+    <Pressable onPress={() => focusedControlKey.next(null)} hitSlop={8} style={styles.backChip}>
+      <ChevronLeft color={colors.textPrimary} size={18} />
+    </Pressable>
+  );
+  // Turns the effect off and closes the slider. The slider's own reset only puts the value back to its default.
+  const close = (
+    <Pressable
+      onPress={() => {
+        removeSlider(control);
+        focusedControlKey.next(null);
+      }}
+      hitSlop={8}
+      style={styles.backChip}
+    >
+      <X color={colors.textPrimary} size={16} />
+    </Pressable>
+  );
+
   return (
-    <View style={styles.sliderRow}>
-      <Pressable onPress={() => focusedControlKey.next(null)} hitSlop={8} style={styles.backChip}>
-        <ChevronLeft color={colors.textPrimary} size={18} />
-      </Pressable>
-      {/* Turns the effect off and closes the slider. The slider's own reset only puts the value back to its default. */}
-      <Pressable
-        onPress={() => {
-          removeSlider(control);
-          focusedControlKey.next(null);
-        }}
-        hitSlop={8}
-        style={styles.backChip}
-      >
-        <X color={colors.textPrimary} size={16} />
-      </Pressable>
-      <View
-        style={styles.sliderFill}
-        onTouchStart={() => {
-          if (personSelection.value.focused) personOutlinesVisible.next(false);
-        }}
-      >
-        {control.picker === 'skin-tan' ? (
-          <SkinTanPicker
-            key={targetKey + '-' + resetVersion}
-            preview={preview}
-            value={adjustments[targetKey] ?? control.defaultValue}
-            onTouch={() => editorLive.show()}
-            onRelease={value => sliderCommitRequested.next({ control, value })}
-          />
-        ) : (
-          <Slider
-            key={targetKey + '-' + resetVersion}
-            label={control.label}
-            min={control.min}
-            max={control.max}
-            step={control.step ?? 1}
-            initialValue={adjustments[targetKey] ?? control.defaultValue}
-            resetValue={control.defaultValue}
-            triggerType="release"
-            onChange={onLiveChange}
-            reset
-            onTrigger={value => sliderCommitRequested.next({ control, value })}
-            onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
-          />
-        )}
-      </View>
+    <View
+      style={styles.sliderPanel}
+      onTouchStart={() => {
+        if (personSelection.value.focused) personOutlinesVisible.next(false);
+      }}
+    >
+      {control.picker === 'skin-tan' ? (
+        <>
+          <View style={styles.sliderHeader}>
+            {back}
+            <Text style={styles.sliderTitle}>{control.label}</Text>
+            {close}
+          </View>
+          <View style={styles.sliderTrack}>
+            <SkinTanPicker
+              key={targetKey + '-' + resetVersion}
+              preview={preview}
+              value={adjustments[targetKey] ?? control.defaultValue}
+              onTouch={() => editorLive.show()}
+              onRelease={value => sliderCommitRequested.next({ control, value })}
+            />
+          </View>
+        </>
+      ) : (
+        <Slider
+          key={targetKey + '-' + resetVersion}
+          leading={back}
+          trailing={close}
+          label={control.label}
+          min={control.min}
+          max={control.max}
+          step={control.step ?? 1}
+          initialValue={adjustments[targetKey] ?? control.defaultValue}
+          resetValue={control.defaultValue}
+          triggerType="release"
+          onChange={onLiveChange}
+          reset
+          onTrigger={value => sliderCommitRequested.next({ control, value })}
+          onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
+        />
+      )}
     </View>
   );
 }
@@ -331,8 +345,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     thumbnailApplied: { borderColor: colors.accent },
     thumbnailCanvas: { flex: 1 },
     thumbnailPlaceholder: { color: colors.textSecondary, textAlign: 'center', margin: 'auto' },
-    sliderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 10 },
-    sliderFill: { flex: 1 },
+    sliderPanel: { paddingHorizontal: 12 },
+    sliderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    sliderTitle: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    // Same side margin as the slider track, so the tan bar also stays clear of the screen edge.
+    sliderTrack: { height: 40, marginHorizontal: 20, justifyContent: 'center' },
     backChip: {
       width: 28,
       height: 28,
