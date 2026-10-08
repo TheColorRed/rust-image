@@ -51,12 +51,12 @@ jobs:
         env:
           NODE_ENV: production
         run: |
-          node apps/alakazam/scripts/move-bindings.mjs
+          node apps/alakazam/desktop/scripts/move-bindings.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run build -w apps/alakazam
+          npm run build -w apps/alakazam/desktop
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Force apps/alakazam/dist/client | Out-Null
-          Copy-Item apps/alakazam/dist/renderer/* apps/alakazam/dist/client -Recurse -Force
+          New-Item -ItemType Directory -Force apps/alakazam/desktop/dist/client | Out-Null
+          Copy-Item apps/alakazam/desktop/dist/renderer/* apps/alakazam/desktop/dist/client -Recurse -Force
 
       # JavaScript dependencies are bundled by webpack. Copy the native workspace
       # package explicitly so the staged app does not rely on workspace symlinks.
@@ -65,15 +65,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force release/desktop-source/dist, release/desktop-source/node_modules/@alakazam/core | Out-Null
-          Copy-Item apps/alakazam/dist/* release/desktop-source/dist -Recurse -Force
+          Copy-Item apps/alakazam/desktop/dist/* release/desktop-source/dist -Recurse -Force
           Copy-Item packages/node/alakazam/package.json, packages/node/alakazam/alakazam.node release/desktop-source/node_modules/@alakazam/core
-          $app = Get-Content apps/alakazam/package.json -Raw | ConvertFrom-Json
+          $app = Get-Content apps/alakazam/desktop/package.json -Raw | ConvertFrom-Json
           @{ name = $app.name; version = $app.version; main = $app.main; description = 'Alakazam image editor' } |
             ConvertTo-Json | Set-Content release/desktop-source/package.json
           $electronVersion = node -p "require('electron/package.json').version"
           npx --yes @electron/packager release/desktop-source Alakazam --platform=win32 --arch=x64 --electron-version=$electronVersion --out=release/desktop --overwrite --prune=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $config = (Resolve-Path apps/alakazam/electron-builder.json).Path
+          $config = (Resolve-Path apps/alakazam/desktop/electron-builder.json).Path
           $packagedApp = (Resolve-Path release/desktop/Alakazam-win32-x64).Path
           npx --yes electron-builder@26.15.3 --projectDir release/desktop-source --config $config --config.electronVersion=$electronVersion --prepackaged $packagedApp --win portable --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -122,13 +122,13 @@ jobs:
           npm run build-bindings:android -- --release
 
       - name: Build Android APK (release)
-        working-directory: apps/mobile/android
+        working-directory: apps/alakazam/mobile/android
         run: bash ./gradlew assembleRelease
 
       - name: Stage Android APK
         run: |
           mkdir -p release
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk release/Alakazam-android-release.apk
+          cp apps/alakazam/mobile/android/app/build/outputs/apk/release/app-release.apk release/Alakazam-android-release.apk
 
       - name: Upload mobile build (release)
         uses: actions/upload-artifact@v7
@@ -171,7 +171,7 @@ jobs:
         run: brew install xcodegen cocoapods
 
       - name: Generate iOS app project and install Pods
-        working-directory: apps/mobile/ios
+        working-directory: apps/alakazam/mobile/ios
         run: |
           xcodegen generate --spec project.yml
           pod install
@@ -179,13 +179,13 @@ jobs:
       - name: Build unsigned iOS app
         run: |
           xcodebuild \
-            -workspace apps/mobile/ios/Alakazam.xcworkspace \
+            -workspace apps/alakazam/mobile/ios/Alakazam.xcworkspace \
             -scheme Alakazam \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath "$GITHUB_WORKSPACE/release/Alakazam.xcarchive" \
-            -derivedDataPath "$GITHUB_WORKSPACE/apps/mobile/ios/build" \
+            -derivedDataPath "$GITHUB_WORKSPACE/apps/alakazam/mobile/ios/build" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \

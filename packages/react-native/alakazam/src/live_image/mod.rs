@@ -376,6 +376,51 @@ fn without_options<E: Effect + LiveEffect + Clone + 'static>(p_effect: &E) -> (A
   (Arc::new(effect), options)
 }
 
+/// Shader passes that are already described, run as one step of a chain. They have no CPU version of their own: whoever
+/// has the passes (see `abra::abra_core::image::recipe::gpu_run`) also has the way to make the pixels without them.
+struct Passes(Vec<abra::abra_core::image::gpu::GpuPass>);
+
+impl abra::abra_core::image::gpu::GpuEffect for Passes {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<abra::abra_core::image::gpu::GpuPass> {
+    self.0.clone()
+  }
+}
+
+impl LiveEffect for Passes {
+  fn apply_cpu(&self, _p_image: &mut Image) {}
+}
+
+impl LiveImage {
+  /// The photo with these shader passes run over it, one step each, in place of whatever chain there was. A texture the
+  /// surface draws without any copy to the CPU. `None` when there is no GPU or the texture cannot be made, and nothing is
+  /// drawn then: the caller makes the pixels another way.
+  pub(crate) fn picture_of_passes(
+    &mut self, p_passes: Vec<Vec<abra::abra_core::image::gpu::GpuPass>>,
+  ) -> Option<vessel::Picture> {
+    if !self.is_gpu() {
+      return None;
+    }
+    if !self.is_direct() {
+      self.set_direct(true);
+    }
+    self.chain = p_passes
+      .into_iter()
+      .map(|passes| Entry {
+        id: self.new_id(),
+        effect: Arc::new(Passes(passes)),
+        options: None,
+        weights: None,
+      })
+      .collect();
+    self.render();
+    #[cfg(feature = "gpu")]
+    if let Some(texture) = self.take_texture() {
+      return Some(vessel::Picture::Gpu(Arc::new(texture)));
+    }
+    None
+  }
+}
+
 /// One place in a [`LiveImage`]'s chain, from [`LiveImage::slot`]. Applying an effect to it replaces the effect with
 /// that id.
 pub struct LiveSlot<'a> {

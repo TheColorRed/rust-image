@@ -1,12 +1,35 @@
 use core::ops::{Add, Div, Mul, Sub};
 use ndarray::{Array1, Axis};
 use rayon::prelude::*;
+use std::any::Any;
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::channels::{Channel, Channels};
 use crate::color::Color;
 use crate::resolution::Resolution;
+
+/// Pixels that are described but not made yet, such as the result of a chain of GPU passes.
+///
+/// An [`Image`] can stand for work that has not run: whoever made it keeps the recipe, and the first time its pixels are
+/// read the image asks for them once and remembers them. Code that never reads the pixels, such as a preview that draws the
+/// recipe on the GPU, never pays for them. This crate knows nothing about GPUs; whatever implements this does.
+pub trait DeferredPixels: Send + Sync + std::fmt::Debug {
+  /// The `width * height * 4` RGBA pixels. This must always succeed: if the fast way to make them fails, such as a GPU that
+  /// went away, it makes them the slow way, so the picture is never lost.
+  fn render(&self) -> Vec<u8>;
+
+  /// This as `Any`, so whoever made the recipe can recognise it again and use it without making the pixels.
+  fn as_any(&self) -> &dyn Any;
+}
+
+/// A [`DeferredPixels`] and the pixels it made, once they have been asked for. Clones of an image share one of these, so
+/// the work runs once however many of them are read.
+#[derive(Debug)]
+struct Deferred {
+  source: Arc<dyn DeferredPixels>,
+  made: OnceLock<Arc<Array1<u8>>>,
+}
 
 /// Minimal Image type with RGBA buffer representation (Arc-backed for cheap cloning).
 ///
@@ -20,12 +43,38 @@ use crate::resolution::Resolution;
 /// img.clear_color(Color::from_rgba(255, 255, 255, 255));
 /// ```
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 pub struct Image {
   width: u32,
   height: u32,
+  /// The pixels. Empty while `deferred` is set; read them through [`Image::ready`], never directly.
   colors: Arc<Array1<u8>>,
+  /// Pixels not made yet. Set by [`Image::from_deferred`] and cleared by anything that changes the image.
+  deferred: Option<Arc<Deferred>>,
   pub anti_aliasing_level: u32,
   resolution: Resolution,
+}
+
+// What other languages can call on an image. A color is passed as a handle there, so `new_from_color` has its own
+// version here under the same name.
+#[cfg(feature = "uniffi")]
+#[uniffi::export]
+impl Image {
+  /// Create a new image with a solid color fill.
+  #[uniffi::constructor(name = "new_from_color")]
+  pub fn uniffi_new_from_color(p_width: u32, p_height: u32, p_color: Arc<Color>) -> Image {
+    Image::new_from_color(p_width, p_height, *p_color)
+  }
+
+  /// The width of the image in pixels.
+  pub fn width(&self) -> u32 {
+    self.width
+  }
+
+  /// The height of the image in pixels.
+  pub fn height(&self) -> u32 {
+    self.height
+  }
 }
 
 impl Image {
@@ -43,6 +92,7 @@ impl Image {
       width,
       height,
       colors,
+      deferred: None,
       anti_aliasing_level: 4,
       resolution: Resolution::default(),
     }
@@ -80,6 +130,56 @@ impl Image {
     img
   }
 
+  /// An image of `p_width` x `p_height` whose pixels `p_source` makes when they are first read.
+  ///
+  /// Nothing runs here. Reading the pixels (`rgba`, `get_pixel`, saving) makes them once, and changing the image makes them
+  /// first and then edits them as usual, so code that does not know about deferred images works with one unchanged.
+  pub fn from_deferred(p_width: u32, p_height: u32, p_source: Arc<dyn DeferredPixels>) -> Image {
+    let mut image = Image::new(0, 0);
+    image.width = p_width;
+    image.height = p_height;
+    image.deferred = Some(Arc::new(Deferred {
+      source: p_source,
+      made: OnceLock::new(),
+    }));
+    image
+  }
+
+  /// The recipe for the pixels if they have not been asked for yet, `None` for an image that has its pixels. An image that was
+  /// read already has them, so its recipe is not offered again.
+  pub fn deferred(&self) -> Option<&Arc<dyn DeferredPixels>> {
+    self.deferred.as_ref().filter(|deferred| deferred.made.get().is_none()).map(|deferred| &deferred.source)
+  }
+
+  /// Whether this image and `p_other` are known to hold the very same pixels, because one was cloned from the other. An image
+  /// whose pixels have not been made yet shares nothing, and neither does one whose pixels merely look the same.
+  pub fn shares_pixels_with(&self, p_other: &Image) -> bool {
+    let made = |image: &Image| match &image.deferred {
+      None => Some(image.colors.clone()),
+      Some(deferred) => deferred.made.get().cloned(),
+    };
+    matches!((made(self), made(p_other)), (Some(a), Some(b)) if Arc::ptr_eq(&a, &b))
+  }
+
+  /// The pixels, making them first if this image is deferred.
+  fn ready(&self) -> &Arc<Array1<u8>> {
+    let Some(deferred) = &self.deferred else { return &self.colors };
+    deferred.made.get_or_init(|| {
+      let mut pixels = deferred.source.render();
+      debug_assert_eq!(pixels.len(), self.pixel_count() * 4, "a deferred image made pixels of the wrong size");
+      pixels.resize(self.pixel_count() * 4, 0);
+      Arc::new(Array1::from_vec(pixels))
+    })
+  }
+
+  /// Turns a deferred image into one that has its pixels, ready to be changed. Does nothing for any other image.
+  fn make_ready(&mut self) {
+    if self.deferred.is_some() {
+      self.colors = Arc::clone(self.ready());
+      self.deferred = None;
+    }
+  }
+
   /// Return a zeroed RGBA Vec<u8> the same size as this image.
   ///
   /// Useful when you need a scratch buffer for pixel operations.
@@ -103,6 +203,11 @@ impl Image {
   pub fn clear_color(&mut self, p_color: Color) {
     let rgba = [p_color.r, p_color.g, p_color.b, p_color.a];
     let pixel_count = self.pixel_count();
+    // Everything is overwritten, so a deferred image does not need its pixels made first.
+    if self.deferred.take().is_some() {
+      self.colors = Arc::new(Array1::from_vec(rgba.repeat(pixel_count)));
+      return;
+    }
     match Arc::get_mut(&mut self.colors).and_then(|colors| colors.as_slice_mut()) {
       // The buffer is not shared, so fill it in place without reallocating.
       Some(pixels) if pixels.len() == pixel_count * 4 => {
@@ -149,6 +254,7 @@ impl Image {
 
     self.width = p_width;
     self.height = p_height;
+    self.deferred = None;
     // Replace the Arc instead of mutating through it so a shared buffer is never cloned just to be overwritten.
     self.colors = Arc::new(Array1::from_vec(rgba));
   }
@@ -171,7 +277,8 @@ impl Image {
       return None;
     }
     let index = (p_y as usize * self.width as usize + p_x as usize) * 4;
-    Some((self.colors[index], self.colors[index + 1], self.colors[index + 2], self.colors[index + 3]))
+    let colors = self.ready();
+    Some((colors[index], colors[index + 1], colors[index + 2], colors[index + 3]))
   }
 
   /// Get the RGBA pixel data for a specified rectangular area.
@@ -194,6 +301,7 @@ impl Image {
   pub fn set_pixel(&mut self, p_x: u32, p_y: u32, p_pixel: (u8, u8, u8, u8)) {
     debug_assert!(p_x < self.width && p_y < self.height, "Pixel ({}, {}) is out of bounds", p_x, p_y);
     let index = (p_y as usize * self.width as usize + p_x as usize) * 4;
+    self.make_ready();
     let arr = Arc::make_mut(&mut self.colors);
     arr[index] = p_pixel.0;
     arr[index + 1] = p_pixel.1;
@@ -240,7 +348,7 @@ impl Image {
   ///
   /// This avoids cloning the buffer for read-only operations.
   pub fn rgba(&self) -> &[u8] {
-    self.colors.as_slice().expect("Image colors must be contiguous")
+    self.ready().as_slice().expect("Image colors must be contiguous")
   }
 
   /// Copy the pixel buffer (`Arc`) from another `Image` into this one.
@@ -248,25 +356,28 @@ impl Image {
   /// This performs a cheap `Arc` clone: the buffer will be shared until one of
   /// the images mutates it (copy-on-write).
   pub fn copy_channel_data(&mut self, p_src: &Image) {
-    self.colors = p_src.colors.clone();
+    self.colors = Arc::clone(p_src.ready());
+    self.deferred = None;
   }
 
   /// Get a mutable reference to the internal pixel buffer as an `ndarray`.
   ///
   /// This triggers copy-on-write if the underlying buffer is shared.
   pub fn colors(&mut self) -> &mut Array1<u8> {
+    self.make_ready();
     Arc::make_mut(&mut self.colors)
   }
 
   /// Return a cloned, owned Vec<u8> containing the RGBA pixels for this image.
   pub fn to_rgba_vec(&self) -> Vec<u8> {
-    self.colors.to_vec()
+    self.ready().to_vec()
   }
 
   /// Consume the Image and return the underlying RGBA Vec<u8>.
   ///
   /// The buffer is moved out without copying unless the underlying `Arc` is shared.
-  pub fn into_rgba_vec(self) -> Vec<u8> {
+  pub fn into_rgba_vec(mut self) -> Vec<u8> {
+    self.make_ready();
     match Arc::try_unwrap(self.colors) {
       Ok(arr) => {
         let (pixels, offset) = arr.into_raw_vec_and_offset();
@@ -332,6 +443,7 @@ impl Image {
   where
     F: Fn(ndarray::ArrayViewMut1<u8>) + Send + Sync,
   {
+    self.make_ready();
     Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
@@ -353,6 +465,7 @@ impl Image {
 
   /// Mutable RGBA slice, triggering copy-on-write if the buffer is shared.
   fn pixels_mut(&mut self) -> &mut [u8] {
+    self.make_ready();
     Arc::make_mut(&mut self.colors).as_slice_mut().expect("Image colors must be contiguous")
   }
 }
@@ -381,6 +494,96 @@ impl_scalar_op!(Div, div, /, "Divide each RGB channel by a scalar value.");
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A recipe that counts how many times it is made and can be told to make the wrong amount.
+  #[derive(Debug)]
+  struct Counting {
+    made: std::sync::atomic::AtomicUsize,
+    pixels: Vec<u8>,
+  }
+
+  impl DeferredPixels for Counting {
+    fn render(&self) -> Vec<u8> {
+      self.made.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      self.pixels.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+      self
+    }
+  }
+
+  fn counting(p_pixels: Vec<u8>) -> Arc<Counting> {
+    Arc::new(Counting {
+      made: Default::default(),
+      pixels: p_pixels,
+    })
+  }
+
+  fn made(p_source: &Counting) -> usize {
+    p_source.made.load(std::sync::atomic::Ordering::SeqCst)
+  }
+
+  #[test]
+  fn a_deferred_image_makes_nothing_until_its_pixels_are_read_and_then_only_once() {
+    let source = counting(vec![10, 20, 30, 255, 40, 50, 60, 255]);
+    let image = Image::from_deferred(2, 1, source.clone());
+    let clone = image.clone();
+    assert_eq!(image.dimensions::<u32>(), (2, 1));
+    assert!(image.deferred().is_some());
+    assert_eq!(made(&source), 0, "nothing runs until the pixels are read");
+    assert_eq!(image.get_pixel(1, 0), Some((40, 50, 60, 255)));
+    assert_eq!(clone.rgba(), &[10, 20, 30, 255, 40, 50, 60, 255]);
+    assert_eq!(image.to_rgba_vec().len(), 8);
+    assert_eq!(made(&source), 1, "the clones share one run");
+    assert!(image.deferred().is_none(), "once the pixels exist the recipe is not offered again");
+  }
+
+  #[test]
+  fn changing_a_deferred_image_makes_its_pixels_first_and_leaves_its_clones_alone() {
+    let source = counting(vec![10, 20, 30, 255, 40, 50, 60, 255]);
+    let original = Image::from_deferred(2, 1, source.clone());
+    let mut edited = original.clone();
+    edited.set_pixel(0, 0, (1, 2, 3, 4));
+    assert_eq!(edited.rgba(), &[1, 2, 3, 4, 40, 50, 60, 255]);
+    assert_eq!(original.rgba(), &[10, 20, 30, 255, 40, 50, 60, 255]);
+    assert_eq!(made(&source), 1);
+
+    let mut inverted = Image::from_deferred(2, 1, counting(vec![10, 20, 30, 255, 40, 50, 60, 255]));
+    inverted.mut_channels(Channel::RGB, |value| 255 - value);
+    assert_eq!(inverted.into_rgba_vec(), vec![245, 235, 225, 255, 215, 205, 195, 255]);
+  }
+
+  #[test]
+  fn replacing_a_deferred_image_does_not_make_its_pixels() {
+    let source = counting(vec![0; 8]);
+    let mut image = Image::from_deferred(2, 1, source.clone());
+    image.clear_color(Color::from_rgba(9, 8, 7, 6));
+    assert_eq!(image.rgba(), &[9, 8, 7, 6, 9, 8, 7, 6]);
+    let mut other = Image::from_deferred(2, 1, source.clone());
+    other.set_rgba(vec![1u8; 8]);
+    assert_eq!(other.rgba(), &[1; 8]);
+    assert_eq!(made(&source), 0);
+  }
+
+  #[test]
+  fn clones_share_pixels_and_copies_and_unmade_images_do_not() {
+    let image = Image::new_from_color(2, 2, Color::white());
+    assert!(image.shares_pixels_with(&image.clone()));
+    assert!(!image.shares_pixels_with(&Image::new_from_color(2, 2, Color::white())));
+    let deferred = Image::from_deferred(1, 1, counting(vec![0; 4]));
+    assert!(!deferred.shares_pixels_with(&deferred.clone()), "nothing is shared before the pixels exist");
+    deferred.rgba();
+    assert!(deferred.shares_pixels_with(&deferred.clone()));
+  }
+
+  #[test]
+  fn a_recipe_can_be_recognised_again_by_whoever_made_it() {
+    let source = counting(vec![0; 4]);
+    let image = Image::from_deferred(1, 1, source.clone());
+    let recipe = image.deferred().expect("not made yet");
+    assert!(recipe.as_any().downcast_ref::<Counting>().is_some());
+  }
 
   #[test]
   fn rgb_pixels_are_opaque() {

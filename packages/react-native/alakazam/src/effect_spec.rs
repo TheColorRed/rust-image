@@ -51,16 +51,6 @@ pub enum FilterType {
   Underwater,
 }
 
-// `Color` lives in `abra_core`, which knows nothing about bindings. This describes it to uniffi so a custom tint can be
-// passed as `{ r, g, b, a }`. The fields must match `abra_core::Color` exactly.
-#[uniffi::remote(Record)]
-pub struct Color {
-  pub r: u8,
-  pub g: u8,
-  pub b: u8,
-  pub a: u8,
-}
-
 /// An effect and its parameters.
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum EffectSpec {
@@ -124,7 +114,7 @@ pub enum EffectSpec {
     /// preset normally does; only that mode has a shader.
     preserve_luminosity: bool,
     /// Color of the custom filter. Ignored if a preset is used.
-    color: Option<Color>,
+    color: Option<std::sync::Arc<Color>>,
   },
   SkinSmooth {
     /// The amount of smoothing.
@@ -217,7 +207,7 @@ impl EffectSpec {
         let filter_to_use = if let Some(f) = filter {
           levels::PhotoFilter::Preset(*f)
         } else if let Some(f) = color {
-          levels::PhotoFilter::Color(*f)
+          levels::PhotoFilter::Color(**f)
         } else {
           levels::PhotoFilter::Color(Color::transparent())
         };

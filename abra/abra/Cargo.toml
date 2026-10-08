@@ -25,6 +25,8 @@ ctor = { workspace = true }
 regex = "1.9"
 
 [features]
+# Exports the library's own types to other languages (see the `primitives` crate).
+uniffi = ["abra-core/uniffi", "adjustments/uniffi"]
 # GPU acceleration for one-shot edits.
 gpu = ["dep:gpu"]
 

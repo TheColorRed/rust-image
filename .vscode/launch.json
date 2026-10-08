@@ -17,8 +17,8 @@
       "name": "Attach to Hermes application",
       "type": "reactnativedirect",
       "request": "attach",
-      "cwd": "${workspaceFolder}/apps/mobile",
-      "projectRoot": "${workspaceFolder}/apps/mobile",
+      "cwd": "${workspaceFolder}/apps/alakazam/mobile",
+      "projectRoot": "${workspaceFolder}/apps/alakazam/mobile",
       "sourceMaps": true
     },
     {
@@ -26,8 +26,8 @@
       "type": "reactnativedirect",
       "request": "launch",
       "platform": "android",
-      "cwd": "${workspaceFolder}/apps/mobile",
-      "projectRoot": "${workspaceFolder}/apps/mobile",
+      "cwd": "${workspaceFolder}/apps/alakazam/mobile",
+      "projectRoot": "${workspaceFolder}/apps/alakazam/mobile",
       "sourceMaps": true
     }
   ]

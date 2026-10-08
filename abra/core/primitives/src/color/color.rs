@@ -8,6 +8,7 @@ use super::to_lab::{rgb_to_lab, srgb_u8_to_linear_f32};
 use super::to_rgb::{hsl_to_rgb, hsv_to_rgb, lab_to_rgb};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 /// A color with red, green, blue, and alpha values.
 pub struct Color {
   /// The red value of the color.
@@ -70,12 +71,17 @@ impl From<u8> for ColorNumber {
   }
 }
 
+// Everything in this block is exported to other languages with uniffi when the `uniffi` feature is on, so it holds only
+// signatures uniffi can carry. The rest of `Color` is in the next block.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 impl Color {
   /// Creates a color from RGB values (alpha set to 255).
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_rgb(p_r: u8, p_g: u8, p_b: u8) -> Self {
     Self::from_rgba(p_r, p_g, p_b, 255)
   }
   /// Creates a color from RGBA values.
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_rgba(p_r: u8, p_g: u8, p_b: u8, p_a: u8) -> Self {
     Self {
       r: p_r,
@@ -84,33 +90,33 @@ impl Color {
       a: p_a,
     }
   }
-  /// Sets the alpha value of the color.
-  pub fn set_alpha(mut self, p_a: impl Into<ColorNumber>) -> Self {
-    self.a = p_a.into().0;
-    self
-  }
   /// Creates a color from HSV values (hue 0-360, saturation/value 0-1; alpha set to 255).
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_hsv(p_h: f32, p_s: f32, p_v: f32) -> Self {
     let (r, g, b) = hsv_to_rgb(p_h, p_s, p_v);
     Self::from_rgb(r, g, b)
   }
   /// Creates a color from HSL values (hue 0-360, saturation/lightness 0-1; alpha set to 255).
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_hsl(p_h: f32, p_s: f32, p_l: f32) -> Self {
     let (r, g, b) = hsl_to_rgb(p_h, p_s, p_l);
     Self::from_rgb(r, g, b)
   }
   /// Creates a color from CIE Lab values (L 0-100, a/b roughly -128 to 127; alpha set to 255).
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_lab(p_l: f32, p_a: f32, p_b: f32) -> Self {
     let (r, g, b) = lab_to_rgb(p_l, p_a, p_b);
     Self::from_rgb(r, g, b)
   }
   /// Creates a color from a hexadecimal value (alpha set to 255).
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_hex(p_hex: u32) -> Self {
     Self::from_rgb(((p_hex >> 16) & 0xFF) as u8, ((p_hex >> 8) & 0xFF) as u8, (p_hex & 0xFF) as u8)
   }
   /// Creates a color from a hexadecimal string (e.g., "#RRGGBB" or "#RRGGBBAA").
   ///
   /// Invalid strings return opaque black.
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn from_hex_string(p_hex: &str) -> Self {
     let p_hex = p_hex.trim_start_matches('#');
     let hex_value = u32::from_str_radix(p_hex, 16).unwrap_or(0);
@@ -132,6 +138,14 @@ impl Color {
     } else {
       format!("#{:02X}{:02X}{:02X}{:02X}", self.r, self.g, self.b, self.a)
     }
+  }
+}
+
+impl Color {
+  /// Sets the alpha value of the color.
+  pub fn set_alpha(mut self, p_a: impl Into<ColorNumber>) -> Self {
+    self.a = p_a.into().0;
+    self
   }
   /// Returns the RGB values of the color as a tuple.
   pub fn rgb(&self) -> (u8, u8, u8) {

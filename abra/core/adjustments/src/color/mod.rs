@@ -7,6 +7,7 @@ mod linear_gradient;
 mod multiply;
 mod opacity;
 mod posterize;
+mod radial_gradient;
 mod threshold;
 
 pub use auto_color::{AutoColor, auto_color};
@@ -18,4 +19,5 @@ pub use linear_gradient::LinearGradientEffect;
 pub use multiply::{ColorMultiply, color_multiply};
 pub use opacity::{Opacity, reduce_opacity};
 pub use posterize::{Posterize, posterize};
+pub use radial_gradient::{radial_gradient, radial_gradient_deferred};
 pub use threshold::{Threshold, threshold};

@@ -69,7 +69,7 @@ Abra's vendored JPEG library also needs the target-scoped CMake toolchain variab
 Generate the app project and install CocoaPods dependencies:
 
 ```sh
-cd apps/mobile/ios
+cd apps/alakazam/mobile/ios
 xcodegen generate --spec project.yml
 pod install
 ```

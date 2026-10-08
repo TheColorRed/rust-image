@@ -6,6 +6,7 @@ use std::{
 use crate::{Color, Harmony};
 
 #[derive(Clone, Debug, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 /// The color stops for a gradient.
 pub struct ColorStop {
   /// The color of the stop.
@@ -25,6 +26,7 @@ impl ColorStop {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Object))]
 /// Describes how to interpolate between colors in a gradient.
 pub struct Gradient {
   /// The color stops in the gradient.
@@ -33,10 +35,61 @@ pub struct Gradient {
   direction: Option<crate::geometry::Path>,
 }
 
+// What other languages can call on a color stop. Colors are handles there, so `new` has its own version here.
+#[cfg(feature = "uniffi")]
+#[uniffi::export]
+impl ColorStop {
+  /// Creates a new gradient color stop with the given color and time.
+  #[uniffi::constructor(name = "new")]
+  pub fn uniffi_new(p_color: std::sync::Arc<Color>, p_time: f32) -> ColorStop {
+    ColorStop::new(*p_color, p_time)
+  }
+
+  /// The color of the stop.
+  pub fn color(&self) -> std::sync::Arc<Color> {
+    std::sync::Arc::new(self.color)
+  }
+
+  /// A value between 0 and 1 representing the x position of the stop.
+  pub fn time(&self) -> f32 {
+    self.time
+  }
+}
+
 impl Display for ColorStop {
   /// Displays the color stop as a string.
   fn fmt(&self, p_f: &mut Formatter) -> fmt::Result {
     write!(p_f, "{} at {}", self.color, self.time)
+  }
+}
+
+// What other languages can call on a gradient. Colors and stops are handles there, so these constructors have their own
+// versions here under the same names.
+#[cfg(feature = "uniffi")]
+#[uniffi::export]
+impl Gradient {
+  /// Creates a new gradient with the given stops. They can be in any order; they are sorted by position.
+  #[uniffi::constructor(name = "new")]
+  pub fn uniffi_new(p_stops: Vec<std::sync::Arc<ColorStop>>) -> Gradient {
+    Gradient::new(p_stops.into_iter().map(|stop| *stop).collect())
+  }
+
+  /// Creates a new gradient that goes from one color to another.
+  #[uniffi::constructor(name = "from_to")]
+  pub fn uniffi_from_to(p_from: std::sync::Arc<Color>, p_to: std::sync::Arc<Color>) -> Gradient {
+    Gradient::from_to(*p_from, *p_to)
+  }
+
+  /// Creates a new gradient with evenly spaced colors.
+  #[uniffi::constructor(name = "evenly")]
+  pub fn uniffi_evenly(p_colors: Vec<std::sync::Arc<Color>>) -> Gradient {
+    Gradient::evenly(p_colors.into_iter().map(|color| *color).collect())
+  }
+
+  /// The color of the gradient at `p_time`, blending the two stops around it.
+  #[uniffi::method(name = "color_at")]
+  pub fn uniffi_color_at(&self, p_time: f32) -> std::sync::Arc<Color> {
+    std::sync::Arc::new(self.color_at(p_time))
   }
 }
 

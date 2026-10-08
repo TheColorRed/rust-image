@@ -47,6 +47,10 @@ pub struct AbraImage {
   /// The effects shown over the image while they are tried out (a slider being dragged, a mood being previewed). They are
   /// not applied to the pixels.
   live: BehaviorSubject<Vec<EffectSpec>>,
+  /// An image a tool written in TypeScript made, shown in place of `live` while it is set.
+  tool_image: BehaviorSubject<Option<Arc<Image>>>,
+  /// The image at the last size a tool asked for, so a drag resizes the photo once and not on every tick.
+  tool_source: Mutex<Option<((u32, u32, u64), Arc<Image>)>>,
 }
 
 impl AbraImage {
@@ -76,6 +80,8 @@ impl AbraImage {
       selected_skin_mask: p_selected_skin_mask,
       edits: BehaviorSubject::new(0),
       live: BehaviorSubject::new(Vec::new()),
+      tool_image: BehaviorSubject::new(None),
+      tool_source: Mutex::new(None),
     })
   }
 
@@ -88,6 +94,36 @@ impl AbraImage {
   /// Shows `p_effects` over the image, in order, in place of any shown before. Nothing is applied to the pixels.
   pub(crate) fn show_live(&self, p_effects: Vec<EffectSpec>) {
     self.live.next(p_effects);
+    if self.tool_image.peek().is_some() {
+      self.tool_image.next(None);
+    }
+  }
+
+  /// Shows `p_image`, which a tool made, in place of the photo and any live effects. Nothing is applied to the pixels.
+  pub(crate) fn show_tool_image(&self, p_image: Arc<Image>) {
+    self.tool_image.next(Some(p_image));
+  }
+
+  /// The image shrunk to fit within `p_max_width` x `p_max_height`, or as it is when it already fits. A tool runs on this
+  /// while a slider is dragged. The same size of the same edit gives the same image, so a drag resizes once.
+  pub(crate) fn preview_image(&self, p_max_width: u32, p_max_height: u32) -> Arc<Image> {
+    let key = (p_max_width, p_max_height, self.edits.peek());
+    let mut cache = self.tool_source.lock().unwrap();
+    if let Some((cached, image)) = cache.as_ref()
+      && *cached == key
+    {
+      return Arc::clone(image);
+    }
+    let image = self.inner.lock().unwrap();
+    let (width, height) = image.dimensions::<u32>();
+    let preview = if width <= p_max_width && height <= p_max_height {
+      image.clone()
+    } else {
+      resize(ResizeTarget::Fit(Size::new(p_max_width, p_max_height))).resized(&image)
+    };
+    let preview = Arc::new(preview);
+    *cache = Some((key, Arc::clone(&preview)));
+    preview
   }
 
   /// Clones the Rust-owned image without transferring its pixels through JavaScript.
@@ -195,6 +231,34 @@ impl AbraImage {
     Ok(Self::from_image_with_skin_mask(image, skin_mask))
   }
 
+  /// Loads an image like `read`, but takes its skin mask from a file saved by `write_skin_mask` instead of running the
+  /// skin model. The mask must be the same size as the image.
+  #[uniffi::constructor]
+  pub fn read_with_skin_mask(path: String, skin_mask_path: String) -> Result<Arc<Self>, AbraError> {
+    let image = Image::read(&path).map_err(|message| AbraError::Io { message })?;
+    let mask = Mask::from_image(Image::read(&skin_mask_path).map_err(|message| AbraError::Io { message })?);
+    let (image_size, mask_size) = (image.dimensions::<u32>(), mask.dimensions::<u32>());
+    if image_size != mask_size {
+      return Err(AbraError::InvalidPixels {
+        message: format!(
+          "the saved skin mask is {}x{} but the image is {}x{}",
+          mask_size.0, mask_size.1, image_size.0, image_size.1
+        ),
+      });
+    }
+    Ok(Self::from_image_with_skin_mask(image, Some(mask)))
+  }
+
+  /// Writes the skin mask computed for this image to an image file, as gray pixels (use a `.webp` or `.png` name: both are
+  /// lossless, so the values load back unchanged; WebP is the smaller). Returns `false`, writing nothing, when the image has no skin mask: the skin model is not on this device.
+  pub fn write_skin_mask(&self, path: String) -> Result<bool, AbraError> {
+    let Some(mask) = self.skin_mask.lock().unwrap().clone() else {
+      return Ok(false);
+    };
+    mask.to_image().write(&path, None).map_err(|message| AbraError::Io { message })?;
+    Ok(true)
+  }
+
   /// Creates an image from raw RGBA bytes (`width * height * 4` long).
   #[uniffi::constructor]
   pub fn from_rgba(width: u32, height: u32, data: Vec<u8>) -> Result<Arc<Self>, AbraError> {
@@ -211,6 +275,13 @@ impl AbraImage {
   pub fn write(&self, path: String) -> Result<(), AbraError> {
     let image = self.inner.lock().unwrap();
     image.write(&path, None).map_err(|message| AbraError::Io { message })
+  }
+
+  /// Writes the image like `write`, at `quality` (0 to 100) for the formats that have one. JPEG uses it, and so does
+  /// WebP, which is lossless without it: a lower quality gives a much smaller file. PNG and GIF ignore it.
+  pub fn write_with_quality(&self, path: String, quality: u8) -> Result<(), AbraError> {
+    let image = self.inner.lock().unwrap();
+    image.write(&path, WriterOptions { quality }).map_err(|message| AbraError::Io { message })
   }
 
   /// Encodes the image as a `data:image/png;base64,...` URI, for showing small images (such as thumbnails) in a
@@ -230,6 +301,20 @@ impl AbraImage {
       Arc::clone(&self.selected_person),
       Arc::clone(&self.selected_skin_mask),
     )
+  }
+
+  /// The image as the library's own `Image`, at full size and without crossing the bridge, for a tool written against it.
+  /// Changing the result does not change this image; give a tool's result back with `replace_with`.
+  pub fn to_image(&self) -> Arc<Image> {
+    Arc::new(self.inner.lock().unwrap().clone())
+  }
+
+  /// Replaces the pixels with `image`, as an edit does. An image a tool left unmade is made now, so the edited photo holds
+  /// pixels and not the recipe for them.
+  pub fn replace_with(&self, image: Arc<Image>) {
+    let (width, height) = image.dimensions::<u32>();
+    let pixels = image.to_rgba_vec();
+    self.with_image_mut(|current| *current = Image::new_from_pixels(width, height, pixels, Channels::RGBA));
   }
 
   pub fn width(&self) -> u32 {
@@ -308,6 +393,12 @@ impl AbraImage {
   #[uniffi::constructor]
   pub async fn read_async(path: String) -> Result<Arc<Self>, AbraError> {
     crate::image_workers::run(move || Self::read(path)).await
+  }
+
+  /// `read_with_skin_mask` on the bounded image worker pool.
+  #[uniffi::constructor]
+  pub async fn read_with_skin_mask_async(path: String, skin_mask_path: String) -> Result<Arc<Self>, AbraError> {
+    crate::image_workers::run(move || Self::read_with_skin_mask(path, skin_mask_path)).await
   }
 
   /// Downscales once in native memory, without transferring pixels through JavaScript.
@@ -459,12 +550,35 @@ impl Trackable for AbraImage {
     let selected_skin_mask = Arc::clone(&self.selected_skin_mask);
     // The image, scaled to the size it is drawn at and uploaded once per size and edit.
     let mut rendering: Option<(((u32, u32), u64), LiveImage)> = None;
+    // The picture a tool starts from, uploaded once while the tool's image keeps starting from the same pixels.
+    let mut tool_rendering: Option<(Image, LiveImage)> = None;
     let changes =
       p_size.combine_latest(&self.edits).combine_latest(&self.live).combine_latest(selected_skin_mask.as_ref());
-    Offscreen::new(&changes, move |(((size, edits), live), selected_skin)| {
+    let changes = changes.combine_latest(&self.tool_image);
+    Offscreen::new(&changes, move |((((size, edits), live), selected_skin), tool)| {
       // Until the view has a surface it has no size, and there is nothing to draw for.
       if size.0 == 0 || size.1 == 0 {
         return None;
+      }
+      // A tool's image that is still a recipe is drawn by the GPU straight to the view's texture, without making its pixels.
+      // One that has its pixels, or is not drawn that way, goes to the view as the pixels it is.
+      if let Some(image) = tool {
+        if let Some((root, passes)) = abra::abra_core::image::recipe::gpu_run(image) {
+          let reuse = tool_rendering.as_ref().is_some_and(|(held, _)| held.shares_pixels_with(&root));
+          if !reuse {
+            let (width, height) = root.dimensions::<u32>();
+            tool_rendering = LiveImage::new(width, height, root.to_rgba_vec()).ok().map(|live| (root, live));
+          }
+          if let Some((_, live)) = tool_rendering.as_mut()
+            && let Some(picture) = live.picture_of_passes(passes)
+          {
+            return Some(match picture {
+              Picture::Pixels(frame) => RenderedFrame::Pixels(frame),
+              Picture::Gpu(frame) => RenderedFrame::Gpu(frame),
+            });
+          }
+        }
+        return Some(RenderedFrame::Pixels(Arc::new(frame_of(image))));
       }
       let key = (*size, *edits);
       if rendering.as_ref().is_none_or(|(rendered_for, _)| *rendered_for != key) {
@@ -496,6 +610,100 @@ mod tests {
   use super::*;
   use abra_find_person::PersonBounds;
   use std::sync::atomic::{AtomicUsize, Ordering};
+
+  #[test]
+  fn a_lower_quality_makes_a_smaller_webp_and_none_keeps_it_lossless() {
+    let (width, height) = (64, 64);
+    // Noisy pixels, which are hard to compress without losing detail (a smooth gradient compresses well either way).
+    let mut seed = 12345u32;
+    let mut noise = move || {
+      seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+      (seed >> 24) as u8
+    };
+    let pixels: Vec<u8> = (0..width * height).flat_map(|_| [noise(), noise(), noise(), 255]).collect();
+    let image = AbraImage::from_image(Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA));
+    let directory = std::env::temp_dir().join(format!("alakazam-webp-quality-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = |name: &str| directory.join(name).to_string_lossy().into_owned();
+
+    image.write(path("lossless.webp")).unwrap();
+    image.write_with_quality(path("low.webp"), 30).unwrap();
+    image.write_with_quality(path("high.webp"), 90).unwrap();
+    let size = |name: &str| std::fs::metadata(directory.join(name)).unwrap().len();
+    assert!(size("low.webp") < size("high.webp"), "a lower quality gives a smaller file");
+    assert!(size("low.webp") < size("lossless.webp"), "a low quality is smaller than lossless");
+
+    // Lossless keeps every pixel; lossy still decodes to an image of the same size.
+    let lossless = Image::read(&path("lossless.webp")).unwrap();
+    assert_eq!(lossless.rgba(), pixels.as_slice());
+    assert_eq!(Image::read(&path("low.webp")).unwrap().dimensions::<u32>(), (width, height));
+    std::fs::remove_dir_all(&directory).unwrap();
+  }
+
+  #[test]
+  fn a_lossless_webp_mask_is_exact_and_smaller_than_png() {
+    // A soft-edged blob, like a skin mask.
+    let (width, height) = (160u32, 160u32);
+    let values: Vec<u8> = (0..width * height)
+      .map(|i| {
+        let (x, y) = ((i % width) as f32 - 80.0, (i / width) as f32 - 80.0);
+        (255.0 - ((x * x + y * y).sqrt() - 40.0).clamp(0.0, 20.0) * 12.75) as u8
+      })
+      .collect();
+    let mask = Mask::from_values(width, height, values.clone());
+    let directory = std::env::temp_dir().join(format!("alakazam-mask-format-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = |name: &str| directory.join(name).to_string_lossy().into_owned();
+    mask.to_image().write(path("mask.png"), None).unwrap();
+    mask.to_image().write(path("mask.webp"), None).unwrap();
+    let size = |name: &str| std::fs::metadata(directory.join(name)).unwrap().len();
+    eprintln!("mask png: {} bytes, lossless webp: {} bytes", size("mask.png"), size("mask.webp"));
+
+    let loaded = Mask::from_image(Image::read(&path("mask.webp")).unwrap());
+    assert_eq!(loaded.values(), values.as_slice(), "lossless WebP keeps every value");
+    assert!(size("mask.webp") < size("mask.png"));
+    std::fs::remove_dir_all(&directory).unwrap();
+  }
+
+  #[test]
+  fn a_webp_that_cannot_be_encoded_is_an_error_and_leaves_the_image_usable() {
+    // WebP sides are limited to 16383 pixels. Encoding must fail with an error, not panic with the image locked.
+    let image = AbraImage::from_image(Image::new_from_color(16384, 1, Color::white()));
+    let path = std::env::temp_dir().join(format!("alakazam-too-wide-{}.webp", std::process::id()));
+    let result = image.write_with_quality(path.to_string_lossy().into_owned(), 85);
+    assert!(result.is_err(), "an image too wide for WebP is an error");
+    assert_eq!(image.width(), 16384, "the image is still usable afterwards");
+    let _ = std::fs::remove_file(path);
+  }
+
+  #[test]
+  fn a_saved_skin_mask_loads_back_unchanged() {
+    let (width, height) = (12, 8);
+    let values: Vec<u8> = (0..width * height).map(|i| (i * 7 % 256) as u8).collect();
+    let directory = std::env::temp_dir().join(format!("alakazam-skin-mask-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let image_path = directory.join("image.png").to_string_lossy().into_owned();
+    let mask_path = directory.join("skin-mask.webp").to_string_lossy().into_owned();
+    Image::new_from_color(width, height, Color::white()).write(&image_path, None).unwrap();
+
+    let source = AbraImage::from_image_with_skin_mask(
+      Image::new_from_color(width, height, Color::white()),
+      Some(Mask::from_values(width, height, values.clone())),
+    );
+    assert!(source.write_skin_mask(mask_path.clone()).unwrap());
+
+    let loaded = AbraImage::read_with_skin_mask(image_path.clone(), mask_path.clone()).unwrap();
+    assert_eq!(loaded.skin_mask().unwrap().values(), values.as_slice());
+
+    // An image with no skin mask has nothing to write.
+    let without = AbraImage::from_image(Image::new_from_color(width, height, Color::white()));
+    assert!(!without.write_skin_mask(directory.join("none.png").to_string_lossy().into_owned()).unwrap());
+
+    // A mask for a differently sized image is refused, not applied out of place.
+    Image::new_from_color(width + 1, height, Color::white()).write(&image_path, None).unwrap();
+    assert!(AbraImage::read_with_skin_mask(image_path, mask_path).is_err());
+    std::fs::remove_dir_all(&directory).unwrap();
+  }
 
   #[test]
   fn tapping_inside_an_overlapping_body_picks_the_inner_one() {

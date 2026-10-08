@@ -203,6 +203,10 @@ pub struct GpuProvider {
 
 static GPU_PROVIDER: RwLock<Option<GpuProvider>> = RwLock::new(None);
 
+/// The GPU provider is global, so tests that register or clear one must hold this, or they change it under each other.
+#[doc(hidden)]
+pub static GPU_PROVIDER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Register the GPU provider. Replaces any previously registered provider.
 pub fn register_gpu_provider(p_provider: GpuProvider) {
   *GPU_PROVIDER.write().unwrap() = Some(p_provider);

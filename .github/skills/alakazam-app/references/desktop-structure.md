@@ -3,7 +3,7 @@
 The Alakazam App is broken down into several key directories and files that make up the application. Below is an overview of the main components:
 
 ```
-apps/alakazam/
+apps/alakazam/desktop/
 ├── package.json             # Node.js project configuration
 ├── tsconfig.json            # TypeScript configuration
 ├── webpack.config.mjs       # Webpack bundler configuration

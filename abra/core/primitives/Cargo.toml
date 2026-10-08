@@ -6,6 +6,11 @@ edition = "2024"
 [dependencies]
 ndarray = { workspace = true, features = ["rayon"] }
 rayon = { workspace = true }
+# Lets other languages call the library's own types and functions. Off unless a binding crate turns it on.
+uniffi = { version = "=0.31", optional = true }
+
+[features]
+uniffi = ["dep:uniffi"]
 
 [lib]
 crate-type = ["rlib"]

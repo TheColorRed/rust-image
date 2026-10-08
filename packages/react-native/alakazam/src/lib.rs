@@ -16,7 +16,6 @@ pub mod history;
 pub mod image;
 pub mod image_operation;
 mod image_workers;
-pub mod live_effects;
 pub mod live_image;
 pub mod models;
 pub mod tools;

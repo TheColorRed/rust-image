@@ -8,8 +8,7 @@ use vessel::prelude::{Component, Frame, Observable, Observer, Slider};
 
 use crate::{
   components::image_preview::{ImagePreview, Message},
-  consts::SKIN_TAN_KEY,
-  effect_spec::skin_tan_gradient,
+  effect_spec::{EffectSpec, skin_tan_gradient},
   image::frame_of,
 };
 
@@ -31,7 +30,11 @@ impl SkinTanColorPicker {
 
     // Send each position to the image_preview component.
     let preview = p_preview.subject::<Message>();
-    slider.changes().subscribe(move |changed| preview.next(Message::SliderMove(SKIN_TAN_KEY.into(), changed.0 as f64)));
+    slider.changes().subscribe(move |changed| {
+      preview.next(Message::Show(vec![EffectSpec::SkinTan {
+        offset: changed.0 as f64,
+      }]))
+    });
 
     Arc::new(Self { slider })
   }
@@ -49,7 +52,7 @@ impl SkinTanColorPicker {
   /// show what is applied now.
   ///
   /// It only moves the handle: nothing is sent to the preview, because the photo is already showing that state (the
-  /// edit's result). To also preview a value that is not applied yet, send a `SliderMove` to the preview as well. The
+  /// edit's result). To also preview a value that is not applied yet, send a `Message::Show` to the preview as well. The
   /// user's own drags do not need this, since the handle follows their finger. The editor currently makes a new picker
   /// for a new starting value instead of calling this.
   pub fn set_value(&self, p_value: f64) {

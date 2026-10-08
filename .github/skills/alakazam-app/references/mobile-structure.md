@@ -1,9 +1,9 @@
 # Structure of the Alakazam Mobile App
 
-The Alakazam mobile app is a React Native application in `/apps/mobile`. Its image-manipulation bindings live in the `@alakazam/mobile` package in `/packages/react-native/alakazam`. Below is an overview of the main components:
+The Alakazam mobile app is a React Native application in `/apps/alakazam/mobile`. Its image-manipulation bindings live in the `@alakazam/mobile` package in `/packages/react-native/alakazam`. Below is an overview of the main components:
 
 ```text
-apps/mobile/
+apps/alakazam/mobile/
 ├── package.json                    # React Native app configuration and scripts
 ├── app.json                        # Application name and display name
 ├── index.js                        # React Native application entry point

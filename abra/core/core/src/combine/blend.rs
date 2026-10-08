@@ -129,11 +129,22 @@ impl BlendMode {
     self.names().1
   }
 
+  /// The mode's number in [`BlendMode::ALL`], which is the number the blend shader switches on. `None` for a custom mode,
+  /// which is a Rust function and has no shader.
+  pub fn shader_index(&self) -> Option<u32> {
+    if matches!(self, BlendMode::Custom(_)) {
+      return None;
+    }
+    BlendMode::ALL.iter().position(|mode| mode == self).map(|index| index as u32)
+  }
+
   /// The built-in mode with the given [`BlendMode::name`], or `None` when there is none.
   pub fn from_name(p_name: &str) -> Option<BlendMode> {
     BlendMode::ALL.into_iter().find(|mode| mode.name() == p_name)
   }
 
+  /// Returns the mode's identifier and display label as a tuple.
+  /// - Returns: A tuple where the first element is the identifier and the second element is the display label.
   fn names(&self) -> (&'static str, &'static str) {
     match self {
       BlendMode::Normal => ("normal", "Normal"),
@@ -424,6 +435,37 @@ pub fn blend(p_source: &Image) -> BlendImage<'_> {
     opacity: 1.0,
     mode: BlendMode::Normal,
   }
+}
+
+/// The mode name given to [`blend_images`] is not one of [`BlendMode::name`].
+#[cfg(feature = "uniffi")]
+#[derive(Debug, uniffi::Error)]
+#[uniffi(flat_error)]
+pub enum BlendError {
+  /// There is no built-in blend mode with this name.
+  UnknownMode(String),
+}
+
+#[cfg(feature = "uniffi")]
+impl std::fmt::Display for BlendError {
+  fn fmt(&self, p_f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      BlendError::UnknownMode(name) => write!(p_f, "there is no blend mode named \"{name}\""),
+    }
+  }
+}
+
+/// A new image: `p_top` composited onto a copy of `p_base`, as [`blend`] does, with `p_opacity` from 0 to 1. The mode is a
+/// [`BlendMode::name`] such as `"multiply"` or `"color-burn"`; a mode with a function in it cannot cross to other
+/// languages. This is the form they call, since they hold images as handles and cannot lend one out to be changed.
+#[cfg(feature = "uniffi")]
+#[uniffi::export(name = "blend")]
+pub fn blend_images(
+  p_base: std::sync::Arc<Image>, p_top: std::sync::Arc<Image>, p_mode: String, p_opacity: f32,
+) -> Result<std::sync::Arc<Image>, BlendError> {
+  let mode = BlendMode::from_name(&p_mode).ok_or(BlendError::UnknownMode(p_mode))?;
+  // Every built-in mode has a shader, so on a GPU the result is an image made only when its pixels are read.
+  Ok(std::sync::Arc::new(crate::image::recipe::blended(&p_base, &p_top, mode, p_opacity)))
 }
 
 /// Composites a blend-color source over a destination pixel using source alpha.

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-abra = { workspace = true }
+abra = { workspace = true, features = ["uniffi"] }
 abra-body-segmentation = { workspace = true }
 abra-find-person = { workspace = true }
 saphyr = { workspace = true }

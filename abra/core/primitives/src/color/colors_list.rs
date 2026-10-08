@@ -7,132 +7,166 @@
 
 use super::Color;
 
+// Exported to other languages with uniffi when the `uniffi` feature is on: each of these is a `Color.name()` there.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
 impl Color {
   /// A transparent color using RGBA(0, 0, 0, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn transparent() -> Self {
     Self::from_rgba(0, 0, 0, 0)
   }
   /// Black color using RGB(0, 0, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn black() -> Self {
     Self::from_rgb(0, 0, 0)
   }
   /// White color using RGB(255, 255, 255)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn white() -> Self {
     Self::from_rgb(255, 255, 255)
   }
   /// Gray color using RGB(128, 128, 128)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn gray() -> Self {
     Self::from_rgb(128, 128, 128)
   }
   /// Red color using RGB(255, 0, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn red() -> Self {
     Self::from_rgb(255, 0, 0)
   }
   /// Crimson color using RGB(220, 20, 60)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn crimson() -> Self {
     Self::from_rgb(220, 20, 60)
   }
   /// Ruby color using RGB(224, 17, 95)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn ruby() -> Self {
     Self::from_rgb(224, 17, 95)
   }
   /// Pink color using RGB(255, 192, 203)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn pink() -> Self {
     Self::from_rgb(255, 192, 203)
   }
   /// Magenta color using RGB(255, 0, 255)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn magenta() -> Self {
     Self::from_rgb(255, 0, 255)
   }
   /// Hot pink color using RGB(255, 105, 180)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn hot_pink() -> Self {
     Self::from_rgb(255, 105, 180)
   }
   /// Green color using RGB(0, 255, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn green() -> Self {
     Self::from_rgb(0, 255, 0)
   }
   /// Lime green color using RGB(50, 205, 50)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn lime_green() -> Self {
     Self::from_rgb(50, 205, 50)
   }
   /// Sea green color using RGB(46, 139, 87)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn sea_green() -> Self {
     Self::from_rgb(46, 139, 87)
   }
   /// Forest green color using RGB(34, 139, 34)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn forest_green() -> Self {
     Self::from_rgb(34, 139, 34)
   }
   /// Blue color using RGB(0, 0, 255)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn blue() -> Self {
     Self::from_rgb(0, 0, 255)
   }
   /// Royal blue color using RGB(65, 105, 225)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn royal_blue() -> Self {
     Self::from_rgb(65, 105, 225)
   }
   /// Sky blue color using RGB(135, 206, 235)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn sky_blue() -> Self {
     Self::from_rgb(135, 206, 235)
   }
   /// Navy blue color using RGB(0, 0, 128)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn navy_blue() -> Self {
     Self::from_rgb(0, 0, 128)
   }
   /// Yellow color using RGB(255, 255, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn yellow() -> Self {
     Self::from_rgb(255, 255, 0)
   }
   /// Gold color using RGB(255, 215, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn gold() -> Self {
     Self::from_rgb(255, 215, 0)
   }
   /// Golden color using RGB(255, 223, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn golden() -> Self {
     Self::from_rgb(255, 223, 0)
   }
   /// Bronze color using RGB(205, 127, 50)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn bronze() -> Self {
     Self::from_rgb(205, 127, 50)
   }
   /// Orange color using RGB(255, 165, 0)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn orange() -> Self {
     Self::from_rgb(255, 165, 0)
   }
   /// Indigo color using RGB(75, 0, 130)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn indigo() -> Self {
     Self::from_rgb(75, 0, 130)
   }
   /// Violet color using RGB(238, 130, 238)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn violet() -> Self {
     Self::from_rgb(238, 130, 238)
   }
   /// Purple color using RGB(128, 0, 128)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn purple() -> Self {
     Self::from_rgb(128, 0, 128)
   }
   /// Tan color using RGB(210, 180, 140)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn tan() -> Self {
     Self::from_rgb(210, 180, 140)
   }
   /// Beige color using RGB(245, 245, 220)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn beige() -> Self {
     Self::from_rgb(245, 245, 220)
   }
   /// Brown color using RGB(165, 42, 42)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn brown() -> Self {
     Self::from_rgb(139, 90, 43)
   }
   /// Dark brown color using RGB(101, 67, 33)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn dark_brown() -> Self {
     Self::from_rgb(101, 67, 33)
   }
   /// Light brown color using RGB(181, 101, 29)
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn light_brown() -> Self {
     Self::from_rgb(181, 101, 29)
   }
   /// Random opaque color.
+  #[cfg_attr(feature = "uniffi", uniffi::constructor)]
   pub fn random() -> Self {
     // Lightweight LCG seeded from current system time to avoid adding rand dependency.
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64;

@@ -1,3 +1,7 @@
+// The scaffolding other languages bind to; the types that carry `cfg_attr(feature = "uniffi", ...)` export through it.
+#[cfg(feature = "uniffi")]
+uniffi::setup_scaffolding!();
+
 pub mod color;
 mod combine;
 mod fs;

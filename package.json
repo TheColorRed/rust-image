@@ -1,19 +1,20 @@
 {
   "name": "image-editor",
   "scripts": {
-    "start": "npm run start -w apps/alakazam",
-    "start:android": "npm run start -w apps/mobile",
-    "android": "npm run android -w apps/mobile",
-    "deploy:android": "node ./scripts/build-android.mjs",
+    "start": "npm run start -w apps/alakazam/desktop",
+    "start:android": "npm run start -w apps/alakazam/mobile",
+    "android": "npm run android -w apps/alakazam/mobile",
+    "dev:android": "node ./scripts/build-android.mjs",
     "watch:android": "node ./scripts/watch-android.mjs",
+    "stop:android": "node ./scripts/stop-android.mjs",
     "build-bindings:android": "npm run build:android -w packages/react-native/alakazam --",
-    "dev": "npm run build-bindings && node ./apps/alakazam/scripts/move-bindings.mjs && npm run dev -w apps/alakazam --if-present",
+    "dev": "npm run build-bindings && node ./apps/alakazam/desktop/scripts/move-bindings.mjs && npm run dev -w apps/alakazam/desktop --if-present",
     "build-bindings": "npm run build -w packages/node --if-present && npm run write-bindings-ready",
-    "write-bindings-ready": "node ./apps/alakazam/scripts/write-bindings-ready.mjs"
+    "write-bindings-ready": "node ./apps/alakazam/desktop/scripts/write-bindings-ready.mjs"
   },
   "workspaces": [
-    "apps/alakazam",
-    "apps/mobile",
+    "apps/alakazam/desktop",
+    "apps/alakazam/mobile",
     "apps/docs",
     "packages/node/*",
     "packages/react-native/*"

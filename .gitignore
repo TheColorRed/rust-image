@@ -16,7 +16,7 @@ node_modules
 dist
 cache
 *android*/
-!/apps/mobile/android/
+!/apps/alakazam/mobile/android/
 !/packages/react-native/vessel/android/
 /packages/react-native/vessel/android/*
 !/packages/react-native/vessel/android/build.gradle
@@ -25,6 +25,7 @@ cache
 
 # Files to ignore
 TODO.md
+metro.log
 *.node
 settings.yml
 .vscode/stores

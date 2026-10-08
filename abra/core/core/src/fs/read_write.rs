@@ -85,7 +85,7 @@ impl Writer {
     let path = self.path.to_string_lossy().into_owned();
     match format {
       ImageFormat::Jpeg => write_jpg(path, p_image, &self.options),
-      ImageFormat::Webp => write_webp(path, p_image),
+      ImageFormat::Webp => write_webp(path, p_image, &self.options),
       ImageFormat::Png => write_png(path, p_image, &self.options),
       ImageFormat::Gif => write_gif(path, p_image, &self.options),
       ImageFormat::Svg => unreachable!("SVG is not writable"),

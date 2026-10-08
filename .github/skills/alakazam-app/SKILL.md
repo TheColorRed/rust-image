@@ -15,10 +15,10 @@ metadata:
 
 # Alakazam App
 
-The app is split into two different apps, a desktop app located at `/apps/alakazam` and a mobile app located at `/apps/mobile`.
+The app is split into two different apps, a desktop app located at `/apps/alakazam/desktop` and a mobile app located at `/apps/alakazam/mobile`.
 
 - The desktop app is an Electron-based desktop application that uses React for the frontend. The app provides a user interface for image manipulation using the Abra library as its backend.
-- The mobile app is located at `/apps/mobile` and uses React Native for the frontend. It provides a user interface for image manipulation using the Abra library as its backend.
+- The mobile app is located at `/apps/alakazam/mobile` and uses React Native for the frontend. It provides a user interface for image manipulation using the Abra library as its backend.
 
 ## Structure
 

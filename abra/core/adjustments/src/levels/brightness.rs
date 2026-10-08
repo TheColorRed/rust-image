@@ -71,6 +71,8 @@ mod tests {
 
   #[test]
   fn brightness_gpu_provider_applies_brightness() {
+    // The provider is global, so other tests that use it wait for this one.
+    let _guard = abra_core::image::gpu::GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     // Register a real GPU provider using a blocking context
     gpu::register();
 

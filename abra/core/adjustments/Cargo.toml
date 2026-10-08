@@ -9,7 +9,12 @@ crate-type = ["rlib"]
 [dependencies]
 abra-core = { workspace = true }
 options = { workspace = true }
+uniffi = { version = "=0.31", optional = true }
 rayon = { workspace = true }
+
+[features]
+# Exports the library's own types and functions to other languages (see the `primitives` crate).
+uniffi = ["dep:uniffi", "abra-core/uniffi"]
 
 [dev-dependencies]
 gpu = { path = "../gpu" }
