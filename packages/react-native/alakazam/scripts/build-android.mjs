@@ -69,6 +69,9 @@ const env = {
   ANDROID_NDK_HOME: ndk,
   PATH: `${cmakeBin}${path.delimiter}${process.env.PATH}`,
 };
+// rav1d assembles its x86 code (the x86_64 and i686 targets) with NASM, which `npm install` puts in tools/nasm.
+const nasm = path.join(packageRoot, '..', '..', '..', 'tools', 'nasm', exe('nasm'));
+if (!process.env.NASM && existsSync(nasm)) env.NASM = nasm;
 for (const triple of TRIPLES) {
   const suffix = triple.replaceAll('-', '_');
   env[`CMAKE_TOOLCHAIN_FILE_${suffix}`] = toolchainFile;

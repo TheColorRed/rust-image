@@ -165,7 +165,10 @@ jobs:
           for target in aarch64_apple_ios aarch64_apple_ios_sim x86_64_apple_ios; do
             export "CMAKE_TOOLCHAIN_FILE_$target=$GITHUB_WORKSPACE/.github/cmake/ios.cmake"
           done
+          # rav1d assembles its x86_64 simulator code with the NASM that `npm ci` put in tools/nasm.
+          export NASM="$GITHUB_WORKSPACE/tools/nasm/nasm"
           npm exec --workspace packages/react-native/alakazam -- ubrn build jsi2 ios --release --and-generate --config ubrn.config.yaml
+          node packages/react-native/abra/scripts/generate-entries.mjs
 
       - name: Install iOS app build tools
         run: brew install xcodegen cocoapods

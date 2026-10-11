@@ -56,8 +56,11 @@ try {
 
   const folder = path.join(work, `nasm-${version}`);
   if (!windows) {
-    run('./configure', [], { cwd: folder });
-    run('make', ['nasm'], { cwd: folder });
+    // NASM runs on this machine, so the iOS deployment target a build job sets must not make the compiler target iOS.
+    const env = { ...process.env };
+    delete env.IPHONEOS_DEPLOYMENT_TARGET;
+    run('./configure', [], { cwd: folder, env });
+    run('make', ['nasm'], { cwd: folder, env });
   }
 
   fs.mkdirSync(destination, { recursive: true });
