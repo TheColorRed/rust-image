@@ -9,10 +9,14 @@ import {
   EDIT_SECTIONS,
   appliesOnSelect,
   findSection,
+  isMultiSlider,
   isSliderApplied,
+  sliderDefault,
+  sliderSpecs,
+  sliderValues,
 } from '@/src/lib/edit-sections';
-import { editorLive } from '@/src/lib/editor-live';
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
+import { editorLive } from '@/src/lib/editor-live';
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor-thumbnails';
 import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import { useTheme } from '@/src/lib/theme';
@@ -35,22 +39,30 @@ import {
   activeSectionKey$,
   adjustments$,
   adjustments as adjustmentsState,
+  historyVersion as historyVersionState,
   appliedActions,
   appliedActions$,
-  focusedControl$,
   focusedControlKey,
+  focusedControlKey$,
   historyVersion$,
   isSkinControlFocused$,
 } from '@/src/state/edits';
 import { canRedo$, canUndo$ } from '@/src/state/history';
-import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
+import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
 import { replayHidden } from '@/src/state/session';
-import { ChevronLeft, Redo2, Undo2, X } from 'lucide-react-native';
 import { VesselView } from '@vessel/react-native';
-import { useEffect, useMemo } from 'react';
+import { ChevronLeft, Redo2, Undo2, X } from 'lucide-react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
+
+/** The control that is open in the active section, or undefined. */
+function useFocusedControl() {
+  const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
+  const key = useObservable(focusedControlKey$, focusedControlKey.value);
+  return key ? findSection(sectionKey).controls.find(control => control.key === key) : undefined;
+}
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
 export function EditorPanel() {
@@ -62,7 +74,7 @@ export function EditorPanel() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const activeSection = findSection(activeKey);
   useLiveAction();
-  const focusedControl = useObservable(focusedControl$, undefined);
+  const focusedControl = useFocusedControl();
   const isSkinControlFocused = useObservable(isSkinControlFocused$, false);
 
   useEffect(() => {
@@ -76,7 +88,7 @@ export function EditorPanel() {
       }),
       selectControlRequested$.subscribe(control => {
         if (control.kind === 'action') {
-          if (control.live) {
+          if (control.live || control.tool) {
             // Applying previews at once; removing has nothing to preview, but the same short replay needs no spinner either.
             replayHidden.next(true);
             if (!appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
@@ -89,7 +101,7 @@ export function EditorPanel() {
             appliesOnSelect(control) &&
             adjustmentsState.value[control.key] === undefined
           ) {
-            commitSlider(control, control.defaultValue);
+            commitSlider(control, sliderDefault(control));
           }
         }
       }),
@@ -110,7 +122,16 @@ export function EditorPanel() {
           <Redo2 color={canRedo ? colors.textPrimary : colors.textTertiary} size={20} />
         </Pressable>
       </View>
-      <View style={[styles.controls, activeSection.previewThumbnails && !focusedControl && styles.thumbnailControls]}>
+      <View
+        style={[
+          styles.controls,
+          focusedControl?.kind === 'slider'
+            ? styles.sliderControls
+            : activeSection.previewThumbnails && !focusedControl
+              ? styles.thumbnailControls
+              : styles.fixedControls,
+        ]}
+      >
         {focusedControl?.kind === 'tool' && focusedControl.key === BLEMISH_TOOL_KEY ? (
           <BlemishControls onBack={() => focusedControlKey.next(null)} onApply={() => blemishApplyRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
@@ -142,19 +163,38 @@ export function EditorPanel() {
 }
 
 function SliderEditor() {
-  const control = useObservable(focusedControl$, undefined);
-  const adjustments = useObservable(adjustments$, {});
+  const control = useFocusedControl();
+  // Each starts from what the subject holds now: the hook's own first value is the one given here, and a control that opens on
+  // an empty one would start its sliders from the defaults and keep them.
+  const adjustments = useObservable(adjustments$, adjustmentsState.value);
   const selection = useObservable(personSelection$, personSelection.value);
-  const historyVersion = useObservable(historyVersion$, 0);
+  const historyVersion = useObservable(historyVersion$, historyVersionState.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onLiveChange = useLiveSlider(control?.kind === 'slider' ? control : undefined);
   const preview = useSyncObservable(editorLive.view, null);
+  // The value of every slider as the user has set them, for a control with several: moving one sends all of them.
+  const sliderState = useRef<{ resetKey: string; values: number[] }>({ resetKey: '', values: [] });
+  // Which slider a control that shows them one at a time (`display: 'tabulated'`) has open.
+  const [selectedSlider, setSelectedSlider] = useState({ key: '', index: 0 });
 
   if (control?.kind !== 'slider') {
     return null;
   }
   const targetKey = adjustmentKey(control.key, selection.selectedId);
+  const specs = sliderSpecs(control);
+  // A different control, person or undo state starts the sliders again from what is committed.
+  const resetKey = targetKey + '-' + historyVersion;
+  if (sliderState.current.resetKey !== resetKey) {
+    sliderState.current = { resetKey, values: sliderValues(control, adjustments[targetKey]) };
+  }
+  const values = sliderState.current.values;
+  const tabulated = control.display === 'tabulated' && specs.length > 1;
+  // A different control starts on its first slider.
+  const openSlider = selectedSlider.key === control.key ? Math.min(selectedSlider.index, specs.length - 1) : 0;
+  const committed = sliderValues(control, adjustments[targetKey]);
+  /** What is committed for the control: a number for one slider, an array for several. */
+  const committedValue = () => (isMultiSlider(control) ? [...values] : values[0]);
 
   const back = (
     <Pressable onPress={() => focusedControlKey.next(null)} hitSlop={8} style={styles.backChip}>
@@ -193,29 +233,75 @@ function SliderEditor() {
             <SkinTanPicker
               key={targetKey + '-' + historyVersion}
               preview={preview}
-              value={adjustments[targetKey] ?? control.defaultValue}
+              value={sliderValues(control, adjustments[targetKey])[0]}
               onTouch={() => editorLive.show()}
               onRelease={value => sliderCommitRequested.next({ control, value })}
             />
           </View>
         </>
       ) : (
-        <Slider
-          key={targetKey + '-' + historyVersion}
-          leading={back}
-          trailing={close}
-          label={control.label}
-          min={control.min}
-          max={control.max}
-          step={control.step ?? 1}
-          initialValue={adjustments[targetKey] ?? control.defaultValue}
-          resetValue={control.defaultValue}
-          triggerType="release"
-          onChange={onLiveChange}
-          reset
-          onTrigger={value => sliderCommitRequested.next({ control, value })}
-          onReset={() => sliderCommitRequested.next({ control, value: control.defaultValue })}
-        />
+        <View style={styles.sliderStack}>
+          {isMultiSlider(control) && (
+            // The back and close buttons belong to the control, so with several sliders they get a header of their own and
+            // every slider looks the same.
+            <View style={styles.sliderHeader}>
+              {back}
+              <Text style={styles.sliderTitle}>{control.label}</Text>
+              {close}
+            </View>
+          )}
+          {tabulated && (
+            <View style={styles.sliderPills}>
+              {specs.map((spec, index) => (
+                <Pressable
+                  key={index}
+                  style={[styles.sliderPill, index === openSlider && styles.sliderPillOpen]}
+                  onPress={() => setSelectedSlider({ key: control.key, index })}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: index === openSlider }}
+                >
+                  <Text style={[styles.sliderPillText, index === openSlider && styles.sliderPillTextOpen]}>
+                    {spec.label}
+                  </Text>
+                  {/* A dot marks a slider that is off its default, as the committed value has it. */}
+                  {committed[index] !== spec.defaultValue && (
+                    <View style={[styles.sliderPillDot, index === openSlider && styles.sliderPillDotOpen]} />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {specs.map((spec, index) =>
+            tabulated && index !== openSlider ? null : (
+              <Slider
+                key={resetKey + '-' + index}
+                // A single slider carries the buttons in its own header.
+                leading={!isMultiSlider(control) && index === 0 ? back : undefined}
+                trailing={!isMultiSlider(control) && index === 0 ? close : undefined}
+                label={spec.label}
+                min={spec.min}
+                max={spec.max}
+                step={spec.step}
+                initialValue={values[index]}
+                resetValue={spec.defaultValue}
+                triggerType="release"
+                onChange={value => {
+                  values[index] = value;
+                  onLiveChange?.([...values]);
+                }}
+                reset
+                onTrigger={value => {
+                  values[index] = value;
+                  sliderCommitRequested.next({ control, value: committedValue() });
+                }}
+                onReset={() => {
+                  values[index] = spec.defaultValue;
+                  sliderCommitRequested.next({ control, value: committedValue() });
+                }}
+              />
+            ),
+          )}
+        </View>
       )}
     </View>
   );
@@ -304,7 +390,10 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     panel: { backgroundColor: colors.surface, paddingTop: 10 },
     history: { height: 36, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24 },
     historyButton: { padding: 6 },
-    controls: { height: 96, justifyContent: 'center' },
+    controls: { justifyContent: 'center' },
+    fixedControls: { height: 96 },
+    // An open slider control is as tall as its sliders, so several of them do not spill over the buttons above and the tabs below.
+    sliderControls: { minHeight: 96 },
     thumbnailControls: { height: THUMBNAIL_HEIGHT + 16 },
     chipRow: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
     chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.chip },
@@ -324,6 +413,22 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     thumbnailCanvas: { flex: 1 },
     thumbnailPlaceholder: { color: colors.textSecondary, textAlign: 'center', margin: 'auto' },
     sliderPanel: { paddingHorizontal: 12 },
+    sliderStack: { gap: 4 },
+    sliderPills: { flexDirection: 'row', gap: 8, paddingVertical: 6 },
+    sliderPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.chip,
+    },
+    sliderPillOpen: { backgroundColor: colors.accent },
+    sliderPillText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+    sliderPillTextOpen: { color: '#fff' },
+    sliderPillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
+    sliderPillDotOpen: { backgroundColor: '#fff' },
     sliderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     sliderTitle: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
     // Same side margin as the slider track, so the tan bar also stays clear of the screen edge.

@@ -10,7 +10,18 @@ const babel = require(
 );
 
 function fixture(platform = 'android') {
-  const filename = path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'react-native', 'vessel', 'src', 'index.tsx');
+  const filename = path.resolve(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    'packages',
+    'react-native',
+    'vessel',
+    'src',
+    'index.tsx',
+  );
   const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
     filename,
     babelrc: false,

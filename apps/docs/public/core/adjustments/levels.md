@@ -37,6 +37,69 @@ levels::contrast(-15).apply(&mut image);
 
 The implementation clamps the amount to this range and adjusts RGB channels around the midpoint value `128`.
 
+## Highlights and shadows
+
+`highlights_shadows(highlights, shadows)` uses `-100..=100` for the basic sliders.
+The native builder does not clamp supplied settings to the UI ranges.
+Positive highlights lower bright tones; positive shadows lift dark tones. Negative
+amounts reverse these directions, and `(0, 0)` leaves the pixels unchanged.
+
+```rust
+levels::highlights_shadows(40, 25)
+  .with_shadow_tone(0.5)
+  .with_shadow_radius(30)
+  .with_highlight_tone(0.5)
+  .with_highlight_radius(30)
+  .apply(&mut image);
+```
+
+The smooth luminance curve avoids the tonal reversal caused by multiplying bright
+pixels toward black. Separate Gaussian neighborhoods determine shadow and
+highlight strength; the effect reaches a pixel only when both the pixel and its
+neighborhood are in the tonal range. A common gain preserves linear RGB proportions,
+and brightening stops at the gamut boundary. Alpha is preserved. Clipped whites
+contain no detail to recover.
+
+| Builder setting                               | Range                              | Default |
+| --------------------------------------------- | ---------------------------------- | ------- |
+| `with_shadow_tone`, `with_highlight_tone`     | 0–1 fraction                       | 0.5     |
+| `with_shadow_radius`, `with_highlight_radius` | Nonnegative pixels, rounded to u32 | 30      |
+| `with_color`                                  | −100–100 saturation correction     | 0       |
+| `with_midtone`                                | −100–100 midtone contrast          | 0       |
+| `with_black_clip`, `with_white_clip`          | Fraction of visible pixels         | 0       |
+
+Tone and clipping use normalized fractions: `0.5` is 50%, and `0.0001` is 0.01%.
+The ranges above describe the basic controls; they are not enforced by the builder.
+Mask weights and output pixels are bounded as part of image processing.
+`with_tone` sets both tonal widths; `with_radius` sets both radii. Radii are in the
+processed image's pixels, so scale them with the image dimensions when previewing
+at a smaller size. Tonal width zero disables that tonal adjustment. Zero amounts
+with the default color, midtone and clipping settings leave the image unchanged.
+
+Color correction reuses the saturation adjustment. Nonzero clipping uses an
+8-bit luminance histogram to stretch the dark and bright percentiles, excluding
+fully transparent pixels. Clipping runs on the CPU; the other settings support
+the GPU. Flat histograms are left unstretched, and brightening remains gamut-limited.
+These controls are inspired by Photoshop's Shadow/Highlight dialog; their math and
+defaults are not intended to reproduce Photoshop pixel for pixel.
+
+TypeScript builders use camelCase names:
+
+```ts
+import { highlightsShadows } from '@abra/core/adjustments';
+
+highlightsShadows(40, 35)
+  .withShadowTone(0.5)
+  .withShadowRadius(30)
+  .withHighlightTone(0.5)
+  .withHighlightRadius(30)
+  .withColor(20)
+  .withMidtone(0)
+  .withBlackClip(0.0001)
+  .withWhiteClip(0.0001)
+  .apply(image);
+```
+
 ## Exposure
 
 `exposure` takes the exposure in stops. Offset and gamma correction are optional:
@@ -117,12 +180,13 @@ Available presets include:
 
 ## API summary
 
-| API                                                    | Purpose                                          |
-| ------------------------------------------------------ | ------------------------------------------------ |
-| `brightness(amount).apply(image)`                      | Increase or decrease brightness.                 |
-| `contrast(amount).apply(image)`                        | Adjust contrast around midpoint gray.            |
-| `exposure(stops).with_offset(..).with_gamma(..)`       | Adjust exposure, offset, and gamma.              |
-| `saturation(amount).apply(image)`                      | Increase or decrease saturation.                 |
-| `vibrance(amount).with_saturation(..)`                 | Enhance color selectively and adjust saturation. |
-| `hue(amount).apply(image)`                             | Reserved for hue rotation; currently a no-op.    |
-| `photo_filter(filter).with_density(..)`                | Apply a custom color or predefined filter.       |
+| API                                                    | Purpose                                              |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| `brightness(amount).apply(image)`                      | Increase or decrease brightness.                     |
+| `contrast(amount).apply(image)`                        | Adjust contrast around midpoint gray.                |
+| `highlights_shadows(highlights, shadows).apply(image)` | Adjust bright and dark tones while preserving color. |
+| `exposure(stops).with_offset(..).with_gamma(..)`       | Adjust exposure, offset, and gamma.                  |
+| `saturation(amount).apply(image)`                      | Increase or decrease saturation.                     |
+| `vibrance(amount).with_saturation(..)`                 | Enhance color selectively and adjust saturation.     |
+| `hue(amount).apply(image)`                             | Reserved for hue rotation; currently a no-op.        |
+| `photo_filter(filter).with_density(..)`                | Apply a custom color or predefined filter.           |

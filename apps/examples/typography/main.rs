@@ -7,7 +7,7 @@ use abra::typography::prelude::{Font, FontLoader, TextAlign, TextSize};
 const BACKGROUND_IMAGE: &str = "assets/kelsey.jpg";
 const TEXT: &str = "Abra";
 const TEXT_SIZE: u32 = 50;
-const OUT_FILE: &str = "out/typography.png";
+const OUT_FILE: &str = "assets/out/typography.png";
 
 pub fn main() {
   let fill = Gradient::harmony(Color::ruby(), Harmony::Complementary); //.with_direction(90);

@@ -5,7 +5,7 @@ use abra::options::prelude::{ApplyOptions, Hardware};
 use abra::{filters, prelude::*};
 
 const FILE: &str = "assets/bikini.jpg";
-const OUT_FILE: &str = "out/adjustments.png";
+const OUT_FILE: &str = "assets/out/adjustments.png";
 
 pub fn main() {
   let mut image = Image::read(FILE).expect("Failed to load image");

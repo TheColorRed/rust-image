@@ -31,7 +31,7 @@ pub enum Message {
   Show(Vec<EffectSpec>),
   /// Shows this image, which a tool written in TypeScript made, in place of the photo and any effects. The next `Show`
   /// goes back to the photo.
-  ShowImage(Arc<abra::abra_core::Image>),
+  ShowImage(Arc<abra_uniffi::Image>),
 }
 
 #[uniffi::export]
@@ -51,7 +51,7 @@ impl ImagePreview {
       let p_image = Arc::clone(&p_image);
       move |message| match message {
         Message::Show(effects) => p_image.show_live(effects.clone()),
-        Message::ShowImage(image) => p_image.show_tool_image(Arc::clone(image)),
+        Message::ShowImage(image) => p_image.show_tool_image(Arc::new(image.core())),
       }
     });
 
@@ -69,8 +69,8 @@ impl ImagePreview {
 
   /// The photo shrunk to fit within `width` x `height` pixels, for a tool to run on while a slider is dragged. The same size
   /// of the same edit gives the same image without resizing again.
-  pub fn source(&self, width: u32, height: u32) -> Arc<abra::abra_core::Image> {
-    self.source.preview_image(width, height)
+  pub fn source(&self, width: u32, height: u32) -> Arc<abra_uniffi::Image> {
+    Arc::new(abra_uniffi::Image::from_core((*self.source.preview_image(width, height)).clone()))
   }
 
   /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.
@@ -185,7 +185,7 @@ mod tests {
     let source = view.source(2, 2);
     assert_eq!(source.width(), 2);
     let made = AbraPixels::new_from_color(2, 2, abra::abra_core::Color::from_rgba(30, 60, 90, 255));
-    view.send(Message::ShowImage(Arc::new(made)));
+    view.send(Message::ShowImage(Arc::new(abra_uniffi::Image::from_core(made))));
     assert_eq!(newest(&surface, |pixel| pixel == 30), 30);
     view.send(Message::Show(vec![]));
     assert_eq!(newest(&surface, |pixel| pixel == 100), 100);
@@ -193,32 +193,24 @@ mod tests {
 
   #[test]
   fn a_tool_s_image_that_is_still_a_recipe_is_drawn_by_the_gpu_and_matches_its_pixels() {
-    use abra::abra_core::{Color, ColorStop, Gradient, image::recipe::blended};
-    use abra::adjustments::prelude::color::radial_gradient_deferred;
+    use abra_uniffi::{Color, ColorStop, Gradient, blend, radial_gradient};
 
     let view = view(7005);
     let surface = surface_of(7005);
     assert_eq!(newest(&surface, |_| true), 100);
-    // A solid dark red over the gray photo, made the way a tool makes a vignette.
+    // A solid dark red over the gray photo, made with the same calls a tool makes. On a machine with a GPU the result is
+    // a recipe the view draws itself; without one it is plain pixels. Either way the view shows the red.
     let source = view.source(4, 4);
-    let red = Color::from_rgba(50, 0, 0, 255);
-    let gradient = Gradient::new(vec![ColorStop::new(red, 0.0), ColorStop::new(red, 1.0)]);
-    let edges = radial_gradient_deferred(4, 4, &gradient, (2.0, 2.0), (3.0, 3.0));
-    let made = blended(&source, &edges, abra::abra_core::BlendMode::Normal, 1.0);
-    if made.deferred().is_none() {
-      // No GPU on this machine, so the tool's image is plain pixels; the view still shows it.
-      view.send(Message::ShowImage(Arc::new(made)));
-      assert_eq!(newest(&surface, |pixel| pixel == 50), 50);
-      return;
-    }
-    let expected = {
-      let mut image = (*source).clone();
-      abra::abra_core::blend::blend(&radial_gradient_deferred(4, 4, &gradient, (2.0, 2.0), (3.0, 3.0))).apply(&mut image);
-      image.rgba()[..4].to_vec()
-    };
-    view.send(Message::ShowImage(Arc::new(made)));
-    assert_eq!(newest(&surface, |pixel| pixel == 50), 50, "the GPU drew the recipe");
-    assert!(expected[0].abs_diff(50) <= 1);
+    let red = Arc::new(Color::from_rgba(50, 0, 0, 255));
+    let gradient = Arc::new(Gradient::new(vec![
+      Arc::new(ColorStop::new(red.clone(), 0.0)),
+      Arc::new(ColorStop::new(red, 1.0)),
+    ]));
+    let edges = radial_gradient(4, 4, gradient, 2.0, 2.0, 3.0, 3.0);
+    // As a tool writes it: blend the edges onto the photo it was given, which is its own to change.
+    blend(edges).apply(source.clone());
+    view.send(Message::ShowImage(source));
+    assert_eq!(newest(&surface, |pixel| pixel == 50), 50);
   }
 
   #[test]

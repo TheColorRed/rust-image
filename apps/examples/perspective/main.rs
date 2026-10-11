@@ -16,13 +16,13 @@ fn main() {
 
   let mut whole = image.clone();
   perspective(area.clone()).with_fit(TransformFit::Fill).apply(&mut whole);
-  whole.write("out/perspective.png", None).expect("Failed to write image");
+  whole.write("assets/out/perspective.png", None).expect("Failed to write image");
 
   let mut expanded = image.clone();
   perspective(area.clone()).with_fit(TransformFit::Expand).apply(&mut expanded);
-  expanded.write("out/perspective-expanded.png", None).expect("Failed to write image");
+  expanded.write("assets/out/perspective-expanded.png", None).expect("Failed to write image");
 
   let mut cropped = image;
   perspective(area).with_fit(TransformFit::Crop).apply(&mut cropped);
-  cropped.write("out/perspective-cropped.png", None).expect("Failed to write image");
+  cropped.write("assets/out/perspective-cropped.png", None).expect("Failed to write image");
 }

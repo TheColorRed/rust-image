@@ -1,8 +1,8 @@
-import { type Image as AbraPixels } from '@alakazam/mobile';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useObservable } from 'react-rx';
 import { type SliderControl } from '@/src/lib/edit-sections';
-import { ensureBase, editorLive, previewPixels } from '@/src/lib/editor-live';
+import { preloadFor } from '@/src/lib/editor-preloads';
+import { ensureBase, editorLive, showTool } from '@/src/lib/editor-live';
 import { hasOtherSteps, renderStackWithoutSlider } from '@/src/lib/editor-replay';
 import { adjustmentKey } from '@/src/lib/skin-adjustments';
 import { personSelection$, personSelection } from '@/src/state/person-selection';
@@ -13,11 +13,12 @@ import { previewBox$ } from '@/src/state/gestures';
  * Live GPU preview for a slider drag. Returns the change handler to give the slider, or undefined when the control has no
  * live form. Frames are drawn over the editor preview until the released value is committed and replayed.
  *
+ * The handler takes the value of every slider of the control (one for a control with one slider) each time any one moves.
  * The drag is shown by the editor's live renderer, which is already connected to the GPU: it only hands Rust the slider's
  * `live` effect at the new value. With nothing else applied the effect goes over the untouched edit base. Otherwise the rest of
  * the stack is rendered on the CPU once, and only the dragged slider's effect runs on top of it.
  */
-export function useLiveSlider(p_control: SliderControl | undefined): ((value: number) => void) | undefined {
+export function useLiveSlider(p_control: SliderControl | undefined): ((values: number[]) => void) | undefined {
   const box = useObservable(previewBox$, null);
   const adjustments = useObservable(adjustments$, {});
   const actions = useObservable(appliedActions$, []);
@@ -52,18 +53,32 @@ export function useLiveSlider(p_control: SliderControl | undefined): ((value: nu
     [],
   );
 
+  // A drag sends many more moves than the screen can show, and a tool runs on the JavaScript thread, so running it for each one
+  // makes the picture fall behind the finger. The newest values wait here for the next frame, and moves that arrive meanwhile
+  // only replace them.
+  const waiting = useRef<{ values: number[]; frame: number | null }>({ values: [], frame: null });
+  useEffect(
+    () => () => {
+      if (waiting.current.frame !== null) cancelAnimationFrame(waiting.current.frame);
+    },
+    [],
+  );
+
   if (!key || !box) return undefined;
   if (tool) {
     // The tool runs on the photo at the size the preview is drawn at, so a drag costs what the screen shows.
-    return value => {
-      const size = previewPixels();
-      const photo = size && editorLive.source(size.width, size.height);
-      if (!photo) return;
-      const made = tool(photo, value);
-      editorLive.showImage(made);
-      (made as AbraPixels).uniffiDestroy();
+    return values => {
+      const pending = waiting.current;
+      pending.values = values;
+      if (pending.frame !== null) return;
+      pending.frame = requestAnimationFrame(() => {
+        pending.frame = null;
+        showTool((photo, context) =>
+          tool(photo, pending.values, { ...context, preloaded: preloadFor(p_control, photo.width()) }),
+        );
+      });
     };
   }
   if (!live) return undefined;
-  return value => editorLive.showEffects([live(value)]);
+  return values => editorLive.showEffects([live(values[0])]);
 }

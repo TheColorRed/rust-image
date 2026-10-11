@@ -21,7 +21,7 @@ For a local checkout or workspace member, use a path dependency instead:
 
 ```toml
 [dependencies]
-abra = { path = "../image/abra/abra" }
+abra = { path = "../image/packages/abra/abra" }
 ```
 
 The workspace currently targets Rust edition 2024. Use a recent stable Rust toolchain capable of compiling edition 2024 crates.

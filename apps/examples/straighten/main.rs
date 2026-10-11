@@ -20,5 +20,5 @@ fn main() {
 
   straighten(start, end).apply(&mut image);
 
-  image.write("out/straighten.png", None).expect("Failed to write image");
+  image.write("assets/out/straighten.png", None).expect("Failed to write image");
 }

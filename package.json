@@ -1,6 +1,7 @@
 {
   "name": "image-editor",
   "scripts": {
+    "postinstall": "node ./scripts/install-nasm.mjs",
     "start": "npm run start -w apps/alakazam/desktop",
     "start:android": "npm run start -w apps/alakazam/mobile",
     "android": "npm run android -w apps/alakazam/mobile",

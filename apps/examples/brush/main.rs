@@ -37,5 +37,5 @@ pub fn main() {
 
   painter.stroke_with_brush(&path, &stroke_brush);
 
-  image.write("out/brush.png", None).expect("Failed to save image");
+  image.write("assets/out/brush.png", None).expect("Failed to save image");
 }

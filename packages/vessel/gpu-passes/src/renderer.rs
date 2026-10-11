@@ -395,7 +395,7 @@ impl LiveRenderer {
 
     if self.readback.as_ref().is_none_or(|readback| readback.width != width || readback.height != height) {
       if self.readback.is_some() {
-        let _guard = self.ctx.submission_gate.lock().unwrap();
+        let _guard = self.ctx.gate();
         self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
       }
       let slots = (0..READBACK_SLOTS)
@@ -468,7 +468,7 @@ impl LiveRenderer {
   /// has finished.
   pub fn poll_frame(&mut self) -> Result<Option<Frame>> {
     {
-      let _guard = self.ctx.submission_gate.lock().unwrap();
+      let _guard = self.ctx.gate();
       self.ctx.device.poll(wgpu::PollType::Poll)?;
     }
     self.take_newest_frame()
@@ -477,7 +477,7 @@ impl LiveRenderer {
   /// Like [`poll_frame`](Self::poll_frame), but first waits for all requested frames to finish.
   pub fn wait_frame(&mut self) -> Result<Option<Frame>> {
     {
-      let _guard = self.ctx.submission_gate.lock().unwrap();
+      let _guard = self.ctx.gate();
       self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
     }
     self.take_newest_frame()

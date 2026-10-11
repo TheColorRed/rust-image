@@ -19,7 +19,7 @@ To choose yourself, skip the router:
 - `effect.apply_on_gpu(&mut image)` always runs on the GPU. It returns an error, and leaves the image as it was, when
   the effect has no shader, no GPU is available, or the GPU fails. It never falls back.
 
-An effect with a shader gives exactly the same pixels on both, and `abra/abra/tests/cpu_gpu_parity.rs` checks it for
+An effect with a shader gives exactly the same pixels on both, and `packages/abra/abra/tests/cpu_gpu_parity.rs` checks it for
 every effect that has one. How each does it:
 
 - **Brightness, contrast and exposure** change each color value on its own, so the shader looks each value up in a
@@ -80,4 +80,4 @@ the image looks like.
     shader and this frame's uniforms). See `Exposure` for an example.
 
   Everything else is provided: limiting it to an area and mask, choosing the GPU or CPU, and working in a live image.
-  To use it from the bindings, add it to `EffectSpec` in `abra/abra/src/live.rs`.
+  To use it from the bindings, add it to `EffectSpec` in `packages/abra/abra/src/live.rs`.

@@ -1,9 +1,12 @@
-import { PixelRatio } from 'react-native';
-import { combineLatest, type Subscription } from 'rxjs';
+import { scaleBetween, type ToolContext } from '@/src/lib/edit-sections';
+import { previewPixels } from '@/src/lib/editor-pictures';
 import { LiveRenderer } from '@/src/lib/live-renderer';
 import { previewBox, previewBox$ } from '@/src/state/gestures';
 import { liveSurface } from '@/src/state/preview';
 import { editBaseImage, editBaseImage$ } from '@/src/state/session';
+import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
+import { PixelRatio } from 'react-native';
+import { combineLatest, type Subscription } from 'rxjs';
 
 /** The editor photo's live renderer: effects drawn over the committed photo while a control is tapped or dragged. */
 export const editorLive = new LiveRenderer(liveSurface);
@@ -11,12 +14,20 @@ export const editorLive = new LiveRenderer(liveSurface);
 const sourceIds = new WeakMap<object, number>();
 let lastSourceId = 0;
 
-/** The pixel size the editor's live frames are rendered at: the preview box at the screen's density. */
-export function previewPixels(): { width: number; height: number } | null {
-  const box = previewBox.value;
-  if (!box) return null;
-  const ratio = PixelRatio.get();
-  return { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio) };
+/**
+ * Shows what a tool makes of the photo the live renderer is open over, at the size the preview is drawn at, so it costs what
+ * the screen shows. The tool gets an image that is its own to change: it changes it in place and returns nothing, or returns
+ * a new image to show instead. Does nothing while the preview has no size.
+ */
+export function showTool(tool: (photo: ImageLike, context: ToolContext) => ImageLike | void) {
+  const size = previewPixels();
+  const photo = size && editorLive.source(size.width, size.height);
+  if (!photo) return;
+  const returned = tool(photo, { scale: scaleBetween(photo, editBaseImage.value) }) as ImageLike | undefined;
+  editorLive.showImage(returned ?? photo);
+  // They are native images the garbage collector cannot see the size of.
+  (photo as AbraPixels).uniffiDestroy();
+  if (returned) (returned as AbraPixels).uniffiDestroy();
 }
 
 /**

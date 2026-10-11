@@ -1,3 +1,4 @@
+import type { AdjustmentValue } from '@/src/lib/edit-sections';
 import type { TimelineEntry } from '@/src/lib/timeline';
 import { NativeModules, Platform } from 'react-native';
 
@@ -6,7 +7,8 @@ import { NativeModules, Platform } from 'react-native';
  * with one, is a tap at `x`, `y` (image pixels) healed with `radius`.
  */
 export interface ProjectRecipe {
-  adjustments: Record<string, number>;
+  /** A number for a slider control with one slider (as saved before controls could have several), an array for several. */
+  adjustments: Record<string, AdjustmentValue>;
   appliedActions: string[];
 }
 

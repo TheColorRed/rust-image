@@ -29,3 +29,5 @@ metro.log
 *.node
 settings.yml
 .vscode/stores
+
+tools/nasm/

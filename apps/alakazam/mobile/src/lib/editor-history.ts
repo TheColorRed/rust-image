@@ -1,7 +1,7 @@
 import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
 import { Alert } from 'react-native';
 import { batch } from '@/src/lib/batch';
-import { EDIT_SECTIONS, type ActionControl, type SliderControl } from '@/src/lib/edit-sections';
+import { EDIT_SECTIONS, type ActionControl, type AdjustmentValue, type SliderControl } from '@/src/lib/edit-sections';
 import { renderRecipe } from '@/src/lib/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
 import type { ProjectRecipe } from '@/src/lib/project-store';
@@ -16,7 +16,7 @@ import {
   type TimelineEntry,
 } from '@/src/lib/timeline';
 import { personSelection } from '@/src/state/person-selection';
-import { adjustments, appliedActions, historyVersion } from '@/src/state/edits';
+import { adjustments, appliedActions, focusedControlKey, historyVersion } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { historyReady } from '@/src/state/project-session';
 import { currentImage, editBaseImage, originalImage, replayHidden } from '@/src/state/session';
@@ -81,7 +81,7 @@ function record(entry: TimelineEntry, replaceLast = false) {
 /** Puts a change on the timeline, with the edit state it leads to. */
 function recordEdit(
   change: TimelineChange,
-  next: { adjustments?: Record<string, number>; appliedActions?: string[] },
+  next: { adjustments?: Record<string, AdjustmentValue>; appliedActions?: string[] },
   replaceLast = false,
 ) {
   record(
@@ -117,7 +117,7 @@ const endsWithSlider = (key: string) => {
 };
 
 /** A slider was released at `value`. */
-function commitSlider(control: SliderControl, value: number) {
+function commitSlider(control: SliderControl, value: AdjustmentValue) {
   replayHidden.next(!!(control.live || control.tool));
   lastGroup = null;
   const key = adjustmentKey(control.key, personSelection.value.selectedId);
@@ -183,7 +183,8 @@ function moveTo(cursor: number) {
     }
     // The person model is needed to render an edit made to one person. Say so, rather than fail inside the replay.
     const step = after.cursor > before.cursor ? after.entries[after.cursor - 1] : undefined;
-    if (step && !personDetectionDownloaded() && editsAPerson(step.before ?? step)) throw new Error(PERSON_MODEL_MISSING);
+    if (step && !personDetectionDownloaded() && editsAPerson(step.before ?? step))
+      throw new Error(PERSON_MODEL_MISSING);
   } catch (error) {
     Alert.alert('Could not redo', errorMessage(error));
     return;
@@ -198,6 +199,26 @@ function moveTo(cursor: number) {
   adjustments.next(recipe.adjustments);
   appliedActions.next(recipe.appliedActions);
   historyVersion.next(historyVersion.value + 1);
+}
+
+/**
+ * Puts the photo back as it was opened: no edits, no blemish fixes, and an empty history. It leaves no step behind, so it
+ * cannot be undone.
+ */
+export function resetEdits() {
+  const original = originalImage.value;
+  if (!original) return;
+  batch(() => {
+    clearTimeline();
+    editBaseImage.value?.uniffiDestroy();
+    editBaseImage.next(original.copy() as AbraImage);
+    focusedControlKey.next(null);
+    replayHidden.next(false);
+    // The replay follows these, so the picture is drawn again from the original.
+    adjustments.next({});
+    appliedActions.next([]);
+    historyVersion.next(historyVersion.value + 1);
+  });
 }
 
 export const undoHistory = () => batch(() => moveTo(timeline.value.cursor - 1));

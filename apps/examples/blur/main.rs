@@ -10,5 +10,5 @@ fn main() {
 
   blur().apply(&mut image);
 
-  image.write("out/blur.png", None).expect("Failed to write image");
+  image.write("assets/out/blur.png", None).expect("Failed to write image");
 }

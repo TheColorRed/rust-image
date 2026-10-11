@@ -1,8 +1,9 @@
+import type { AdjustmentValue } from '@/src/lib/edit-sections';
 import type { ProjectRecipe } from '@/src/lib/project-store';
 
 /** What an entry changed: for showing the history, and to tell whether a repeat edit should replace it. */
 export type TimelineChange =
-  | { type: 'slider'; key: string; /** `null` when the slider was turned off. */ value: number | null }
+  | { type: 'slider'; key: string; /** `null` when the slider was turned off. */ value: AdjustmentValue | null }
   | { type: 'action'; key: string; on: boolean; group?: string }
   | { type: 'blemish'; x: number; y: number; radius: number }
   /** Edits made while a project was still loading, merged into its saved edits as one step. */

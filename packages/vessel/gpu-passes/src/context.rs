@@ -80,13 +80,20 @@ impl GpuContext {
     })
   }
 
+  /// Takes the submission gate. It guards the order of GPU calls and no data, so a panic while it was held (wgpu panics on a
+  /// validation error, such as a failed surface reconfigure) leaves nothing half-changed. The gate is then poisoned, and a
+  /// later call goes on as normal instead of panicking for the rest of the process.
+  pub(crate) fn gate(&self) -> std::sync::MutexGuard<'_, ()> {
+    self.submission_gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+  }
+
   pub(crate) fn submit(&self, p_command: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
-    let _guard = self.submission_gate.lock().unwrap();
+    let _guard = self.gate();
     self.queue.submit(Some(p_command))
   }
 
   pub(crate) fn configure(&self, p_surface: &wgpu::Surface<'_>, p_config: &wgpu::SurfaceConfiguration) {
-    let _guard = self.submission_gate.lock().unwrap();
+    let _guard = self.gate();
     p_surface.configure(&self.device, p_config);
   }
 }

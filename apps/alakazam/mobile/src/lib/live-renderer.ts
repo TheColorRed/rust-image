@@ -1,4 +1,5 @@
-import { ImagePreview, Message, type AbraImage, type EffectSpec, type ImageLike } from '@alakazam/mobile';
+import { type ImageLike } from '@abra/core/image';
+import { ImagePreview, Message, type AbraImage, type EffectSpec } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
 
 type Open = {

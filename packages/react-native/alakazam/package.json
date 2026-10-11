@@ -6,9 +6,9 @@
   "homepage": "https://github.com/TheColorRed/rust-image",
   "author": "Alakazam contributors",
   "license": "UNLICENSED",
-  "main": "src/index.tsx",
-  "react-native": "src/index.tsx",
-  "types": "src/index.tsx",
+  "main": "src/app.ts",
+  "react-native": "src/app.ts",
+  "types": "src/app.ts",
   "repository": {
     "type": "git",
     "url": "https://github.com/TheColorRed/rust-image.git"

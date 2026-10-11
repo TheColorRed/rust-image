@@ -8,7 +8,7 @@ use abra::adjustments::prelude::{color, levels};
 use abra::live::{EffectSink, GpuProbe};
 use abra_body_segmentation::Mask;
 
-use levels::FilterType;
+use abra_uniffi::FilterType;
 
 use crate::AbraImage;
 
@@ -25,30 +25,6 @@ pub struct GradientStop {
   pub b: u8,
   /// Alpha, 0-255.
   pub a: u8,
-}
-
-// `FilterType` lives in `adjustments`, which knows nothing about bindings. This describes it to uniffi, so the editor
-// names the library's own presets and the colors exist only in `adjustments`. Every variant must be listed.
-#[uniffi::remote(Enum)]
-pub enum FilterType {
-  WarmingDark,
-  WarmingLight,
-  CoolingDark,
-  CoolingLight,
-  Red,
-  Orange,
-  Yellow,
-  Green,
-  Cyan,
-  Blue,
-  Violet,
-  Magenta,
-  Sepia,
-  DeepRed,
-  DeepBlue,
-  DeepEmerald,
-  DeepYellow,
-  Underwater,
 }
 
 /// An effect and its parameters.
@@ -114,7 +90,7 @@ pub enum EffectSpec {
     /// preset normally does; only that mode has a shader.
     preserve_luminosity: bool,
     /// Color of the custom filter. Ignored if a preset is used.
-    color: Option<std::sync::Arc<Color>>,
+    color: Option<std::sync::Arc<abra_uniffi::Color>>,
   },
   SkinSmooth {
     /// The amount of smoothing.
@@ -205,9 +181,9 @@ impl EffectSpec {
         color,
       } => {
         let filter_to_use = if let Some(f) = filter {
-          levels::PhotoFilter::Preset(*f)
+          levels::PhotoFilter::Preset((*f).into())
         } else if let Some(f) = color {
-          levels::PhotoFilter::Color(**f)
+          levels::PhotoFilter::Color(f.0)
         } else {
           levels::PhotoFilter::Color(Color::transparent())
         };
@@ -377,7 +353,7 @@ mod tests {
     use abra::adjustments::prelude::levels::{PhotoFilter, photo_filter};
     let spec = warming_tint(0.35);
     let expected = one_shot(|image| {
-      photo_filter(PhotoFilter::Preset(FilterType::WarmingLight)).with_density(0.35).apply(&mut *image)
+      photo_filter(PhotoFilter::Preset(levels::FilterType::WarmingLight)).with_density(0.35).apply(&mut *image)
     });
     assert_ne!(expected, original_pixels(), "the tint must change something");
     assert_eq!(one_shot(|image| spec.apply(&mut *image)), expected);

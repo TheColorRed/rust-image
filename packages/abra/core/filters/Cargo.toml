@@ -1,0 +1,20 @@
+[package]
+name = "filters"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+rayon = { workspace = true }
+abra-core = { workspace = true }
+drawing = { workspace = true }
+mask = { workspace = true }
+options = { workspace = true }
+primitives = { workspace = true }
+adjustments = { workspace = true }
+
+[dev-dependencies]
+gpu = { path = "../gpu" }
+anyhow = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

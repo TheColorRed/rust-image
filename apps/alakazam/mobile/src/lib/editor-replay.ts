@@ -1,17 +1,21 @@
 import { batch } from '@/src/lib/batch';
 import {
-  EDIT_SECTIONS,
   applyAction,
   applySlider,
+  EDIT_SECTIONS,
   findSection,
   isSliderApplied,
+  scaleBetween,
+  sliderDefault,
+  type AdjustmentValue,
   type ActionControl,
   type EditSection,
 } from '@/src/lib/edit-sections';
-import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
-import { personSelection } from '@/src/state/person-selection';
-import { type ProjectRecipe } from '@/src/lib/project-store';
+import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor-pictures';
+import { clearPreloads, preloadFor } from '@/src/lib/editor-preloads';
 import { buildControlThumbnails } from '@/src/lib/editor-thumbnails';
+import { type ProjectRecipe } from '@/src/lib/project-store';
+import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import {
   activeSectionKey,
   activeSectionKey$,
@@ -19,13 +23,64 @@ import {
   adjustments$,
   appliedActions,
   appliedActions$,
+  focusedControlKey,
+  focusedControlKey$,
 } from '@/src/state/edits';
 import { previewBox$ } from '@/src/state/gestures';
-import { controlThumbnails, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
-import { busy, currentImage, editBaseImage, originalImage, ready$, replayHidden } from '@/src/state/session';
+import { personSelection } from '@/src/state/person-selection';
+import { controlThumbnails } from '@/src/state/preview';
+import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
 import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { filter, switchMap, tap } from 'rxjs/operators';
+
+// #region: The full-size picture, which is not shown
+
+/** Gap before the full-size edit starts, so a run of quick edits (a slider moved again) only makes the last one. */
+const FULL_REPLAY_DELAY_MS = 150;
+let fullReplayTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Makes the edit on the full-size photo. It is not shown: it is `currentImage`, for what needs every pixel. */
+function runFullReplay() {
+  fullReplayTimer = undefined;
+  const base = editBaseImage.value;
+  if (!base) return;
+  const started = Date.now();
+  const next = renderEditStack(base, undefined, true);
+  currentImage.value?.uniffiDestroy();
+  currentImage.next(next);
+  if (__DEV__) console.debug('[edit] full-size replay ms (not shown):', Date.now() - started);
+}
+
+function scheduleFullReplay() {
+  if (fullReplayTimer !== undefined) clearTimeout(fullReplayTimer);
+  fullReplayTimer = setTimeout(runFullReplay, FULL_REPLAY_DELAY_MS);
+}
+
+/**
+ * Makes the full-size edit now if one is waiting. Whatever changes the full-size photo in place, such as the blemish tool,
+ * calls this first, so it works on the photo as it is edited now and not on the one before the last release.
+ */
+export function flushFullReplay() {
+  if (fullReplayTimer === undefined) return;
+  clearTimeout(fullReplayTimer);
+  runFullReplay();
+}
+
+function cancelFullReplay() {
+  if (fullReplayTimer !== undefined) clearTimeout(fullReplayTimer);
+  fullReplayTimer = undefined;
+}
+
+/** Lets go of every screen-size picture and stops a waiting full-size edit, when the session ends. */
+export function releaseShownImages() {
+  cancelFullReplay();
+  clearPreloads();
+  preloadedBase = null;
+  releasePictures();
+}
+
+// #endregion
 
 /** Gap between an edit and its replay, so the tap's immediate UI feedback can be drawn first. */
 const REPLAY_DELAY_MS = 60;
@@ -41,8 +96,8 @@ const findAction = (key: string): ActionControl | undefined => {
 type Step = {
   key: string;
   /** The slider's value; actions have none. */
-  value?: number;
-  run: (image: AbraImageLike) => void;
+  value?: AdjustmentValue;
+  run: (image: AbraImageLike, scale: number) => void;
 };
 
 /**
@@ -54,7 +109,7 @@ type Step = {
  */
 function appliedSteps(
   excludeGroups?: ReadonlySet<string>,
-  slider?: { key: string; value?: number },
+  slider?: { key: string; value?: AdjustmentValue },
   pending?: ActionControl,
   recipe: ProjectRecipe = { adjustments: adjustments.value, appliedActions: appliedActions.value },
 ): Step[] {
@@ -65,10 +120,10 @@ function appliedSteps(
       : recipe.appliedActions;
   for (const key of keys) {
     const control = findAction(key);
-    if (!control || (!control.apply && !control.live && !control.operation)) continue;
+    if (!control || (!control.apply && !control.live && !control.operation && !control.tool)) continue;
     // The action about to be applied replaces the others in its group, so it is never left out with them.
     if (control !== pending && control.group && excludeGroups?.has(control.group)) continue;
-    steps.push({ key, run: image => applyAction(control, image) });
+    steps.push({ key, run: (image, scale) => applyAction(control, image, scale) });
   }
   for (const section of EDIT_SECTIONS) {
     for (const control of section.controls) {
@@ -94,36 +149,38 @@ function appliedSteps(
       if (dragged && slider.value === undefined) continue;
       const committed = dragged ? slider.value : recipe.adjustments[control.key];
       if (!dragged && !isSliderApplied(control, committed)) continue;
-      const value = committed ?? control.defaultValue;
+      const value = committed ?? sliderDefault(control);
       steps.push({
         key: control.key,
         value,
-        run: image => applySlider(control, image, value),
+        run: (image, scale) => applySlider(control, image, value, scale),
       });
     }
   }
   return steps;
 }
 
-/** The image a held before/after preview should show: the untouched original. */
-export const comparisonImage = () => originalImage.value;
-
 /** Renders a saved recipe onto a fresh copy of `base`, without touching the live edit state. The caller owns the result. */
 export function renderRecipe(base: AbraImage, recipe: ProjectRecipe): AbraImage {
   const next = base.copy() as AbraImage;
-  runSteps(next, appliedSteps(undefined, undefined, undefined, recipe));
+  runSteps(next, appliedSteps(undefined, undefined, undefined, recipe), base);
   return next;
 }
 
-/** Renders the whole edit stack onto a fresh copy of the edit base. */
-function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>) {
-  const next = base.copy() as AbraImage;
-  runSteps(next, appliedSteps(excludeGroups));
+/**
+ * Renders the whole edit stack onto a fresh copy of the edit base, shrunk to the screen unless `full` is set. The caller owns
+ * the result.
+ */
+function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, full = false) {
+  const next = (full ? base : shrunkOf('base', base)).copy() as AbraImage;
+  runSteps(next, appliedSteps(excludeGroups), base);
   return next;
 }
 
-function runSteps(image: AbraImage, steps: Step[]) {
-  for (const step of steps) step.run(image);
+/** Runs the steps on `image`, telling each how much smaller it is than `full`, the photo they are all edits of. */
+function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
+  const scale = scaleBetween(image, full);
+  for (const step of steps) step.run(image, scale);
 }
 
 /** Whether any control other than the slider is applied, so a drag of it has to start from the stack rendered without it. */
@@ -136,8 +193,8 @@ export const hasOtherSteps = (sliderKey: string): boolean => appliedSteps(undefi
 export function renderStackWithoutSlider(sliderKey: string): AbraImage | null {
   const base = editBaseImage.value;
   if (!base) return null;
-  const next = base.copy() as AbraImage;
-  runSteps(next, appliedSteps(undefined, { key: sliderKey }));
+  const next = shrunkOf('base', base).copy() as AbraImage;
+  runSteps(next, appliedSteps(undefined, { key: sliderKey }), base);
   return next;
 }
 
@@ -161,6 +218,24 @@ const imageId = (image: object) => {
   return imageIds.get(image)!;
 };
 let cachedThumbnailKey = '';
+/** The edit base the preloaded images were made from. */
+let preloadedBase: AbraImage | null = null;
+let preloadTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Makes what the focused control preloads, from the screen-size photo, if it has a `preload` and has not made it for this photo.
+ * A control is preloaded when it is clicked and not before, so nothing is made for the controls that are never used.
+ */
+function preloadFocused() {
+  const base = editBaseImage.value;
+  const control = findSection(activeSectionKey.value).controls.find(item => item.key === focusedControlKey.value);
+  if (!base || control?.kind !== 'slider' || !control.preload) return;
+  if (preloadedBase && preloadedBase !== base) clearPreloads();
+  preloadedBase = base;
+  const shrunk = shrunkOf('base', base);
+  preloadFor(control, shrunk.width(), shrunk);
+}
+
 let thumbnailBuild: ReturnType<typeof buildControlThumbnails> | undefined;
 let thumbnailFrame: number | undefined;
 let thumbnailTimer: ReturnType<typeof setTimeout> | undefined;
@@ -177,9 +252,15 @@ function cancelThumbnailBuild() {
 function replaceThumbnails(thumbnails: Record<string, ThumbnailPreview>) {
   const previous = controlThumbnails.value;
   controlThumbnails.next(thumbnails);
-  for (const [key, thumbnail] of Object.entries(previous)) {
-    if (thumbnails[key] !== thumbnail) thumbnail.uniffiDestroy();
-  }
+  const retired = Object.entries(previous).filter(([key, thumbnail]) => thumbnails[key] !== thumbnail);
+  if (retired.length === 0) return;
+  // A view that draws one of these is still mounted until React has rendered the new set, and it reads the thumbnail when it
+  // renders and when a refresh runs its effects again, so they are freed after that, not now.
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      for (const [, thumbnail] of retired) thumbnail.uniffiDestroy();
+    }, 0);
+  });
 }
 
 /** Clears the published sources before releasing them, including the replay cache on session teardown. */
@@ -222,9 +303,15 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
       }),
     );
     replaceThumbnails(previous);
-    const build = buildControlThumbnails(source, section, previous, (controlKey, preview) => {
-      batch(() => replaceThumbnails({ ...controlThumbnails.value, [controlKey]: preview }));
-    });
+    const build = buildControlThumbnails(
+      source,
+      section,
+      previous,
+      (controlKey, preview) => {
+        batch(() => replaceThumbnails({ ...controlThumbnails.value, [controlKey]: preview }));
+      },
+      base,
+    );
     thumbnailBuild = build;
     void build.done.then(succeeded => {
       if (thumbnailBuild !== build) return;
@@ -244,12 +331,10 @@ function replay() {
 
   const started = Date.now();
   const next = renderEditStack(base);
-  currentImage.value?.uniffiDestroy();
-  currentImage.next(next);
-
-  // Keep a held before/after preview correct even if an edit finishes replaying with a finger down.
-  previewSourceImage.next(showingCheckpoint.value ? (comparisonImage() ?? next) : next);
-  if (__DEV__) console.debug('[preview] full-resolution replay ms:', Date.now() - started);
+  // Keeps a held before/after preview correct even if an edit finishes replaying with a finger down.
+  setShown(next);
+  if (__DEV__) console.debug('[preview] screen-size replay ms:', Date.now() - started);
+  scheduleFullReplay();
 
   busy.next(false);
   // Let React mount the main preview before starting thumbnail work.
@@ -258,6 +343,10 @@ function replay() {
     thumbnailTimer = setTimeout(() => {
       thumbnailTimer = undefined;
       try {
+        // A new photo makes what was preloaded from the old one again, when its control is next used.
+        if (preloadedBase && preloadedBase !== base) clearPreloads();
+        preloadedBase = base;
+        preloadFocused();
         sectionThumbnails(findSection(activeSectionKey.value), base, next);
       } catch (error) {
         console.warn('[edit] preparing thumbnail edit stack threw:', error);
@@ -304,6 +393,15 @@ export function startReplay(): Subscription {
       ),
     )
     .subscribe();
+  // Clicking a control preloads it, after a frame so the control's own UI is drawn first.
+  subscription.add(
+    focusedControlKey$.subscribe(() => {
+      clearTimeout(preloadTimer);
+      preloadTimer = setTimeout(preloadFocused, 0);
+    }),
+  );
+  subscription.add(() => clearTimeout(preloadTimer));
   subscription.add(cancelThumbnailBuild);
+  subscription.add(cancelFullReplay);
   return subscription;
 }

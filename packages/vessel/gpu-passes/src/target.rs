@@ -87,7 +87,7 @@ impl GpuFrame for TextureFrame {
       let _ = sender.send(result);
     });
     {
-      let _guard = self.context.submission_gate.lock().unwrap();
+      let _guard = self.context.gate();
       device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
     }
     receiver.recv().ok()?.ok()?;
@@ -247,6 +247,26 @@ mod tests {
   use crate::LiveRenderer;
 
   #[test]
+  fn a_panic_while_the_gate_is_held_does_not_stop_later_gpu_calls() -> anyhow::Result<()> {
+    let context = GpuContext::new_default_blocking()?;
+    let held = context.submission_gate.clone();
+    let panicked = std::thread::spawn(move || {
+      let _guard = held.lock().unwrap();
+      panic!("a validation error while the gate is held");
+    })
+    .join();
+    assert!(panicked.is_err());
+    assert!(context.submission_gate.is_poisoned(), "the panic poisoned the gate");
+    // A later submission still gets the gate, as it did before the panic.
+    drop(context.gate());
+    let mut renderer = LiveRenderer::new(context.clone());
+    renderer.set_source(2, 2, &[10u8; 16])?;
+    renderer.render(&[])?;
+    assert_eq!(renderer.read_pixels()?, vec![10u8; 16]);
+    Ok(())
+  }
+
+  #[test]
   fn cloned_contexts_share_a_gate_and_concurrent_readbacks_preserve_pixels() -> anyhow::Result<()> {
     let context = GpuContext::new_default_blocking()?;
     assert!(Arc::ptr_eq(&context.submission_gate, &context.clone().submission_gate));
@@ -262,7 +282,7 @@ mod tests {
             renderer.render(&[])?;
             let frame = TextureFrame::new(&context, renderer.snapshot_texture()?);
             let readback = frame.read_back().ok_or_else(|| anyhow::anyhow!("concurrent texture readback failed"))?;
-            assert_eq!(readback.pixels, pixels);
+            assert_eq!(*readback.pixels, pixels);
           }
           Ok(())
         })

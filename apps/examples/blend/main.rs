@@ -3,7 +3,7 @@ use abra::prelude::*;
 
 const OVERLAY_FILE: &str = "assets/bikini.jpg";
 const BASE_FILE: &str = "assets/34KK-breasts.webp";
-const OUT_FILE: &str = "out/blend.png";
+const OUT_FILE: &str = "assets/out/blend.png";
 
 pub fn main() {
   let mut base = Image::read(BASE_FILE).expect("Failed to load base image");

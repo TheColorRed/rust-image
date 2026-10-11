@@ -110,7 +110,7 @@ test('a newer live renderer interaction is not hidden by the previous committed 
       send() {}
       uniffiDestroy() {}
     },
-    Message: { SliderMove: { new: (key, value) => ({ key, value }) } },
+    Message: { Show: { new: effects => ({ effects }) } },
   };
   vm.runInNewContext(
     code,
@@ -137,7 +137,7 @@ test('a newer live renderer interaction is not hidden by the previous committed 
     },
     error => assert.fail(error.message),
   );
-  live.slide('action-brightness', 30);
+  live.showEffects([]);
   assert.ok(live.activity > committedActivity);
   presented = true;
   tick(16);

@@ -7,7 +7,7 @@ use abra_body_segmentation::BodySegmentation;
 fn main() {
   // Read the original image and prepare for skin effects.
   let image_orig = Image::read("assets/nude/freckles-blonde.jpeg").expect("Failed to read image");
-  let segmenter = BodySegmentation::load("abra/ai/body-segmentation/models/selfie_multiclass_256x256.onnx")
+  let segmenter = BodySegmentation::load("packages/abra/ai/body-segmentation/models/selfie_multiclass_256x256.onnx")
     .expect("Failed to load the skin model");
   let mask = segmenter.process(&image_orig).expect("Failed to segment skin");
 
@@ -19,7 +19,7 @@ fn main() {
     skin_smooth(amount).with_mask(&mask).apply(&mut effects);
     atlas_smooth.append(effects.clone());
   }
-  atlas_smooth.create().write("out/skin-smooth.png", None).expect("Failed to write image");
+  atlas_smooth.create().write("assets/out/skin-smooth.png", None).expect("Failed to write image");
 
   // Create a side-by-side comparison of the original and the effects.
   let mut atlas_tan = atlas().with_dimensions(4);
@@ -38,7 +38,7 @@ fn main() {
     skin_tan(color).with_mask(&mask).apply(&mut effects);
     atlas_tan.append(effects.clone());
   }
-  atlas_tan.create().write("out/skin-tan.png", None).expect("Failed to write image");
+  atlas_tan.create().write("assets/out/skin-tan.png", None).expect("Failed to write image");
 
   let mut atlas = atlas().with_dimensions(Fixed(4, 2)).with_trim(true);
   atlas.append(image_orig.clone());
@@ -50,5 +50,5 @@ fn main() {
       atlas.append(image_orig.clone());
     }
   }
-  atlas.create().write("out/skin-tone.png", None).expect("Failed to write skin tone comparison");
+  atlas.create().write("assets/out/skin-tone.png", None).expect("Failed to write skin tone comparison");
 }

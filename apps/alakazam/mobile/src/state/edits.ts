@@ -1,17 +1,11 @@
-import { BehaviorSubject, combineLatest } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
-import {
-  BLEMISH_TOOL_KEY,
-  SKIN_SMOOTH_KEY,
-  SKIN_TAN_KEY,
-  SKIN_TONE_KEY,
-  findSection,
-  type EditControl,
-} from '@/src/lib/edit-sections';
+import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/keys';
+import type { AdjustmentValue } from '@/src/lib/edit-sections';
 
 // #region: Edit controls
 
-export const adjustments = new BehaviorSubject<Record<string, number>>({});
+export const adjustments = new BehaviorSubject<Record<string, AdjustmentValue>>({});
 export const adjustments$ = adjustments.asObservable();
 export const appliedActions = new BehaviorSubject<string[]>([]);
 export const appliedActions$ = appliedActions.asObservable();
@@ -27,25 +21,13 @@ export const historyVersion$ = historyVersion.asObservable();
 
 // #region: Derived focus state
 
-export const getFocusedControl = (): EditControl | undefined => {
-  const key = focusedControlKey.value;
-  return key ? findSection(activeSectionKey.value).controls.find(control => control.key === key) : undefined;
-};
-export const isBlemishToolFocused = () => getFocusedControl()?.key === BLEMISH_TOOL_KEY;
-export const focusedControl$ = combineLatest([activeSectionKey$, focusedControlKey$]).pipe(
-  map(([sectionKey, key]) => (key ? findSection(sectionKey).controls.find(control => control.key === key) : undefined)),
+export const isBlemishToolFocused = () => focusedControlKey.value === BLEMISH_TOOL_KEY;
+export const isBlemishToolFocused$ = focusedControlKey$.pipe(
+  map(key => key === BLEMISH_TOOL_KEY),
   distinctUntilChanged(),
 );
-export const isSkinControlFocused$ = focusedControl$.pipe(
-  map(
-    control =>
-      control?.kind === 'slider' &&
-      (control.key === SKIN_SMOOTH_KEY || control.key === SKIN_TAN_KEY || control.key === SKIN_TONE_KEY),
-  ),
-  distinctUntilChanged(),
-);
-export const isBlemishToolFocused$ = focusedControl$.pipe(
-  map(control => control?.key === BLEMISH_TOOL_KEY),
+export const isSkinControlFocused$ = focusedControlKey$.pipe(
+  map(key => key === SKIN_SMOOTH_KEY || key === SKIN_TAN_KEY || key === SKIN_TONE_KEY),
   distinctUntilChanged(),
 );
 export const wasBlemishToolFocused = new BehaviorSubject(false);

@@ -47,6 +47,6 @@ pub fn main() {
   println!("brush fill: {:?}", start.elapsed());
 
   std::fs::create_dir_all("out").expect("failed to create output directory");
-  butterfly_image.write("out/butterfly.png", None).expect("Failed to save butterfly image");
-  fill_image.write("out/brush-fill.png", None).expect("Failed to save fill image");
+  butterfly_image.write("assets/out/butterfly.png", None).expect("Failed to save butterfly image");
+  fill_image.write("assets/out/brush-fill.png", None).expect("Failed to save fill image");
 }

@@ -6,6 +6,8 @@
 // so this points cmake at the NDK's toolchain file and the SDK's cmake/ninja
 // through target-scoped env vars that leave desktop builds untouched.
 //
+// It then writes the entry points of `@abra/core` (packages/react-native/abra) from the generated bindings.
+//
 // Extra arguments are passed through to ubrn, e.g. `--release` or
 // `--targets arm64-v8a`.
 import { spawnSync } from 'node:child_process';
@@ -80,6 +82,12 @@ const args = [ubrnCli, 'build', 'jsi2', 'android', '--and-generate', '--config',
 console.log(`build-android: NDK ${path.basename(ndk)}, cmake ${path.basename(cmakeDir)}`);
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' });
 if (result.status !== 0) process.exit(result.status ?? 1);
+
+// The Abra library's entry points (`@abra/core/adjustments`, ...) are written from the bindings that were just generated.
+const entries = spawnSync(process.execPath, [path.join(packageRoot, '..', 'abra', 'scripts', 'generate-entries.mjs')], {
+  stdio: 'inherit',
+});
+if (entries.status !== 0) fail('could not write the entry points of @abra/core');
 
 const gradleFile = path.join(packageRoot, 'android', 'build.gradle');
 const gradle = readFileSync(gradleFile, 'utf8');

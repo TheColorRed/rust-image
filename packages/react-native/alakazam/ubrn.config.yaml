@@ -6,6 +6,10 @@ rust:
   manifestPath: packages/react-native/alakazam/Cargo.toml
 bindings:
   ts: src/generated
+turboModule:
+  # The file the generator writes, which nothing imports: the package entry (`src/app.ts`, in package.json) is written by hand
+  # and does its work. It is out of `src` so that editors do not offer its exports, which include the whole Abra library.
+  entrypoint: .ubrn/index.tsx
 android:
   apiLevel: 24
 jsi2:

@@ -10,7 +10,9 @@
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\""
   },
   "dependencies": {
+    "@abra/core": "1.0.0",
     "@alakazam/mobile": "1.0.0",
+    "@abra/core": "1.0.0",
     "@react-native-camera-roll/camera-roll": "^7.10.2",
     "@react-native-community/slider": "^5.2.1",
     "@react-native-documents/picker": "^12.0.2",

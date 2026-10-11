@@ -32,9 +32,9 @@ The root crate of the Abra library is located in the root of the workspace. It i
 
 ## Modules
 
-- `/abra/abra`: This is the main entry point of the library. It doesn't contain much logic itself but re-exports the other modules for easier access.
-- `/abra/ai`: This module contains functions and types related to AI-powered image processing tasks, such as image enhancement.
-- `/abra/core`: This directory contains the core functionality of the library and is further divided into several sub-modules:
+- `/packages/abra/abra`: This is the main entry point of the library. It doesn't contain much logic itself but re-exports the other modules for easier access.
+- `/packages/abra/ai`: This module contains functions and types related to AI-powered image processing tasks, such as image enhancement.
+- `/packages/abra/core`: This directory contains the core functionality of the library and is further divided into several sub-modules:
   - `adjustments`: Contains functions for adjusting image properties such as brightness, contrast, and saturation.
   - `canvas`: A canvas is a group of layers, and this module contains functions for creating and managing canvases and their layers.
   - `core`: Contains common types and functions used throughout the library and is used by other modules. It is commonly used as the middle-man for passing data between modules. Includes geometry, transforms, color utilities, blending, file IO, and area/GPU application helpers.
@@ -51,7 +51,7 @@ The root crate of the Abra library is located in the root of the workspace. It i
 - `/packages/vessel/vessel`: The standalone view engine, package `vessel` (no abra dependency, so it can be published on its own). `Engine` runs `View`s on its own thread and decides when to draw them; each view shows a `MediaSource` (a canvas, a video, a camera, a game...). It uses `pub-sub`.
 - `/packages/vessel/gpu-passes`: Compute shader passes over RGBA pixels (`GpuPass`, `GpuAux`, `GpuSession`) and, with its `runtime` feature, the wgpu runtime that runs them (`GpuContext`, `LiveRenderer`, `Presenter`). No abra dependency. Abra supplies passes as data; it never runs the GPU itself.
 - `/packages/vessel/surface`: Surfaces that frames are drawn on, looked up by id (`Surface` trait; a native Android window is the first kind). No abra dependency.
-- `/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
+- `/packages/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
 
 ## Examples
 

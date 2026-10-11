@@ -21,6 +21,7 @@
     "luma",
     "mkdirp",
     "napi",
+    "nasm",
     "ndarray",
     "NEDI",
     "oneshot",
@@ -91,5 +92,12 @@
   "rust-analyzer.procMacro.enable": false,
   "react-native-tools.projectRoot": "C:/Users/untun/Documents/vscode/rust/image/apps/alakazam/mobile",
   "react-native-tools.logLevel": "Trace",
-  "terminal.integrated.defaultProfile.windows": "Fish"
+  "terminal.integrated.defaultProfile.windows": "Fish",
+  // rav1d (AVIF decoding) assembles its x86 code with NASM at build time: `tools/nasm/nasm.exe` (portable NASM 3.02).
+  "terminal.integrated.env.windows": {
+    "NASM": "${workspaceFolder}/tools/nasm/nasm.exe"
+  },
+  "rust-analyzer.cargo.extraEnv": {
+    "NASM": "${workspaceFolder}/tools/nasm/nasm.exe"
+  }
 }

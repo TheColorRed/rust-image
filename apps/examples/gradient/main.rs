@@ -4,7 +4,7 @@ use abra::drawing::prelude::*;
 use abra::prelude::*;
 use abra::typography::prelude::FontLoader;
 
-const OUT_FILE: &str = "out/gradient.png";
+const OUT_FILE: &str = "assets/out/gradient.png";
 
 // const BACKGROUND_IMAGE: &str = "assets/nude/black-hair-beauty-long-hair-leg.jpg";
 const BACKGROUND_IMAGE: &str = "assets/nude/gravure-idol-black-hair-chest.jpg";

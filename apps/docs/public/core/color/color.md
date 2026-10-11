@@ -59,6 +59,14 @@ let black = Color::default();
 let transparent = Color::transparent();
 ```
 
+## Linear-light conversion helpers
+
+In Rust, `primitives::color::srgb_to_linear(channel)` and
+`linear_to_srgb(channel)` convert floating-point channel values between normalized
+sRGB and linear light without clamping. Use `srgb_u8_to_linear_f32` and
+`linear_f32_to_srgb_u8` for conversion to and from 8-bit channels. Shared linear RGB
+gains can adjust luminance without changing the channel proportions.
+
 ## Named colors
 
 The color module provides constructors for common colors such as `red`, `green`, `blue`, `orange`, `purple`, `tan`, `white`, and `black`:
@@ -153,14 +161,14 @@ let shades = Color::royal_blue().harmony(Harmony::Shades(5));
 
 | `Harmony`            | Colors                                                                     |
 | -------------------- | -------------------------------------------------------------------------- |
-| `Analogous`          | Five hues at -30, -15, 0, 15, and 30 degrees, source in the middle.         |
-| `Complementary`      | The source and its opposite hue.                                            |
-| `SplitComplementary` | Five colors: source, the hues beside its complement, and two darker tones.  |
-| `Triadic`            | The source and the hues 120 and 240 degrees away.                           |
-| `Square`             | The source and the hues 90, 180, and 270 degrees away.                      |
-| `Compound`           | The source, a hue 30 degrees away, and the hue opposite that one.           |
-| `Shades(n)`          | `n` progressively darker shades, starting at the source.                    |
-| `Monochromatic(n)`   | `n` lightness variants of the source hue, source in the middle.             |
+| `Analogous`          | Five hues at -30, -15, 0, 15, and 30 degrees, source in the middle.        |
+| `Complementary`      | The source and its opposite hue.                                           |
+| `SplitComplementary` | Five colors: source, the hues beside its complement, and two darker tones. |
+| `Triadic`            | The source and the hues 120 and 240 degrees away.                          |
+| `Square`             | The source and the hues 90, 180, and 270 degrees away.                     |
+| `Compound`           | The source, a hue 30 degrees away, and the hue opposite that one.          |
+| `Shades(n)`          | `n` progressively darker shades, starting at the source.                   |
+| `Monochromatic(n)`   | `n` lightness variants of the source hue, source in the middle.            |
 
 `Gradient::harmony(color, harmony)` builds an evenly spaced gradient from the same schemes.
 

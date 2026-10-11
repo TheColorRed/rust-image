@@ -114,14 +114,7 @@ impl AbraImage {
     {
       return Arc::clone(image);
     }
-    let image = self.inner.lock().unwrap();
-    let (width, height) = image.dimensions::<u32>();
-    let preview = if width <= p_max_width && height <= p_max_height {
-      image.clone()
-    } else {
-      resize(ResizeTarget::Fit(Size::new(p_max_width, p_max_height))).resized(&image)
-    };
-    let preview = Arc::new(preview);
+    let preview = Arc::new(fit_within(&self.inner.lock().unwrap(), p_max_width, p_max_height));
     *cache = Some((key, Arc::clone(&preview)));
     preview
   }
@@ -303,17 +296,31 @@ impl AbraImage {
     )
   }
 
+  /// A copy shrunk to fit within `max_width` x `max_height`, or the same size when it already fits, made the same way a drag
+  /// makes the screen-size photo it runs a tool on. It shares this image's skin and person state, which the skin tools resize
+  /// to whatever image they are applied to, so edits made on it match the ones made on the full-size photo. The editor shows
+  /// these, and never the full-size photo, which is edited afterwards for the saved file.
+  pub fn shrunk(&self, max_width: u32, max_height: u32) -> Arc<Self> {
+    Self::from_image_with_shared_state(
+      fit_within(&self.inner.lock().unwrap(), max_width, max_height),
+      Arc::clone(&self.skin_mask),
+      Arc::clone(&self.people),
+      Arc::clone(&self.selected_person),
+      Arc::clone(&self.selected_skin_mask),
+    )
+  }
+
   /// The image as the library's own `Image`, at full size and without crossing the bridge, for a tool written against it.
   /// Changing the result does not change this image; give a tool's result back with `replace_with`.
-  pub fn to_image(&self) -> Arc<Image> {
-    Arc::new(self.inner.lock().unwrap().clone())
+  pub fn to_image(&self) -> Arc<abra_uniffi::Image> {
+    Arc::new(abra_uniffi::Image::from_core(self.inner.lock().unwrap().clone()))
   }
 
   /// Replaces the pixels with `image`, as an edit does. An image a tool left unmade is made now, so the edited photo holds
   /// pixels and not the recipe for them.
-  pub fn replace_with(&self, image: Arc<Image>) {
-    let (width, height) = image.dimensions::<u32>();
-    let pixels = image.to_rgba_vec();
+  pub fn replace_with(&self, image: Arc<abra_uniffi::Image>) {
+    let (width, height) = image.core().dimensions::<u32>();
+    let pixels = image.core().to_rgba_vec();
     self.with_image_mut(|current| *current = Image::new_from_pixels(width, height, pixels, Channels::RGBA));
   }
 
@@ -522,17 +529,18 @@ pub(crate) fn frame_of(p_image: &Image) -> Frame {
   }
 }
 
-/// `p_image` downscaled to fit within `p_max_width` x `p_max_height`.
-fn preview_of(p_image: &Image, p_max_width: u32, p_max_height: u32) -> PreviewImage {
+/// `p_image` shrunk to fit within `p_max_width` x `p_max_height`, or as it is when it already fits.
+fn fit_within(p_image: &Image, p_max_width: u32, p_max_height: u32) -> Image {
   let (width, height) = p_image.dimensions::<u32>();
   if width <= p_max_width && height <= p_max_height {
-    return PreviewImage {
-      width,
-      height,
-      data: p_image.rgba().to_vec(),
-    };
+    return p_image.clone();
   }
-  let preview = resize(ResizeTarget::Fit(Size::new(p_max_width, p_max_height))).resized(p_image);
+  resize(ResizeTarget::Fit(Size::new(p_max_width, p_max_height))).resized(p_image)
+}
+
+/// `p_image` downscaled to fit within `p_max_width` x `p_max_height`.
+fn preview_of(p_image: &Image, p_max_width: u32, p_max_height: u32) -> PreviewImage {
+  let preview = fit_within(p_image, p_max_width, p_max_height);
   let (width, height) = preview.dimensions::<u32>();
   PreviewImage {
     width,
@@ -610,6 +618,25 @@ mod tests {
   use super::*;
   use abra_find_person::PersonBounds;
   use std::sync::atomic::{AtomicUsize, Ordering};
+
+  #[test]
+  fn a_shrunk_copy_fits_the_screen_keeps_the_proportions_and_shares_the_skin_mask() {
+    let mask = Mask::from_values(8, 4, vec![200; 32]);
+    let image = AbraImage::from_image_with_skin_mask(
+      Image::new_from_pixels(8, 4, [10u8, 20, 30, 255].repeat(32), Channels::RGBA),
+      Some(mask),
+    );
+    let small = image.shrunk(4, 4);
+    assert_eq!((small.width(), small.height()), (4, 2), "fitted inside 4 x 4 with the same proportions");
+    assert_eq!((image.width(), image.height()), (8, 4), "the full-size photo is untouched");
+    assert!(small.skin_mask().is_some(), "the copy has the photo's skin mask, which the skin tools resize");
+    // A photo that already fits is not resized.
+    let same = image.shrunk(100, 100);
+    assert_eq!((same.width(), same.height()), (8, 4));
+    // Editing the shrunk copy leaves the photo as it was.
+    small.invert();
+    assert_eq!(image.rgba()[0], 10);
+  }
 
   #[test]
   fn a_lower_quality_makes_a_smaller_webp_and_none_keeps_it_lossless() {

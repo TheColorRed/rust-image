@@ -2,7 +2,7 @@ use abra::canvas::prelude::*;
 use abra::prelude::*;
 
 const FILE: &str = "assets/bikini.jpg";
-const OUT_FILE: &str = "out/layer-effects.png";
+const OUT_FILE: &str = "assets/out/layer-effects.png";
 
 pub fn main() {
   let (width, height) = (512 + 100, 1024 + 100);

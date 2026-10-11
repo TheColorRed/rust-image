@@ -20,24 +20,24 @@ Search the whole workspace, not just the crate you are working in. Common locati
 
 | Looking for...                                                                        | Search here                                                      |
 | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Image type, channels, color type, resolution                                          | `abra/core/primitives`                                           |
-| Color math: HSL/HSV/Lab conversion, `luma`, harmonies, histograms and `Bins`, pixel stats | `abra/core/primitives/src/color`                              |
-| Geometry (`PointF`, `Size`, `Rect`, lines, areas, paths, quads, homography, shapes, point-in-polygon) | `abra/core/core/src/geometry`                     |
-| Transforms (resize, rotate, crop, flip, warp, zoom, fit, interpolation)               | `abra/core/core/src/transform`                                   |
-| Mapping each output pixel back to a source position and sampling it (`remap`)         | `abra/core/core/src/transform/interpolation.rs`                  |
-| Fills and gradients                                                                   | `abra/core/core/src/color`                                       |
-| Blending / compositing (`BlendMode`)                                                  | `abra/core/core/src/combine`                                     |
-| Applying an operation to an area, image extensions, GPU dispatch                      | `abra/core/core/src/image`                                       |
-| Loading / saving files                                                                | `abra/core/core/src/fs`                                          |
-| Drawing shapes, brushes, fills                                                        | `abra/core/drawing`                                              |
-| Masks                                                                                 | `abra/core/mask`                                                 |
-| `ApplyOptions` and shared operation options                                           | `abra/core/options`                                              |
-| Brightness, contrast, levels, color adjustments                                       | `abra/core/adjustments`                                          |
-| Blur, sharpen, distort, edges, noise, smoothing, repair, kernels, sobel               | `abra/core/filters`                                              |
-| Layer effects (drop shadow, stroke)                                                   | `abra/core/canvas/src/effects`                                   |
-| Fonts and text                                                                        | `abra/core/typography`                                           |
-| GPU context and GPU images                                                            | `abra/core/gpu`                                                  |
-| Existing tools (perspective, straighten, remover)                                     | `abra/core/tools`                                                |
+| Image type, channels, color type, resolution                                          | `packages/abra/core/primitives`                                           |
+| Color math: HSL/HSV/Lab conversion, `luma`, harmonies, histograms and `Bins`, pixel stats | `packages/abra/core/primitives/src/color`                              |
+| Geometry (`PointF`, `Size`, `Rect`, lines, areas, paths, quads, homography, shapes, point-in-polygon) | `packages/abra/core/core/src/geometry`                     |
+| Transforms (resize, rotate, crop, flip, warp, zoom, fit, interpolation)               | `packages/abra/core/core/src/transform`                                   |
+| Mapping each output pixel back to a source position and sampling it (`remap`)         | `packages/abra/core/core/src/transform/interpolation.rs`                  |
+| Fills and gradients                                                                   | `packages/abra/core/core/src/color`                                       |
+| Blending / compositing (`BlendMode`)                                                  | `packages/abra/core/core/src/combine`                                     |
+| Applying an operation to an area, image extensions, GPU dispatch                      | `packages/abra/core/core/src/image`                                       |
+| Loading / saving files                                                                | `packages/abra/core/core/src/fs`                                          |
+| Drawing shapes, brushes, fills                                                        | `packages/abra/core/drawing`                                              |
+| Masks                                                                                 | `packages/abra/core/mask`                                                 |
+| `ApplyOptions` and shared operation options                                           | `packages/abra/core/options`                                              |
+| Brightness, contrast, levels, color adjustments                                       | `packages/abra/core/adjustments`                                          |
+| Blur, sharpen, distort, edges, noise, smoothing, repair, kernels, sobel               | `packages/abra/core/filters`                                              |
+| Layer effects (drop shadow, stroke)                                                   | `packages/abra/core/canvas/src/effects`                                   |
+| Fonts and text                                                                        | `packages/abra/core/typography`                                           |
+| GPU context and GPU images                                                            | `packages/abra/core/gpu`                                                  |
+| Existing tools (perspective, straighten, remover)                                     | `packages/abra/core/tools`                                                |
 
 ## How to Search
 
@@ -47,7 +47,7 @@ Search by **concept**, not only by the name you would give the function. The sam
 - Search for the math or algorithm: e.g. `homography`, `perspective`, `gaussian`, `kernel`, `convolve`, `luminance`.
 - Search for the types involved: e.g. functions taking or returning `Quad`, `Area`, `PointF`, `Mask`.
 - Search `pub fn` and `impl` blocks of the relevant crate to see what it already offers.
-- Check `abra/abra/src/prelude.rs` and each crate's `lib.rs` to see what is exported.
+- Check `packages/abra/abra/src/prelude.rs` and each crate's `lib.rs` to see what is exported.
 - Check the docs in `apps/docs/public` for existing features.
 
 If you find two or more existing functions that already do the same thing, point it out to the user as a cleanup candidate rather than adding a third.

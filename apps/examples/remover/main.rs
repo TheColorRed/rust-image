@@ -20,5 +20,5 @@ fn main() {
 
   // remover(RemoverShape::circle(45)).with_position((630, 880)).apply(&mut image);
 
-  image.write("out/remover.png", None).expect("Failed to write image");
+  image.write("assets/out/remover.png", None).expect("Failed to write image");
 }

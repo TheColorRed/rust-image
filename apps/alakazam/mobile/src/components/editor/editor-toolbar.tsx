@@ -1,12 +1,11 @@
-import { X } from 'lucide-react-native';
+import { RotateCcw, X } from 'lucide-react-native';
 import { useEffect, useMemo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
+import { resetEdits } from '@/src/lib/editor-history';
 import { useTheme } from '@/src/lib/theme';
-import {
-  closeRequested,
-  closeRequested$,
-} from '@/src/state/commands';
+import { closeRequested, closeRequested$ } from '@/src/state/commands';
+import { timeline$ } from '@/src/state/history';
 import { topInset$ } from '@/src/state/preview';
 
 export interface EditorToolbarProps {
@@ -16,6 +15,7 @@ export interface EditorToolbarProps {
 /** The close button floating over the photo, and the handler for closing. */
 export function EditorToolbar({ onClose }: EditorToolbarProps) {
   const topInset = useObservable(topInset$, 0);
+  const hasEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -33,6 +33,20 @@ export function EditorToolbar({ onClose }: EditorToolbarProps) {
       <Pressable style={styles.iconButton} onPress={() => closeRequested.next()} hitSlop={8}>
         <X color={overlayIconColor} size={22} />
       </Pressable>
+      {hasEdits ? (
+        <Pressable
+          style={styles.iconButton}
+          hitSlop={8}
+          onPress={() =>
+            Alert.alert('Reset all edits?', 'The photo goes back to how it was opened, and the history is cleared.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Reset', style: 'destructive', onPress: resetEdits },
+            ])
+          }
+        >
+          <RotateCcw color={overlayIconColor} size={22} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }

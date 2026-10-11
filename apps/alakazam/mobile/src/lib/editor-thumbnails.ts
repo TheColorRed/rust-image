@@ -1,6 +1,7 @@
+import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { effectList, type EditSection } from '@/src/lib/edit-sections';
+import { effectList, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
 import { ownedImage } from '@/src/lib/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
@@ -17,6 +18,8 @@ export function buildControlThumbnails(
   section: EditSection,
   previous: Record<string, ThumbnailPreview>,
   publish: (key: string, preview: ThumbnailPreview) => void,
+  /** The full-size photo the thumbnails are edits of, so a thumb can be told how much smaller its copy is. */
+  full: AbraImage | null = null,
 ) {
   let cancelled = false;
   const density = PixelRatio.get();
@@ -43,13 +46,32 @@ export function buildControlThumbnails(
           let pixels: AbraImage | undefined;
           let created: ThumbnailPreview | undefined;
           try {
-            if (control.kind === 'action' && control.apply) {
-              throw new Error(`Thumbnail action "${control.key}" needs a native operation or live effect`);
-            }
-            const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
-            const operation = control.kind === 'action' ? control.operation : undefined;
             const effectStarted = Date.now();
-            pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects, operation));
+            if (control.thumb) {
+              // The control makes its own thumbnail, on a copy of the thumbnail-size photo that is its own to change.
+              const target = ownedImage(thumbnailSource.copy());
+              const photo = target.toImage();
+              let returned: ImageLike | undefined;
+              try {
+                returned = control.thumb(photo, { scale: scaleBetween(photo, full ?? image) }) as ImageLike | undefined;
+                target.replaceWith(returned ?? photo);
+                pixels = target;
+              } catch (error) {
+                target.uniffiDestroy();
+                throw error;
+              } finally {
+                // They are native images the garbage collector cannot see the size of.
+                (photo as AbraPixels).uniffiDestroy();
+                if (returned) (returned as AbraPixels).uniffiDestroy();
+              }
+            } else {
+              if (control.kind === 'action' && control.apply) {
+                throw new Error(`Thumbnail action "${control.key}" needs a native operation, live effect or thumb`);
+              }
+              const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
+              const operation = control.kind === 'action' ? control.operation : undefined;
+              pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects, operation));
+            }
             if (cancelled) return;
             const effectMs = Date.now() - effectStarted;
             const componentStarted = Date.now();

@@ -1,0 +1,24 @@
+{
+  "name": "@abra/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Abra image library for TypeScript: the types and functions of the abra-uniffi bindings",
+  "license": "UNLICENSED",
+  "main": "index.ts",
+  "react-native": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./adjustments": "./entries/adjustments.ts",
+    "./blend": "./entries/blend.ts",
+    "./color": "./entries/color.ts",
+    "./filters": "./entries/filters.ts",
+    "./geometry": "./entries/geometry.ts",
+    "./gradient": "./entries/gradient.ts",
+    "./image": "./entries/image.ts",
+    "./mask": "./entries/mask.ts"
+  },
+  "peerDependencies": {
+    "@alakazam/mobile": "*"
+  }
+}

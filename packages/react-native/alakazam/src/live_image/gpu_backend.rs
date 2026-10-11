@@ -57,7 +57,7 @@ mod tests {
   use abra::abra_core::Image;
   use abra::abra_core::image::gpu::{GpuOp, GpuPass};
 
-  const BRIGHTNESS: &str = include_str!("../../../../../abra/core/adjustments/src/levels/brightness.wgsl");
+  const BRIGHTNESS: &str = include_str!("../../../../abra/core/adjustments/src/levels/brightness.wgsl");
 
   struct Bright(f32);
 

@@ -8,6 +8,7 @@ import { commitBlemish } from '@/src/lib/editor-history';
 import { blemishApplyRequested$ } from '@/src/state/commands';
 import { isBlemishToolFocused, isBlemishToolFocused$, wasBlemishToolFocused } from '@/src/state/edits';
 import { historyReady } from '@/src/state/project-session';
+import { flushFullReplay } from '@/src/lib/editor-replay';
 import { currentImage } from '@/src/state/session';
 import {
   previewBox,
@@ -71,6 +72,8 @@ export function BlemishToolController() {
     let lastTap: { time: number; x: number; y: number } | null = null;
     const subscriptions = [
       blemishApplyRequested$.subscribe(() => {
+        // The blemish is healed on the full-size photo, so it must have this edit's full-size version first.
+        flushFullReplay();
         const image = currentImage.value;
         const box = previewBox.value;
         // Until the history is built the image is a project's saved picture, and healing it would be lost.

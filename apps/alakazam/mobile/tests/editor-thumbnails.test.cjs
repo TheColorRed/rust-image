@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
+const { loadTs } = require('./load-ts.cjs');
 const { BehaviorSubject } = require('rxjs');
 const babel = require(
   require.resolve('@babel/core', {
@@ -111,6 +112,9 @@ function fixture() {
   const sections = {
     EDIT_SECTIONS: [section],
     effectList: effect => (Array.isArray(effect) ? effect : [effect]),
+    scaleBetween: () => 1,
+    preloadFor: () => undefined,
+    clearPreloads() {},
     applyAction: (control, image) => {
       image.effect = control.key;
     },
@@ -244,10 +248,17 @@ test('cancellation while downscaling releases its source without starting effect
 test('replay defers thumbnails, caches exclusive groups and discards retired builds', async () => {
   const f = fixture();
   const subject = value => new BehaviorSubject(value);
-  const edits = { activeSectionKey: subject('moods'), adjustments: subject({}), appliedActions: subject([]) };
+  const edits = {
+    activeSectionKey: subject('moods'),
+    adjustments: subject({}),
+    appliedActions: subject([]),
+    focusedControlKey: subject(null),
+  };
   for (const key of Object.keys(edits)) edits[`${key}$`] = edits[key];
   const thumbnails = subject({});
-  const base = { ...f.source, copy: () => ({ ...f.source, uniffiDestroy() {} }) };
+  const previewSourceImage = subject(null);
+  const small = () => ({ ...f.source, copy: small, shrunk: small, uniffiDestroy() {} });
+  const base = { ...f.source, copy: small, shrunk: small };
   const session = {
     busy: subject(false),
     currentImage: subject(null),
@@ -267,6 +278,13 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       '@/src/lib/batch': { batch: run => run() },
       '@/src/lib/edit-sections': f.sections,
       '@/src/lib/editor-history': { recordDraftStep() {}, comparisonImage: () => null },
+      '@/src/lib/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
+      '@/src/lib/editor-pictures': loadTs('lib/editor-pictures.ts', {
+        '@/src/state/gestures': { previewBox: subject({ width: 320, height: 200 }) },
+        '@/src/state/preview': { previewSourceImage, showingCheckpoint: subject(false) },
+        '@/src/state/session': session,
+        'react-native': { Dimensions: { get: () => ({ width: 320, height: 640 }) }, PixelRatio: { get: () => 1 } },
+      }),
       '@/src/lib/skin-adjustments': {},
       '@/src/state/person-selection': { personSelection: subject(null) },
       '@/src/lib/editor-thumbnails': f,
@@ -274,7 +292,7 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       '@/src/state/gestures': { previewBox$: subject({ width: 320, height: 200 }) },
       '@/src/state/preview': {
         controlThumbnails: thumbnails,
-        previewSourceImage: subject(null),
+        previewSourceImage,
         showingCheckpoint: subject(false),
       },
       '@/src/state/session': session,
@@ -311,9 +329,11 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   const subscription = replay.startReplay();
   flush();
   assert.equal(f.requests.length, 0, 'main preview publishes before thumbnails start');
-  assert.ok(session.currentImage.value);
+  assert.ok(previewSourceImage.value, 'the screen-size picture is drawn');
+  assert.equal(session.currentImage.value, null, 'the full-size edit waits until after it');
   flush();
   await settle();
+  assert.ok(session.currentImage.value, 'and then the full-size edit is made');
   const first = thumbnails.value;
   edits.appliedActions.next(['warm']);
   await completeReplay();
@@ -333,6 +353,8 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   late.forEach(job => job.finish());
   await settle();
   assert.equal(Object.keys(thumbnails.value).length, 0, 'late results cannot resurrect retired cards');
+  // They are freed after the frame that draws the new set, and not before it.
+  await completeReplay();
   assert.ok(f.previews.every(preview => preview.destroyed === 1));
   f.manual = false;
   edits.activeSectionKey.next('moods');
@@ -344,6 +366,7 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   assert.equal(Object.keys(thumbnails.value).length, 2, 'reset invalidates unchanged cache inputs');
   subscription.unsubscribe();
   replay.clearControlThumbnails();
+  await completeReplay();
   assert.ok(f.previews.every(preview => preview.destroyed === 1));
 });
 
@@ -373,7 +396,9 @@ test('closing an editor during async decoding releases late native images withou
       startReplay: () => ({ unsubscribe() {} }),
       clearControlThumbnails() {},
       renderRecipe() {},
+      releaseShownImages() {},
     },
+    '@/src/lib/editor-pictures': { showStandIn() {} },
     '@/src/lib/error-message': { errorMessage: String },
     '@/src/lib/native-image': nativeImages,
     '@/src/lib/project-store': { projectImageUri: () => '' },

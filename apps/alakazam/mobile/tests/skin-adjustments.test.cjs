@@ -35,12 +35,13 @@ function loadSource(file, dependencies) {
   return module.exports;
 }
 
-const helpers = loadSource('lib/skin-adjustments.ts', {
-  '@/src/lib/edit-sections/beauty': { SKIN_SMOOTH_KEY: smooth, SKIN_TAN_KEY: tan, SKIN_TONE_KEY: tone },
-});
+// The keys of the controls are a module of their own, and are loaded as they are.
+const keys = loadSource('lib/edit-sections/keys.ts', {});
+const helpers = loadSource('lib/skin-adjustments.ts', { '@/src/lib/edit-sections/keys': keys });
 
 test('Skin Tone is neutral on selection and uses the signed Beauty slider range', () => {
   const { beauty } = loadSource('lib/edit-sections/beauty.ts', {
+    './keys': keys,
     '@alakazam/mobile': { EffectSpec: { SkinTone: { new: fields => fields } } },
   });
   const control = beauty.controls.find(control => control.key === tone);
@@ -54,15 +55,7 @@ test('Skin Tone is neutral on selection and uses the signed Beauty slider range'
 });
 
 test('focusing Skin Tone enables the existing person selection flow', () => {
-  const { beauty } = loadSource('lib/edit-sections/beauty.ts', { '@alakazam/mobile': {} });
-  const state = loadSource('state/edits.ts', {
-    '@/src/lib/edit-sections': {
-      SKIN_SMOOTH_KEY: smooth,
-      SKIN_TAN_KEY: tan,
-      SKIN_TONE_KEY: tone,
-      findSection: () => beauty,
-    },
-  });
+  const state = loadSource('state/edits.ts', { '@/src/lib/edit-sections/keys': keys });
   const focused = [];
   const subscription = state.isSkinControlFocused$.subscribe(value => focused.push(value));
   state.focusedControlKey.next(tone);
@@ -100,7 +93,7 @@ function replayFixture(selectedId) {
       applied.push({ ...effect, personId });
     },
   };
-  const base = { copy: () => image };
+  const base = { copy: () => image, shrunk: () => ({ copy: () => image, uniffiDestroy() {} }) };
   const adjustments = new BehaviorSubject({
     [`${tan}:person:0`]: 0.7,
     [`${tan}:person:1`]: 0.3,
@@ -122,12 +115,23 @@ function replayFixture(selectedId) {
     '@/src/lib/batch': { batch: fn => fn() },
     '@/src/lib/edit-sections': {
       EDIT_SECTIONS: sections,
+      scaleBetween: () => 1,
       isSliderApplied: (_, value) => (value ?? 0) !== 0,
       applySlider: (control, target, value) => {
         applied.push({ key: control.key, personId: target.selectedPerson(), value });
       },
     },
     '@/src/lib/editor-history': {},
+    '@/src/lib/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
+    '@/src/lib/editor-pictures': loadSource('lib/editor-pictures.ts', {
+      '@/src/state/gestures': { previewBox: new BehaviorSubject({ width: 320, height: 200 }) },
+      '@/src/state/preview': {
+        previewSourceImage: new BehaviorSubject(null),
+        showingCheckpoint: new BehaviorSubject(false),
+      },
+      '@/src/state/session': { originalImage: new BehaviorSubject(null) },
+      'react-native': { Dimensions: { get: () => ({ width: 320, height: 640 }) }, PixelRatio: { get: () => 1 } },
+    }),
     '@/src/lib/skin-adjustments': helpers,
     '@/src/state/person-selection': { personSelection: { value: selection } },
     '@/src/lib/editor-thumbnails': {},
@@ -289,7 +293,9 @@ test('redo is refused with an explanation when it needs the person model and it 
   const personKey = helpers.adjustmentKey(tone, 1);
   // A step saved with an edit aimed at person 1, after the cursor.
   timeline.next({
-    entries: [{ change: { type: 'slider', key: personKey, value: 40 }, adjustments: { [personKey]: 40 }, appliedActions: [] }],
+    entries: [
+      { change: { type: 'slider', key: personKey, value: 40 }, adjustments: { [personKey]: 40 }, appliedActions: [] },
+    ],
     cursor: 0,
   });
   history.redoHistory();

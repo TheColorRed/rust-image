@@ -1,9 +1,11 @@
-import { EffectSpec as Effect } from "@alakazam/mobile";
-import { EditSection } from "../edit-sections";
+import { highlightsShadows } from '@/src/effects/highlights-shadows';
+import { brightness, contrast, exposure, saturation, vibrance } from '@abra/core/adjustments';
+import { EditSection, SliderControl } from '../edit-sections';
 
 export const adjustments: EditSection = {
   key: 'section-adjustments',
   label: 'Adjustments',
+  previewThumbnails: true,
   controls: [
     {
       kind: 'slider',
@@ -13,9 +15,9 @@ export const adjustments: EditSection = {
       max: 100,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.applyEffect(Effect.Brightness.new({ amount: Math.round(value) })),
-      live: value => Effect.Brightness.new({ amount: Math.round(value) }),
-    },
+      tool: (image, [value]) => brightness(value).apply(image),
+      thumb: image => brightness(100).apply(image),
+    } satisfies SliderControl<number>,
     {
       kind: 'slider',
       key: 'action-contrast',
@@ -24,9 +26,21 @@ export const adjustments: EditSection = {
       max: 100,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.applyEffect(Effect.Contrast.new({ amount: Math.round(value) })),
-      live: value => Effect.Contrast.new({ amount: Math.round(value) }),
-    },
+      tool: (image, [value]) => contrast(value).apply(image),
+      thumb: image => contrast(100).apply(image),
+    } satisfies SliderControl<number>,
+    {
+      kind: 'slider',
+      key: 'action-highlights-shadows',
+      label: 'Highlights & Shadows',
+      sliderLabel: ['Highlights', 'Shadows'],
+      max: [100, 100],
+      min: [-100, -100],
+      defaultValue: [0, 0],
+      applyOnSelect: false,
+      tool: (image, [highlights, shadows]) => highlightsShadows(image, highlights, shadows),
+      thumb: image => highlightsShadows(image, 100, 100),
+    } satisfies SliderControl<number>,
     {
       kind: 'slider',
       key: 'action-saturation',
@@ -35,21 +49,23 @@ export const adjustments: EditSection = {
       max: 100,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.applyEffect(Effect.Saturation.new({ amount: Math.round(value) })),
-      live: value => Effect.Saturation.new({ amount: Math.round(value) }),
-    },
+      tool: (image, [value]) => saturation(value).apply(image),
+      thumb: image => saturation(100).apply(image),
+    } satisfies SliderControl<number>,
     {
       kind: 'slider',
       key: 'action-exposure',
+      display: 'tabulated',
       label: 'Exposure',
-      min: -5,
-      max: 5,
-      step: 0.1,
-      defaultValue: 0,
+      sliderLabel: ['Stops', 'Gamma', 'Offset'],
+      min: [-5, 0, -1],
+      max: [5, 3, 1],
+      step: [0.1, 0.1, 0.1],
+      defaultValue: [0, 1, 0],
       applyOnSelect: false,
-      apply: (image, value) => image.applyEffect(Effect.Exposure.new({ exposure: value, offset: 0.0, gammaCorrection: 1.0 })),
-      live: value => Effect.Exposure.new({ exposure: value, offset: 0.0, gammaCorrection: 1.0 }),
-    },
+      tool: (image, [exp, gamma, offset]) => exposure(exp).withGamma(gamma).withOffset(offset).apply(image),
+      thumb: image => exposure(5).withGamma(1.0).withOffset(0.0).apply(image),
+    } satisfies SliderControl<number>,
     {
       kind: 'slider',
       key: 'action-vibrance',
@@ -58,8 +74,8 @@ export const adjustments: EditSection = {
       max: 100,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.applyEffect(Effect.Vibrance.new({ vibrance: Math.round(value), saturation: 0 })),
-      live: value => Effect.Vibrance.new({ vibrance: Math.round(value), saturation: 0 }),
-    },
+      tool: (image, [value]) => vibrance(value).apply(image),
+      thumb: image => vibrance(100).apply(image),
+    } satisfies SliderControl<number>,
   ],
-}
+};

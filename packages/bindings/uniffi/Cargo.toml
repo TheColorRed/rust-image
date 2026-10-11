@@ -1,0 +1,18 @@
+[package]
+name = "abra-uniffi"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+abra = { workspace = true }
+# Pinned to what the bindings generator (uniffi-bindgen-react-native 0.31.0-6, the newest release) reads. See the
+# alakazam-mobile crate.
+uniffi = { version = "=0.31" }
+
+[build-dependencies]
+regex = "1.9"
+
+[lib]
+crate-type = ["lib"]
+name = "abra_uniffi"

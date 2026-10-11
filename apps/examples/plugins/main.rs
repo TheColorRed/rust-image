@@ -59,6 +59,6 @@ pub fn main() {
 
   let mut result = collage_plugin.apply().unwrap();
   if let Some(canvas) = result.take_canvas_at(0) {
-    canvas.save("out/collage_result.png", None);
+    canvas.save("assets/out/collage_result.png", None);
   }
 }

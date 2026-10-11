@@ -1,11 +1,8 @@
 import { EffectSpec } from '@alakazam/mobile';
 import { type EditSection } from '../edit-sections';
+import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './keys';
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
-export const BLEMISH_TOOL_KEY = 'action-blemish';
-export const SKIN_SMOOTH_KEY = 'action-skin-smooth';
-export const SKIN_TAN_KEY = 'action-skin-tan';
-export const SKIN_TONE_KEY = 'action-skin-tone';
 
 export const beauty: EditSection = {
   key: 'section-beauty',

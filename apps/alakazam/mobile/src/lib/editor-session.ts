@@ -8,7 +8,8 @@ import {
   keepBlemishBase,
 } from '@/src/lib/editor-history';
 import { startEditorLive } from '@/src/lib/editor-live';
-import { clearControlThumbnails, renderRecipe, startReplay } from '@/src/lib/editor-replay';
+import { clearControlThumbnails, releaseShownImages, renderRecipe, startReplay } from '@/src/lib/editor-replay';
+import { showStandIn } from '@/src/lib/editor-pictures';
 import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type ProjectRecipe } from '@/src/lib/project-store';
@@ -37,6 +38,7 @@ function resetSessionState() {
   destroy(editBaseImage);
   clearTimeline();
   previewSourceImage.next(null);
+  releaseShownImages();
   openProject.next(null);
   historyReady.next(false);
   clearControlThumbnails();
@@ -146,7 +148,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         batch(() => {
           editBaseImage.next(result.copy() as AbraImage);
           currentImage.next(result);
-          previewSourceImage.next(result);
+          showStandIn(result);
           ready.next(true);
         });
       }

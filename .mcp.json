@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "data-store": {
+      "command": "node",
+      "args": [
+        "--experimental-sqlite",
+        "C:/Users/untun/.vscode/extensions/thecolorred.data-store-mcp-1.10.0/out/mcp/server.cjs",
+        "[\"c:\\\\Users\\\\untun\\\\Documents\\\\vscode\\\\rust\\\\image\"]",
+        "C:/Users/untun/.vscode/extensions/thecolorred.data-store-mcp-1.10.0/out/"
+      ]
+    }
+  }
+}

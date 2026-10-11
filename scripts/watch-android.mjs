@@ -1,6 +1,6 @@
 // Redeploys the Android app whenever the Rust code behind it changes.
 //
-// Watches abra/ and the React Native binding crate, waits for edits to settle, then runs the same steps as
+// Watches packages/abra/ and the React Native binding crate, waits for edits to settle, then runs the same steps as
 // `npm run deploy:android` (build the Rust libraries and bindings, install with Gradle, launch). An edit made during a
 // build cancels it and starts over with the new code. JS/TS changes are not watched: Metro already reloads those.
 //
@@ -14,7 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const deployScript = path.join(root, 'scripts', 'build-android.mjs');
 const deployArgs = process.argv.slice(2);
 
-const WATCHED = ['abra', path.join('packages', 'react-native', 'alakazam', 'src')];
+const WATCHED = [path.join('packages', 'abra'), path.join('packages', 'react-native', 'alakazam', 'src')];
 const SOURCE_EXTENSIONS = new Set(['.rs', '.wgsl', '.toml']);
 /** Folders that are build output or written by the deploy itself; watching them would loop. */
 const IGNORED = new Set(['target', 'generated', 'node_modules', '.git']);

@@ -1,5 +1,5 @@
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
-import { comparisonImage } from '@/src/lib/editor-replay';
+import { comparisonImage, shownImage } from '@/src/lib/editor-pictures';
 import { editorLive } from '@/src/lib/editor-live';
 import { waitForPreviewFrame } from '@/src/lib/preview-handoff';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
@@ -36,7 +36,7 @@ import {
   showingCheckpoint,
   topInset$,
 } from '@/src/state/preview';
-import { busy$, currentImage, loadError as previewError, loadError$ } from '@/src/state/session';
+import { busy$, loadError as previewError, loadError$ } from '@/src/state/session';
 import { personOutlinesVisible$, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { ImagePreview } from '@alakazam/mobile';
 import { VesselView } from '@vessel/react-native';
@@ -204,12 +204,12 @@ export function EditorPreview() {
     const subscriptions = [
       showCheckpointRequested$.subscribe(() => {
         showingCheckpoint.next(true);
-        previewSourceImage.next(comparisonImage() ?? currentImage.value);
+        previewSourceImage.next(comparisonImage() ?? shownImage());
       }),
       restorePreviewRequested$.subscribe(() => {
         if (!showingCheckpoint.value) return;
         showingCheckpoint.next(false);
-        previewSourceImage.next(currentImage.value);
+        previewSourceImage.next(shownImage());
       }),
     ];
     return () => subscriptions.forEach(subscription => subscription.unsubscribe());

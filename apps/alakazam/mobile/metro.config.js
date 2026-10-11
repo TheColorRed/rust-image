@@ -24,14 +24,6 @@ const config = {
       if (moduleName.startsWith('@/')) {
         return context.resolveRequest(context, path.join(projectRoot, moduleName.slice(2)), platform);
       }
-      // `@abra/core` is the library half of the bindings, re-exported by hand (see abra-core.ts).
-      if (moduleName === '@abra/core') {
-        return context.resolveRequest(
-          context,
-          path.join(workspaceRoot, 'packages/react-native/alakazam/abra-core.ts'),
-          platform,
-        );
-      }
       const isSingleton = SINGLETONS.some((name) => moduleName === name || moduleName.startsWith(`${name}/`));
       const origin = isSingleton ? { ...context, originModulePath: appOrigin } : context;
       return context.resolveRequest(origin, moduleName, platform);

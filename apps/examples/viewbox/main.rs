@@ -39,9 +39,9 @@ fn main() {
   image_large.draw_image_at(&filled_600, (0, 0));
 
   // Save at different sizes
-  image_small.write("out/heart_100.png", None).expect("Failed to save small image");
-  image_medium.write("out/heart_300.png", None).expect("Failed to save medium image");
-  image_large.write("out/heart_600.png", None).expect("Failed to save large image");
+  image_small.write("assets/out/heart_100.png", None).expect("Failed to save small image");
+  image_medium.write("assets/out/heart_300.png", None).expect("Failed to save medium image");
+  image_large.write("assets/out/heart_600.png", None).expect("Failed to save large image");
 
   println!("✅ Generated 3 heart images at different sizes:");
   println!("   - heart_100.png (100x100)");
@@ -57,7 +57,7 @@ fn main() {
   let stroke_stretched = heart_stretched.stroke(3.0, LineJoin::Miter);
   let filled_stretched = fill(stroke_stretched, Fill::Solid(Color::from_rgba(100, 150, 255, 255).into()));
   image_stretch.draw_image_at(&filled_stretched, (0, 0));
-  image_stretch.write("out/heart_stretched.png", None).expect("Failed to save stretched image");
+  image_stretch.write("assets/out/heart_stretched.png", None).expect("Failed to save stretched image");
 
   println!();
   println!("✅ Generated heart_stretched.png (800x400)");

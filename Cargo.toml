@@ -1,17 +1,18 @@
 [workspace]
 members = [
   # "packages/rxrs",
-  "abra/abra",
-  "abra/core/*",
-  "abra/ai/core",
-  "abra/ai/super-resolution",
-  "abra/ai/body-segmentation",
-  "abra/ai/find-person",
-  "abra/plugins/*",
+  "packages/abra/abra",
+  "packages/abra/core/*",
+  "packages/abra/ai/core",
+  "packages/abra/ai/super-resolution",
+  "packages/abra/ai/body-segmentation",
+  "packages/abra/ai/find-person",
+  "packages/abra/plugins/*",
   # Examples
   "apps/examples/*",
   "apps/examples/ai/super-resolution",
   # Bindings for different platforms
+  "packages/bindings/uniffi",
   "packages/node/alakazam",
   "packages/react-native/alakazam",
   # Crates for app building
@@ -66,20 +67,20 @@ napi-derive = { version = "3.6.9" }
 swash = { version = "0.2.10" }
 
 # Packages
-abra = { path = "./abra/abra" }
-adjustments = { path = "./abra/core/adjustments" }
-canvas = { path = "./abra/core/canvas" }
-abra-core = { path = "./abra/core/core" }
-drawing = { path = "./abra/core/drawing" }
-filters = { path = "./abra/core/filters" }
-mask = { path = "./abra/core/mask" }
-options = { path = "./abra/core/options" }
-primitives = { path = "./abra/core/primitives" }
-humanoid = { path = "./abra/core/humanoid" }
-tools = { path = "./abra/core/tools" }
+abra = { path = "./packages/abra/abra" }
+adjustments = { path = "./packages/abra/core/adjustments" }
+canvas = { path = "./packages/abra/core/canvas" }
+abra-core = { path = "./packages/abra/core/core" }
+drawing = { path = "./packages/abra/core/drawing" }
+filters = { path = "./packages/abra/core/filters" }
+mask = { path = "./packages/abra/core/mask" }
+options = { path = "./packages/abra/core/options" }
+primitives = { path = "./packages/abra/core/primitives" }
+humanoid = { path = "./packages/abra/core/humanoid" }
+tools = { path = "./packages/abra/core/tools" }
 
-gpu = { path = "./abra/core/gpu" }
-typography = { path = "./abra/core/typography" }
+gpu = { path = "./packages/abra/core/gpu" }
+typography = { path = "./packages/abra/core/typography" }
 
 # Standalone packages that must not depend on abra, so they can be published on their own
 pub-sub = { path = "./packages/vessel/events" }
@@ -91,14 +92,17 @@ vessel-macros = { path = "./packages/vessel/macros" }
 gpu-passes = { path = "./packages/vessel/gpu-passes" }
 surface = { path = "./packages/vessel/surface" }
 
+# Bindings of the Abra library for other languages
+abra-uniffi = { path = "./packages/bindings/uniffi" }
+
 # Abra Plugins
-collage = { path = "./abra/plugins/collage" }
+collage ={ path = "./packages/abra/plugins/collage" }
 
 # Abra AI Packages
-abra-ai-core = { path = "./abra/ai/core" }
-abra-super-resolution = { path = "./abra/ai/super-resolution" }
-abra-body-segmentation = { path = "./abra/ai/body-segmentation" }
-abra-find-person = { path = "./abra/ai/find-person" }
+abra-ai-core = { path = "./packages/abra/ai/core" }
+abra-super-resolution = { path = "./packages/abra/ai/super-resolution" }
+abra-body-segmentation = { path = "./packages/abra/ai/body-segmentation" }
+abra-find-person = { path = "./packages/abra/ai/find-person" }
 
 [workspace.dependencies.uuid]
 version = "1.24.0"
