@@ -1,22 +1,26 @@
-import { aiModels, downloadAiModel, refreshAiModels, type AiModel } from '@alakazam/mobile';
+import { aiModels, downloadAiModel, refreshAiModels, type AiModelListing } from '@alakazam/mobile';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { errorMessage } from '@/src/lib/error-message';
 import { formatBytes } from '@/src/lib/format-bytes';
 import { useTheme } from '@/src/lib/theme';
-import { aiModelsOfferDeclined, aiModelsVersion } from '@/src/state/ai-models';
+import { aiModelsOfferDeclined, aiModelsRequested, aiModelsRequested$, aiModelsVersion } from '@/src/state/ai-models';
 import { isSkinControlFocused$ } from '@/src/state/edits';
 import { currentImage, editBaseImage } from '@/src/state/session';
 
 /**
- * Offers to download the AI models when a skin control opens and they are not on the device yet. Skin tools work
- * without them (using color-based skin detection); the models only make them more precise.
+ * Offers to download AI models in two cases:
+ * - A skin control opens and the models are not on the device yet. Skin tools work without them (using color-based skin
+ *   detection); the models only make them more precise, so this is an optional upgrade.
+ * - An action that needs models is tapped without them (`aiModelsRequested`). Accepting downloads them and then applies the
+ *   action; cancelling drops the request and downloads nothing.
  */
 export function AiModelPrompt() {
   const { colors } = useTheme();
   const skinControlFocused = useObservable(isSkinControlFocused$, false);
-  const [missing, setMissing] = useState<AiModel[]>([]);
+  const request = useObservable(aiModelsRequested$, null);
+  const [missing, setMissing] = useState<AiModelListing[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const styles = useMemo(
@@ -39,7 +43,7 @@ export function AiModelPrompt() {
 
   useEffect(() => {
     setError(null);
-    if (!skinControlFocused || aiModelsOfferDeclined.value) {
+    if (request || !skinControlFocused || aiModelsOfferDeclined.value) {
       setMissing([]);
       return;
     }
@@ -52,13 +56,44 @@ export function AiModelPrompt() {
     return () => {
       cancelled = true;
     };
-  }, [skinControlFocused]);
+  }, [skinControlFocused, request]);
+
+  // An action that needs models: find which of them are missing, and say so when the list does not have them.
+  useEffect(() => {
+    if (!request) return;
+    setError(null);
+    let cancelled = false;
+    refreshAiModels().then(
+      models => {
+        if (cancelled) return;
+        const needed = models.filter(model => request.roles.includes(model.id));
+        const unlisted = request.roles.filter(role => !needed.some(model => model.id === role));
+        const notDownloaded = needed.filter(model => !model.downloaded);
+        if (unlisted.length > 0) setError(`These AI models are not available yet: ${unlisted.join(', ')}.`);
+        else if (notDownloaded.length === 0) setError('The AI models are on this device but could not be loaded.');
+        setMissing(notDownloaded);
+      },
+      e => !cancelled && setError(errorMessage(e)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [request]);
 
   const download = async () => {
     setError(null);
     setDownloading(true);
     try {
       for (const model of missing) await downloadAiModel(model.id);
+      if (request) {
+        // Now that the models are here, do what was asked.
+        setMissing([]);
+        aiModelsRequested.next(null);
+        aiModelsVersion.next(aiModelsVersion.value + 1);
+        request.onReady();
+        setDownloading(false);
+        return;
+      }
       // Switch the open photo from color-based to AI skin detection.
       const images = [currentImage.value, editBaseImage.value].filter(image => image !== null);
       await Promise.all(images.map(image => image.detectSkinAsync()));
@@ -72,27 +107,40 @@ export function AiModelPrompt() {
   };
 
   const decline = () => {
-    aiModelsOfferDeclined.next(true);
+    if (request) {
+      aiModelsRequested.next(null);
+    } else {
+      aiModelsOfferDeclined.next(true);
+    }
     setMissing([]);
   };
 
   const totalBytes = missing.reduce((sum, model) => sum + Number(model.downloadSizeBytes), 0);
 
   return (
-    <Modal visible={missing.length > 0} transparent animationType="fade" onRequestClose={decline}>
+    <Modal visible={request !== null || missing.length > 0} transparent animationType="fade" onRequestClose={decline}>
       <View style={styles.backdrop}>
         <View style={styles.dialog}>
-          <Text style={styles.title}>Improve body detection?</Text>
+          <Text style={styles.title}>{request ? 'Download AI models?' : 'Improve body detection?'}</Text>
           <Text style={styles.text}>
-            Skin tools already work, but AI models find bodies more precisely. Download{' '}
-            {missing.map(model => model.title).join(' and ')} ({formatBytes(totalBytes)}) once and keep it on this device.
+            {request
+              ? missing.length > 0
+                ? `${request.title} needs ${missing.map(model => model.title).join(' and ')} (${formatBytes(totalBytes)}). Download it once and keep it on this device.`
+                : `${request.title} needs AI models.`
+              : `Skin tools already work, but AI models find bodies more precisely. Download ${missing
+                  .map(model => model.title)
+                  .join(' and ')} (${formatBytes(totalBytes)}) once and keep it on this device.`}
           </Text>
           {error && <Text style={styles.error}>{error}</Text>}
           <View style={styles.buttons}>
             <Pressable accessibilityRole="button" disabled={downloading} onPress={decline} style={[styles.button, styles.decline]}>
-              <Text style={styles.declineText}>Not now</Text>
+              <Text style={styles.declineText}>{request ? 'Cancel' : 'Not now'}</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" disabled={downloading} onPress={download} style={[styles.button, styles.accept]}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={downloading || (request !== null && missing.length === 0)}
+              onPress={download}
+              style={[styles.button, styles.accept]}>
               {downloading ? <ActivityIndicator color="#fff" /> : <Text style={styles.acceptText}>Download</Text>}
             </Pressable>
           </View>

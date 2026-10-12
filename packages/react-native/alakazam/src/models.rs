@@ -14,7 +14,12 @@
 //!     description: What the model does.
 //!     uri: https://.../models/file.onnx
 //!     sha256: <64 hex characters>
+//!     manifest_uri: https://.../models/file.yml   # optional: how the model is fed and read (see `AiModel`)
+//!     manifest_sha256: <64 hex characters>         # required with manifest_uri
 //! ```
+//!
+//! A model with a manifest is stored as `<role>-<12 hash characters>.onnx` with `<role>-<12 hash characters>.yml` beside
+//! it, which is where `AiModel::load` looks for the manifest.
 
 use std::{
   fs,
@@ -47,6 +52,8 @@ struct ModelEntry {
   url: String,
   /// Lowercase hex SHA-256 of the file.
   sha256: String,
+  /// Where the manifest is downloaded from, and its lowercase hex SHA-256. Both or neither.
+  manifest: Option<(String, String)>,
   /// Size of the file in bytes as reported by S3, or 0 if S3 did not say.
   size_bytes: u64,
 }
@@ -102,12 +109,25 @@ fn parse_catalog(p_text: &str) -> Result<Vec<ModelEntry>, String> {
           .map(str::to_string)
           .ok_or_else(|| format!("A model in the catalog has no `{key}`"))
       };
+      let sha256_of = |url: &str, hash: String| {
+        let hash = hash.to_lowercase();
+        if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+          return Err(format!("The catalog hash for {url} is not a SHA-256"));
+        }
+        Ok(hash)
+      };
       let url = text("uri")?;
-      let sha256 = text("sha256")?.to_lowercase();
-      if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("The catalog hash for {url} is not a SHA-256"));
-      }
+      let sha256 = sha256_of(&url, text("sha256")?)?;
+      let manifest = match (text("manifest_uri"), text("manifest_sha256")) {
+        (Ok(manifest_url), Ok(manifest_hash)) => {
+          let manifest_hash = sha256_of(&manifest_url, manifest_hash)?;
+          Some((manifest_url, manifest_hash))
+        }
+        (Err(_), Err(_)) => None,
+        _ => return Err(format!("The model {url} needs both `manifest_uri` and `manifest_sha256`, or neither")),
+      };
       Ok(ModelEntry {
+        manifest,
         role: text("role")?,
         title: text("title")?,
         description: item.as_mapping_get("description").and_then(Yaml::as_str).unwrap_or("").to_string(),
@@ -181,44 +201,70 @@ impl ModelEntry {
     fs::metadata(self.local_path()).ok().filter(|metadata| metadata.is_file()).map(|metadata| metadata.len())
   }
 
-  /// Returns the local path of the model, downloading it first if needed.
+  /// Where the manifest is stored: beside the model, with the same name and a `.yml` extension, which is where
+  /// `AiModel::load` reads it from.
+  fn local_manifest_path(&self) -> PathBuf {
+    self.local_path().with_extension("yml")
+  }
+
+  /// Whether the manifest is on this device, or the model has none. Like the model, a manifest only gets its final name
+  /// after passing the hash check.
+  fn manifest_on_disk(&self) -> bool {
+    self.manifest.is_none() || self.local_manifest_path().is_file()
+  }
+
+  /// Returns the local path of the model, downloading it and its manifest first if needed.
   fn ensure(&self) -> Result<PathBuf, AbraError> {
     let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = self.local_path();
-    if path.exists() {
-      match hash_file(&path) {
-        Ok(hash) if hash == self.sha256 => return Ok(path),
-        _ => {
-          let _ = fs::remove_file(&path);
-        }
-      }
-    }
 
-    let partial = path.with_extension("part");
     let result = fs::create_dir_all(model_dir())
       .map_err(|e| format!("Cannot create the model folder: {e}"))
-      .and_then(|_| self.download(&partial))
-      .and_then(|_| fs::rename(&partial, &path).map_err(|e| format!("Cannot save {}: {e}", self.title)));
+      .and_then(|_| self.ensure_file(&self.url, &self.sha256, &path))
+      .and_then(|_| match &self.manifest {
+        Some((url, sha256)) => self.ensure_file(url, sha256, &self.local_manifest_path()),
+        None => Ok(()),
+      });
     match result {
       Ok(()) => {
         // Older versions of this model are no longer used.
         for entry in downloaded_files(&self.role) {
           if entry.path() != path {
+            let _ = fs::remove_file(entry.path().with_extension("yml"));
             let _ = fs::remove_file(entry.path());
           }
         }
         Ok(path)
       }
-      Err(message) => {
-        let _ = fs::remove_file(&partial);
-        Err(AbraError::Ai { message })
-      }
+      Err(message) => Err(AbraError::Ai { message }),
     }
   }
 
-  /// Downloads the file to `p_partial` and checks its hash.
-  fn download(&self, p_partial: &Path) -> Result<(), String> {
-    let response = ureq::get(&self.url).call().map_err(|e| format!("Failed to download {}: {e}", self.title))?;
+  /// Makes sure `p_path` holds the file at `p_url` with hash `p_sha256`: keeps a file that already matches, otherwise
+  /// downloads it.
+  fn ensure_file(&self, p_url: &str, p_sha256: &str, p_path: &Path) -> Result<(), String> {
+    if p_path.exists() {
+      match hash_file(p_path) {
+        Ok(hash) if hash == p_sha256 => return Ok(()),
+        _ => {
+          let _ = fs::remove_file(p_path);
+        }
+      }
+    }
+
+    let partial = p_path.with_extension("part");
+    let result = self
+      .download(p_url, p_sha256, &partial)
+      .and_then(|_| fs::rename(&partial, p_path).map_err(|e| format!("Cannot save {}: {e}", self.title)));
+    if result.is_err() {
+      let _ = fs::remove_file(&partial);
+    }
+    result
+  }
+
+  /// Downloads the file at `p_url` to `p_partial` and checks its hash.
+  fn download(&self, p_url: &str, p_sha256: &str, p_partial: &Path) -> Result<(), String> {
+    let response = ureq::get(p_url).call().map_err(|e| format!("Failed to download {}: {e}", self.title))?;
     let mut reader = response.into_body().into_reader();
     let mut file = fs::File::create(p_partial).map_err(|e| format!("Cannot create {p_partial:?}: {e}"))?;
     let mut hasher = Sha256::new();
@@ -234,7 +280,7 @@ impl ModelEntry {
     file.flush().map_err(|e| format!("Cannot write {}: {e}", self.title))?;
 
     let hash = hex(&hasher.finalize());
-    if hash != self.sha256 {
+    if hash != p_sha256 {
       return Err(format!("Downloaded {} does not match its hash (got {hash})", self.title));
     }
     Ok(())
@@ -287,9 +333,10 @@ pub(crate) fn person_segmenter() -> Result<Arc<PersonSegmenter>, AbraError> {
   Ok(segmenter)
 }
 
-/// One AI model and whether it is downloaded to this device.
+/// One AI model the app can download, and whether it is on this device. Not the library's `AiModel`, which runs a model:
+/// both are exported to TypeScript, so they cannot share a name.
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct AiModel {
+pub struct AiModelListing {
   /// What the model is used for. Identifies the model in `download_ai_model` and `delete_ai_model`.
   pub id: String,
   /// Name shown to people.
@@ -310,13 +357,13 @@ pub fn person_detection_downloaded() -> bool {
   find_downloaded(PERSON_DETECTION_ROLE).is_ok()
 }
 
-fn describe_models(p_models: Vec<ModelEntry>) -> Vec<AiModel> {
+fn describe_models(p_models: Vec<ModelEntry>) -> Vec<AiModelListing> {
   p_models
     .into_iter()
     .map(|model| {
       let size = model.size_on_disk();
-      AiModel {
-        downloaded: size.is_some(),
+      AiModelListing {
+        downloaded: size.is_some() && model.manifest_on_disk(),
         size_bytes: size.unwrap_or(0),
         download_size_bytes: model.size_bytes,
         id: model.role,
@@ -329,13 +376,13 @@ fn describe_models(p_models: Vec<ModelEntry>) -> Vec<AiModel> {
 
 /// Lists the AI models from the last catalog fetched in this run of the app. Empty until `refresh_ai_models` succeeds.
 #[uniffi::export]
-pub fn ai_models() -> Vec<AiModel> {
+pub fn ai_models() -> Vec<AiModelListing> {
   describe_models(CATALOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone())
 }
 
 /// Fetches the model catalog from S3 and lists the AI models. Fails when S3 can't be reached.
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn refresh_ai_models() -> Result<Vec<AiModel>, AbraError> {
+pub async fn refresh_ai_models() -> Result<Vec<AiModelListing>, AbraError> {
   image_workers::run(|| fetch_catalog().map(describe_models).map_err(|message| AbraError::Ai { message })).await
 }
 
@@ -346,12 +393,27 @@ pub async fn download_ai_model(id: String) -> Result<(), AbraError> {
   image_workers::run(move || model.ensure().map(|_| ())).await
 }
 
+/// Where a downloaded AI model is on this device, for `AiModel.load`. Its manifest is beside it. Works offline. Fails when
+/// the model is not downloaded, or only its `.onnx` is (an older download): `AiModel.load` needs the manifest, and
+/// `download_ai_model` fetches it.
+#[uniffi::export]
+pub fn ai_model_path(id: String) -> Result<String, AbraError> {
+  let path = find_downloaded(&id)?;
+  if !path.with_extension("yml").is_file() {
+    return Err(AbraError::Ai {
+      message: format!("The model for {id} has no manifest on this device; download it again"),
+    });
+  }
+  Ok(path.to_string_lossy().into_owned())
+}
+
 /// Deletes a downloaded AI model. It downloads again the next time a feature needs it. A model already loaded in
 /// memory keeps working until the app restarts.
 #[uniffi::export]
 pub fn delete_ai_model(id: String) -> Result<(), AbraError> {
   let model = find_model(&id)?;
   let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+  let _ = fs::remove_file(model.local_manifest_path());
   match fs::remove_file(model.local_path()) {
     Ok(()) => Ok(()),
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -379,6 +441,36 @@ mod tests {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].role, "skin-segmentation");
     assert_eq!(models[0].title, "Body detail");
+  }
+
+  #[test]
+  fn a_model_may_list_a_manifest_but_needs_its_hash() {
+    let with = |lines: &str| format!("{CATALOG_TEXT}{lines}");
+    let hash = "a".repeat(64);
+    let listed = format!("    manifest_uri: https://example.com/a.yml\n    manifest_sha256: {hash}\n");
+    let models = parse_catalog(&with(&listed)).unwrap();
+    assert_eq!(models[0].manifest, Some(("https://example.com/a.yml".to_string(), hash.clone())));
+    assert_eq!(parse_catalog(CATALOG_TEXT).unwrap()[0].manifest, None);
+    assert!(parse_catalog(&with("    manifest_uri: https://example.com/a.yml\n")).is_err());
+    assert!(parse_catalog(&with(&format!("    manifest_sha256: {hash}\n"))).is_err());
+    assert!(parse_catalog(&with("    manifest_uri: x\n    manifest_sha256: nothex\n")).is_err());
+  }
+
+  #[test]
+  fn a_model_path_needs_the_manifest_beside_the_model() {
+    let role = "path-test-role";
+    fs::create_dir_all(model_dir()).unwrap();
+    let onnx = model_dir().join(format!("{role}-0123456789ab.onnx"));
+    fs::write(&onnx, b"model").unwrap();
+    let _ = fs::remove_file(onnx.with_extension("yml"));
+
+    assert!(ai_model_path(role.to_string()).is_err(), "an ONNX-only download cannot be loaded as an AiModel");
+    fs::write(onnx.with_extension("yml"), b"name: x\n").unwrap();
+    assert_eq!(ai_model_path(role.to_string()).unwrap(), onnx.to_string_lossy());
+    assert!(ai_model_path("no-such-model".to_string()).is_err());
+
+    let _ = fs::remove_file(&onnx);
+    let _ = fs::remove_file(onnx.with_extension("yml"));
   }
 
   #[test]

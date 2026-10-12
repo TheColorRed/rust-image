@@ -1,0 +1,30 @@
+# MediaPipe Face Landmarker
+#
+# Purpose: 478 dense 3D face landmarks, including the irises
+# Input: RGB float32 tensor [1, 256, 256, 3], normalized to [0, 1] (NHWC)
+# Input image: Square crop containing one face; level the eyes when practical
+# Output: 478 landmarks as [1, 1, 1, 1434], plus one raw face-presence logit
+
+name: face_landmarks_detector
+decoder: landmarks
+description: 478-point MediaPipe facial mesh for feature-aware portrait adjustments
+source: https://huggingface.co/senty-au/face_landmarks_detector-ONNX
+license: Apache-2.0
+sha256: 7d6e82dee82a1dca5fbddb282b3cc74571833a530de317fc22ae325c3358beeb
+
+upstream:
+  bundle: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+  bundle_sha256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+  model_sha256: c7d54204ce0448474c7f3fa9af494787c0965cbdd6f20fc72867e43046bd43d5
+conversion:
+  tool: tf2onnx
+  version: 1.17.0
+  opset: 17
+
+# How Abra feeds the model and reads its answer (see abra-ai-core: InputSpec and Decoder).
+params:
+  input_size: 256
+  input_layout: nhwc
+  input_fit: stretch
+  landmark_count: 478
+  coordinates_per_landmark: 3

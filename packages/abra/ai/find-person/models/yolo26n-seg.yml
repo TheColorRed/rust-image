@@ -1,0 +1,29 @@
+# YOLO26 Nano Instance-Segmentation Model
+#
+# Purpose: Finds people and produces a separate silhouette mask for each person
+# Architecture: Ultralytics YOLO26n-seg
+# Input: RGB float32 tensor [1, 3, 640, 640], normalized to [0, 1]
+# Preprocessing: Bilinear resize with centered letterboxing, padding value 114/255
+# Outputs: Detections [1, 300, 38] and mask prototypes [1, 32, height, width]
+# Detection layout: x1, y1, x2, y2, confidence, class ID, 32 mask coefficients
+
+name: yolo26n-seg
+decoder: instance-segmentation
+description: Person detection and instance segmentation with YOLO26 nano
+source: https://huggingface.co/prithivMLmods/YOLO26-ONNX/tree/main/yolo26n-seg
+license: AGPL-3.0
+sha256: a49edf10356c0be2452c6f398c39c1284390f7506c322c9055d60974648f8852
+
+# How Abra feeds the model and reads its answer (see abra-ai-core: InputSpec and Decoder).
+# input_pad is the letterbox gray, 114/255. class 0 is person.
+params:
+  input_size: 640
+  input_fit: letterbox
+  input_pad: 0.44705883
+  class: 0
+  confidence_threshold: 0.25
+  detection_count: 300
+  detection_size: 38
+  mask_channels: 32
+  # Snap box sides within this fraction of the source-image edge onto that edge.
+  edge_snap: 0.04

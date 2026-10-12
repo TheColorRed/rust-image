@@ -1,0 +1,12 @@
+[package]
+name = "abra-face-landmarks"
+version = "1.0.0"
+edition = "2024"
+description = "Dense face landmarks for portrait editing"
+
+[dependencies]
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

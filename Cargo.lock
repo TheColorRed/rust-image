@@ -44,6 +44,7 @@ name = "abra-ai-core"
 version = "1.0.0"
 dependencies = [
  "abra-core",
+ "mask",
  "ndarray",
  "ort",
  "rayon",
@@ -84,6 +85,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "abra-face-landmarks"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+]
+
+[[package]]
+name = "abra-face-parsing"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
+]
+
+[[package]]
 name = "abra-find-person"
 version = "1.0.0"
 dependencies = [
@@ -105,6 +123,7 @@ name = "abra-uniffi"
 version = "0.1.0"
 dependencies = [
  "abra",
+ "abra-ai-core",
  "regex",
  "uniffi",
 ]

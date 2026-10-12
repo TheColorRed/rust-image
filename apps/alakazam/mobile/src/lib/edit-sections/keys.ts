@@ -1,6 +1,7 @@
 /** The keys of the controls that the editor treats specially. They are here, and not with the controls, so the state that
  * reads them does not depend on the controls and is not re-run when one is edited. */
 export const BLEMISH_TOOL_KEY = 'action-blemish';
+export const RED_EYE_TOOL_KEY = 'action-red-eye';
 export const SKIN_SMOOTH_KEY = 'action-skin-smooth';
 export const SKIN_TAN_KEY = 'action-skin-tan';
 export const SKIN_TONE_KEY = 'action-skin-tone';

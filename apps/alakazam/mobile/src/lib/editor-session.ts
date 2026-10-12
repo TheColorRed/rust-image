@@ -13,7 +13,7 @@ import { showStandIn } from '@/src/lib/editor-pictures';
 import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type ProjectRecipe } from '@/src/lib/project-store';
-import { recipeAt, type TimelineEntry } from '@/src/lib/timeline';
+import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -169,8 +169,8 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       if (__DEV__) console.debug('[image] decode and skin mask ms:', Date.now() - started);
 
       // The project was closed with some steps applied and maybe more undone after them. Only the applied steps are rebuilt.
-      // Only blemish steps change pixels, so only they are rendered: each heals the edits that came before it, on top of the
-      // picture the last blemish left. Every other step is just edit state, which the last step already holds. Each healed
+      // Only steps that change pixels (blemish and red-eye fixes) are rendered: each bakes in the edits that came before it, on top
+      // of the picture the last one left. Every other step is just edit state, which the last step already holds. Each healed
       // picture is kept by the timeline, so undo and redo across a blemish only swap the base. The undone steps are kept as
       // they are, and a blemish among them is healed if it is ever redone.
       const saved = project?.timeline ?? [];
@@ -183,7 +183,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       for (const entry of saved.slice(0, applied)) {
         try {
           if (personModelMissing && editsAPerson(entry.before ?? entry)) throw new Error(PERSON_MODEL_MISSING);
-          if (entry.change.type === 'blemish') {
+          if (changesPixels(entry.change)) {
             await nextFrame();
             if (cancelled) {
               base.uniffiDestroy();

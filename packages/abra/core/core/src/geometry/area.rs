@@ -49,6 +49,16 @@ impl Area {
     let radius = p_radius.into() as f32;
     Area::ellipse(p_center, (radius * 2.0, radius * 2.0))
   }
+  /// Creates a circular area around a center, as large as the points around it: its radius is the average distance from
+  /// the center to the points. With no points the radius is `0`.
+  /// - `p_center`: The center point of the circle.
+  /// - `p_points`: The points around the center.
+  pub fn circle_around(p_center: impl Into<PointF>, p_points: impl IntoIterator<Item = impl Into<PointF>>) -> Area {
+    let center = p_center.into();
+    let distances: Vec<f32> = p_points.into_iter().map(|point| center.distance_to(point.into())).collect();
+    let radius = if distances.is_empty() { 0.0 } else { distances.iter().sum::<f32>() / distances.len() as f32 };
+    Area::circle(center, radius)
+  }
   /// Creates an elliptical area.
   /// - `p_center`: The center point of the ellipse.
   /// - `p_size`: The size (width, height) of the ellipse.
@@ -210,6 +220,15 @@ impl From<&Image> for Area {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn a_circle_around_a_center_is_as_large_as_the_points_around_it() {
+    let area = Area::circle_around((10, 10), [(13, 10), (7, 10), (10, 14), (10, 6)]);
+    let bounds = area.bounds();
+    assert_eq!(bounds.center(), PointF::new(10, 10));
+    assert!((bounds.width - 7.0).abs() < 0.5, "the radius is the average distance, 3.5: {bounds:?}");
+    assert!(Area::circle_around((1, 1), Vec::<PointF>::new()).bounds().is_empty(), "no points, no radius");
+  }
+
   use super::*;
 
   #[test]

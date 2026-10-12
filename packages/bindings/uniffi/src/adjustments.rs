@@ -91,6 +91,21 @@ pub fn color_multiply(color: Arc<Color>) -> Arc<ColorMultiply> {
   Arc::new(ColorMultiply(color::color_multiply(color.0)))
 }
 
+/// Mixes the color channels: each channel of the result is a weighted sum of the red, green and blue channels. Made by
+/// [`channel_mix`].
+#[derive(uniffi::Object)]
+pub struct ChannelMix(color::ChannelMix);
+
+/// A channel mixer. Each argument is the weights, `[red, green, blue]`, of the source's channels that make one channel of the
+/// result, so `[1, 0, 0]`, `[0, 1, 0]`, `[0, 0, 1]` changes nothing. An array that is not three numbers panics.
+#[uniffi::export]
+pub fn channel_mix(red: Vec<f32>, green: Vec<f32>, blue: Vec<f32>) -> Arc<ChannelMix> {
+  let weights = |name: &str, values: Vec<f32>| -> [f32; 3] {
+    values.try_into().unwrap_or_else(|values: Vec<f32>| panic!("the {name} weights need three numbers, got {}", values.len()))
+  };
+  Arc::new(ChannelMix(color::channel_mix(weights("red", red), weights("green", green), weights("blue", blue))))
+}
+
 /// Makes the image more transparent. Made by [`reduce_opacity`].
 #[derive(uniffi::Object)]
 pub struct Opacity(color::Opacity);
@@ -382,6 +397,7 @@ effect_methods!(
   Grayscale,
   Invert,
   ColorMultiply,
+  ChannelMix,
   Opacity,
   Brightness,
   Contrast,
@@ -537,6 +553,20 @@ mod tests {
     let level = pixel(128, 128, 128, 255);
     threshold(128).apply_on_cpu(level.clone());
     assert_eq!(level.get_pixel(0, 0), Some(vec![0, 0, 0, 255]), "a mean equal to the threshold is not above it");
+  }
+
+  #[test]
+  fn a_channel_mix_makes_one_channel_from_the_others_through_a_mask() {
+    let image = Arc::new(Image::new_from_pixels(2, 1, vec![220, 40, 30, 255, 220, 40, 30, 255], Channels::RGBA));
+    let mask = Arc::new(crate::Mask::from_values(2, 1, vec![255, 0]));
+    channel_mix(vec![0.0, 0.5, 0.5], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]).with_mask(Some(mask)).apply_on_cpu(image.clone());
+    assert_eq!(image.rgba(), vec![35, 40, 30, 255, 220, 40, 30, 255], "only the pixel the mask reaches changes");
+  }
+
+  #[test]
+  #[should_panic(expected = "need three numbers")]
+  fn a_channel_mix_needs_three_weights_for_each_channel() {
+    channel_mix(vec![1.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]);
   }
 
   #[test]

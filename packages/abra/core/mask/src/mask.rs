@@ -1,8 +1,9 @@
-use abra_core::{Area, Color, GrayPlane, Image, PointF, ResizeTarget, Size, Transform, TransformAlgorithm, blend};
+use abra_core::{Area, Color, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm, blend};
 pub use abra_core::rgba_to_gray;
 use std::borrow::Cow;
 
 use drawing::fill;
+use rayon::prelude::*;
 
 /// Helper trait to convert various types into an optional PointF
 pub trait IntoOptionalPointF {
@@ -82,6 +83,12 @@ impl Mask {
     Mask::from_values(width, height, vec![255; width as usize * height as usize])
   }
 
+  /// Creates a mask that lets nothing through (all `0`), to draw into or to add to.
+  /// - `p_width`, `p_height`: The size of the mask.
+  pub fn empty(p_width: u32, p_height: u32) -> Mask {
+    Mask::from_values(p_width, p_height, vec![0; p_width as usize * p_height as usize])
+  }
+
   /// Creates a mask from one value per pixel.
   /// - `p_width`, `p_height`: The size of the mask.
   /// - `p_values`: The values, row by row from the top left. Its length must be `p_width * p_height`.
@@ -133,6 +140,60 @@ impl Mask {
     self.plane.get(p_x, p_y)
   }
 
+  /// Creates a mask of the pixels of an image that are close to a color: `255` where a pixel has the color's hue and is
+  /// saturated and bright enough, `0` where it does not, and values between along the edge when `p_feather` is more than
+  /// `0`. Use it to pick out a color anywhere in a picture, then limit an effect to it, or combine it with other masks
+  /// (such as an eye mask) to pick out that color in only one place.
+  ///
+  /// Gray pixels have no hue, so give `p_min_saturation` more than `0` to leave them out.
+  /// - `p_image`: The image to look at.
+  /// - `p_color`: The color whose hue is looked for. Only its hue is used.
+  /// - `p_hue_range`: How far a pixel's hue may be from the color's, in degrees either way, and still count fully.
+  /// - `p_min_saturation`: The least saturation, from `0` to `1`, a pixel may have.
+  /// - `p_min_value`: The least brightness (HSV value), from `0` to `1`, a pixel may have.
+  /// - `p_feather`: How soft the edges are, from `0` (hard) to `1`. Each limit eases in over that fraction of itself: the
+  ///   hue range grows by it, and the saturation and brightness limits start lower by it.
+  pub fn from_color_range(
+    p_image: &Image, p_color: Color, p_hue_range: f32, p_min_saturation: f32, p_min_value: f32, p_feather: f32,
+  ) -> Mask {
+    let (width, height) = p_image.dimensions::<u32>();
+    let target_hue = p_color.hsv().0;
+    let feather = p_feather.clamp(0.0, 1.0);
+    // 1 inside the limit, easing to 0 over `feather` of the limit past it, and 0 beyond that. Each limit is held to 0..=1 on its
+    // own: two limits that are both far out would otherwise multiply two negative numbers into a positive one.
+    let at_most = |value: f32, limit: f32| {
+      if value <= limit {
+        1.0
+      } else if limit * feather > 0.0 {
+        (1.0 - (value - limit) / (limit * feather)).max(0.0)
+      } else {
+        0.0
+      }
+    };
+    // 1 at or above the limit, easing to 0 over `feather` of the limit below it, and 0 beyond that.
+    let at_least = |value: f32, limit: f32| {
+      if value >= limit {
+        1.0
+      } else if limit * feather > 0.0 {
+        (1.0 - (limit - value) / (limit * feather)).max(0.0)
+      } else {
+        0.0
+      }
+    };
+    let values: Vec<u8> = p_image
+      .rgba()
+      .par_chunks_exact(4)
+      .map(|pixel| {
+        let (hue, saturation, value) = Color::from_rgb(pixel[0], pixel[1], pixel[2]).hsv();
+        let distance = (hue - target_hue).abs();
+        let distance = distance.min(360.0 - distance);
+        let weight = at_most(distance, p_hue_range) * at_least(saturation, p_min_saturation) * at_least(value, p_min_value);
+        (weight.clamp(0.0, 1.0) * 255.0).round() as u8
+      })
+      .collect();
+    Mask::from_values(width, height, values)
+  }
+
   /// The mask as a gray RGBA image, for drawing or saving.
   pub fn to_image(&self) -> Image {
     self.plane.to_image()
@@ -145,6 +206,136 @@ impl Mask {
     let mut image = self.to_image();
     image.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), p_algorithm);
     Mask::from_image(image)
+  }
+
+  /// The smallest rectangle holding every pixel whose value is above `p_threshold`, or `None` when there is none. Use
+  /// it to find where a mask has anything in it.
+  /// - `p_threshold`: Pixels above this value count. `0` counts every pixel the mask reaches at all.
+  pub fn bounds(&self, p_threshold: u8) -> Option<Rect> {
+    let (width, height) = (self.width() as usize, self.height() as usize);
+    let (mut left, mut top, mut right, mut bottom) = (width, height, 0, 0);
+    for (row, values) in self.values().chunks_exact(width.max(1)).enumerate() {
+      let Some(first) = values.iter().position(|value| *value > p_threshold) else {
+        continue;
+      };
+      let last = values.iter().rposition(|value| *value > p_threshold).unwrap_or(first);
+      left = left.min(first);
+      right = right.max(last + 1);
+      top = top.min(row);
+      bottom = row + 1;
+    }
+    (right > left && bottom > top).then(|| Rect::from_edges(left, top, right, bottom))
+  }
+
+  /// How much of the mask is selected: the fraction, from `0` to `1`, of its pixels with a value above `p_threshold`. A mask with
+  /// no pixels is `0`. Use it with [`Mask::cropped`] to see how full a region is, which tells a round, solid spot from a thin or
+  /// patchy one of the same size.
+  /// - `p_threshold`: Pixels above this value count.
+  pub fn coverage(&self, p_threshold: u8) -> f32 {
+    let values = self.values();
+    if values.is_empty() {
+      return 0.0;
+    }
+    values.iter().filter(|value| **value > p_threshold).count() as f32 / values.len() as f32
+  }
+
+  /// A copy of the part of the mask inside a rectangle. The rectangle is clipped to the mask; when none of it is on the
+  /// mask the result has no pixels.
+  /// - `p_rect`: The part to keep.
+  pub fn cropped(&self, p_rect: Rect) -> Mask {
+    let keep = p_rect.intersect(Rect::new((0, 0), (self.width(), self.height())));
+    if keep.is_empty() {
+      return Mask::from_values(0, 0, Vec::new());
+    }
+    let (left, top, right, bottom) = keep.edges::<u32>();
+    let (width, height) = (right - left, bottom - top);
+    let stride = self.width() as usize;
+    let mut values = Vec::with_capacity(width as usize * height as usize);
+    for row in top..bottom {
+      let start = row as usize * stride + left as usize;
+      values.extend_from_slice(&self.values()[start..start + width as usize]);
+    }
+    Mask::from_values(width, height, values)
+  }
+
+  /// This mask placed onto a larger, empty (all `0`) mask. The part that falls outside the new mask is cut off. It is the
+  /// opposite of [`Mask::cropped`]: a mask found in a crop of a picture can be put back at the crop's place in the whole
+  /// picture.
+  /// - `p_width`, `p_height`: The size of the new mask.
+  /// - `p_at`: Where the top left corner of this mask goes in the new mask. May be negative.
+  pub fn placed(&self, p_width: u32, p_height: u32, p_at: impl Into<PointF>) -> Mask {
+    let at = p_at.into();
+    let (offset_x, offset_y) = (at.x.round() as i64, at.y.round() as i64);
+    let mut values = vec![0u8; p_width as usize * p_height as usize];
+    let columns = (0..self.width() as i64).filter(|x| (0..p_width as i64).contains(&(x + offset_x)));
+    let (first, last) = (columns.clone().next(), columns.last());
+    if let (Some(first), Some(last)) = (first, last) {
+      for row in (0..self.height() as i64).filter(|y| (0..p_height as i64).contains(&(y + offset_y))) {
+        let from = row as usize * self.width() as usize;
+        let to = (row + offset_y) as usize * p_width as usize + (first + offset_x) as usize;
+        let count = (last - first + 1) as usize;
+        values[to..to + count].copy_from_slice(&self.values()[from + first as usize..from + first as usize + count]);
+      }
+    }
+    Mask::from_values(p_width, p_height, values)
+  }
+
+  /// A mask with every value flipped: `255` becomes `0` and `0` becomes `255`.
+  pub fn inverted(&self) -> Mask {
+    Mask::from_values(self.width(), self.height(), self.values().iter().map(|value| 255 - value).collect())
+  }
+
+  /// The two masks added: where both reach a pixel the result is stronger, up to `255`. The result is the size of this
+  /// mask; a mask of another size is first scaled to it (see [`Mask::combined`]).
+  /// - `p_other`: The mask to add.
+  pub fn added(&self, p_other: &Mask) -> Mask {
+    self.combined(p_other, |a, b| a.saturating_add(b))
+  }
+
+  /// This mask with the other taken away: where the other reaches a pixel, this one is weaker, down to `0`. Use it to
+  /// cut one region out of another.
+  /// - `p_other`: The mask to take away.
+  pub fn subtracted(&self, p_other: &Mask) -> Mask {
+    self.combined(p_other, |a, b| a.saturating_sub(b))
+  }
+
+  /// The two masks multiplied: a pixel is only as strong as the weaker one, softly (`128` × `128` is `64`). Use it to
+  /// keep what two masks agree on, such as the skin of one person.
+  /// - `p_other`: The mask to multiply by.
+  pub fn multiplied(&self, p_other: &Mask) -> Mask {
+    self.combined(p_other, |a, b| ((a as u16 * b as u16 + 127) / 255) as u8)
+  }
+
+  /// The strongest of the two masks at each pixel: everything either one reaches.
+  /// - `p_other`: The mask to combine with.
+  pub fn maximum(&self, p_other: &Mask) -> Mask {
+    self.combined(p_other, u8::max)
+  }
+
+  /// The weakest of the two masks at each pixel: only what both reach.
+  /// - `p_other`: The mask to combine with.
+  pub fn minimum(&self, p_other: &Mask) -> Mask {
+    self.combined(p_other, u8::min)
+  }
+
+  /// Joins the values of two masks pixel by pixel. The result is the size of this mask. A mask of another size is
+  /// scaled to it with a bilinear resize first, and a mask with no pixels counts as `0` everywhere.
+  fn combined(&self, p_other: &Mask, p_join: impl Fn(u8, u8) -> u8) -> Mask {
+    let resized;
+    let other = if p_other.dimensions::<u32>() == self.dimensions::<u32>() {
+      p_other.values()
+    } else if p_other.width() == 0 || p_other.height() == 0 {
+      resized = Mask::from_values(self.width(), self.height(), vec![0; self.values().len()]);
+      resized.values()
+    } else {
+      resized = p_other.resized(self.width(), self.height(), TransformAlgorithm::Bilinear);
+      resized.values()
+    };
+    Mask::from_values(
+      self.width(),
+      self.height(),
+      self.values().iter().zip(other).map(|(a, b)| p_join(*a, *b)).collect(),
+    )
   }
 }
 
@@ -291,6 +482,140 @@ mod tests {
 
     assert_eq!(mask.dimensions::<u32>(), (8, 6));
     assert!(mask.values().iter().all(|value| *value == 200));
+  }
+
+  fn pair() -> (Mask, Mask) {
+    (Mask::from_values(4, 1, vec![0, 100, 200, 255]), Mask::from_values(4, 1, vec![255, 100, 100, 128]))
+  }
+
+  fn colors(p_pixels: &[(u8, u8, u8)]) -> Image {
+    let rgba: Vec<u8> = p_pixels.iter().flat_map(|(r, g, b)| [*r, *g, *b, 255]).collect();
+    Image::new_from_pixels(p_pixels.len() as u32, 1, rgba, abra_core::Channels::RGBA)
+  }
+
+  #[test]
+  fn an_empty_mask_lets_nothing_through_until_something_is_drawn() {
+    let mut mask = Mask::empty(6, 6);
+    assert_eq!((mask.width(), mask.height()), (6, 6));
+    assert!(mask.values().iter().all(|value| *value == 0));
+    // The area's top left corner is placed at `at`: this circle's box starts at (1, 1).
+    mask.draw_area(&Area::circle((3.0, 3.0), 2.0), Color::white(), (1.0, 1.0));
+    assert_eq!(mask.get(3, 3), Some(255));
+    assert_eq!(mask.get(0, 0), Some(0));
+  }
+
+  #[test]
+  fn a_color_range_picks_out_the_pixels_with_that_hue() {
+    // Red, orange-red, green, gray, dark red.
+    let image = colors(&[(220, 30, 30), (230, 130, 30), (30, 200, 30), (120, 120, 120), (30, 5, 5)]);
+    let mask = Mask::from_color_range(&image, Color::red(), 20.0, 0.4, 0.3, 0.0);
+    assert_eq!(mask.values(), &[255, 0, 0, 0, 0], "orange is too far, green and gray are not red, dark red is too dark");
+    let wider = Mask::from_color_range(&image, Color::red(), 35.0, 0.4, 0.3, 0.0);
+    assert_eq!(wider.values()[1], 255, "a wider range takes in the orange-red");
+  }
+
+  #[test]
+  fn a_color_range_wraps_around_the_hue_circle() {
+    // Hue 350 and hue 10 are both 10 degrees from red at 0.
+    let image = colors(&[(220, 30, 60), (220, 60, 30)]);
+    assert_eq!(Mask::from_color_range(&image, Color::red(), 20.0, 0.4, 0.3, 0.0).values(), &[255, 255]);
+  }
+
+  #[test]
+  fn a_pixel_far_outside_every_limit_is_never_selected_however_much_it_is_feathered() {
+    // Blue-gray, like an iris: its hue is far from red and its saturation is below the limit, which are both far out.
+    let image = colors(&[(110, 130, 150), (120, 128, 135), (10, 10, 10)]);
+    for feather in [0.0, 0.3, 1.0] {
+      let mask = Mask::from_color_range(&image, Color::red(), 22.0, 0.5, 0.15, feather);
+      assert_eq!(mask.values(), &[0, 0, 0], "feather {feather}");
+    }
+  }
+
+  #[test]
+  fn feathering_eases_the_edge_instead_of_cutting_it() {
+    let image = colors(&[(220, 30, 30), (220, 105, 30)]);
+    let hard = Mask::from_color_range(&image, Color::red(), 20.0, 0.4, 0.3, 0.0);
+    let soft = Mask::from_color_range(&image, Color::red(), 20.0, 0.4, 0.3, 1.0);
+    assert_eq!(hard.values()[1], 0);
+    assert!(soft.values()[1] > 0 && soft.values()[1] < 255, "partly selected: {}", soft.values()[1]);
+    assert_eq!(soft.values()[0], 255, "a pixel well inside is still fully selected");
+  }
+
+  #[test]
+  fn bounds_find_where_a_mask_has_anything_in_it() {
+    let mut values = vec![0u8; 5 * 4];
+    values[1 * 5 + 2] = 200;
+    values[2 * 5 + 3] = 50;
+    let mask = Mask::from_values(5, 4, values);
+    assert_eq!(mask.bounds(0), Some(Rect::from_edges(2, 1, 4, 3)));
+    assert_eq!(mask.bounds(100), Some(Rect::from_edges(2, 1, 3, 2)), "only values above the threshold count");
+    assert_eq!(mask.bounds(200), None);
+    assert_eq!(Mask::from_values(0, 0, vec![]).bounds(0), None);
+  }
+
+  #[test]
+  fn coverage_is_the_fraction_of_the_mask_that_is_selected() {
+    let mask = Mask::from_values(4, 1, vec![0, 100, 200, 255]);
+    assert_eq!(mask.coverage(0), 0.75);
+    assert_eq!(mask.coverage(100), 0.5);
+    assert_eq!(mask.coverage(255), 0.0);
+    assert_eq!(Mask::from_values(0, 0, vec![]).coverage(0), 0.0);
+  }
+
+  #[test]
+  fn a_mask_is_cropped_and_placed_back() {
+    let whole = Mask::from_values(4, 3, (0..12).collect());
+    let part = whole.cropped(Rect::new((1, 1), (2, 2)));
+    assert_eq!((part.width(), part.height()), (2, 2));
+    assert_eq!(part.values(), &[5, 6, 9, 10]);
+    assert_eq!(whole.cropped(Rect::new((3, 2), (9, 9))).values(), &[11], "clipped to the mask");
+    assert_eq!(whole.cropped(Rect::new((10, 10), (2, 2))).dimensions::<u32>(), (0, 0), "nothing of it is on the mask");
+
+    let back = part.placed(4, 3, (1, 1));
+    assert_eq!(back.values(), &[0, 0, 0, 0, 0, 5, 6, 0, 0, 9, 10, 0]);
+  }
+
+  #[test]
+  fn a_mask_placed_partly_outside_is_cut_off() {
+    let part = Mask::from_values(2, 2, vec![1, 2, 3, 4]);
+    assert_eq!(part.placed(3, 3, (2, 2)).values(), &[0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(part.placed(3, 3, (-1, -1)).values(), &[4, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert!(part.placed(3, 3, (5, 5)).values().iter().all(|value| *value == 0), "entirely outside");
+  }
+
+  #[test]
+  fn masks_are_inverted_added_and_subtracted_without_wrapping() {
+    let (a, b) = pair();
+    assert_eq!(a.inverted().values(), &[255, 155, 55, 0]);
+    assert_eq!(a.added(&b).values(), &[255, 200, 255, 255], "adding stops at 255");
+    assert_eq!(a.subtracted(&b).values(), &[0, 0, 100, 127], "subtracting stops at 0");
+  }
+
+  #[test]
+  fn masks_are_multiplied_softly_and_joined_by_strongest_and_weakest() {
+    let (a, b) = pair();
+    assert_eq!(a.multiplied(&b).values(), &[0, 39, 78, 128]);
+    assert_eq!(Mask::from_values(1, 1, vec![128]).multiplied(&Mask::from_values(1, 1, vec![128])).values(), &[64]);
+    assert_eq!(a.maximum(&b).values(), &[255, 100, 200, 255]);
+    assert_eq!(a.minimum(&b).values(), &[0, 100, 100, 128]);
+  }
+
+  #[test]
+  fn a_mask_of_another_size_is_scaled_to_this_one() {
+    let a = Mask::from_values(4, 4, vec![200; 16]);
+    let half = Mask::from_values(1, 1, vec![100]);
+    let result = a.subtracted(&half);
+    assert_eq!(result.dimensions::<u32>(), (4, 4), "the result keeps this mask's size");
+    assert!(result.values().iter().all(|value| *value == 100));
+  }
+
+  #[test]
+  fn an_empty_mask_counts_as_nothing() {
+    let a = Mask::from_values(2, 1, vec![10, 20]);
+    let empty = Mask::from_values(0, 0, vec![]);
+    assert_eq!(a.added(&empty).values(), &[10, 20]);
+    assert_eq!(a.multiplied(&empty).values(), &[0, 0]);
+    assert_eq!(empty.added(&a).dimensions::<u32>(), (0, 0));
   }
 
   #[test]

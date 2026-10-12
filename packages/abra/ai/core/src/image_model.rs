@@ -46,12 +46,12 @@
 //! ```
 
 use crate::error::AiError;
+use crate::manifest::Manifest;
 use crate::onnx::OnnxSession;
 use crate::tensor::image_to_nchw;
 use crate::tiled::{TileAccumulator, TileConfig, generate_tiles};
 use abra_core::Image;
 use abra_core::crop;
-use saphyr::{LoadableYamlNode, Yaml};
 use std::path::Path;
 use std::time::Instant;
 
@@ -107,81 +107,29 @@ impl ModelSpec {
   /// and a `.yml` extension.
   pub fn load(p_onnx_path: impl AsRef<Path>) -> Result<Self, AiError> {
     let p_onnx_path = p_onnx_path.as_ref();
-    let yaml_path = p_onnx_path.with_extension("yml");
-
-    if !yaml_path.exists() {
-      return Err(AiError::model_load_failed(format!("Model manifest not found: {}", yaml_path.display())));
-    }
-
-    let yaml_str = std::fs::read_to_string(&yaml_path)
-      .map_err(|e| AiError::model_load_failed(format!("Failed to read manifest: {}", e)))?;
-
-    let docs =
-      Yaml::load_from_str(&yaml_str).map_err(|e| AiError::model_load_failed(format!("Invalid YAML: {}", e)))?;
-
-    let doc = docs.first().ok_or_else(|| AiError::model_load_failed("Empty YAML document"))?;
-
-    Self::from_yaml(doc, p_onnx_path.to_string_lossy().to_string())
+    let manifest = Manifest::load(p_onnx_path)?;
+    Ok(Self::from_manifest(&manifest, p_onnx_path.to_string_lossy().to_string()))
   }
 
-  /// Creates a ModelSpec from a parsed YAML document.
-  fn from_yaml(p_doc: &Yaml, p_onnx_path: String) -> Result<Self, AiError> {
-    let name = p_doc["name"].as_str().unwrap_or("Unknown Model").to_string();
-    let description = p_doc["description"].as_str().unwrap_or("No description").to_string();
-
-    let params = if p_doc["params"].is_badvalue() || p_doc["params"].is_null() { p_doc } else { &p_doc["params"] };
-
-    let scale_factor = params["scale_factor"].as_floating_point().map(|f| f as f32).unwrap_or(1.0);
-
-    let tile_size = params["tile_size"].as_integer().map(|i| i as u32).unwrap_or(256);
-    let tile_overlap = params["tile_overlap"].as_integer().map(|i| i as u32).unwrap_or(32);
-
-    // Parse control specification if present
-    let control = if p_doc["control"].is_badvalue() || p_doc["control"].is_null() {
-      None
-    } else {
-      let ctrl = &p_doc["control"];
-      let size = ctrl["size"].as_integer().unwrap_or(0) as usize;
-
-      let defaults: Vec<f32> = ctrl["defaults"]
-        .as_vec()
-        .map(|v| v.iter().filter_map(|x| x.as_floating_point().map(|f| f as f32)).collect())
-        .unwrap_or_else(|| vec![0.5; size]);
-
-      let parameters: Vec<ControlParameter> = ctrl["parameters"]
-        .as_vec()
-        .map(|v| {
-          v.iter()
-            .filter_map(|p| {
-              Some(ControlParameter {
-                name: p["name"].as_str()?.to_string(),
-                description: p["description"].as_str().unwrap_or("").to_string(),
-                index: p["index"].as_integer()? as usize,
-              })
-            })
-            .collect()
-        })
-        .unwrap_or_default();
-
-      if size > 0 {
-        Some(ControlSpec {
-          size,
-          defaults,
-          parameters,
-        })
-      } else {
-        None
-      }
-    };
-
-    Ok(Self {
+  /// Creates a ModelSpec from a model's manifest, the same one `AiModel` reads. The image-model settings
+  /// (`scale_factor`, `tile_size`, `tile_overlap`, `control`) are read from its `params`, or from its top level when it
+  /// has no `params`.
+  ///
+  /// - `p_manifest`: The model's manifest.
+  /// - `p_onnx_path`: Path to the ONNX model file.
+  pub fn from_manifest(p_manifest: &Manifest, p_onnx_path: String) -> Self {
+    let description = p_manifest.description();
+    Self {
       path: p_onnx_path,
-      name,
-      description,
-      scale_factor,
-      tile_config: TileConfig::new(tile_size, tile_overlap),
-      control,
-    })
+      name: p_manifest.name().to_string(),
+      description: if description.is_empty() { "No description".into() } else { description.to_string() },
+      scale_factor: p_manifest.number("scale_factor").map(|scale| scale as f32).unwrap_or(1.0),
+      tile_config: TileConfig::new(
+        p_manifest.number("tile_size").map(|size| size as u32).unwrap_or(256),
+        p_manifest.number("tile_overlap").map(|overlap| overlap as u32).unwrap_or(32),
+      ),
+      control: p_manifest.control().cloned(),
+    }
   }
 
   /// Creates a minimal spec for a model without a manifest.

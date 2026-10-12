@@ -12,6 +12,17 @@ The code uses the Builder pattern for constructing complex objects. This pattern
 
 The builder should contain a `new()` method or `new_*` function to initialize the builder with default values. Each method in the builder should return `self` to allow for method chaining. All functions should be prefixed with `with_` to indicate that they set a property.
 
+### Parameter ownership and bounds
+
+Application code owns control ranges, normalization, and input validation. Library
+constructors and `with_*` builders must preserve the supplied parameter values; do
+not clamp an input merely because an application slider has a minimum or maximum.
+
+The library may bound values only at a representation or processing boundary where
+the result has a physical range, such as encoding an RGBA channel to `0..=255`,
+forming a mask weight in `0..=1`, or selecting an index in a fixed-size table.
+Document those output bounds where they affect the API's behavior.
+
 ## Doc Comments
 
 Doc comments should be used to describe the purpose and usage of structs, enums, functions, and methods. They should provide clear and concise explanations to help other developers understand the code. Use triple slashes (`///`) for doc comments.

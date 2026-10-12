@@ -4,14 +4,14 @@ import { errorMessage } from '@/src/lib/error-message';
 import { formatBytes } from '@/src/lib/format-bytes';
 import { useCommonStyles } from '@/src/lib/styles';
 import { useTheme } from '@/src/lib/theme';
-import { aiModels, deleteAiModel, downloadAiModel, refreshAiModels, type AiModel } from '@alakazam/mobile';
+import { aiModels, deleteAiModel, downloadAiModel, refreshAiModels, type AiModelListing } from '@alakazam/mobile';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function StorageScreen() {
   const { colors } = useTheme();
   const commonStyles = useCommonStyles();
-  const [models, setModels] = useState<AiModel[]>([]);
+  const [models, setModels] = useState<AiModelListing[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const styles = useMemo(
@@ -48,7 +48,7 @@ export function StorageScreen() {
     refreshAiModels().then(setModels, e => setError(errorMessage(e)));
   }, []);
 
-  const download = async (model: AiModel) => {
+  const download = async (model: AiModelListing) => {
     setError(null);
     setDownloading(model.id);
     try {
@@ -60,7 +60,7 @@ export function StorageScreen() {
     refresh();
   };
 
-  const remove = (model: AiModel) => {
+  const remove = (model: AiModelListing) => {
     setError(null);
     try {
       deleteAiModel(model.id);

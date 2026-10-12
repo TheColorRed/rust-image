@@ -126,6 +126,30 @@ These can be combined, e.g. an options struct whose fields are enums, taken as `
 
 Keep performance in mind: prefer enums and generics (`impl Trait`) in hot paths over `dyn Trait`, and resolve options once outside per-pixel loops.
 
+## Keep Library Functions General
+
+The library holds general operations. A feature that is specific to one subject, task or workflow is a *composition* of general operations, and the composition belongs in a tool, a plugin, or the application, not in the library as a single function.
+
+Most features break into the same three questions. Answer each with a general operation:
+
+1. **Where does it apply?** A selection: a mask, an area or a shape, however it was produced (by hand, by color, by geometry, or by a model).
+2. **Which of those pixels or points count?** A test or weight on the content, such as a color range, a brightness range or an edge.
+3. **What changes?** An existing adjustment, filter, blend or transform, limited to the result of 1 and 2.
+
+If a new function can only be described by naming the feature it was written for, it is too specific. Split it: add the missing general operation (often a new way to *select*, not a new way to *change*), and compose it with what already exists.
+
+Signs a function is too specific:
+
+- Its name, parameters or docs are about one subject or task and not about pixels, colors, masks, geometry or data.
+- Its constants are tuned for one use case (thresholds, ranges, sizes) and not supplied by the caller.
+- It does a selection and a change in one step, so neither can be reused alone.
+- An existing adjustment, filter or blend, applied through a mask or area, would give the same result.
+- A second, different feature could not call it without bending it.
+
+Put the specific values (which color, how strong, which ranges) in the caller, which knows the use case. Do not bake them into the library.
+
+When in doubt, ask: *what is the smallest general operation that is missing?* Add that, and write the feature on top of it.
+
 ## Where New Code Belongs
 
 When new code really is required, place it where it is most reusable:
@@ -141,6 +165,7 @@ Before finishing, confirm:
 - [ ] I searched the workspace for every building block of the feature.
 - [ ] I used or extended existing functions instead of writing duplicates.
 - [ ] Any function I extended is still general-purpose and not tailored to my feature.
+- [ ] Anything new I added can be described without naming my feature, and the feature is a composition of general operations (see [Keep Library Functions General](#keep-library-functions-general)).
 - [ ] Any function I added parameters to now uses an enum, builder/options struct, trait, or `impl Into` so future features won't require another signature change.
 - [ ] New reusable logic lives in a core/shared crate, not inside the feature.
 - [ ] Callers, docs, and examples were updated for any changed signatures.

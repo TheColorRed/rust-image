@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use abra::prelude::*;
 use abra::transform::prelude::{ResizeTarget, resize};
 use abra_body_segmentation::Mask;
-use abra_find_person::{PersonInstance, person_skin_mask};
+use abra_find_person::PersonInstance;
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 use vessel::prelude::{
@@ -191,10 +191,7 @@ impl AbraImage {
         }
       }
     };
-    let selected_skin = person_skin_mask(&person.mask, &skin_mask).map_err(|error| AbraError::Ai {
-      message: error.to_string(),
-    })?;
-    Ok(Some(selected_skin))
+    Ok(Some(person.mask.multiplied(&skin_mask)))
   }
 }
 

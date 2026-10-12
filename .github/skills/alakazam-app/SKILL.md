@@ -42,6 +42,8 @@ See the [bindings document](./references/node-bindings.md) for information on ho
 
 See the [uniffi bindings document](./references/uniffi-bindings.md) for information on how the Alakazam App integrates with the Abra library using uniffi for usage in the mobile app.
 
+Both apps follow the `abra-library` skill's [applications document](../abra-library/references/applications.md): the library does the work and the app is a thin caller.
+
 ## Development
 
 See the [development document](./references/development.md) for instructions on how to set up a development environment for the Alakazam App, including building and running the application.

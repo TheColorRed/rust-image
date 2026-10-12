@@ -1,11 +1,13 @@
 import { SkinTanPicker } from '@/src/components/editor/skin-tan-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonSelectionControls, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
 import { useLiveAction } from '@/src/hooks/useLiveAction';
 import { useLiveSlider } from '@/src/hooks/useLiveSlider';
 import {
   BLEMISH_TOOL_KEY,
+  RED_EYE_TOOL_KEY,
   EDIT_SECTIONS,
   appliesOnSelect,
   findSection,
@@ -23,6 +25,7 @@ import { useTheme } from '@/src/lib/theme';
 import {
   actionPreviewRequested,
   blemishApplyRequested,
+  redEyeAutoRequested,
   redoRequested,
   redoRequested$,
   selectControlRequested,
@@ -113,6 +116,7 @@ export function EditorPanel() {
   return (
     <View style={[styles.panel, { paddingBottom: bottomInset + 12 }]}>
       <BlemishToolController />
+      <RedEyeToolController />
       <PersonSelectionToolController />
       <View style={styles.history}>
         <Pressable style={styles.historyButton} onPress={() => undoRequested.next()} disabled={!canUndo} hitSlop={8}>
@@ -134,6 +138,8 @@ export function EditorPanel() {
       >
         {focusedControl?.kind === 'tool' && focusedControl.key === BLEMISH_TOOL_KEY ? (
           <BlemishControls onBack={() => focusedControlKey.next(null)} onApply={() => blemishApplyRequested.next()} />
+        ) : focusedControl?.kind === 'tool' && focusedControl.key === RED_EYE_TOOL_KEY ? (
+          <RedEyeControls onBack={() => focusedControlKey.next(null)} onAuto={() => redEyeAutoRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
           <>
             {isSkinControlFocused && <PersonSelectionControls />}

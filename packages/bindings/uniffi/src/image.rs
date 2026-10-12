@@ -16,7 +16,7 @@
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::{Arc, RwLock};
 
-use abra::abra_core::{self, Channel, Channels, ImageExt, Resolution, Size, WriterOptions};
+use abra::abra_core::{self, Channel, Channels, ImageExt, Resolution, Size, Transform, WriterOptions};
 
 use crate::{Area, Color};
 
@@ -183,6 +183,13 @@ impl Image {
   #[uniffi::method(name = "clone")]
   pub fn duplicate(&self) -> Arc<Image> {
     Arc::new(Self::from_core(self.core()))
+  }
+
+  /// A copy cropped to `[x, y, width, height]`. The rectangle is clipped to the image.
+  pub fn cropped(&self, x: u32, y: u32, width: u32, height: u32) -> Arc<Image> {
+    let mut image = self.core();
+    image.crop(x, y, width, height);
+    Arc::new(Self::from_core(image))
   }
 
   /// Shares the pixels of another image, which this image then keeps until either one changes.

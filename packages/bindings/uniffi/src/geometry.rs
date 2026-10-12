@@ -391,6 +391,30 @@ pub fn rect_intersect(rect: Rect, other: Rect) -> Rect {
   rect.intersect(other)
 }
 
+/// The rectangle made `x` times as wide and `y` times as tall, about its center.
+#[uniffi::export]
+pub fn rect_scaled(rect: Rect, x: f32, y: f32) -> Rect {
+  rect.scaled(x, y)
+}
+
+/// The rectangle moved by `x` and `y`, with the same size.
+#[uniffi::export]
+pub fn rect_translated(rect: Rect, x: f32, y: f32) -> Rect {
+  rect.translated(x, y)
+}
+
+/// The smallest square that holds the rectangle, with the same center.
+#[uniffi::export]
+pub fn rect_squared(rect: Rect) -> Rect {
+  rect.squared()
+}
+
+/// The smallest rectangle on whole numbers that holds the rectangle: left and top round down, right and bottom round up.
+#[uniffi::export]
+pub fn rect_rounded_out(rect: Rect) -> Rect {
+  rect.rounded_out()
+}
+
 /// Maps a point from the rectangle's coordinate system into a viewport of `viewport` size, the way an SVG `viewBox` maps
 /// into its element.
 #[uniffi::export]
@@ -858,6 +882,13 @@ impl Area {
   #[uniffi::constructor]
   pub fn circle(center: PointF, radius: f64) -> Self {
     Self::from_core(abra_core::Area::circle(center, radius))
+  }
+
+  /// A circular area around a center, as large as the points around it: its radius is the average distance from the
+  /// center to the points.
+  #[uniffi::constructor]
+  pub fn circle_around(center: PointF, points: Vec<PointF>) -> Self {
+    Self::from_core(abra_core::Area::circle_around(center, points))
   }
 
   /// An elliptical area.

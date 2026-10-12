@@ -6,12 +6,14 @@ import { renderRecipe } from '@/src/lib/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
 import type { ProjectRecipe } from '@/src/lib/project-store';
 import { adjustmentKey } from '@/src/lib/skin-adjustments';
+import { applyRedEyeStep } from '@/src/lib/red-eye';
 import {
   baseIndexAt,
   emptyTimeline,
   moveCursor,
   pushEntry,
   recipeAt,
+  type PixelChange,
   type TimelineChange,
   type TimelineEntry,
 } from '@/src/lib/timeline';
@@ -38,12 +40,19 @@ export const PERSON_MODEL_MISSING =
 export const editsAPerson = (recipe: ProjectRecipe) =>
   Object.keys(recipe.adjustments).some(key => key.includes(':person:'));
 
-/** The picture a blemish step leaves: the edits it healed rendered on `base`, with the blemish removed. The caller owns it. */
+/**
+ * The picture a step that changes pixels leaves: the edits it baked in rendered on `base`, with the blemish removed or the
+ * red-eye fixed. The caller owns it.
+ */
 export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
-  if (entry.change.type !== 'blemish' || !entry.before) throw new Error('A saved blemish step is damaged.');
+  const change = entry.change;
+  if ((change.type !== 'blemish' && change.type !== 'red-eye' && change.type !== 'red-eye-auto') || !entry.before) {
+    throw new Error('A saved retouch step is damaged.');
+  }
   const healed = renderRecipe(base, entry.before);
   try {
-    healed.removeBlemish(entry.change.x, entry.change.y, entry.change.radius);
+    if (change.type === 'blemish') healed.removeBlemish(change.x, change.y, change.radius);
+    else applyRedEyeStep(healed, change);
   } catch (error) {
     healed.uniffiDestroy();
     throw error;
@@ -138,14 +147,14 @@ function removeSlider(control: SliderControl) {
 }
 
 /**
- * The blemish tool healed `currentImage` at this spot. That is a step of its own, and the healed picture becomes the base
- * that the edits after it are rendered on, so those start empty.
+ * A tool changed the pixels of `currentImage`: it healed a blemish or fixed red-eye. That is a step of its own, and the new
+ * picture becomes the base that the edits after it are rendered on, so those start empty.
  */
-function commitBlemish(blemish: { x: number; y: number; radius: number }) {
+function commitRetouch(change: PixelChange) {
   const image = currentImage.value;
   if (!image || !historyReady.value) return;
   const entry: TimelineEntry = {
-    change: { type: 'blemish', ...blemish },
+    change,
     adjustments: {},
     appliedActions: [],
     before: { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] },
@@ -236,5 +245,9 @@ const commitSliderBatched = batched(commitSlider);
 export { commitSliderBatched as commitSlider };
 const removeSliderBatched = batched(removeSlider);
 export { removeSliderBatched as removeSlider };
-const commitBlemishBatched = batched(commitBlemish);
+const commitRetouchBatched = batched(commitRetouch);
+export { commitRetouchBatched as commitRetouch };
+const commitBlemishBatched = batched((blemish: { x: number; y: number; radius: number }) =>
+  commitRetouch({ type: 'blemish', ...blemish }),
+);
 export { commitBlemishBatched as commitBlemish };

@@ -6,6 +6,7 @@ description = "Lightweight AI model loading for Abra"
 
 [dependencies]
 abra-core = { workspace = true }
+mask = { workspace = true }
 ndarray = { workspace = true }
 rayon = { workspace = true }
 saphyr = { workspace = true }

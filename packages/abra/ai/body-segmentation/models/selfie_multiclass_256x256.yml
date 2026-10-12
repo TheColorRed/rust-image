@@ -1,0 +1,43 @@
+# MediaPipe Selfie Multiclass Segmentation Model
+#
+# Purpose: Segments background, hair, body skin, face skin, clothes, and accessories
+# Origin: Google MediaPipe, converted from TFLite to ONNX by senty-au
+# Input: RGB float32 tensor [1, 256, 256, 3], normalized to [0, 1] (NHWC)
+# Preprocessing: Bilinear resize to 256x256, stretching the image without letterboxing
+# Output: Float32 logits [1, 256, 256, 6]; apply softmax across the classes
+# Abra combines body-skin and face-skin probabilities into a source-sized mask.
+
+name: selfie_multiclass_256x256
+decoder: semantic-mask
+description: Six-class selfie segmentation with Google MediaPipe, used for face and body skin masks
+source: https://huggingface.co/senty-au/selfie_multiclass_256x256-ONNX
+license: Apache-2.0
+sha256: 35ec1ecd9ee7f85073c99c00020b7f6751b69506eeacf683bc8665f6117f85b0
+
+# The local ONNX file's SHA-256 matches the conversion publisher's model card.
+upstream:
+  source: https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite
+  sha256: c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
+conversion:
+  tool: tf2onnx
+  version: 1.17.0
+  opset: 17
+  file: onnx/model.onnx
+
+# How Abra feeds the model and reads its answer (see abra-ai-core: InputSpec and Decoder).
+# mask_classes are the classes that count as skin: body skin and face skin.
+params:
+  input_size: 256
+  input_layout: nhwc
+  input_fit: stretch
+  output_layout: nhwc
+  class_count: 6
+  mask_classes: [2, 3]
+
+classes:
+  - background
+  - hair
+  - body skin
+  - face skin
+  - clothes
+  - others (accessories)

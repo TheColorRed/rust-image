@@ -22,6 +22,7 @@ The Abra library is located in the `/abra` directory of the repository. It is br
 
 - If it exists, use it.
 - If something close exists, update it to cover your use case, keeping it general-purpose and reusable (not tailored to your feature).
+- Keep the library general. A feature specific to one subject or task is a composition of general operations (select where, test which pixels count, change them with an existing adjustment), not a new library function named after the feature.
 - Only write new code when nothing suitable exists, and place reusable logic in a core/shared crate rather than inside the feature.
 
 See the [reuse first document](./references/reuse-first.md) for the full workflow, where to search, and how to extend existing code.
@@ -33,7 +34,7 @@ The root crate of the Abra library is located in the root of the workspace. It i
 ## Modules
 
 - `/packages/abra/abra`: This is the main entry point of the library. It doesn't contain much logic itself but re-exports the other modules for easier access.
-- `/packages/abra/ai`: This module contains functions and types related to AI-powered image processing tasks, such as image enhancement.
+- `/packages/abra/ai`: This module contains functions and types related to AI-powered image processing tasks, such as image enhancement. Models describe themselves with a `.yml` manifest beside the `.onnx` file, so adding a model of a kind the library can already read needs no code. See `ai/core` (`AiModel`, `Manifest`). The library never downloads or locates models; the app passes a path.
 - `/packages/abra/core`: This directory contains the core functionality of the library and is further divided into several sub-modules:
   - `adjustments`: Contains functions for adjusting image properties such as brightness, contrast, and saturation.
   - `canvas`: A canvas is a group of layers, and this module contains functions for creating and managing canvases and their layers.
@@ -67,6 +68,10 @@ Some examples include:
 - **drawing:** Demonstrates how to draw shapes and text onto an image.
 - **gradient:** Demonstrates how to create and apply gradients to images.
 
+## Applications and Bindings
+
+**Read the [applications document](./references/applications.md) before writing or reviewing any code that uses the library from outside it:** Rust examples, the Electron app, the React Native app, bindings, or any application added later. The rule is that the library does the work and applications are thin callers. A missing operation is added to the library first.
+
 ## Code Management
 
 See the [code management document](./references/code-management.md) for guidelines on handling code modifications within the Abra library.
@@ -90,6 +95,9 @@ See the [naming conventions document](./references/naming-conventions.md) for gu
 ## Patterns
 
 Defines patterns for writing new code or updating existing code. See the [patterns document](./references/patterns.md) for more information.
+It includes the rule that application code owns control ranges and validation,
+while library builders preserve supplied parameters and only bound physical output
+representations.
 
 ## Tools
 

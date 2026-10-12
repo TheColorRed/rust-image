@@ -12,6 +12,8 @@ export const previewBox$ = previewBox.asObservable();
 /** Pending rAF handle debouncing `onLayout` into `previewBox`. */
 export const previewLayoutFrame = new BehaviorSubject<number | null>(null);
 export const previewLayoutFrame$ = previewLayoutFrame.asObservable();
+/** Window position of the preview's top-left, so pinch anchors don't depend on which child got the touch. */
+export const previewOrigin = new BehaviorSubject({ x: 0, y: 0 });
 
 // #endregion
 
@@ -120,11 +122,6 @@ const midpointOfTouches = (touches: Touches) => {
   return { x: (a.pageX + b.pageX) / 2, y: (a.pageY + b.pageY) / 2 };
 };
 
-const localMidpointOfTouches = (touches: Touches) => {
-  const [a, b] = touches;
-  return { x: (a.locationX + b.locationX) / 2, y: (a.locationY + b.locationY) / 2 };
-};
-
 const clamp = (limit: number, value: number) => Math.min(limit, Math.max(-limit, value));
 
 // Baselines the gesture from the touches present right now (on grant, or when a finger is lifted or
@@ -132,15 +129,17 @@ const clamp = (limit: number, value: number) => Math.min(limit, Math.max(-limit,
 // the previous touch count left off.
 function baselineOf(touches: Touches): GestureBaseline {
   const two = touches.length === 2;
+  const midpoint = two ? midpointOfTouches(touches) : { x: touches[0].pageX, y: touches[0].pageY };
   return {
     active: true,
     touchCount: two ? 2 : 1,
     distance: two ? distanceBetweenTouches(touches) : 0,
     // Screen coordinates for movement: `locationX/Y` are measured in the scaled child view, so
     // their deltas shrink as the preview gets larger.
-    midpoint: two ? midpointOfTouches(touches) : { x: touches[0].pageX, y: touches[0].pageY },
-    // Local coordinates are only needed for the initial zoom anchor relative to the preview center.
-    focalPoint: two ? localMidpointOfTouches(touches) : { x: touches[0].locationX, y: touches[0].locationY },
+    midpoint,
+    // Zoom anchor relative to the preview's top-left. `locationX/Y` is relative to whichever child
+    // was hit (e.g. the narrower photo view of a portrait image), which shifted the zoom sideways.
+    focalPoint: { x: midpoint.x - previewOrigin.value.x, y: midpoint.y - previewOrigin.value.y },
     scale: previewScaleValue.value,
     translate: previewTranslateValue.value,
   };

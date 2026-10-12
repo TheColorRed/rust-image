@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
-import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/keys';
+import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/keys';
 import type { AdjustmentValue } from '@/src/lib/edit-sections';
 
 // #region: Edit controls
@@ -26,6 +26,7 @@ export const isBlemishToolFocused$ = focusedControlKey$.pipe(
   map(key => key === BLEMISH_TOOL_KEY),
   distinctUntilChanged(),
 );
+export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOOL_KEY;
 export const isSkinControlFocused$ = focusedControlKey$.pipe(
   map(key => key === SKIN_SMOOTH_KEY || key === SKIN_TAN_KEY || key === SKIN_TONE_KEY),
   distinctUntilChanged(),

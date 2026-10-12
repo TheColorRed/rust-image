@@ -7,6 +7,8 @@ members = [
   "packages/abra/ai/super-resolution",
   "packages/abra/ai/body-segmentation",
   "packages/abra/ai/find-person",
+  "packages/abra/ai/face-landmarks",
+  "packages/abra/ai/face-parsing",
   "packages/abra/plugins/*",
   # Examples
   "apps/examples/*",
@@ -103,6 +105,8 @@ abra-ai-core = { path = "./packages/abra/ai/core" }
 abra-super-resolution = { path = "./packages/abra/ai/super-resolution" }
 abra-body-segmentation = { path = "./packages/abra/ai/body-segmentation" }
 abra-find-person = { path = "./packages/abra/ai/find-person" }
+abra-face-landmarks = { path = "./packages/abra/ai/face-landmarks" }
+abra-face-parsing = { path = "./packages/abra/ai/face-parsing" }
 
 [workspace.dependencies.uuid]
 version = "1.24.0"

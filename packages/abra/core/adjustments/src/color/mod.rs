@@ -1,5 +1,6 @@
 mod auto_color;
 mod auto_tone;
+mod channel_mix;
 mod gradient_map;
 mod grayscale;
 mod invert;
@@ -12,6 +13,7 @@ mod threshold;
 
 pub use auto_color::{AutoColor, auto_color};
 pub use auto_tone::{AutoTone, auto_tone};
+pub use channel_mix::{ChannelMix, channel_mix};
 pub use gradient_map::{GradientMap, gradient_map};
 pub use grayscale::{Grayscale, grayscale};
 pub use invert::{Invert, invert};

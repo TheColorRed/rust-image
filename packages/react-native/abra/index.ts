@@ -8,5 +8,4 @@
 // Starts the native modules before the library's functions are used.
 import '@alakazam/mobile';
 
-// export * from '../alakazam/src/generated/abra_uniffi';
-export {};
+export * from '../alakazam/src/generated/abra_uniffi';

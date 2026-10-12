@@ -6,6 +6,9 @@
 //!
 //! # Overview
 //!
+//! - `AiModel`: Any model, described by its manifest: it feeds the picture in, runs the model and reads the result with
+//!   the decoder the manifest names. A new model of a known kind needs only its `.onnx` and `.yml`.
+//! - `Manifest`, `InputSpec` and `Decoder`: what an `AiModel` is made of (`manifest`, `input` and `decode`).
 //! - `ImageModel`: Unified model that loads any ONNX model with a YAML manifest.
 //! - `ModelSpec`: Model specification loaded from YAML.
 //! - `ControlParams`: Generic control parameters for models that support them.
@@ -55,7 +58,11 @@
 //! let output = model.process_with_control(&image, &ctrl)?;
 //! ```
 
+mod ai_model;
+pub mod decode;
 mod error;
+pub mod input;
+pub mod manifest;
 pub mod model;
 pub mod tensor;
 pub mod tiled;
@@ -64,7 +71,11 @@ pub mod onnx;
 
 mod image_model;
 
+pub use ai_model::AiModel;
+pub use decode::{AiOutput, Bounds, Decoder, Instance, LabelMap, Landmark, Landmarks};
 pub use error::AiError;
+pub use input::{Fit, InputSpec, Layout, Placement};
+pub use manifest::Manifest;
 
 pub use image_model::{ControlParameter, ControlParams, ControlSpec, ImageModel, ModelSpec, discover_models};
 

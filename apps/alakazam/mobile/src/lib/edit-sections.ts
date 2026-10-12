@@ -1,10 +1,10 @@
+import { preloadFor } from '@/src/lib/editor-preloads';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { MaskLike } from '@abra/core/mask';
 import { type AbraImageLike, type EffectSpec, type ImageOperation } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
-import { preloadFor } from '@/src/lib/editor-preloads';
 import { beauty } from './edit-sections/beauty';
-import { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
+import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
 import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
 import { detail } from './edit-sections/detail';
@@ -139,6 +139,7 @@ export type ActionControl = {
   kind: 'action';
   key: string;
   label: string;
+  /** @deprecated Use `tool` instead for custom on-image interactions. */
   apply?: (image: AbraImageLike, context: ToolContext) => void;
   /** A native edit shared by replay and asynchronous thumbnail generation. */
   operation?: ImageOperation;
@@ -148,6 +149,7 @@ export type ActionControl = {
    */
   group?: string;
   /**
+   * @deprecated Use `tool` instead for custom on-image interactions.
    * The effects this action applies, as one effect or several that run in order. Tapping previews them at once in a live
    * image while the full-resolution edit replays behind it; effects without a shader run on the CPU at preview size.
    * Without `apply`, replaying the action applies these same effects, so there is one definition of the action.
@@ -296,7 +298,7 @@ export type EditSection = {
 };
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
-export { BLEMISH_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY };
+export { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY };
 
 // Ordered by what a casual, non-designer social-media poster reaches for first: filters, then
 // basic brightness/color tweaks, then face retouching — with the more technical, restoration-style

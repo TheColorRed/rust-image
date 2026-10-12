@@ -86,6 +86,29 @@ console.log(`build-android: NDK ${path.basename(ndk)}, cmake ${path.basename(cma
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' });
 if (result.status !== 0) process.exit(result.status ?? 1);
 
+// The generated index re-exports every namespace with `export *`. A name exported by two of them makes the whole module fail
+// to load on the device ("property is not configurable"), and nothing says why until the app runs, so stop here instead.
+const generated = path.join(packageRoot, 'src', 'generated');
+const exportedNames = (file) =>
+  new Set(
+    [...readFileSync(path.join(generated, file), 'utf8').matchAll(/^export (?:declare )?(?:abstract )?(?:const|class|function|enum|interface|type) (\w+)/gm)].map(
+      (match) => match[1],
+    ),
+  );
+const namespaces = readdirSync(generated).filter((file) => /\.ts$/.test(file) && !/-ffi\.ts$|^index\.ts$/.test(file));
+const owners = new Map();
+for (const file of namespaces) {
+  for (const name of exportedNames(file)) owners.set(name, [...(owners.get(name) ?? []), file]);
+}
+const clashes = [...owners].filter(([, files]) => files.length > 1);
+if (clashes.length > 0) {
+  fail(
+    `these names are exported by more than one generated namespace, which breaks the app at startup: ${clashes
+      .map(([name, files]) => `${name} (${files.join(', ')})`)
+      .join('; ')}. Rename one of them in Rust.`,
+  );
+}
+
 // The Abra library's entry points (`@abra/core/adjustments`, ...) are written from the bindings that were just generated.
 const entries = spawnSync(process.execPath, [path.join(packageRoot, '..', 'abra', 'scripts', 'generate-entries.mjs')], {
   stdio: 'inherit',

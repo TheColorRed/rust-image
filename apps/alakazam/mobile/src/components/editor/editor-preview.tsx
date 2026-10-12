@@ -15,6 +15,7 @@ import {
   previewBox,
   previewBox$,
   previewLayoutFrame,
+  previewOrigin,
   previewPanResponder$,
   previewPressed,
   previewScale,
@@ -96,6 +97,9 @@ export function EditorPreview() {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const beginCheckpointHold = useCallback(() => {
+    // Re-measure on every touch-down: a layout-time measurement can be stale (screen transition,
+    // insets settling), which showed up as the zoom drifting vertically.
+    touchTargetRef.current?.measureInWindow((left, top) => previewOrigin.next({ x: left, y: top }));
     if (checkpointHoldTimer.current) clearTimeout(checkpointHoldTimer.current);
     checkpointPreviewActive.current = false;
     checkpointHoldTimer.current = setTimeout(() => {
@@ -129,6 +133,7 @@ export function EditorPreview() {
     previewLayoutFrame.next(
       requestAnimationFrame(() => {
         previewLayoutFrame.next(null);
+        touchTargetRef.current?.measureInWindow((left, top) => previewOrigin.next({ x: left, y: top }));
         const current = previewBox.value;
         if (current?.width === width && current.height === height) return;
         previewBox.next({ width, height });

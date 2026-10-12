@@ -131,6 +131,35 @@ impl Rect {
     Rect::from_edges(left, top, right, bottom)
   }
 
+  /// The rectangle made `p_x` times as wide and `p_y` times as tall, about its center. Factors below `0` count as `0`.
+  /// - `p_x`: The factor for the width.
+  /// - `p_y`: The factor for the height.
+  pub fn scaled(&self, p_x: f32, p_y: f32) -> Rect {
+    let (width, height) = (self.width * p_x.max(0.0), self.height * p_y.max(0.0));
+    let center = self.center();
+    Rect::new((center.x - width / 2.0, center.y - height / 2.0), (width, height))
+  }
+
+  /// The rectangle moved by `p_x` and `p_y`, with the same size. Use it to take a rectangle from one coordinate system
+  /// to another, such as from a crop back to the picture it was cut from.
+  /// - `p_x`, `p_y`: How far to move it right and down.
+  pub fn translated(&self, p_x: f32, p_y: f32) -> Rect {
+    Rect::new((self.x + p_x, self.y + p_y), (self.width, self.height))
+  }
+
+  /// The smallest square that holds the rectangle, with the same center.
+  pub fn squared(&self) -> Rect {
+    let side = self.width.max(self.height);
+    let center = self.center();
+    Rect::new((center.x - side / 2.0, center.y - side / 2.0), (side, side))
+  }
+
+  /// The smallest rectangle on whole numbers that holds this one: the left and top edges round down and the right and
+  /// bottom edges round up. Use it to turn a box into whole pixels without losing any of it.
+  pub fn rounded_out(&self) -> Rect {
+    Rect::from_edges(self.left().floor(), self.top().floor(), self.right().ceil(), self.bottom().ceil())
+  }
+
   /// Maps a point from this rectangle's coordinate system into a viewport of `p_viewport` size, the way an SVG
   /// `viewBox` maps into its element.
   /// - `p_point`: The point in this rectangle's coordinates.
@@ -238,6 +267,16 @@ mod tests {
     let clipped = a.intersect(Size::new(30, 30));
     assert_eq!(clipped.edges::<i32>(), (0, 10, 30, 30));
     assert!(a.intersect(Rect::new((100, 100), (5, 5))).is_empty());
+  }
+
+  #[test]
+  fn a_rect_is_scaled_squared_and_rounded_out() {
+    let rect = Rect::new((10, 20), (40, 20));
+    assert_eq!(rect.scaled(1.5, 2.0).edges::<f32>(), (0.0, 10.0, 60.0, 50.0), "grows about its center");
+    assert_eq!(rect.scaled(-1.0, 1.0).width, 0.0);
+    assert_eq!(rect.squared().edges::<f32>(), (10.0, 10.0, 50.0, 50.0), "a square on the same center");
+    assert_eq!(rect.translated(5.0, -10.0).edges::<f32>(), (15.0, 10.0, 55.0, 30.0), "moved, not resized");
+    assert_eq!(Rect::from_edges(1.2, 2.7, 5.1, 6.0).rounded_out().edges::<f32>(), (1.0, 2.0, 6.0, 6.0));
   }
 
   #[test]
