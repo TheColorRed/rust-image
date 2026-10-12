@@ -1,5 +1,6 @@
 import { EffectSpec } from "@alakazam/mobile";
-import { EditSection } from "../edit-sections";
+import { boxBlur } from '@abra/core/filters';
+import { EditSection, SliderControl } from "../edit-sections";
 
 export const blur: EditSection = {
   key: 'section-blur',
@@ -26,7 +27,7 @@ export const blur: EditSection = {
       step: 1,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.boxBlur(value),
-    },
+      tool: (photo, [value], { scale }) => boxBlur(value * scale).apply(photo),
+    } satisfies SliderControl<number>,
   ],
 };

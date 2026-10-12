@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use abra::abra_core::PointF;
 use abra_ai_core::{
-  AiError, AiModel as Model, AiOutput as Output, Bounds, Instance as FoundInstance, LabelMap as Labels, Landmark, Landmarks,
+  AiError, AiModel as Model, AiOutput as Output, Bounds, Instance as FoundInstance, LabelMap as Labels, Landmark,
+  Landmarks,
 };
 
 use crate::{Image, Mask};
@@ -143,7 +144,12 @@ impl LabelMap {
       right = Some(right.map_or(x, |edge: u32| edge.max(x)));
       bottom = Some(bottom.map_or(y, |edge: u32| edge.max(y)));
     }
-    Some(Bounds { x: left, y: top, width: right? - left + 1, height: bottom? - top + 1 })
+    Some(Bounds {
+      x: left,
+      y: top,
+      width: right? - left + 1,
+      height: bottom? - top + 1,
+    })
   }
 
   /// A mask that is `255` on the pixels of one class and `0` elsewhere.
@@ -302,7 +308,10 @@ mod tests {
         AiOutputKind::Labels => assert_eq!(output.labels().unwrap().labels().len(), 64 * 64),
         AiOutputKind::Landmarks => assert_eq!(output.landmarks().unwrap().landmarks.len(), 478),
       }
-      assert!(output.landmarks().is_err() || kind == AiOutputKind::Landmarks, "{folder}: asking for the wrong kind fails");
+      assert!(
+        output.landmarks().is_err() || kind == AiOutputKind::Landmarks,
+        "{folder}: asking for the wrong kind fails"
+      );
     }
   }
 

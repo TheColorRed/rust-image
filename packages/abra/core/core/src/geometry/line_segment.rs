@@ -200,7 +200,10 @@ mod tests {
     assert!((LineSegment::new((0, 0), (10, 10)).correction_to(Orientation::Horizontal) + 45.0).abs() < 1e-4);
     // Reversing the line must not change the correction.
     let line = LineSegment::new((0, 0), (10, 5));
-    assert!((line.correction_to(Orientation::Horizontal) - line.reversed().correction_to(Orientation::Horizontal)).abs() < 1e-4);
+    assert!(
+      (line.correction_to(Orientation::Horizontal) - line.reversed().correction_to(Orientation::Horizontal)).abs()
+        < 1e-4
+    );
     // Vertical lines turn by 90, never -90.
     assert_eq!(LineSegment::new((0, 0), (0, -10)).correction_to(Orientation::Horizontal), 90.0);
   }
@@ -215,7 +218,9 @@ mod tests {
     assert_eq!(LineSegment::new((0, 0), (10, 0)).correction_to(Orientation::Vertical), 90.0);
     // Reversing the line must not change the correction.
     let line = LineSegment::new((0, 0), (5, 10));
-    assert!((line.correction_to(Orientation::Vertical) - line.reversed().correction_to(Orientation::Vertical)).abs() < 1e-4);
+    assert!(
+      (line.correction_to(Orientation::Vertical) - line.reversed().correction_to(Orientation::Vertical)).abs() < 1e-4
+    );
   }
 
   #[test]

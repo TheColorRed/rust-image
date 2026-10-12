@@ -153,6 +153,14 @@ pub struct Canvas<'a> {
   inner: Arc<Mutex<CanvasInner<'a>>>,
 }
 
+impl<'a> Clone for Canvas<'a> {
+  fn clone(&self) -> Self {
+    Canvas {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
 impl<'a> Default for Canvas<'a> {
   fn default() -> Self {
     Canvas::new("Empty Canvas")

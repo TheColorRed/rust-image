@@ -6,14 +6,22 @@
 use abra as _; // links the library, whose start-up code registers the GPU
 use abra_core::image::gpu::Hardware;
 use abra_core::{Channels, Image};
-use options::{Effect, ApplyOptions};
+use options::{ApplyOptions, Effect};
 
 const SIZE: u32 = 256;
 
 /// Every red and green pair appears, with blue spread across them.
 fn picture() -> Image {
-  let pixels: Vec<u8> =
-    (0..SIZE * SIZE).flat_map(|i| [(i % SIZE) as u8, (i / SIZE) as u8, ((i % SIZE) * 3 + (i / SIZE) * 5) as u8, 255]).collect();
+  let pixels: Vec<u8> = (0..SIZE * SIZE)
+    .flat_map(|i| {
+      [
+        (i % SIZE) as u8,
+        (i / SIZE) as u8,
+        ((i % SIZE) * 3 + (i / SIZE) * 5) as u8,
+        255,
+      ]
+    })
+    .collect();
   Image::new_from_pixels(SIZE, SIZE, pixels, Channels::RGBA)
 }
 
@@ -137,7 +145,11 @@ fn linear_gradient_is_exactly_the_same_on_the_gpu() {
     ColorStop::new(Color::from_rgba(20, 30, 255, 255), 1.0),
   ]);
   // A line between two points, a very short one, and one that ends past the image.
-  for (start, end) in [((10.0, 20.0), (240.0, 200.0)), ((100.0, 100.0), (101.0, 100.0)), ((-50.0, 0.0), (900.0, 40.0))] {
+  for (start, end) in [
+    ((10.0, 20.0), (240.0, 200.0)),
+    ((100.0, 100.0), (101.0, 100.0)),
+    ((-50.0, 0.0), (900.0, 40.0)),
+  ] {
     agree(
       &format!("linear gradient from {start:?} to {end:?}"),
       adjustments::color::LinearGradientEffect::between(&gradient, start, end).with_opacity(0.7),

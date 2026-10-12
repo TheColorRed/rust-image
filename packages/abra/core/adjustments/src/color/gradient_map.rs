@@ -64,11 +64,13 @@ impl Effect for GradientMap {
 
 impl GpuProcessor for GradientMap {
   fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
-    vec![GpuPass::new(include_str!("./gradient_map.wgsl"), Vec::new()).with_aux(GpuAux {
-      width: LUT_SIZE,
-      height: 1,
-      rgba: self.lut.clone(),
-    })]
+    vec![
+      GpuPass::new(include_str!("./gradient_map.wgsl"), Vec::new()).with_aux(GpuAux {
+        width: LUT_SIZE,
+        height: 1,
+        rgba: self.lut.clone(),
+      }),
+    ]
   }
 }
 

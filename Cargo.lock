@@ -99,6 +99,7 @@ dependencies = [
  "abra-ai-core",
  "abra-core",
  "mask",
+ "tools",
 ]
 
 [[package]]
@@ -124,6 +125,10 @@ version = "0.1.0"
 dependencies = [
  "abra",
  "abra-ai-core",
+ "abra-body-segmentation",
+ "abra-find-person",
+ "canvas",
+ "pub-sub",
  "regex",
  "uniffi",
 ]

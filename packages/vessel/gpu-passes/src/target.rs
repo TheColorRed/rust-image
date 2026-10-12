@@ -98,7 +98,11 @@ impl GpuFrame for TextureFrame {
     }
     drop(mapped);
     buffer.unmap();
-    Some(Frame { width, height, pixels: Arc::new(pixels) })
+    Some(Frame {
+      width,
+      height,
+      pixels: Arc::new(pixels),
+    })
   }
 
   fn target_for(&self, p_surface_id: i32) -> Option<Box<dyn GpuTarget>> {

@@ -1,3 +1,6 @@
+import { autoTone, invert } from '@abra/core/adjustments';
+import { sharpen } from '@abra/core/filters';
+import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
 import { useEffect, useRef, useState } from 'react';
 import { Button, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -6,15 +9,16 @@ import { Slider } from '@/src/components/slider';
 import { VesselView } from '@vessel/react-native';
 import { useLiveSession } from '@/src/hooks/useLiveSession';
 
-type Operation = { label: string; run: (image: AbraImageLike) => void };
+/** An edit made either with an effect on the photo, or by a tool written against the library on a copy of its pixels. */
+type Operation = { label: string; run?: (image: AbraImageLike) => void; tool?: (photo: ImageLike) => void };
 
 const OPERATIONS: Operation[] = [
   { label: 'Grayscale', run: (image) => image.applyEffect(EffectSpec.Grayscale.new()) },
-  { label: 'Invert', run: (image) => image.invert() },
+  { label: 'Invert', tool: (photo) => invert().apply(photo) },
   { label: 'Brightness +40', run: (image) => image.applyEffect(EffectSpec.Brightness.new({ amount: 40 })) },
-  { label: 'Auto tone', run: (image) => image.autoTone() },
+  { label: 'Auto tone', tool: (photo) => autoTone().apply(photo) },
   { label: 'Blur 8px', run: (image) => image.applyEffect(EffectSpec.GaussianBlur.new({ radius: 8 })) },
-  { label: 'Sharpen', run: (image) => image.sharpen() },
+  { label: 'Sharpen', tool: (photo) => sharpen().apply(photo) },
 ];
 
 const PREVIEW_HEIGHT = 320;
@@ -56,7 +60,16 @@ export default function AbraScreen() {
     if (!image) return;
     try {
       const t0 = Date.now();
-      operation.run(image);
+      if (operation.run) operation.run(image);
+      else if (operation.tool) {
+        const photo = image.toImage();
+        try {
+          operation.tool(photo);
+          image.replaceWith(photo);
+        } finally {
+          (photo as AbraPixels).uniffiDestroy();
+        }
+      }
       const t1 = Date.now();
       setRevision((r) => r + 1);
       const t2 = Date.now();

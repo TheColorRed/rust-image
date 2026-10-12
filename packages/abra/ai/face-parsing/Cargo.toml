@@ -9,5 +9,8 @@ abra-ai-core = { workspace = true, features = ["onnx"] }
 abra-core = { workspace = true }
 mask = { workspace = true }
 
+[dev-dependencies]
+tools = { workspace = true }
+
 [lib]
 crate-type = ["rlib"]

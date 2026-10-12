@@ -29,7 +29,8 @@ mod tests {
   #[test]
   fn the_table_is_what_the_cpu_code_does_to_each_value() {
     let pass = channel_lut_pass(|image| {
-      let doubled: Vec<u8> = image.to_rgba_vec().chunks_exact(4).flat_map(|p| [p[0].saturating_mul(2), p[1], p[2], p[3]]).collect();
+      let doubled: Vec<u8> =
+        image.to_rgba_vec().chunks_exact(4).flat_map(|p| [p[0].saturating_mul(2), p[1], p[2], p[3]]).collect();
       image.set_rgba(doubled);
     });
     let table = pass.aux.expect("a table").rgba;

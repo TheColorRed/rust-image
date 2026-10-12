@@ -2,6 +2,7 @@ import { batch } from '@/src/lib/batch';
 import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/edit-source';
 import {
   PERSON_MODEL_MISSING,
+  checkpointFor,
   clearTimeline,
   editsAPerson,
   healBlemish,
@@ -14,7 +15,7 @@ import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type ProjectRecipe } from '@/src/lib/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
-import { activeSectionKey, adjustments, appliedActions, focusedControlKey } from '@/src/state/edits';
+import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
@@ -45,6 +46,7 @@ function resetSessionState() {
   adjustments.next({});
   appliedActions.next([]);
   focusedControlKey.next(null);
+  openGroupKey.next(null);
   activeSectionKey.next('section-colorization');
   showingCheckpoint.next(false);
   personSelection.next({ focused: false, loading: false, people: [], selectedId: null, error: null });
@@ -62,6 +64,30 @@ const RESULT_QUALITY = 85;
 const JPEG_FALLBACK_QUALITY = 90;
 
 const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+/**
+ * Runs optional AI skin detection only after React has had a frame to lay out the editor. `readAsync` intentionally only
+ * decodes pixels, so selecting a photo never waits for a model. Copies of an AbraImage share the resulting mask; nudging
+ * the adjustment stream when it arrives redraws the current edit (including anything the user changed in the meantime).
+ */
+function detectSkinInBackground(image: AbraImage, isCancelled: () => boolean) {
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      if (isCancelled()) return;
+      void image.detectSkinAsync().then(
+        () => {
+          if (isCancelled() || originalImage.value !== image) return;
+          adjustments.next({ ...adjustments.value });
+        },
+        error => {
+          // The model is optional. Without it, skin controls keep using their color-based fallback.
+          if (__DEV__ && !isCancelled())
+            console.debug('[image] background skin detection unavailable:', errorMessage(error));
+        },
+      );
+    }, 0);
+  });
+}
 
 const NOT_SAVED = 'This session will not be saved, so the project keeps what it had.';
 
@@ -81,9 +107,19 @@ function saveOpenProject() {
   const skinMaskFile =
     project.skinMaskFile ??
     (originalImage.value?.writeSkinMask(toLocalPath(`${project.dir}/skin-mask.webp`)) ? 'skin-mask.webp' : undefined);
+  const people = originalImage.value?.writePersonMasks(toLocalPath(`${project.dir}/people`)) ?? project.people;
+  const entriesWithResources = entries.map((entry, index) => {
+    if (!changesPixels(entry.change)) return entry;
+    const checkpoint = checkpointFor(entry);
+    if (!checkpoint) return entry;
+    const checkpointFile = entry.checkpointFile ?? `checkpoint-${index}.webp`;
+    checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`));
+    return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
+  });
   if (
     skinMaskFile === project.skinMaskFile &&
-    JSON.stringify([entries, cursor]) === JSON.stringify([project.timeline, project.cursor])
+    JSON.stringify([entriesWithResources, cursor, people]) ===
+      JSON.stringify([project.timeline, project.cursor, project.people])
   )
     return;
 
@@ -109,7 +145,7 @@ function saveOpenProject() {
         if (final !== base) final.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entries, cursor, resultFile, skinMaskFile };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, people };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {
@@ -158,8 +194,13 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       const started = Date.now();
       // A saved skin mask is loaded as it was, rather than running the skin model again.
       const original = ownedImage(
-        project?.skinMaskFile
-          ? await AbraImage.readWithSkinMaskAsync(path, toLocalPath(`${project.dir}/${project.skinMaskFile}`))
+        project
+          ? await AbraImage.readWithProjectResourcesAsync(
+              path,
+              project.skinMaskFile ? toLocalPath(`${project.dir}/${project.skinMaskFile}`) : undefined,
+              project.people ? toLocalPath(`${project.dir}/people`) : undefined,
+              project.people,
+            )
           : await AbraImage.readAsync(path),
       );
       if (cancelled) {
@@ -175,23 +216,38 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       // they are, and a blemish among them is healed if it is ever redone.
       const saved = project?.timeline ?? [];
       const applied = Math.min(project?.cursor ?? saved.length, saved.length);
+      // Load rendered retouch checkpoints up front, including undone ones. Redo can then swap pixels without rerunning the
+      // automatic red-eye models (and old projects without checkpoints still use the compatibility replay below).
+      for (const entry of saved) {
+        if (!changesPixels(entry.change) || !entry.checkpointFile) continue;
+        const checkpoint = ownedImage(
+          await AbraImage.readAsync(toLocalPath(`${project!.dir}/${entry.checkpointFile}`)),
+        );
+        keepBlemishBase(entry, checkpoint);
+      }
       let base = original.copy() as AbraImage;
       const rebuilt: TimelineEntry[] = [];
       let restoreFailed = false;
       // Without the person model, an edit made to one person cannot be replayed (it would only throw).
-      const personModelMissing = !personDetectionDownloaded();
+      const personModelMissing = !personDetectionDownloaded() && !project?.people;
       for (const entry of saved.slice(0, applied)) {
         try {
           if (personModelMissing && editsAPerson(entry.before ?? entry)) throw new Error(PERSON_MODEL_MISSING);
           if (changesPixels(entry.change)) {
-            await nextFrame();
-            if (cancelled) {
-              base.uniffiDestroy();
-              original.uniffiDestroy();
-              return;
+            const checkpoint = checkpointFor(entry);
+            let healed: AbraImage;
+            if (checkpoint) {
+              healed = checkpoint.copy() as AbraImage;
+            } else {
+              await nextFrame();
+              if (cancelled) {
+                base.uniffiDestroy();
+                original.uniffiDestroy();
+                return;
+              }
+              healed = healBlemish(base, entry);
+              keepBlemishBase(entry, healed.copy() as AbraImage);
             }
-            const healed = healBlemish(base, entry);
-            keepBlemishBase(entry, healed.copy() as AbraImage);
             base.uniffiDestroy();
             base = healed;
           }
@@ -236,6 +292,9 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         historyReady.next(true);
         ready.next(true);
       });
+      // A saved mask was loaded above and needs no model. Otherwise begin detection after the decoded photo and editor UI
+      // are both usable; the result is shared by the base and all of its copies.
+      if (!project) detectSkinInBackground(original, () => cancelled);
     } catch (e: any) {
       busy.next(false);
       if (!cancelled) loadError.next(String(e?.message ?? e));

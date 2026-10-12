@@ -15,7 +15,7 @@ pub use super::anchor::Anchor;
 pub use super::layer_transform::LayerTransform;
 pub use super::origin::Origin;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdjustmentLayerType {
   BrightnessContrast,
   Exposure,
@@ -116,11 +116,8 @@ impl<'a> Layer<'a> {
   }
 
   /// Return a cloned owned `Image` (cheap clone of the internal Arc/Image).
-  pub fn clone_image<'b>(&'b self) -> Image
-  where
-    'b: 'a,
-  {
-    self.image().clone()
+  pub fn clone_image(&self) -> Image {
+    self.borrow().image().clone()
   }
 
   /// Creates a new Layer wrapper from an `Arc<Mutex<LayerInner>>`.
@@ -232,9 +229,7 @@ impl<'a> Layer<'a> {
     set_global_position(x: i32, y: i32)
   );
 
-  layer_method_mut!(
-    set_anchor(anchor: Option<Anchor>)
-  );
+  layer_method_mut!(set_anchor(anchor: Option<Anchor>));
 
   /// Sets the position of the layer relative to another `Layer`.
   pub fn set_relative_position(&self, p_x: i32, p_y: i32, p_layer: &Layer) {
@@ -282,6 +277,11 @@ impl<'a> Layer<'a> {
   layer_method_imm_scalar!(
     /// Gets the position of the layer.
     position() -> (i32, i32)
+  );
+
+  layer_method_imm_scalar!(
+    /// Gets the origin point of the layer.
+    origin() -> Origin
   );
 
   /// Gets the anchor point of the layer.

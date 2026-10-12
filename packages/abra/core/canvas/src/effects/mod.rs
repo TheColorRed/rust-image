@@ -9,4 +9,4 @@ mod layer_effects;
 
 pub use drop_shadow::DropShadow;
 pub use layer_effects::LayerEffects;
-pub use stroke::Stroke;
+pub use stroke::{OutlinePosition, Stroke};

@@ -85,6 +85,7 @@ function fixture({ box = { width: 320, height: 200 } } = {}) {
     '@/src/lib/edit-sections': {
       EDIT_SECTIONS: [{ key: 'section', controls: [{ key: 'size', kind: 'slider', defaultValue: 0 }] }],
       applyAction() {},
+      leafControls: controls => controls,
       applySlider: (_control, _image, _value, scale) => scales.push(scale),
       findSection: key => ({
         key,

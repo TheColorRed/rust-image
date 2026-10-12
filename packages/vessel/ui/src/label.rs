@@ -189,7 +189,11 @@ mod tests {
       let mut component = label.component.clone();
       let frame = component.render(Duration::ZERO);
       let at = frame.pixels.chunks_exact(4).position(|pixel| pixel[3] == 255).unwrap() * 4;
-      { let slice = &frame.pixels.as_slice()[at..at + 4]; let pixel: [u8; 4] = slice.try_into().unwrap(); pixel }
+      {
+        let slice = &frame.pixels.as_slice()[at..at + 4];
+        let pixel: [u8; 4] = slice.try_into().unwrap();
+        pixel
+      }
     };
     assert_eq!(color_of_first_lit_pixel(&label), Theme::light().text);
     label.set_default_theme(Theme::dark());
@@ -328,7 +332,7 @@ mod tests {
     assert_eq!(pixel(0, 0), &[200, 0, 0, 255]);
     assert_eq!(pixel(20, 12), &[99, 0, 0, 255]);
     assert_eq!(pixel(20, 0), &[0, 255, 0, 255]);
-    assert_eq!(    pixel(3, 2), &[0, 255, 0, 255], "the border is above the image at the curved corner");
+    assert_eq!(pixel(3, 2), &[0, 255, 0, 255], "the border is above the image at the curved corner");
   }
 
   #[test]

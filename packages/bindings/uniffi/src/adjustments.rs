@@ -101,7 +101,9 @@ pub struct ChannelMix(color::ChannelMix);
 #[uniffi::export]
 pub fn channel_mix(red: Vec<f32>, green: Vec<f32>, blue: Vec<f32>) -> Arc<ChannelMix> {
   let weights = |name: &str, values: Vec<f32>| -> [f32; 3] {
-    values.try_into().unwrap_or_else(|values: Vec<f32>| panic!("the {name} weights need three numbers, got {}", values.len()))
+    values
+      .try_into()
+      .unwrap_or_else(|values: Vec<f32>| panic!("the {name} weights need three numbers, got {}", values.len()))
   };
   Arc::new(ChannelMix(color::channel_mix(weights("red", red), weights("green", green), weights("blue", blue))))
 }
@@ -559,7 +561,9 @@ mod tests {
   fn a_channel_mix_makes_one_channel_from_the_others_through_a_mask() {
     let image = Arc::new(Image::new_from_pixels(2, 1, vec![220, 40, 30, 255, 220, 40, 30, 255], Channels::RGBA));
     let mask = Arc::new(crate::Mask::from_values(2, 1, vec![255, 0]));
-    channel_mix(vec![0.0, 0.5, 0.5], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]).with_mask(Some(mask)).apply_on_cpu(image.clone());
+    channel_mix(vec![0.0, 0.5, 0.5], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0])
+      .with_mask(Some(mask))
+      .apply_on_cpu(image.clone());
     assert_eq!(image.rgba(), vec![35, 40, 30, 255, 220, 40, 30, 255], "only the pixel the mask reaches changes");
   }
 

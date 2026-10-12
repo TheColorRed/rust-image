@@ -4,7 +4,7 @@ import { type SliderControl } from '@/src/lib/edit-sections';
 import { preloadFor } from '@/src/lib/editor-preloads';
 import { ensureBase, editorLive, showTool } from '@/src/lib/editor-live';
 import { hasOtherSteps, renderStackWithoutSlider } from '@/src/lib/editor-replay';
-import { adjustmentKey } from '@/src/lib/skin-adjustments';
+import { adjustmentKey, scaledPersonBounds } from '@/src/lib/skin-adjustments';
 import { personSelection$, personSelection } from '@/src/state/person-selection';
 import { appliedActions$, adjustments$ } from '@/src/state/edits';
 import { previewBox$ } from '@/src/state/gestures';
@@ -74,7 +74,14 @@ export function useLiveSlider(p_control: SliderControl | undefined): ((values: n
       pending.frame = requestAnimationFrame(() => {
         pending.frame = null;
         showTool((photo, context) =>
-          tool(photo, pending.values, { ...context, preloaded: preloadFor(p_control, photo.width()) }),
+          tool(photo, pending.values, {
+            ...context,
+            preloaded: preloadFor(p_control, photo.width()),
+            person: scaledPersonBounds(
+              personSelection.value.people.find(person => person.id === personSelection.value.selectedId),
+              context.scale,
+            ),
+          }),
         );
       });
     };

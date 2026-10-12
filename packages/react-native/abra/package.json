@@ -11,12 +11,15 @@
     ".": "./index.ts",
     "./adjustments": "./entries/adjustments.ts",
     "./blend": "./entries/blend.ts",
+    "./canvas": "./entries/canvas.ts",
     "./color": "./entries/color.ts",
     "./filters": "./entries/filters.ts",
     "./geometry": "./entries/geometry.ts",
     "./gradient": "./entries/gradient.ts",
     "./image": "./entries/image.ts",
-    "./mask": "./entries/mask.ts"
+    "./mask": "./entries/mask.ts",
+    "./tools": "./entries/tools.ts",
+    "./transform": "./entries/transform.ts"
   },
   "peerDependencies": {
     "@alakazam/mobile": "*"

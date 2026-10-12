@@ -12,7 +12,54 @@ use std::sync::{
 
 use vessel::prelude::*;
 
-use crate::{AbraImage, effect_spec::EffectSpec};
+use crate::{effect_spec::EffectSpec, live_image::LiveImage};
+
+struct PreviewSource {
+  image: Arc<abra_uniffi::Image>,
+  live: BehaviorSubject<Vec<EffectSpec>>,
+  tool_image: BehaviorSubject<Option<Arc<abra::prelude::Image>>>,
+}
+
+impl PreviewSource {
+  fn new(image: Arc<abra_uniffi::Image>) -> Self {
+    Self { image, live: BehaviorSubject::new(Vec::new()), tool_image: BehaviorSubject::new(None) }
+  }
+}
+
+impl Trackable for PreviewSource {
+  fn pictures(&self, size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
+    let source = Arc::clone(&self.image);
+    let selected_skin = source.selected_skin_mask();
+    let changes = size.combine_latest(source.revision()).combine_latest(&self.live).combine_latest(selected_skin);
+    let changes = changes.combine_latest(&self.tool_image);
+    let mut rendering: Option<(((u32, u32), u64), LiveImage)> = None;
+    Offscreen::new(&changes, move |((((size, revision), live), selected_skin), tool)| {
+      if size.0 == 0 || size.1 == 0 { return None }
+      if let Some(image) = tool {
+        return Some(RenderedFrame::Pixels(Arc::new(frame_of(image))));
+      }
+      let key = (*size, *revision);
+      if rendering.as_ref().is_none_or(|(rendered_for, _)| *rendered_for != key) {
+        let preview = source.preview(size.0, size.1);
+        rendering = LiveImage::new(preview.width, preview.height, preview.data).ok().map(|image| (key, image));
+      }
+      let skin = selected_skin.as_deref().cloned().or_else(|| source.base_skin_mask());
+      let picture = rendering.as_mut()?.1.picture_with_skin_mask(live.iter(), skin.as_ref())?;
+      Some(match picture {
+        Picture::Pixels(frame) => RenderedFrame::Pixels(frame),
+        Picture::Gpu(frame) => RenderedFrame::Gpu(frame),
+      })
+    }).map(|frame| match frame {
+      RenderedFrame::Pixels(frame) => Picture::Pixels(Arc::clone(frame)),
+      RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
+    })
+  }
+}
+
+fn frame_of(image: &abra::prelude::Image) -> Frame {
+  let (width, height) = image.dimensions::<u32>();
+  Frame { width, height, pixels: image.rgba().to_vec().into() }
+}
 
 /// The photo being edited: an image that follows the photo and the controls React touches. A `VesselView` shows it on a
 /// native view, and the Vessel engine does the rest.
@@ -20,7 +67,7 @@ use crate::{AbraImage, effect_spec::EffectSpec};
 pub struct ImagePreview {
   image: Image,
   presented: Arc<AtomicBool>,
-  source: Arc<AbraImage>,
+  source: Arc<PreviewSource>,
 }
 
 /// Everything React can tell a view.
@@ -38,8 +85,9 @@ pub enum Message {
 impl ImagePreview {
   /// A view of `image`.
   #[uniffi::constructor]
-  pub fn new(p_image: Arc<AbraImage>) -> Arc<Self> {
-    let image = Image::new().track(&p_image);
+  pub fn new(p_image: Arc<abra_uniffi::Image>) -> Arc<Self> {
+    let source = Arc::new(PreviewSource::new(p_image));
+    let image = Image::new().track(source.as_ref());
     let presented = Arc::new(AtomicBool::new(false));
     image.subject::<Drawn>().subscribe({
       let presented = Arc::clone(&presented);
@@ -48,17 +96,20 @@ impl ImagePreview {
     let messages = image.subject::<Message>();
 
     messages.subscribe({
-      let p_image = Arc::clone(&p_image);
+      let source = Arc::clone(&source);
       move |message| match message {
-        Message::Show(effects) => p_image.show_live(effects.clone()),
-        Message::ShowImage(image) => p_image.show_tool_image(Arc::new(image.core())),
+        Message::Show(effects) => {
+          source.live.next(effects.clone());
+          if source.tool_image.peek().is_some() { source.tool_image.next(None); }
+        }
+        Message::ShowImage(image) => source.tool_image.next(Some(Arc::new(image.core()))),
       }
     });
 
     Arc::new(Self {
       image,
       presented,
-      source: p_image,
+      source,
     })
   }
 
@@ -70,7 +121,7 @@ impl ImagePreview {
   /// The photo shrunk to fit within `width` x `height` pixels, for a tool to run on while a slider is dragged. The same size
   /// of the same edit gives the same image without resizing again.
   pub fn source(&self, width: u32, height: u32) -> Arc<abra_uniffi::Image> {
-    Arc::new(abra_uniffi::Image::from_core((*self.source.preview_image(width, height)).clone()))
+    self.source.image.shrunk(width, height)
   }
 
   /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.
@@ -144,8 +195,9 @@ mod tests {
   }
 
   fn view(p_id: i32) -> Arc<ImagePreview> {
-    let image =
-      AbraImage::from_image(AbraPixels::new_from_pixels(4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA));
+    let image = Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_pixels(
+      4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA,
+    )));
     let view = ImagePreview::new(image);
     view.mount(p_id);
     view
@@ -215,13 +267,14 @@ mod tests {
 
   #[test]
   fn an_edit_to_the_image_shows_up_on_the_view() {
-    let image =
-      AbraImage::from_image(AbraPixels::new_from_pixels(4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA));
+    let image = Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_pixels(
+      4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA,
+    )));
     let view = ImagePreview::new(Arc::clone(&image));
     view.mount(7002);
     let surface = surface_of(7002);
     assert_eq!(newest(&surface, |_| true), 100);
-    image.invert();
+    crate::effect_spec::apply_effect(Arc::clone(&image), EffectSpec::Invert);
     assert_eq!(newest(&surface, |pixel| pixel == 155), 155);
     drop(view);
   }

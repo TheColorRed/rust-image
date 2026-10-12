@@ -56,11 +56,13 @@ impl Generator for RadialGradient {
     let inverse = self.inverse();
     let uniforms: Vec<u8> =
       [self.center.0, self.center.1, inverse.0, inverse.1].into_iter().flat_map(f32::to_le_bytes).collect();
-    Some(vec![GpuPass::new(include_str!("./radial_gradient.wgsl"), uniforms).with_aux(GpuAux {
-      width: LUT_SIZE,
-      height: 1,
-      rgba: self.lut.clone(),
-    })])
+    Some(vec![
+      GpuPass::new(include_str!("./radial_gradient.wgsl"), uniforms).with_aux(GpuAux {
+        width: LUT_SIZE,
+        height: 1,
+        rgba: self.lut.clone(),
+      }),
+    ])
   }
 }
 
@@ -213,7 +215,11 @@ mod tests {
       let worst = made.rgba().iter().zip(expected.rgba()).map(|(a, e)| a.abs_diff(*e)).max().unwrap_or(0);
       assert!(worst <= 2, "{}: the fused gradient differs from the CPU by {worst}", mode.name());
     }
-    assert_eq!(gpu_runs.load(Ordering::SeqCst) - runs_before, modes.len() * 2, "the gradient and then the blend, each on the GPU");
+    assert_eq!(
+      gpu_runs.load(Ordering::SeqCst) - runs_before,
+      modes.len() * 2,
+      "the gradient and then the blend, each on the GPU"
+    );
 
     // A picture that is just pixels goes over the photo as a texture.
     let picture = Image::new_from_color(width, height, Color::from_rgba(200, 30, 60, 128));
@@ -257,15 +263,33 @@ mod tests {
     let (mut base, mut top) = (Vec::new(), Vec::new());
     for y in 0..size {
       for x in 0..size {
-        base.extend_from_slice(&[x as u8, y as u8, ((x * 5 + y * 3) % 256) as u8, if (x + y) % 5 == 0 { 90 } else { 255 }]);
-        top.extend_from_slice(&[y as u8, x as u8, ((x * 7 + y * 11) % 256) as u8, if (x * y) % 4 == 0 { 140 } else { 220 }]);
+        base.extend_from_slice(&[
+          x as u8,
+          y as u8,
+          ((x * 5 + y * 3) % 256) as u8,
+          if (x + y) % 5 == 0 { 90 } else { 255 },
+        ]);
+        top.extend_from_slice(&[
+          y as u8,
+          x as u8,
+          ((x * 7 + y * 11) % 256) as u8,
+          if (x * y) % 4 == 0 { 140 } else { 220 },
+        ]);
       }
     }
     let base = Image::new_from_pixels(size, size, base, Channels::RGBA);
     let top = Image::new_from_pixels(size, size, top, Channels::RGBA);
 
     // The modes that use floats on both sides, and how far they may differ.
-    let float_modes = ["darker-color", "lighter-color", "divide", "hue", "saturation", "color", "luminosity"];
+    let float_modes = [
+      "darker-color",
+      "lighter-color",
+      "divide",
+      "hue",
+      "saturation",
+      "color",
+      "luminosity",
+    ];
     let mut report = Vec::new();
     for mode in BlendMode::ALL {
       for opacity in [1.0f32, 0.55] {

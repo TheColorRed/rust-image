@@ -5,7 +5,7 @@
 /// Anchor points define where an element should be positioned relative to its parent.
 /// For example, `Center` positions the element in the center, while `TopLeft` positions
 /// it at the top-left corner.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anchor {
   /// Anchors the element to the top left corner of the parent.
   TopLeft,

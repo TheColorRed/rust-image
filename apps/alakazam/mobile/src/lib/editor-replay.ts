@@ -4,6 +4,7 @@ import {
   applySlider,
   EDIT_SECTIONS,
   findSection,
+  leafControls,
   isSliderApplied,
   scaleBetween,
   sliderDefault,
@@ -15,7 +16,7 @@ import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor-pictures';
 import { clearPreloads, preloadFor } from '@/src/lib/editor-preloads';
 import { buildControlThumbnails } from '@/src/lib/editor-thumbnails';
 import { type ProjectRecipe } from '@/src/lib/project-store';
-import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
+import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import {
   activeSectionKey,
   activeSectionKey$,
@@ -87,7 +88,7 @@ const REPLAY_DELAY_MS = 60;
 
 const findAction = (key: string): ActionControl | undefined => {
   for (const section of EDIT_SECTIONS) {
-    for (const control of section.controls) if (control.kind === 'action' && control.key === key) return control;
+    for (const control of leafControls(section.controls)) if (control.kind === 'action' && control.key === key) return control;
   }
   return undefined;
 };
@@ -120,26 +121,30 @@ function appliedSteps(
       : recipe.appliedActions;
   for (const key of keys) {
     const control = findAction(key);
-    if (!control || (!control.apply && !control.live && !control.operation && !control.tool)) continue;
+    if (!control || (!control.apply && !control.live && !control.tool)) continue;
     // The action about to be applied replaces the others in its group, so it is never left out with them.
     if (control !== pending && control.group && excludeGroups?.has(control.group)) continue;
     steps.push({ key, run: (image, scale) => applyAction(control, image, scale) });
   }
   for (const section of EDIT_SECTIONS) {
-    for (const control of section.controls) {
+    for (const control of leafControls(section.controls)) {
       if (control.kind !== 'slider') continue;
-      if (isSkinAdjustment(control.key)) {
+      if (isPersonAdjustment(control.key)) {
         const effect = control.live;
-        if (!effect) throw new Error(`Skin control has no effect definition: ${control.key}`);
+        if (!effect && !control.tool) throw new Error(`Person control has no effect definition: ${control.key}`);
         const activeKey = adjustmentKey(control.key, personSelection.value.selectedId);
-        for (const target of skinAdjustmentTargets(recipe.adjustments, control.key)) {
+        for (const target of personAdjustmentTargets(recipe.adjustments, control.key)) {
           if (slider?.key === control.key && target.key === activeKey) continue;
           if (!isSliderApplied(control, target.value)) continue;
           steps.push({
             key: target.key,
             value: target.value,
-            run: image => {
-              image.applyEffectToPerson(effect(target.value), target.personId ?? undefined);
+            run: (image, scale) => {
+              // A live person effect has one slider; multi-slider person controls use `tool` below.
+              if (effect) return image.applyEffectToPerson(effect(target.value as number), target.personId ?? undefined);
+              // A tool is told where the person is. The image gives the box in its own pixels, so it is not scaled again.
+              const person = target.personId === null ? undefined : image.findPeople().find(found => found.id === target.personId);
+              applySlider(control, image, target.value, scale, person);
             },
           });
         }
@@ -228,7 +233,7 @@ let preloadTimer: ReturnType<typeof setTimeout> | undefined;
  */
 function preloadFocused() {
   const base = editBaseImage.value;
-  const control = findSection(activeSectionKey.value).controls.find(item => item.key === focusedControlKey.value);
+  const control = leafControls(findSection(activeSectionKey.value).controls).find(item => item.key === focusedControlKey.value);
   if (!base || control?.kind !== 'slider' || !control.preload) return;
   if (preloadedBase && preloadedBase !== base) clearPreloads();
   preloadedBase = base;

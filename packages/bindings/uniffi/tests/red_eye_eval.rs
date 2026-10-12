@@ -64,7 +64,11 @@ fn look(p_photo: &Arc<Image>, p_cx: f32, p_cy: f32, p_half: f32, p_color: &Arc<C
     || (found.x + found.width >= area.width && area.x + area.width < width)
     || (found.y + found.height >= area.height && area.y + area.height < height);
   let fill = core.cropped(found).coverage(TAP_BOX_THRESHOLD);
-  Some(Look { found: found.translated(area.x, area.y), cut, fill })
+  Some(Look {
+    found: found.translated(area.x, area.y),
+    cut,
+    fill,
+  })
 }
 
 /// Finds the pupil near a tap: the pupil-colored pixels in a small square around it, then, while they run into the side of the
@@ -77,7 +81,13 @@ fn find_pupil(p_photo: &Arc<Image>, p_x: f32, p_y: f32, p_color: &Arc<Color>) ->
       break;
     }
     let middle = current.found.center();
-    current = look(p_photo, middle.x, middle.y, current.found.width.max(current.found.height) * TAP_REFINE_WINDOW / 2.0 + 2.0, p_color)?;
+    current = look(
+      p_photo,
+      middle.x,
+      middle.y,
+      current.found.width.max(current.found.height) * TAP_REFINE_WINDOW / 2.0 + 2.0,
+      p_color,
+    )?;
   }
   if current.cut {
     return None;
@@ -160,7 +170,8 @@ fn describe(p_photo: &Arc<Image>, p_x: f32, p_y: f32) -> String {
   } else {
     ((r - g) / d + 4.0) * 60.0
   };
-  let mut text = format!("tap pixel h/s/v {:.0}/{:.0}/{:.0};", hue, if max == 0.0 { 0.0 } else { d / max * 100.0 }, max * 100.0);
+  let mut text =
+    format!("tap pixel h/s/v {:.0}/{:.0}/{:.0};", hue, if max == 0.0 { 0.0 } else { d / max * 100.0 }, max * 100.0);
   match find_pupil(p_photo, p_x, p_y, &pupil_color) {
     Some(l) => {
       text += &format!(
@@ -193,19 +204,40 @@ const PHOTOS: &[Photo] = &[
     name: "girl",
     file: "assets/red-eye/1JMredeye.jpg",
     pupils: &[(104.0, 174.0), (186.0, 162.0)],
-    not_pupils: &[(150.0, 260.0), (60.0, 200.0), (230.0, 230.0), (140.0, 215.0), (100.0, 120.0), (40.0, 330.0)],
+    not_pupils: &[
+      (150.0, 260.0),
+      (60.0, 200.0),
+      (230.0, 230.0),
+      (140.0, 215.0),
+      (100.0, 120.0),
+      (40.0, 330.0),
+    ],
   },
   Photo {
     name: "flash",
     file: "assets/red-eye/Red-eye-flash.jpg",
     pupils: &[(331.0, 148.0), (481.0, 150.0)],
-    not_pupils: &[(250.0, 230.0), (480.0, 260.0), (390.0, 325.0), (160.0, 170.0), (400.0, 90.0), (340.0, 380.0)],
+    not_pupils: &[
+      (250.0, 230.0),
+      (480.0, 260.0),
+      (390.0, 325.0),
+      (160.0, 170.0),
+      (400.0, 90.0),
+      (340.0, 380.0),
+    ],
   },
   Photo {
     name: "child",
     file: "assets/red-eye/red-eye-effect-min.jpg.webp",
     pupils: &[(138.0, 174.0), (218.0, 175.0)],
-    not_pupils: &[(178.0, 268.0), (150.0, 278.0), (110.0, 220.0), (250.0, 215.0), (180.0, 130.0), (178.0, 250.0)],
+    not_pupils: &[
+      (178.0, 268.0),
+      (150.0, 278.0),
+      (110.0, 220.0),
+      (250.0, 215.0),
+      (180.0, 130.0),
+      (178.0, 250.0),
+    ],
   },
   Photo {
     name: "party",

@@ -55,8 +55,9 @@ impl Manifest {
   /// - `p_onnx_path`: Path to the ONNX model file.
   pub fn load(p_onnx_path: impl AsRef<Path>) -> Result<Self, AiError> {
     let yaml_path = p_onnx_path.as_ref().with_extension("yml");
-    let text = std::fs::read_to_string(&yaml_path)
-      .map_err(|e| AiError::model_load_failed(format!("Model manifest {} could not be read: {e}", yaml_path.display())))?;
+    let text = std::fs::read_to_string(&yaml_path).map_err(|e| {
+      AiError::model_load_failed(format!("Model manifest {} could not be read: {e}", yaml_path.display()))
+    })?;
     Self::parse(&text)
   }
 
@@ -64,7 +65,8 @@ impl Manifest {
   ///
   /// - `p_text`: The YAML of the manifest.
   pub fn parse(p_text: &str) -> Result<Self, AiError> {
-    let docs = Yaml::load_from_str(p_text).map_err(|e| AiError::model_load_failed(format!("Invalid manifest YAML: {e}")))?;
+    let docs =
+      Yaml::load_from_str(p_text).map_err(|e| AiError::model_load_failed(format!("Invalid manifest YAML: {e}")))?;
     let doc = docs.first().ok_or_else(|| AiError::model_load_failed("The model manifest is empty"))?;
     Ok(Self::from_yaml(doc))
   }
@@ -131,7 +133,11 @@ impl Manifest {
           .collect()
       })
       .unwrap_or_default();
-    Some(ControlSpec { size, defaults, parameters })
+    Some(ControlSpec {
+      size,
+      defaults,
+      parameters,
+    })
   }
 
   /// The name of the model.
@@ -185,9 +191,9 @@ impl Manifest {
 
   /// A number in `params` that the decoder cannot work without.
   pub fn required_number(&self, p_key: &str) -> Result<f64, AiError> {
-    self
-      .number(p_key)
-      .ok_or_else(|| AiError::config_error(format!("The manifest of {} has no number `{p_key}` in its params", self.name)))
+    self.number(p_key).ok_or_else(|| {
+      AiError::config_error(format!("The manifest of {} has no number `{p_key}` in its params", self.name))
+    })
   }
 }
 

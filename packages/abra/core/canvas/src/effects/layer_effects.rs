@@ -7,7 +7,7 @@ use crate::{
 };
 
 /// Options for various layer effects.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LayerEffects<'a> {
   pub drop_shadow: Option<DropShadow<'a>>,
   pub stroke: Option<Stroke<'a>>,

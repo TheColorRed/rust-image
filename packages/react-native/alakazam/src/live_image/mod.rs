@@ -245,8 +245,8 @@ impl LiveImage {
 
   /// The weights that limit an effect to the area and mask in `p_options`, or `None` if it has neither.
   fn weights_for(&self, p_options: &Options) -> Option<GpuAux> {
-    let ctx = abra::options::prelude::get_ctx(p_options.as_ref())
-      .filter(|ctx| ctx.area.is_some() || ctx.mask.is_some())?;
+    let ctx =
+      abra::options::prelude::get_ctx(p_options.as_ref()).filter(|ctx| ctx.area.is_some() || ctx.mask.is_some())?;
     let weights = abra::abra_core::image::apply_area::area_weights(self.width, self.height, &ctx);
     Some(masked::weights_texture(self.width, self.height, &weights))
   }

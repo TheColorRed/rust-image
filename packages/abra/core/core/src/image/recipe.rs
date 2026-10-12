@@ -284,7 +284,11 @@ mod tests {
     assert_eq!(twice.get_pixel(1, 1), Some((9, 8, 7, 255)));
     // The top is handed to the shader as pixels, so it is made once (one run, one step), and then the two blends over the
     // photo are the one chain (one run, two steps).
-    assert_eq!(RUNS.load(Ordering::SeqCst), 2, "the top once, and one run for the whole chain however often it is read");
+    assert_eq!(
+      RUNS.load(Ordering::SeqCst),
+      2,
+      "the top once, and one run for the whole chain however often it is read"
+    );
     assert_eq!(PASSES.load(Ordering::SeqCst), 3, "one step for the top, and the two blends as two steps of one run");
     clear_gpu_provider();
   }

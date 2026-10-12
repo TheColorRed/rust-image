@@ -2,7 +2,6 @@ use abra_core::Image;
 use options::{Effect, Options};
 use rayon::prelude::*;
 
-
 fn apply_posterize(p_image: &mut Image, p_levels: u8) {
   let p_levels = (p_levels as f32).clamp(2.0, 255.0);
   let pixels = p_image.colors().as_slice_mut().expect("Image colors must be contiguous");

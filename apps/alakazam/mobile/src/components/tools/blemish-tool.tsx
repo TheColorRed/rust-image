@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import { computePreviewImagePoint, type PreviewPoint } from '@/src/lib/preview-coordinates';
+import { removeBlemish } from '@/src/lib/blemish';
 import { commitBlemish } from '@/src/lib/editor-history';
 import { blemishApplyRequested$ } from '@/src/state/commands';
 import { isBlemishToolFocused, isBlemishToolFocused$, wasBlemishToolFocused } from '@/src/state/edits';
@@ -80,7 +81,7 @@ export function BlemishToolController() {
         if (!image || !box || !historyReady.value) return;
         const target = computeBlemishTarget(image, box, previewScaleValue.value, previewTranslateValue.value);
         if (!target) return;
-        image.removeBlemish(target.x, target.y, target.radius);
+        removeBlemish(image, target.x, target.y, target.radius);
         commitBlemish({ x: target.x, y: target.y, radius: target.radius });
       }),
 

@@ -12,6 +12,15 @@ export interface ProjectRecipe {
   appliedActions: string[];
 }
 
+export interface SavedPersonDetection {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence: number;
+}
+
 /**
  * One saved project: a folder in the app's files folder (kept until the user deletes it, unlike the cache) holding
  * the untouched original, `source.<ext>`, the final image, `resultFile`, and `project.json`, which is this object
@@ -31,6 +40,8 @@ export interface Project {
    * the model, so the edits replay with the same mask (even when the model is not on this device) and open faster.
    */
   skinMaskFile?: string;
+  /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
+  people?: SavedPersonDetection[];
   /** Every step, in the order it was performed, including ones that were undone and can be redone. */
   timeline: TimelineEntry[];
   /** How many steps of `timeline` are applied: where undo had got to when the project was closed. */

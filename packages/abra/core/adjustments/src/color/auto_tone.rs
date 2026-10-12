@@ -3,7 +3,6 @@ use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-
 fn apply_auto_tone(p_image: &mut Image) {
   let (width, height) = p_image.dimensions::<i32>();
   let src = p_image.rgba();

@@ -1,7 +1,14 @@
 import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
 import { Alert } from 'react-native';
 import { batch } from '@/src/lib/batch';
-import { EDIT_SECTIONS, type ActionControl, type AdjustmentValue, type SliderControl } from '@/src/lib/edit-sections';
+import { removeBlemish } from '@/src/lib/blemish';
+import {
+  EDIT_SECTIONS,
+  leafControls,
+  type ActionControl,
+  type AdjustmentValue,
+  type SliderControl,
+} from '@/src/lib/edit-sections';
 import { renderRecipe } from '@/src/lib/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
 import type { ProjectRecipe } from '@/src/lib/project-store';
@@ -20,7 +27,7 @@ import {
 import { personSelection } from '@/src/state/person-selection';
 import { adjustments, appliedActions, focusedControlKey, historyVersion } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
-import { historyReady } from '@/src/state/project-session';
+import { historyReady, openProject } from '@/src/state/project-session';
 import { currentImage, editBaseImage, originalImage, replayHidden } from '@/src/state/session';
 
 /**
@@ -51,7 +58,7 @@ export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
   }
   const healed = renderRecipe(base, entry.before);
   try {
-    if (change.type === 'blemish') healed.removeBlemish(change.x, change.y, change.radius);
+    if (change.type === 'blemish') removeBlemish(healed, change.x, change.y, change.radius);
     else applyRedEyeStep(healed, change);
   } catch (error) {
     healed.uniffiDestroy();
@@ -65,6 +72,9 @@ export function keepBlemishBase(entry: TimelineEntry, image: AbraImage) {
   blemishBases.set(entry, image);
 }
 
+/** The rendered checkpoint owned by a pixel-changing history step, when it has been built. */
+export const checkpointFor = (entry: TimelineEntry): AbraImage | undefined => blemishBases.get(entry);
+
 /** Frees every kept picture and empties the timeline, when the editor session ends. */
 export function clearTimeline() {
   for (const image of blemishBases.values()) image.uniffiDestroy();
@@ -74,7 +84,9 @@ export function clearTimeline() {
 }
 
 const isInGroup = (key: string, group: string) =>
-  EDIT_SECTIONS.some(section => section.controls.some(c => c.kind === 'action' && c.key === key && c.group === group));
+  EDIT_SECTIONS.some(section =>
+    leafControls(section.controls).some(c => c.kind === 'action' && c.key === key && c.group === group),
+  );
 
 /** Adds a step to the timeline, freeing the pictures of the undone steps it drops. Does nothing until the history is built. */
 function record(entry: TimelineEntry, replaceLast = false) {
@@ -192,7 +204,7 @@ function moveTo(cursor: number) {
     }
     // The person model is needed to render an edit made to one person. Say so, rather than fail inside the replay.
     const step = after.cursor > before.cursor ? after.entries[after.cursor - 1] : undefined;
-    if (step && !personDetectionDownloaded() && editsAPerson(step.before ?? step))
+    if (step && !personDetectionDownloaded() && !openProject.value?.people && editsAPerson(step.before ?? step))
       throw new Error(PERSON_MODEL_MISSING);
   } catch (error) {
     Alert.alert('Could not redo', errorMessage(error));

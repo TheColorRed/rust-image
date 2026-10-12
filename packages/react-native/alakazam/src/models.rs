@@ -141,7 +141,8 @@ fn parse_catalog(p_text: &str) -> Result<Vec<ModelEntry>, String> {
 
 /// Downloads the catalog from S3, asks S3 for each file's size and replaces the model list with the result.
 fn fetch_catalog() -> Result<Vec<ModelEntry>, String> {
-  let mut response = ureq::get(MODEL_CATALOG_URL).call().map_err(|e| format!("Failed to download the model catalog: {e}"))?;
+  let mut response =
+    ureq::get(MODEL_CATALOG_URL).call().map_err(|e| format!("Failed to download the model catalog: {e}"))?;
   let text = response.body_mut().read_to_string().map_err(|e| format!("Failed to read the model catalog: {e}"))?;
   let mut models = parse_catalog(&text)?;
   for model in &mut models {
@@ -312,9 +313,10 @@ pub(crate) fn skin_segmenter() -> Result<Arc<BodySegmentation>, AbraError> {
   if let Some(segmenter) = cached.as_ref() {
     return Ok(Arc::clone(segmenter));
   }
-  let segmenter = Arc::new(BodySegmentation::load(find_downloaded(SKIN_SEGMENTATION_ROLE)?).map_err(|error| AbraError::Ai {
-    message: error.to_string(),
-  })?);
+  let segmenter =
+    Arc::new(BodySegmentation::load(find_downloaded(SKIN_SEGMENTATION_ROLE)?).map_err(|error| AbraError::Ai {
+      message: error.to_string(),
+    })?);
   *cached = Some(Arc::clone(&segmenter));
   Ok(segmenter)
 }
@@ -326,9 +328,10 @@ pub(crate) fn person_segmenter() -> Result<Arc<PersonSegmenter>, AbraError> {
   if let Some(segmenter) = cached.as_ref() {
     return Ok(Arc::clone(segmenter));
   }
-  let segmenter = Arc::new(PersonSegmenter::load(find_downloaded(PERSON_DETECTION_ROLE)?).map_err(|error| AbraError::Ai {
-    message: error.to_string(),
-  })?);
+  let segmenter =
+    Arc::new(PersonSegmenter::load(find_downloaded(PERSON_DETECTION_ROLE)?).map_err(|error| AbraError::Ai {
+      message: error.to_string(),
+    })?);
   *cached = Some(Arc::clone(&segmenter));
   Ok(segmenter)
 }

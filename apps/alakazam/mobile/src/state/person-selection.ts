@@ -20,3 +20,6 @@ export const personSelection$ = personSelection.asObservable();
 
 export const personOutlinesVisible = new BehaviorSubject(false);
 export const personOutlinesVisible$ = personOutlinesVisible.asObservable();
+
+/** Whether the user has anything to choose: more than one person was found, or detection is still running or has failed. */
+export const selectionNeeded = (state: PersonSelectionState) => state.loading || !!state.error || state.people.length > 1;

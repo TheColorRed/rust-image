@@ -74,7 +74,14 @@ impl Mask {
   pub fn from_color_range(
     image: Arc<Image>, color: Arc<Color>, hue_range: f32, min_saturation: f32, min_value: f32, feather: f32,
   ) -> Self {
-    Self::from_core(library::Mask::from_color_range(&image.core(), color.0, hue_range, min_saturation, min_value, feather))
+    Self::from_core(library::Mask::from_color_range(
+      &image.core(),
+      color.0,
+      hue_range,
+      min_saturation,
+      min_value,
+      feather,
+    ))
   }
 
   /// The width of the mask in pixels.

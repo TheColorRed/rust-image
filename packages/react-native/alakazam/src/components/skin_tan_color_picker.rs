@@ -9,7 +9,7 @@ use vessel::prelude::{Component, Frame, Observable, Observer, Slider};
 use crate::{
   components::image_preview::{ImagePreview, Message},
   effect_spec::{EffectSpec, skin_tan_gradient},
-  image::frame_of,
+  components::frame_of,
 };
 
 /// A bar of tans with a handle: the user drags it to pick how tanned the skin in the photo gets. The preview shows each
@@ -70,7 +70,7 @@ impl SkinTanColorPicker {
   }
 
   /// The handle as a picture: a white ring with a soft shadow, hollow so the tan under it shows through.
-  fn create_gradient_handle() -> Frame {
+  pub(crate) fn create_gradient_handle() -> Frame {
     const SIZE: u32 = 36;
     // The ring runs from `INNER` to `OUTER` pixels from the center, edged on the inside with a thin dark line, and the
     // shadow fades out beyond it.

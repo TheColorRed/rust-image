@@ -1,5 +1,7 @@
-use abra_core::{Area, Color, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm, blend};
 pub use abra_core::rgba_to_gray;
+use abra_core::{
+  Area, Color, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm, blend,
+};
 use std::borrow::Cow;
 
 use drawing::fill;
@@ -187,7 +189,8 @@ impl Mask {
         let (hue, saturation, value) = Color::from_rgb(pixel[0], pixel[1], pixel[2]).hsv();
         let distance = (hue - target_hue).abs();
         let distance = distance.min(360.0 - distance);
-        let weight = at_most(distance, p_hue_range) * at_least(saturation, p_min_saturation) * at_least(value, p_min_value);
+        let weight =
+          at_most(distance, p_hue_range) * at_least(saturation, p_min_saturation) * at_least(value, p_min_value);
         (weight.clamp(0.0, 1.0) * 255.0).round() as u8
       })
       .collect();
@@ -507,9 +510,19 @@ mod tests {
   #[test]
   fn a_color_range_picks_out_the_pixels_with_that_hue() {
     // Red, orange-red, green, gray, dark red.
-    let image = colors(&[(220, 30, 30), (230, 130, 30), (30, 200, 30), (120, 120, 120), (30, 5, 5)]);
+    let image = colors(&[
+      (220, 30, 30),
+      (230, 130, 30),
+      (30, 200, 30),
+      (120, 120, 120),
+      (30, 5, 5),
+    ]);
     let mask = Mask::from_color_range(&image, Color::red(), 20.0, 0.4, 0.3, 0.0);
-    assert_eq!(mask.values(), &[255, 0, 0, 0, 0], "orange is too far, green and gray are not red, dark red is too dark");
+    assert_eq!(
+      mask.values(),
+      &[255, 0, 0, 0, 0],
+      "orange is too far, green and gray are not red, dark red is too dark"
+    );
     let wider = Mask::from_color_range(&image, Color::red(), 35.0, 0.4, 0.3, 0.0);
     assert_eq!(wider.values()[1], 255, "a wider range takes in the orange-red");
   }

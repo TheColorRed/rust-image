@@ -17,11 +17,7 @@ impl GrayPlane {
   /// - `p_width`, `p_height`: The size of the plane.
   /// - `p_values`: The values, row by row from the top left. Its length must be `p_width * p_height`.
   pub fn new(p_width: u32, p_height: u32, p_values: Vec<u8>) -> GrayPlane {
-    assert_eq!(
-      p_values.len(),
-      p_width as usize * p_height as usize,
-      "a plane needs one value per pixel"
-    );
+    assert_eq!(p_values.len(), p_width as usize * p_height as usize, "a plane needs one value per pixel");
     GrayPlane {
       width: p_width,
       height: p_height,

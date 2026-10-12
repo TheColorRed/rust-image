@@ -100,6 +100,12 @@ impl BlendMode {
   }
 }
 
+impl From<abra_core::BlendMode> for BlendMode {
+  fn from(mode: abra_core::BlendMode) -> Self {
+    blend_modes().into_iter().find(|m| m.to_core() == mode).unwrap_or(BlendMode::Normal)
+  }
+}
+
 #[uniffi::export]
 impl BlendMode {
   /// The mode's identifier, such as "color-burn".

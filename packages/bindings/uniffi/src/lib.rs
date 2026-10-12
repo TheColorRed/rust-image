@@ -5,10 +5,11 @@
 //! `blend(edges).apply(photo)`. Each handle owns the library's value and forwards to it; the work is the library's. A handle
 //! is needed because Rust only lets a type's own crate add functions to it.
 //!
-//! One file for each part of the library: [`color`] (the `primitives` color module), [`image`] (`Image`), [`gradient`]
-//! (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest) and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes). The top of each file says what in its part of
-//! the library cannot be exported, and why. A tuple of the library is an array here, and an
-//! array of the wrong length panics, as the library does for input it cannot use.
+//! One file for each part of the library: [`canvas`] (`Canvas` and `Layer`), [`color`] (the `primitives` color module),
+//! [`image`] (`Image`), [`gradient`] (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest)
+//! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`transform`] (rotate and flip)
+//! and [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
+//! of the library is an array here, and an array of the wrong length panics, as the library does for input it cannot use.
 //!
 //! uniffi turns this crate into one namespace (`abra_uniffi`) of the generated TypeScript bindings. A crate that builds the
 //! native library depends on this one and shares its types.
@@ -16,6 +17,7 @@
 mod adjustments;
 mod ai;
 mod blend;
+mod canvas;
 mod color;
 mod effect;
 mod filters;
@@ -23,15 +25,26 @@ mod geometry;
 mod gradient;
 mod image;
 mod mask;
+mod tools;
+mod transform;
 
 pub use adjustments::{
   AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, Contrast, Exposure, FilterType, GradientMap, Grayscale,
   HighlightsShadows, Hue, Invert, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment, Posterize,
-  Saturation, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure, gradient_map,
-  grayscale, highlights_shadows, hue, invert, photo_filter, posterize, reduce_opacity, saturation, threshold, vibrance,
+  Saturation, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
+  gradient_map, grayscale, highlights_shadows, hue, invert, photo_filter, posterize, reduce_opacity, saturation,
+  threshold, vibrance,
 };
 pub use ai::{AiModel, AiOutput, AiOutputKind, Instance, LabelMap};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};
+pub use canvas::{
+  AddCanvasOptions, Canvas, CanvasTransform, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
+  add_canvas_options, new_layer_options,
+};
+pub use abra::canvas::prelude::{
+  AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
+};
+pub use abra::abra_core::ResizeTarget;
 pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
 pub use filters::{
   Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, LensBlur, Median,
@@ -53,5 +66,7 @@ pub use geometry::{
 pub use gradient::{ColorStop, Gradient, radial_gradient};
 pub use image::{Image, channel_index, channels_bytes_per_pixel, resolution_new, resolution_uniform};
 pub use mask::{Mask, apply_mask_to_image, apply_mask_to_pixels_rgba, mask_value_to_alpha, rgba_to_gray};
+pub use tools::{Remover, RemoverShape, remover};
+pub use transform::{FlipImage, RotateImage, flip, rotate};
 
 uniffi::setup_scaffolding!();

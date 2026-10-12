@@ -6,7 +6,7 @@ use abra::{
 };
 use vessel::prelude::*;
 
-use crate::{AbraImage, consts::THUMBNAIL_GRADIENT_OPACITY};
+use crate::consts::THUMBNAIL_GRADIENT_OPACITY;
 
 #[derive(uniffi::Object, Component)]
 pub struct ThumbnailPreview {
@@ -14,15 +14,24 @@ pub struct ThumbnailPreview {
   preview_size: (u32, u32),
 }
 
-struct ThumbnailSource(Arc<AbraImage>);
+struct ThumbnailSource(Arc<abra_uniffi::Image>);
 
 impl Trackable for ThumbnailSource {
   fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
-    self.0.thumbnail_pictures(p_size)
+    let image = Arc::clone(&self.0);
+    p_size.combine_latest(image.revision()).filter_map(move |(size, _)| {
+      if size.0 == 0 || size.1 == 0 { return None }
+      let preview = image.preview(size.0, size.1);
+      Some(Picture::Pixels(Arc::new(Frame {
+        width: preview.width,
+        height: preview.height,
+        pixels: preview.data.into(),
+      })))
+    })
   }
 }
 
-fn background(p_image: &Arc<AbraImage>, p_width: u32, p_height: u32) -> Image {
+fn background(p_image: &Arc<abra_uniffi::Image>, p_width: u32, p_height: u32) -> Image {
   // Seed a frame before attaching the reactive source.
   let pixels = p_image.preview(p_width, p_height);
   Image::new()
@@ -38,8 +47,11 @@ fn gradient_overlay(p_width: u32, p_height: u32) -> Image {
   static LAST: OnceLock<Mutex<Option<Arc<Frame>>>> = OnceLock::new();
   let mut cached = LAST.get_or_init(|| Mutex::new(None)).lock().unwrap();
   if cached.as_ref().is_none_or(|frame| (frame.width, frame.height) != (width, height)) {
-    let gradient = Gradient::evenly(vec![Color::transparent(), Color::black().set_alpha(THUMBNAIL_GRADIENT_OPACITY)])
-      .with_direction(Path::line((0, height as f32 * 0.20), (0, height)));
+    let gradient = Gradient::evenly(vec![
+      Color::transparent(),
+      Color::black().set_alpha(THUMBNAIL_GRADIENT_OPACITY),
+    ])
+    .with_direction(Path::line((0, height as f32 * 0.20), (0, height)));
     let pixels = fill(Area::rect((0, 0), (width, height)), &gradient).to_image();
     *cached = Some(Arc::new(Frame {
       width,
@@ -56,7 +68,7 @@ fn gradient_overlay(p_width: u32, p_height: u32) -> Image {
 impl ThumbnailPreview {
   /// A view of `image`.
   #[uniffi::constructor]
-  pub fn new(p_image: Arc<AbraImage>, p_label: String, p_width: u32, p_height: u32) -> Arc<Self> {
+  pub fn new(p_image: Arc<abra_uniffi::Image>, p_label: String, p_width: u32, p_height: u32) -> Arc<Self> {
     let image = background(&p_image, p_width, p_height);
     let gradient = gradient_overlay(p_width, p_height);
 
@@ -85,7 +97,7 @@ impl ThumbnailPreview {
   }
 
   /// Replaces the preview image without remounting the thumbnail or changing its label.
-  pub fn set_image(&self, p_image: Arc<AbraImage>) {
+  pub fn set_image(&self, p_image: Arc<abra_uniffi::Image>) {
     let image = background(&p_image, self.preview_size.0, self.preview_size.1);
     self.container.set_background(image);
   }
@@ -149,12 +161,12 @@ mod tests {
     assert_eq!(inherited.font().size, 42, "a failed font update leaves the previous default intact");
   }
 
-  fn source(p_color: [u8; 4]) -> Arc<AbraImage> {
-    AbraImage::from_image(AbraPixels::new_from_color(
+  fn source(p_color: [u8; 4]) -> Arc<abra_uniffi::Image> {
+    Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_color(
       16,
       32,
       Color::from_rgba(p_color[0], p_color[1], p_color[2], p_color[3]),
-    ))
+    )))
   }
 
   fn pixel(p_frame: &Frame, p_x: u32, p_y: u32) -> [u8; 4] {
@@ -226,7 +238,7 @@ mod tests {
     let preview = ThumbnailPreview::new(Arc::clone(&image), "Warm".into(), 112, 80);
     preview.size().next((112, 80));
     rendered(&preview, red);
-    image.with_image_mut(|pixels| {
+    image.edit(|pixels| {
       *pixels = AbraPixels::new_from_color(16, 32, Color::from_rgba(0, 0, 200, 255));
     });
     drop(image);
@@ -237,8 +249,9 @@ mod tests {
   fn gradients_are_present_on_first_frame_for_every_aspect_ratio_and_survive_source_replacement() {
     let white = [200, 200, 200, 255];
     for (width, height) in [(16, 32), (32, 16), (32, 32), (1, 1)] {
-      let image =
-        AbraImage::from_image(AbraPixels::new_from_color(width, height, Color::from_rgba(200, 200, 200, 255)));
+      let image = Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_color(
+        width, height, Color::from_rgba(200, 200, 200, 255),
+      )));
       let preview = ThumbnailPreview::new(image, "".into(), 112, 80);
       preview.size().next((112, 80));
       let frame = rendered(&preview, white);

@@ -6,7 +6,7 @@
 use abra_core::image::apply_area::{ApplyContext, area_weights, mix_by_weights, weight_to_byte};
 use abra_core::image::gpu::Hardware;
 use abra_core::{Area, Channels, Image};
-use options::{Effect, ApplyOptions};
+use options::{ApplyOptions, Effect};
 
 const SIZE: u32 = 24;
 
@@ -79,7 +79,10 @@ fn filters_that_read_neighbouring_pixels_agree() {
 fn effects_that_depend_on_position_agree() {
   use abra_core::{Color, Gradient};
   let gradient = Gradient::from_to(Color::from_rgba(255, 0, 0, 255), Color::from_rgba(0, 0, 255, 255));
-  check("linear gradient between", adjustments::color::LinearGradientEffect::between(&gradient, (0.0, 0.0), (SIZE as f32, 0.0)));
+  check(
+    "linear gradient between",
+    adjustments::color::LinearGradientEffect::between(&gradient, (0.0, 0.0), (SIZE as f32, 0.0)),
+  );
   check("linear gradient angle", adjustments::color::LinearGradientEffect::angle(&gradient, 33.0).with_opacity(0.6));
   check("pinch", filters::distort::pinch(0.6));
   check("ripple", filters::distort::ripple(0.5));

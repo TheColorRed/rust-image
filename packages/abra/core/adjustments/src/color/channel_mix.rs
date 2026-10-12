@@ -123,7 +123,10 @@ mod tests {
       effect.apply_on_cpu(&mut expected);
       for (index, (&actual, &expected)) in actual.iter().zip(expected.rgba().iter()).enumerate() {
         let tolerance = if index % 4 == 3 { 0 } else { tolerance };
-        assert!((actual as i16 - expected as i16).abs() <= tolerance, "byte {index}, {weights:?}: {actual} != {expected}");
+        assert!(
+          (actual as i16 - expected as i16).abs() <= tolerance,
+          "byte {index}, {weights:?}: {actual} != {expected}"
+        );
       }
     }
     Ok(())

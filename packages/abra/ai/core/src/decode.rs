@@ -239,13 +239,16 @@ impl ClassScores {
   /// The scores of a model run, checked against the model's input size: one per class at every input pixel.
   fn check<'a>(&self, p_outputs: &'a [Tensor], p_placement: &Placement) -> Result<&'a [f32], AiError> {
     let (width, height) = (p_placement.input_width as usize, p_placement.input_height as usize);
-    let (shape, values) = p_outputs.first().ok_or_else(|| AiError::inference_failed("The model returned no outputs"))?;
+    let (shape, values) =
+      p_outputs.first().ok_or_else(|| AiError::inference_failed("The model returned no outputs"))?;
     let expected = match self.layout {
       Layout::Nchw => [1, self.class_count, height, width],
       Layout::Nhwc => [1, height, width, self.class_count],
     };
     if shape != &expected || values.len() != self.class_count * width * height {
-      return Err(AiError::inference_failed(format!("Unexpected class-score output shape {shape:?}, expected {expected:?}")));
+      return Err(AiError::inference_failed(format!(
+        "Unexpected class-score output shape {shape:?}, expected {expected:?}"
+      )));
     }
     Ok(values)
   }
@@ -260,12 +263,15 @@ impl ClassScores {
 }
 
 impl SemanticMask {
-  fn decode(&self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement) -> Result<Mask, AiError> {
+  fn decode(
+    &self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement,
+  ) -> Result<Mask, AiError> {
     let values = self.scores.check(p_outputs, p_placement)?;
     let plane = p_placement.input_width as usize * p_placement.input_height as usize;
     let mask = (0..plane)
       .map(|pixel| {
-        let logits: Vec<f32> = (0..self.scores.class_count).map(|class| self.scores.at(values, plane, pixel, class)).collect();
+        let logits: Vec<f32> =
+          (0..self.scores.class_count).map(|class| self.scores.at(values, plane, pixel, class)).collect();
         (class_confidence(&logits, &self.mask_classes) * 255.0).round().clamp(0.0, 255.0) as u8
       })
       .collect();
@@ -283,7 +289,9 @@ fn class_confidence(p_logits: &[f32], p_classes: &[usize]) -> f32 {
 }
 
 impl LabelMapDecoder {
-  fn decode(&self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement) -> Result<LabelMap, AiError> {
+  fn decode(
+    &self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement,
+  ) -> Result<LabelMap, AiError> {
     let values = self.scores.check(p_outputs, p_placement)?;
     let plane = p_placement.input_width as usize * p_placement.input_height as usize;
     let labels = (0..plane)
@@ -333,7 +341,8 @@ impl InstanceSegmentation {
     let mut found = Vec::new();
     for detection in detections.chunks_exact(self.detection_size) {
       let confidence = detection[4];
-      if !confidence.is_finite() || confidence < self.confidence_threshold || detection[5].round() as i32 != self.class {
+      if !confidence.is_finite() || confidence < self.confidence_threshold || detection[5].round() as i32 != self.class
+      {
         continue;
       }
       let [x1, y1, x2, y2] = [detection[0], detection[1], detection[2], detection[3]];
@@ -383,7 +392,8 @@ impl InstanceSegmentation {
           let values = (0..strengths[index].len())
             .map(|pixel| {
               let strength = strengths[index][pixel];
-              let outranked = strengths.iter().enumerate().any(|(other, values)| other != index && values[pixel] > strength);
+              let outranked =
+                strengths.iter().enumerate().any(|(other, values)| other != index && values[pixel] > strength);
               if outranked { 0 } else { strength }
             })
             .collect();
@@ -407,7 +417,9 @@ impl InstanceSegmentation {
     let plane = mask_width * mask_height;
     let mut prototype_values = Vec::with_capacity(plane);
     for index in 0..plane {
-      let logit = (0..self.mask_channels).map(|channel| p_coefficients[channel] * p_prototypes[channel * plane + index]).sum::<f32>();
+      let logit = (0..self.mask_channels)
+        .map(|channel| p_coefficients[channel] * p_prototypes[channel * plane + index])
+        .sum::<f32>();
       let probability = if logit >= 0.0 {
         1.0 / (1.0 + (-logit).exp())
       } else {
@@ -459,9 +471,14 @@ fn source_bounds(
 }
 
 impl LandmarkDecoder {
-  fn decode(&self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement) -> Result<Landmarks, AiError> {
+  fn decode(
+    &self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement,
+  ) -> Result<Landmarks, AiError> {
     if p_outputs.len() < 2 {
-      return Err(AiError::inference_failed(format!("Expected landmark and presence outputs, got {}", p_outputs.len())));
+      return Err(AiError::inference_failed(format!(
+        "Expected landmark and presence outputs, got {}",
+        p_outputs.len()
+      )));
     }
     let (landmark_shape, landmark_values) = &p_outputs[0];
     let expected_values = self.landmark_count * self.coordinates_per_landmark;
@@ -530,7 +547,8 @@ mod tests {
   #[test]
   fn a_wrong_output_shape_is_an_error() {
     let decoder =
-      Decoder::from_manifest(&manifest("decoder: semantic-mask\nparams:\n  class_count: 2\n  mask_classes: [1]\n")).unwrap();
+      Decoder::from_manifest(&manifest("decoder: semantic-mask\nparams:\n  class_count: 2\n  mask_classes: [1]\n"))
+        .unwrap();
     let placement = Placement::new(1, 1, 1, 1, Fit::Stretch);
     assert!(decoder.decode(&[], 1, 1, &placement).is_err());
     assert!(decoder.decode(&[(vec![1, 3, 1, 1], vec![0.0; 3])], 1, 1, &placement).is_err());
@@ -553,7 +571,10 @@ mod tests {
     assert_eq!(labels.classes[2], "nose");
     assert_eq!(labels.mask(2).values(), &[255; 16]);
     assert_eq!(labels.mask_named(&["skin", "nose"]).values(), &[255; 16], "any of the named classes");
-    assert!(labels.mask_named(&["skin", "nothing"]).values().iter().all(|value| *value == 0), "a name that is not a class selects nothing");
+    assert!(
+      labels.mask_named(&["skin", "nothing"]).values().iter().all(|value| *value == 0),
+      "a name that is not a class selects nothing"
+    );
     assert!(labels.mask_of(&[0, 1]).values().iter().all(|value| *value == 0));
   }
 
@@ -573,12 +594,21 @@ mod tests {
     let mut prototypes = vec![0.0; 32 * 4];
     prototypes[..4].fill(1.0);
     let placement = Placement::new(640, 640, 64, 64, Fit::Letterbox { pad: 0.0 });
-    let AiOutput::Instances(found) = decoder.decode(&instance_outputs(detections, prototypes), 64, 64, &placement).unwrap()
+    let AiOutput::Instances(found) =
+      decoder.decode(&instance_outputs(detections, prototypes), 64, 64, &placement).unwrap()
     else {
       panic!("expected instances")
     };
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].bounds, Bounds { x: 10, y: 10, width: 40, height: 40 });
+    assert_eq!(
+      found[0].bounds,
+      Bounds {
+        x: 10,
+        y: 10,
+        width: 40,
+        height: 40
+      }
+    );
     assert_eq!((found[0].mask.width(), found[0].mask.height()), (64, 64));
     assert_eq!(found[0].mask.values()[0], 0, "pixels outside the box are excluded");
   }
@@ -610,7 +640,8 @@ mod tests {
     prototypes[..4].fill(2.0);
     prototypes[4..8].copy_from_slice(&[0.0, 0.0, 6.0, 6.0]);
     let placement = Placement::new(640, 640, 64, 64, Fit::Letterbox { pad: 0.0 });
-    let AiOutput::Instances(found) = decoder.decode(&instance_outputs(detections, prototypes), 64, 64, &placement).unwrap()
+    let AiOutput::Instances(found) =
+      decoder.decode(&instance_outputs(detections, prototypes), 64, 64, &placement).unwrap()
     else {
       panic!("expected instances")
     };
@@ -634,7 +665,13 @@ mod tests {
       panic!("expected landmarks")
     };
     assert_eq!(result.landmarks.len(), 478);
-    assert_eq!(result.landmarks[0], Landmark { point: PointF::new(256.0, 128.0), depth: -64.0 });
+    assert_eq!(
+      result.landmarks[0],
+      Landmark {
+        point: PointF::new(256.0, 128.0),
+        depth: -64.0
+      }
+    );
     assert_eq!(result.presence, 0.5);
   }
 
@@ -643,6 +680,9 @@ mod tests {
     assert!(Decoder::from_manifest(&manifest("decoder: nope\n")).is_err());
     assert!(Decoder::from_manifest(&manifest("name: x\n")).is_err());
     assert!(Decoder::from_manifest(&manifest("decoder: landmarks\n")).is_err());
-    assert!(Decoder::from_manifest(&manifest("decoder: semantic-mask\nparams:\n  class_count: 2\n  mask_classes: [5]\n")).is_err());
+    assert!(
+      Decoder::from_manifest(&manifest("decoder: semantic-mask\nparams:\n  class_count: 2\n  mask_classes: [5]\n"))
+        .is_err()
+    );
   }
 }

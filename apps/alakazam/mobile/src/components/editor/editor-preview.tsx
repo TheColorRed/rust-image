@@ -9,7 +9,7 @@ import {
   showCheckpointRequested,
   showCheckpointRequested$,
 } from '@/src/state/commands';
-import { isBlemishToolFocused$, isSkinControlFocused$ } from '@/src/state/edits';
+import { isBlemishToolFocused$, isPersonControlFocused$ } from '@/src/state/edits';
 import {
   ensurePreviewPanResponder,
   previewBox,
@@ -37,8 +37,16 @@ import {
   showingCheckpoint,
   topInset$,
 } from '@/src/state/preview';
-import { busy$, loadError as previewError, loadError$ } from '@/src/state/session';
-import { personOutlinesVisible$, personSelection, personSelection$ } from '@/src/state/person-selection';
+import {
+  busy$,
+  currentImage,
+  currentImage$,
+  editBaseImage,
+  editBaseImage$,
+  loadError as previewError,
+  loadError$,
+} from '@/src/state/session';
+import { personOutlinesVisible$, personSelection, personSelection$, selectionNeeded } from '@/src/state/person-selection';
 import { ImagePreview } from '@alakazam/mobile';
 import { VesselView } from '@vessel/react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
@@ -86,8 +94,12 @@ export function EditorPreview() {
   const loadError = useObservable(loadError$, null);
   const busy = useObservable(busy$, false);
   const blemishFocused = useObservable(isBlemishToolFocused$, false);
-  const skinControlFocused = useObservable(isSkinControlFocused$, false);
+  const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const personSelectionState = useObservable(personSelection$, personSelection.value);
+  // People are found in the edit base, not in the screen-size preview, so their boxes are in its pixels.
+  const editBase = useObservable(editBaseImage$, editBaseImage.value);
+  const openImage = useObservable(currentImage$, currentImage.value);
+  const detectedImage = editBase ?? openImage;
   const outlinesVisible = useSyncObservable(personOutlinesVisible$, false);
   const scale = useObservable(previewScale$, previewScale.value);
   const translateX = useObservable(previewTranslateX$, previewTranslateX.value);
@@ -246,13 +258,13 @@ export function EditorPreview() {
               pointerEvents="none"
               style={photoStyle(box, photo, false)}
             />
-            {skinControlFocused && personSelectionState.focused && outlinesVisible && (
+            {skinControlFocused && personSelectionState.focused && outlinesVisible && selectionNeeded(personSelectionState) && (
               <PersonDetectionOverlay
                 people={personSelectionState.people}
                 selectedId={personSelectionState.selectedId}
                 loading={personSelectionState.loading}
                 error={personSelectionState.error}
-                imageSize={photo}
+                imageSize={detectedImage ? { width: detectedImage.width(), height: detectedImage.height() } : photo}
                 previewSize={box}
               />
             )}

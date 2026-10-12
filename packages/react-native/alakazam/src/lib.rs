@@ -7,22 +7,12 @@
 
 uniffi::setup_scaffolding!();
 
-pub mod adjustments;
 pub mod components;
 mod consts;
 pub mod effect_spec;
-pub mod filters;
-pub mod history;
-pub mod image;
-pub mod image_operation;
 mod image_workers;
 pub mod live_image;
 pub mod models;
-pub mod tools;
-pub mod transforms;
-
-pub use history::AbraImageHistory;
-pub use image::AbraImage;
 
 /// Errors surfaced to JavaScript as thrown exceptions.
 #[derive(Debug, uniffi::Error)]

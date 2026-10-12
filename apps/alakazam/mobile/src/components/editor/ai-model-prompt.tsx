@@ -6,7 +6,7 @@ import { errorMessage } from '@/src/lib/error-message';
 import { formatBytes } from '@/src/lib/format-bytes';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsOfferDeclined, aiModelsRequested, aiModelsRequested$, aiModelsVersion } from '@/src/state/ai-models';
-import { isSkinControlFocused$ } from '@/src/state/edits';
+import { isPersonControlFocused$ } from '@/src/state/edits';
 import { currentImage, editBaseImage } from '@/src/state/session';
 
 /**
@@ -18,7 +18,7 @@ import { currentImage, editBaseImage } from '@/src/state/session';
  */
 export function AiModelPrompt() {
   const { colors } = useTheme();
-  const skinControlFocused = useObservable(isSkinControlFocused$, false);
+  const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const request = useObservable(aiModelsRequested$, null);
   const [missing, setMissing] = useState<AiModelListing[]>([]);
   const [downloading, setDownloading] = useState(false);

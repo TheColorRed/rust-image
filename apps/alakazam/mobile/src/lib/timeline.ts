@@ -19,6 +19,8 @@ export type TimelineChange =
  */
 export interface TimelineEntry extends ProjectRecipe {
   change: TimelineChange;
+  /** A lossless project resource holding the pixels after this retouch step, so reopening never reruns an AI tool. */
+  checkpointFile?: string;
   /** Steps that change pixels only: the edit state that was baked in. Afterwards the edit state starts empty on the new picture. */
   before?: ProjectRecipe;
 }
@@ -39,9 +41,7 @@ export const emptyRecipe = (): ProjectRecipe => ({ adjustments: {}, appliedActio
 /** The edit state after the first `cursor` steps, which is what the controls show and the picture is rendered from. */
 export function recipeAt(entries: readonly TimelineEntry[], cursor: number): ProjectRecipe {
   const last = cursor > 0 ? entries[cursor - 1] : undefined;
-  return last
-    ? { adjustments: { ...last.adjustments }, appliedActions: [...last.appliedActions] }
-    : emptyRecipe();
+  return last ? { adjustments: { ...last.adjustments }, appliedActions: [...last.appliedActions] } : emptyRecipe();
 }
 
 /** The steps that change pixels, which become the base that the edits after them are rendered on. */

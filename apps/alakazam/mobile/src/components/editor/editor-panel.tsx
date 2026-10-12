@@ -1,8 +1,13 @@
+import { HuePicker } from '@/src/components/editor/hue-picker';
 import { SkinTanPicker } from '@/src/components/editor/skin-tan-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonSelectionControls, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
+import { missingModels } from '@/src/lib/ai-model-availability';
+import { FACE_MODELS } from '@/src/lib/faces';
+import { aiModelsRequested } from '@/src/state/ai-models';
+import { BROW_BONE_KEY, EYELINER_KEY, EYESHADOW_KEY, LIPSTICK_KEY, UNDER_EYE_KEY } from '@/src/lib/edit-sections/keys';
 import { useLiveAction } from '@/src/hooks/useLiveAction';
 import { useLiveSlider } from '@/src/hooks/useLiveSlider';
 import {
@@ -10,9 +15,13 @@ import {
   RED_EYE_TOOL_KEY,
   EDIT_SECTIONS,
   appliesOnSelect,
+  findGroup,
   findSection,
   isMultiSlider,
+  type EditControl,
+  type GroupControl,
   isSliderApplied,
+  leafControls,
   sliderDefault,
   sliderSpecs,
   sliderValues,
@@ -20,7 +29,7 @@ import {
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
 import { editorLive } from '@/src/lib/editor-live';
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor-thumbnails';
-import { adjustmentKey, isSkinAdjustment, skinAdjustmentTargets } from '@/src/lib/skin-adjustments';
+import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import { useTheme } from '@/src/lib/theme';
 import {
   actionPreviewRequested,
@@ -48,14 +57,16 @@ import {
   focusedControlKey,
   focusedControlKey$,
   historyVersion$,
-  isSkinControlFocused$,
+  isPersonControlFocused$,
+  openGroupKey,
+  openGroupKey$,
 } from '@/src/state/edits';
 import { canRedo$, canUndo$ } from '@/src/state/history';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
 import { replayHidden } from '@/src/state/session';
 import { VesselView } from '@vessel/react-native';
-import { ChevronLeft, Redo2, Undo2, X } from 'lucide-react-native';
+import { ChevronLeft, Redo2, RotateCcw, Undo2, X } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
@@ -64,7 +75,7 @@ import { useObservable, useSyncObservable } from 'react-rx';
 function useFocusedControl() {
   const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
   const key = useObservable(focusedControlKey$, focusedControlKey.value);
-  return key ? findSection(sectionKey).controls.find(control => control.key === key) : undefined;
+  return key ? leafControls(findSection(sectionKey).controls).find(control => control.key === key) : undefined;
 }
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
@@ -78,7 +89,7 @@ export function EditorPanel() {
   const activeSection = findSection(activeKey);
   useLiveAction();
   const focusedControl = useFocusedControl();
-  const isSkinControlFocused = useObservable(isSkinControlFocused$, false);
+  const isPersonControlFocused = useObservable(isPersonControlFocused$, false);
 
   useEffect(() => {
     const subscriptions = [
@@ -87,6 +98,7 @@ export function EditorPanel() {
       // Picking a section closes any open slider, including when it is the section already showing, so its controls come back.
       selectSectionRequested$.subscribe(key => {
         focusedControlKey.next(null);
+        openGroupKey.next(null);
         activeSectionKey.next(key);
       }),
       selectControlRequested$.subscribe(control => {
@@ -97,6 +109,18 @@ export function EditorPanel() {
             if (!appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
           }
           toggleAction(control);
+        } else if (control.kind === 'group') {
+          openGroupKey.next(control.key);
+        } else if (
+          [LIPSTICK_KEY, EYELINER_KEY, EYESHADOW_KEY, BROW_BONE_KEY, UNDER_EYE_KEY].includes(control.key) &&
+          missingModels(FACE_MODELS).length > 0
+        ) {
+          // Finding the lips needs the face models; opening the slider without them would do nothing.
+          aiModelsRequested.next({
+            title: 'Lipstick',
+            roles: FACE_MODELS,
+            onReady: () => selectControlRequested.next(control),
+          });
         } else {
           focusedControlKey.next(control.key);
           if (
@@ -142,7 +166,7 @@ export function EditorPanel() {
           <RedEyeControls onBack={() => focusedControlKey.next(null)} onAuto={() => redEyeAutoRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
           <>
-            {isSkinControlFocused && <PersonSelectionControls />}
+            {isPersonControlFocused && <PersonSelectionControls />}
             <SliderEditor />
           </>
         ) : activeSection.previewThumbnails ? (
@@ -183,6 +207,9 @@ function SliderEditor() {
   const sliderState = useRef<{ resetKey: string; values: number[] }>({ resetKey: '', values: [] });
   // Which slider a control that shows them one at a time (`display: 'tabulated'`) has open.
   const [selectedSlider, setSelectedSlider] = useState({ key: '', index: 0 });
+  // Counts the times the values were set from outside the sliders (a swatch, a reset), so the sliders and the picker are made
+  // again with their handles where the values are now.
+  const [valueSets, setValueSets] = useState(0);
 
   if (control?.kind !== 'slider') {
     return null;
@@ -205,6 +232,23 @@ function SliderEditor() {
   const back = (
     <Pressable onPress={() => focusedControlKey.next(null)} hitSlop={8} style={styles.backChip}>
       <ChevronLeft color={colors.textPrimary} size={18} />
+    </Pressable>
+  );
+  // Puts every slider of the control back to its default and applies that, leaving the control open. The close button is the one
+  // that turns the effect off.
+  const resetAll = (
+    <Pressable
+      onPress={() => {
+        specs.forEach((spec, index) => (values[index] = spec.defaultValue));
+        setValueSets(sets => sets + 1);
+        sliderCommitRequested.next({ control, value: committedValue() });
+      }}
+      hitSlop={8}
+      style={styles.backChip}
+      accessibilityRole="button"
+      accessibilityLabel={`Reset ${control.label}`}
+    >
+      <RotateCcw color={colors.textPrimary} size={16} />
     </Pressable>
   );
   // Turns the effect off and closes the slider. The slider's own reset only puts the value back to its default.
@@ -253,6 +297,7 @@ function SliderEditor() {
             <View style={styles.sliderHeader}>
               {back}
               <Text style={styles.sliderTitle}>{control.label}</Text>
+              {resetAll}
               {close}
             </View>
           )}
@@ -278,9 +323,64 @@ function SliderEditor() {
             </View>
           )}
           {specs.map((spec, index) =>
-            tabulated && index !== openSlider ? null : (
+            tabulated && index !== openSlider ? null : (Array.isArray(control.picker)
+                ? control.picker[index]
+                : undefined) === 'hue' ? (
+              <View key={resetKey + '-' + index}>
+                {control.swatches && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.swatchRow}
+                  >
+                    {control.swatches.map(swatch => {
+                      const chosen = swatch.values.every(
+                        (wanted, swatchIndex) => wanted === undefined || Math.abs(values[swatchIndex] - wanted) < 0.005,
+                      );
+                      return (
+                        <Pressable
+                          key={swatch.label}
+                          style={styles.swatch}
+                          accessibilityRole="button"
+                          accessibilityLabel={swatch.label}
+                          accessibilityState={{ selected: chosen }}
+                          onPress={() => {
+                            swatch.values.forEach((wanted, swatchIndex) => {
+                              if (wanted !== undefined) values[swatchIndex] = wanted;
+                            });
+                            setValueSets(sets => sets + 1);
+                            sliderCommitRequested.next({ control, value: committedValue() });
+                          }}
+                        >
+                          <View
+                            style={[styles.swatchDot, { backgroundColor: swatch.color }, chosen && styles.swatchChosen]}
+                          />
+                          <Text numberOfLines={2} style={[styles.swatchLabel, chosen && styles.swatchLabelChosen]}>
+                            {swatch.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+                <View style={styles.sliderTrack}>
+                  <HuePicker
+                    key={valueSets}
+                    value={values[index]}
+                    onChange={value => {
+                      values[index] = value;
+                      onLiveChange?.([...values]);
+                    }}
+                    onRelease={value => {
+                      values[index] = value;
+                      sliderCommitRequested.next({ control, value: committedValue() });
+                    }}
+                  />
+                </View>
+              </View>
+            ) : (
               <Slider
-                key={resetKey + '-' + index}
+                key={resetKey + '-' + index + '-' + valueSets}
                 // A single slider carries the buttons in its own header.
                 leading={!isMultiSlider(control) && index === 0 ? back : undefined}
                 trailing={!isMultiSlider(control) && index === 0 ? close : undefined}
@@ -360,23 +460,31 @@ function ChipControls() {
   const adjustments = useObservable(adjustments$, {});
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const groupKey = useObservable(openGroupKey$, openGroupKey.value);
   const activeSection = findSection(sectionKey);
+  const group = groupKey ? findGroup(activeSection.controls, groupKey) : undefined;
+  const isApplied = (control: Exclude<EditControl, GroupControl>) =>
+    control.kind === 'action'
+      ? appliedActions.includes(control.key)
+      : control.kind === 'slider' &&
+        (isPersonAdjustment(control.key)
+          ? personAdjustmentTargets(adjustments, control.key).some(target => isSliderApplied(control, target.value))
+          : isSliderApplied(control, adjustments[control.key]));
 
   return (
     <ScrollView
-      key={sectionKey}
+      key={sectionKey + (group?.key ?? '')}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.chipRow}
     >
-      {activeSection.controls.map(control => {
-        const adjusted =
-          control.kind === 'action'
-            ? appliedActions.includes(control.key)
-            : control.kind === 'slider' &&
-              (isSkinAdjustment(control.key)
-                ? skinAdjustmentTargets(adjustments, control.key).some(target => isSliderApplied(control, target.value))
-                : isSliderApplied(control, adjustments[control.key]));
+      {group && (
+        <Pressable style={styles.backChip} onPress={() => openGroupKey.next(null)} hitSlop={8}>
+          <ChevronLeft color={colors.textPrimary} size={18} />
+        </Pressable>
+      )}
+      {(group?.controls ?? activeSection.controls).map(control => {
+        const adjusted = leafControls([control]).some(isApplied);
         return (
           <Pressable
             key={control.key}
@@ -420,6 +528,12 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     thumbnailPlaceholder: { color: colors.textSecondary, textAlign: 'center', margin: 'auto' },
     sliderPanel: { paddingHorizontal: 12 },
     sliderStack: { gap: 4 },
+    swatchRow: { gap: 8, paddingVertical: 6, paddingHorizontal: 4 },
+    swatch: { alignItems: 'center', gap: 4, width: 64 },
+    swatchDot: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: colors.textTertiary },
+    swatchChosen: { borderWidth: 3, borderColor: colors.accent },
+    swatchLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '500', textAlign: 'center' },
+    swatchLabelChosen: { color: colors.textPrimary, fontWeight: '700' },
     sliderPills: { flexDirection: 'row', gap: 8, paddingVertical: 6 },
     sliderPill: {
       flexDirection: 'row',

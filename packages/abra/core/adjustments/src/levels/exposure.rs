@@ -1,3 +1,4 @@
+use crate::lut::channel_lut_pass;
 use abra_core::{
   IntoNumber,
   image::{
@@ -5,11 +6,9 @@ use abra_core::{
     gpu::{GpuPass, GpuProcessor},
   },
 };
-use crate::lut::channel_lut_pass;
 use options::{Effect, Options};
 
 use rayon::prelude::*;
-
 
 fn apply_exposure(
   p_image: &mut Image, p_exposure: impl IntoNumber, p_offset: impl IntoNumber, p_gamma_correction: impl IntoNumber,

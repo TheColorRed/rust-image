@@ -230,6 +230,27 @@ test('a preload runs once for a photo width, its result reaches the tool, and cl
   assert.equal(preloadFor(control, 320), undefined, 'and nothing is left');
 });
 
+test('controls sharing a preload function share one result at the same photo width', () => {
+  clearPreloads();
+  const mask = {
+    destroyed: 0,
+    uniffiDestroy() {
+      this.destroyed++;
+    },
+  };
+  let runs = 0;
+  const shared = () => (runs++, mask);
+  const first = single({ key: 'first', preload: shared });
+  const second = single({ key: 'second', preload: shared });
+  const { image } = fakeImage();
+  image.width = () => 320;
+  assert.deepEqual(preloadFor(first, 320, image), [mask]);
+  assert.deepEqual(preloadFor(second, 320, image), [mask]);
+  assert.equal(runs, 1);
+  clearPreloads();
+  assert.equal(mask.destroyed, 1, 'the shared result is owned and freed once');
+});
+
 test('a control with no preload is told no preloaded images', () => {
   const seen = [];
   const { image } = fakeImage();

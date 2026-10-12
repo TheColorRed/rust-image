@@ -115,6 +115,7 @@ function replayFixture(selectedId) {
     '@/src/lib/batch': { batch: fn => fn() },
     '@/src/lib/edit-sections': {
       EDIT_SECTIONS: sections,
+      leafControls: controls => controls,
       scaleBetween: () => 1,
       isSliderApplied: (_, value) => (value ?? 0) !== 0,
       applySlider: (control, target, value) => {
@@ -203,7 +204,9 @@ function loadEditorHistory({ selectedId = 0, personModel = true } = {}) {
     '@alakazam/mobile': { personDetectionDownloaded: () => personModel },
     'react-native': { Alert: { alert: (...args) => alerts.push(args) } },
     '@/src/lib/batch': { batch: fn => fn() },
-    '@/src/lib/edit-sections': { EDIT_SECTIONS: [] },
+    '@/src/lib/blemish': { removeBlemish() {} },
+    '@/src/lib/edit-sections': { EDIT_SECTIONS: [], leafControls: controls => controls },
+    '@/src/lib/red-eye': { applyRedEyeStep() {} },
     '@/src/lib/editor-replay': { renderRecipe() {} },
     '@/src/lib/error-message': { errorMessage: error => error.message },
     '@/src/lib/skin-adjustments': helpers,

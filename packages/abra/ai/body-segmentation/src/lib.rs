@@ -65,7 +65,8 @@ mod tests {
       return;
     }
     let image = Image::new(32, 24);
-    let mask = BodySegmentation::load(model).expect("model should load").process(&image).expect("segmentation should succeed");
+    let mask =
+      BodySegmentation::load(model).expect("model should load").process(&image).expect("segmentation should succeed");
 
     assert_eq!(mask.dimensions::<u32>(), (32, 24));
   }

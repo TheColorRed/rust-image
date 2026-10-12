@@ -96,8 +96,7 @@ mod tests {
     std::thread::scope(|scope| {
       let handles: Vec<_> = (0..8)
         .map(|i| {
-          let (width, height, pixels, expected) =
-            if i % 2 == 0 { (4, 4, &small, 100) } else { (9, 5, &large, 50) };
+          let (width, height, pixels, expected) = if i % 2 == 0 { (4, 4, &small, 100) } else { (9, 5, &large, 50) };
           let op = &op;
           scope.spawn(move || {
             let out = process(&[op.passes(width, height)], width, height, pixels).unwrap();

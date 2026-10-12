@@ -10,7 +10,6 @@ use abra_body_segmentation::Mask;
 
 use abra_uniffi::FilterType;
 
-use crate::AbraImage;
 
 /// One color stop of a gradient, at `position` from 0 to 1.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -222,20 +221,21 @@ pub fn effect_has_gpu(effect: EffectSpec) -> bool {
   effect.has_gpu()
 }
 
+/// Applies one editor effect to the shared Abra image.
 #[uniffi::export]
-impl AbraImage {
-  /// Applies one effect to the image. Uses the same definition as live previews.
-  pub fn apply_effect(&self, effect: EffectSpec) {
-    let skin_mask = self.skin_mask();
-    self.with_image_mut(|img| effect.apply_with_skin_mask(img, skin_mask.as_ref()));
-  }
+pub fn apply_effect(image: std::sync::Arc<abra_uniffi::Image>, effect: EffectSpec) {
+  let skin_mask = image.skin_mask();
+  image.edit(|pixels| effect.apply_with_skin_mask(pixels, skin_mask.as_ref()));
+}
 
-  /// Applies an effect with an explicit person mask without changing the live selection.
-  pub fn apply_effect_to_person(&self, effect: EffectSpec, person_id: Option<u32>) -> Result<(), crate::AbraError> {
-    let skin_mask = self.skin_mask_for_person(person_id)?;
-    self.with_image_mut(|img| effect.apply_with_skin_mask(img, skin_mask.as_ref()));
-    Ok(())
-  }
+/// Applies an effect to one cached person without changing the live selection.
+#[uniffi::export]
+pub fn apply_effect_to_person(
+  image: std::sync::Arc<abra_uniffi::Image>, effect: EffectSpec, person_id: Option<u32>,
+) -> Result<(), crate::AbraError> {
+  let skin_mask = image.skin_mask_for_person(person_id).map_err(|message| crate::AbraError::Ai { message })?;
+  image.edit(|pixels| effect.apply_with_skin_mask(pixels, skin_mask.as_ref()));
+  Ok(())
 }
 
 #[cfg(test)]

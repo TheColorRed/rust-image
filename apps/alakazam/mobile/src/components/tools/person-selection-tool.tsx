@@ -9,8 +9,14 @@ import { editorLive } from '@/src/lib/editor-live';
 import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsVersion$ } from '@/src/state/ai-models';
-import { isSkinControlFocused$ } from '@/src/state/edits';
-import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
+import { isPersonControlFocused$ } from '@/src/state/edits';
+import {
+  personOutlinesVisible,
+  personSelection,
+  personSelection$,
+  selectionNeeded,
+} from '@/src/state/person-selection';
+import { openProject } from '@/src/state/project-session';
 import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
 import { currentImage, currentImage$, editBaseImage, editBaseImage$ } from '@/src/state/session';
 
@@ -19,7 +25,7 @@ export function PersonSelectionToolController() {
   useEffect(() => {
     let requestId = 0;
     const subscriptions = [
-      combineLatest([isSkinControlFocused$, currentImage$, editBaseImage$, aiModelsVersion$])
+      combineLatest([isPersonControlFocused$, currentImage$, editBaseImage$, aiModelsVersion$])
         .pipe(
           map(([isOpen, image, editBase, version]) => [isOpen, editBase ?? image, version] as const),
           distinctUntilChanged(
@@ -48,7 +54,7 @@ export function PersonSelectionToolController() {
           }
           // Without the body model there is nothing to detect; skin effects apply to the whole photo. Detection starts once
           // the model is downloaded.
-          if (!personDetectionDownloaded()) {
+          if (!personDetectionDownloaded() && !openProject.value?.people) {
             personSelection.next({ ...personSelection.value, focused: true, loading: false, error: null });
             return;
           }
@@ -121,6 +127,9 @@ export function PersonSelectionControls() {
   const state = useObservable(personSelection$, personSelection.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  // One person (or none) leaves nothing to choose: the effect is for everyone in the photo.
+  if (!selectionNeeded(state)) return null;
 
   return (
     <View style={styles.row}>

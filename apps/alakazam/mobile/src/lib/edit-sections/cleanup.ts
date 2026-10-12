@@ -1,4 +1,5 @@
-import { EditSection } from "../edit-sections";
+import { despeckle, median } from '@abra/core/filters';
+import { EditSection, SliderControl } from "../edit-sections";
 
 export const cleanup: EditSection = {
   key: 'section-cleanup',
@@ -13,8 +14,13 @@ export const cleanup: EditSection = {
       step: 1,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => image.median(value),
+      tool: (photo, [value], { scale }) => median(value * scale).apply(photo),
+    } satisfies SliderControl<number>,
+    {
+      kind: 'action',
+      key: 'action-despeckle',
+      label: 'Despeckle',
+      tool: photo => despeckle(1, 13).apply(photo),
     },
-    { kind: 'action', key: 'action-despeckle', label: 'Despeckle', apply: image => image.despeckle() },
   ],
 };

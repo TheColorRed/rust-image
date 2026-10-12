@@ -30,6 +30,12 @@ See the [structure document](./references/desktop-structure.md) for a detailed b
 
 See the [structure document](./references/mobile-structure.md) for a detailed breakdown of the directories and files that make up the Alakazam mobile app.
 
+## Usability
+
+The app is for people who are not artists. See the [usability document](./references/usability.md) for how controls are named
+(plain words, not trade words), how common choices are offered as named swatches, what a control should show when it opens, and
+how a control that applies to a person behaves with one person or several. Read it before adding or renaming an edit control.
+
 ## Bindings
 
 The Alakazam App integrates with the Abra library using both Node and uniffi bindings. The Node bindings are used for the desktop app, while the uniffi bindings are used for the mobile app.

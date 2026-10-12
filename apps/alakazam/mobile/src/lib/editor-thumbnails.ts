@@ -1,7 +1,7 @@
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { effectList, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
+import { effectList, leafControls, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
 import { ownedImage } from '@/src/lib/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
@@ -41,8 +41,9 @@ export function buildControlThumbnails(
       if (cancelled) return false;
       const thumbnailSource = source;
       const render = async () => {
-        while (!cancelled && next < section.controls.length) {
-          const control = section.controls[next++];
+        const controls = leafControls(section.controls);
+        while (!cancelled && next < controls.length) {
+          const control = controls[next++];
           let pixels: AbraImage | undefined;
           let created: ThumbnailPreview | undefined;
           try {
@@ -66,11 +67,10 @@ export function buildControlThumbnails(
               }
             } else {
               if (control.kind === 'action' && control.apply) {
-                throw new Error(`Thumbnail action "${control.key}" needs a native operation, live effect or thumb`);
+                throw new Error(`Thumbnail action "${control.key}" needs a live effect or thumb`);
               }
               const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
-              const operation = control.kind === 'action' ? control.operation : undefined;
-              pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects, operation));
+              pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects));
             }
             if (cancelled) return;
             const effectMs = Date.now() - effectStarted;

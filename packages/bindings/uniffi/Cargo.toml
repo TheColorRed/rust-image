@@ -7,6 +7,10 @@ build = "build.rs"
 [dependencies]
 abra = { workspace = true }
 abra-ai-core = { workspace = true }
+abra-body-segmentation = { workspace = true }
+abra-find-person = { workspace = true }
+canvas = { workspace = true }
+pub-sub = { workspace = true }
 # Pinned to what the bindings generator (uniffi-bindgen-react-native 0.31.0-6, the newest release) reads. See the
 # alakazam-mobile crate.
 uniffi = { version = "=0.31" }

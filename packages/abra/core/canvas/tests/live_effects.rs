@@ -1,8 +1,8 @@
 use abra_core::image::gpu::LiveEffect;
 use abra_core::{Channels, Color, Gradient, Image};
+use adjustments::color::LinearGradientEffect;
 use adjustments::levels::brightness;
 use canvas::Canvas;
-use adjustments::color::LinearGradientEffect;
 use filters::blur::gaussian_blur;
 use std::sync::Arc;
 

@@ -1,7 +1,7 @@
 import { preloadFor } from '@/src/lib/editor-preloads';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { MaskLike } from '@abra/core/mask';
-import { type AbraImageLike, type EffectSpec, type ImageOperation } from '@alakazam/mobile';
+import { type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
 import { beauty } from './edit-sections/beauty';
 import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
@@ -31,6 +31,11 @@ export type ToolContext = {
    * becomes an array of one, and nothing an empty array. Missing for a control with no `preload`, and for a thumb.
    */
   preloaded?: Preloaded;
+  /**
+   * The box of the one person the edit is for, in pixels of the photo the tool is given, for a control that can be set for one
+   * person. Missing when the edit is for everyone.
+   */
+  person?: { x: number; y: number; width: number; height: number };
 };
 
 /** What a `preload` makes, as the tool gets it: an array, or an object with a name for each image or mask. */
@@ -95,10 +100,17 @@ export type SliderControl<T = unknown> = {
    */
   apply?: (image: AbraImageLike, value: number, context: ToolContext) => void;
   /**
-   * A Vessel component to show in place of the plain slider, for a control whose value is better picked another way. The
-   * value is still 0 to 1 on the control's scale, and the control still needs its `live` effect.
+   * A Vessel component to show in place of the plain slider, for a slider whose value is better picked another way; one for
+   * each slider of a control that has several. The value is still 0 to 1 on the slider's scale. 'skin-tan' is the bar of tans,
+   * which needs the control's `live` effect; 'hue' is the bar of colors, which only picks.
    */
-  picker?: 'skin-tan';
+  picker?: PerSlider<'skin-tan' | 'hue'>;
+  /**
+   * Ready-made choices shown above a picker, for people who would not know which sliders to move to get a color (black is no
+   * brightness). Tapping one sets the sliders it lists, in `values` (one for each slider; `undefined` leaves a slider alone),
+   * and applies the control. `color` is the swatch's CSS color.
+   */
+  swatches?: { label: string; color: string; values: (number | undefined)[] }[];
   /**
    * When set, dragging previews this effect live (GPU where available) before the release commits it via `apply`, or this same
    * effect when there is no `apply`. Only for a control with one slider: use `tool` for several.
@@ -129,7 +141,7 @@ export type SliderControl<T = unknown> = {
    * Makes the control's thumbnail, in sections that show one. It gets a thumbnail-size copy of the photo, which is its own to
    * change: it changes it in place and returns nothing, or returns a new image to use instead. A slider has no single value
    * to show, so it gets only the image (and the context, whose `scale` is small here) and picks what to illustrate. Used in
-   * place of `live` and `operation` when it is set.
+   * place of `live` when it is set.
    */
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };
@@ -141,8 +153,6 @@ export type ActionControl = {
   label: string;
   /** @deprecated Use `tool` instead for custom on-image interactions. */
   apply?: (image: AbraImageLike, context: ToolContext) => void;
-  /** A native edit shared by replay and asynchronous thumbnail generation. */
-  operation?: ImageOperation;
   /**
    * Controls sharing a group are mutually exclusive: applying one clears any other applied
    * control in the same group (across all sections). Ungrouped controls toggle independently.
@@ -164,8 +174,8 @@ export type ActionControl = {
   tool?(photo: ImageLike, context: ToolContext): ImageLike | void;
   /**
    * Makes the action's thumbnail, in sections that show one. It gets a thumbnail-size copy of the photo, which is its own to
-   * change: it changes it in place and returns nothing, or returns a new image to use instead. Used in place of `live` and
-   * `operation` when it is set, so a control whose `tool` has no effect form can still show what it does.
+   * change: it changes it in place and returns nothing, or returns a new image to use instead. Used in place of `live` when it
+   * is set, so a control whose `tool` has no effect form can still show what it does.
    */
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };
@@ -202,8 +212,7 @@ export type ToolControl<T = unknown> = {
 /** Applies an action to `image`: its own `apply`, or else its tool, or else its live effect, which is the same definition. */
 export const applyAction = (control: ActionControl, image: AbraImageLike, scale = 1) => {
   const context: ToolContext = { scale };
-  if (control.operation) image.applyOperation(control.operation);
-  else if (control.apply) control.apply(image, context);
+  if (control.apply) control.apply(image, context);
   else if (control.tool) {
     const photo = image.toImage();
     // The tool changed `photo` in place, or made a new image to use instead.
@@ -261,11 +270,18 @@ export const sliderValues = (control: SliderControl, value?: AdjustmentValue): n
 };
 
 /** Applies a slider at `value` to `image`: its own `apply`, or else its tool, or else its live effect. */
-export const applySlider = (control: SliderControl, image: AbraImageLike, value: AdjustmentValue, scale = 1) => {
+export const applySlider = (
+  control: SliderControl,
+  image: AbraImageLike,
+  value: AdjustmentValue,
+  scale = 1,
+  person?: ToolContext['person'],
+) => {
   const values = sliderValues(control, value);
   const context: ToolContext = {
     scale,
     preloaded: control.preload ? preloadFor(control, image.width(), image) : undefined,
+    person,
   };
   if (control.apply) control.apply(image, values[0], context);
   else if (control.tool) {
@@ -287,7 +303,18 @@ export const isSliderApplied = (control: SliderControl, value: AdjustmentValue |
     ? value !== undefined
     : sliderValues(control, value).some((slider, index) => slider !== sliderSpecs(control)[index].defaultValue);
 
-export type EditControl = SliderControl | ActionControl | ToolControl;
+/**
+ * A control that opens a row of controls of its own, one level down: tapping it replaces the section's row with these, with a
+ * way back. The controls inside may be any kind, so a group may hold groups.
+ */
+export type GroupControl = {
+  kind: 'group';
+  key: string;
+  label: string;
+  controls: EditControl[];
+};
+
+export type EditControl = SliderControl | ActionControl | ToolControl | GroupControl;
 
 export type EditSection = {
   key: string;
@@ -314,6 +341,21 @@ export const EDIT_SECTIONS: EditSection[] = [
   detail,
   cleanup,
 ];
+
+/** The controls that do something, with every group opened out into the controls inside it. */
+export const leafControls = (controls: EditControl[]): Exclude<EditControl, GroupControl>[] =>
+  controls.flatMap(control => (control.kind === 'group' ? leafControls(control.controls) : [control]));
+
+/** The group with this key, at any depth, or nothing. */
+export const findGroup = (controls: EditControl[], key: string): GroupControl | undefined => {
+  for (const control of controls) {
+    if (control.kind !== 'group') continue;
+    if (control.key === key) return control;
+    const found = findGroup(control.controls, key);
+    if (found) return found;
+  }
+  return undefined;
+};
 
 export const findSection = (key: string): EditSection =>
   EDIT_SECTIONS.find(section => section.key === key) ?? EDIT_SECTIONS[0];

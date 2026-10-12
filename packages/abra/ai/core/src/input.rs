@@ -118,17 +118,17 @@ impl InputSpec {
   pub fn from_manifest(p_manifest: &Manifest) -> Result<Self, AiError> {
     let size = p_manifest.number("input_size");
     let dimension = |key: &str| {
-      size
-        .or_else(|| p_manifest.number(key))
-        .filter(|value| *value >= 1.0)
-        .map(|value| value as u32)
-        .ok_or_else(|| AiError::config_error(format!("The manifest of {} needs `input_size` in its params", p_manifest.name())))
+      size.or_else(|| p_manifest.number(key)).filter(|value| *value >= 1.0).map(|value| value as u32).ok_or_else(|| {
+        AiError::config_error(format!("The manifest of {} needs `input_size` in its params", p_manifest.name()))
+      })
     };
     let triple = |key: &str, default: f32| -> Result<[f32; 3], AiError> {
       match p_manifest.list(key) {
         None => Ok([default; 3]),
         Some([a, b, c]) => Ok([*a as f32, *b as f32, *c as f32]),
-        Some(_) => Err(AiError::config_error(format!("`{key}` in the manifest of {} needs three numbers", p_manifest.name()))),
+        Some(_) => {
+          Err(AiError::config_error(format!("`{key}` in the manifest of {} needs three numbers", p_manifest.name())))
+        }
       }
     };
     let fit = match p_manifest.text("input_fit") {
@@ -136,7 +136,9 @@ impl InputSpec {
       Some("letterbox") => Fit::Letterbox {
         pad: p_manifest.number("input_pad").unwrap_or(0.5) as f32,
       },
-      Some(other) => return Err(AiError::config_error(format!("Unknown input fit `{other}`; use stretch or letterbox"))),
+      Some(other) => {
+        return Err(AiError::config_error(format!("Unknown input fit `{other}`; use stretch or letterbox")));
+      }
     };
     Ok(Self {
       width: dimension("input_width")?,
@@ -276,6 +278,8 @@ mod tests {
     assert_eq!(input.fit, Fit::Letterbox { pad: 0.25 });
     assert_eq!(input.mean, [0.5; 3]);
     assert!(InputSpec::from_manifest(&Manifest::parse("name: x\n").unwrap()).is_err());
-    assert!(InputSpec::from_manifest(&Manifest::parse("params:\n  input_size: 8\n  input_layout: x\n").unwrap()).is_err());
+    assert!(
+      InputSpec::from_manifest(&Manifest::parse("params:\n  input_size: 8\n  input_layout: x\n").unwrap()).is_err()
+    );
   }
 }

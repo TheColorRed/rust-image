@@ -7,9 +7,7 @@ use rgb::RGBA8;
 ///
 /// With `p_options`, the image is encoded at its `quality` (0 to 100). Without options it is encoded at the highest
 /// quality, which is close to lossless but still much smaller than PNG.
-pub fn write_avif(
-  p_file: impl Into<String>, p_img: &Image, p_options: &Option<WriterOptions>,
-) -> Result<(), String> {
+pub fn write_avif(p_file: impl Into<String>, p_img: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let (width, height) = p_img.dimensions::<usize>();
   let pixels: Vec<RGBA8> =
     p_img.rgba().chunks_exact(4).map(|pixel| RGBA8::new(pixel[0], pixel[1], pixel[2], pixel[3])).collect();

@@ -442,7 +442,8 @@ pub fn appearance() -> Appearance {
     const DWM: &str = r"Software\Microsoft\Windows\DWM";
     let dark = windows_registry::dword(PERSONALIZE, "AppsUseLightTheme") == Some(0);
     // `AccentColor` is stored as 0xAABBGGRR.
-    let accent = windows_registry::dword(DWM, "AccentColor").map(|value| [value as u8, (value >> 8) as u8, (value >> 16) as u8]);
+    let accent =
+      windows_registry::dword(DWM, "AccentColor").map(|value| [value as u8, (value >> 8) as u8, (value >> 16) as u8]);
     Appearance { dark, accent }
   }
   #[cfg(not(windows))]
@@ -459,12 +460,7 @@ mod windows_registry {
   #[link(name = "advapi32")]
   unsafe extern "system" {
     fn RegGetValueW(
-      p_key: isize,
-      p_sub_key: *const u16,
-      p_value: *const u16,
-      p_flags: u32,
-      p_type: *mut u32,
-      p_data: *mut c_void,
+      p_key: isize, p_sub_key: *const u16, p_value: *const u16, p_flags: u32, p_type: *mut u32, p_data: *mut c_void,
       p_size: *mut u32,
     ) -> i32;
   }
@@ -514,7 +510,8 @@ mod tests {
     assert_eq!(options.frame, WindowFrame::Bordered);
     assert!(options.resizable);
 
-    let options = options.with_size(640, 480).with_frame(WindowFrame::Borderless).with_resizable(false).with_surface_id(7);
+    let options =
+      options.with_size(640, 480).with_frame(WindowFrame::Borderless).with_resizable(false).with_surface_id(7);
     assert_eq!((options.width, options.height), (640, 480));
     assert_eq!(options.frame, WindowFrame::Borderless);
     assert!(!options.resizable);

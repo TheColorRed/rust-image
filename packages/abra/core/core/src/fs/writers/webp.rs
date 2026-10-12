@@ -9,9 +9,7 @@ use webp::ColorType::Rgba8;
 ///
 /// With `p_options`, the image is encoded lossy at its `quality` (0 to 100), which makes a much smaller file than the
 /// lossless encoding. Without options it is encoded lossless, so every pixel is kept as it is.
-pub fn write_webp(
-  p_file: impl Into<String>, p_img: &Image, p_options: &Option<WriterOptions>,
-) -> Result<(), String> {
+pub fn write_webp(p_file: impl Into<String>, p_img: &Image, p_options: &Option<WriterOptions>) -> Result<(), String> {
   let p_file = p_file.into();
   let (width, height) = p_img.dimensions::<u32>();
 

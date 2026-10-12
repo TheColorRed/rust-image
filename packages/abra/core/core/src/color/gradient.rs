@@ -201,8 +201,16 @@ mod tests {
     let red = Color::from_rgba(255, 0, 0, 255);
     let green = Color::from_rgba(0, 255, 0, 255);
     let blue = Color::from_rgba(0, 0, 255, 255);
-    let sorted = Gradient::new(vec![ColorStop::new(red, 0.0), ColorStop::new(green, 0.5), ColorStop::new(blue, 1.0)]);
-    let shuffled = Gradient::new(vec![ColorStop::new(blue, 1.0), ColorStop::new(red, 0.0), ColorStop::new(green, 0.5)]);
+    let sorted = Gradient::new(vec![
+      ColorStop::new(red, 0.0),
+      ColorStop::new(green, 0.5),
+      ColorStop::new(blue, 1.0),
+    ]);
+    let shuffled = Gradient::new(vec![
+      ColorStop::new(blue, 1.0),
+      ColorStop::new(red, 0.0),
+      ColorStop::new(green, 0.5),
+    ]);
     for time in [-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5] {
       assert_eq!(shuffled.color_at(time), sorted.color_at(time), "at {time}");
     }
@@ -212,7 +220,12 @@ mod tests {
   fn two_stops_at_the_same_position_make_a_hard_edge_in_the_order_given() {
     let red = Color::from_rgba(255, 0, 0, 255);
     let blue = Color::from_rgba(0, 0, 255, 255);
-    let hard = Gradient::new(vec![ColorStop::new(red, 0.0), ColorStop::new(red, 0.5), ColorStop::new(blue, 0.5), ColorStop::new(blue, 1.0)]);
+    let hard = Gradient::new(vec![
+      ColorStop::new(red, 0.0),
+      ColorStop::new(red, 0.5),
+      ColorStop::new(blue, 0.5),
+      ColorStop::new(blue, 1.0),
+    ]);
     assert_eq!(hard.color_at(0.499), red);
     assert_eq!(hard.color_at(0.5), blue);
   }

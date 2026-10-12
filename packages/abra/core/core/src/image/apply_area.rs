@@ -197,7 +197,9 @@ pub fn mix_by_weights(p_before: &[u8], p_after: &[u8], p_weights: impl IntoItera
     .chunks_exact(4)
     .zip(p_after.chunks_exact(4))
     .zip(p_weights)
-    .flat_map(|((before, after), weight)| (0..4).map(move |channel| mix_byte(before[channel], after[channel], weight as u32)))
+    .flat_map(|((before, after), weight)| {
+      (0..4).map(move |channel| mix_byte(before[channel], after[channel], weight as u32))
+    })
     .collect()
 }
 
@@ -345,8 +347,8 @@ pub fn area_weights(p_width: u32, p_height: u32, p_ctx: &ApplyContext<'_>) -> Ve
 ///   hardware selection allows it and a GPU provider is registered and ready.
 /// - `p_processor`: Closure that processes the prepared image area on the CPU.
 pub fn apply_in_area<F>(
-  p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_kernel_padding: impl Into<i32>, p_gpu: Option<&dyn GpuEffect>,
-  mut p_processor: F,
+  p_image: &mut Image, p_ctx: Option<ApplyContext<'_>>, p_kernel_padding: impl Into<i32>,
+  p_gpu: Option<&dyn GpuEffect>, mut p_processor: F,
 ) where
   F: FnMut(&mut Image),
 {
@@ -421,7 +423,9 @@ fn process_area<F>(
   if let Some((effect, provider)) = p_gpu {
     // A GPU error is non-fatal: fall back to the CPU path.
     let (rect_w, rect_h) = (meta.rect_w as u32, meta.rect_h as u32);
-    if let Ok(processed) = (provider.process)(&[effect.passes(rect_w, rect_h)], rect_w, rect_h, prepared.pixels.as_ref()) {
+    if let Ok(processed) =
+      (provider.process)(&[effect.passes(rect_w, rect_h)], rect_w, rect_h, prepared.pixels.as_ref())
+    {
       apply_processed_pixels_to_image(p_image, processed, &meta, p_area, p_mask);
       return;
     }

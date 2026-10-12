@@ -6,7 +6,7 @@ use std::time::Instant;
 use drawing::Brush;
 use drawing::Painter;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Position of the outline relative to the shape.
 pub enum OutlinePosition {
   /// Outline is drawn inside the shape.

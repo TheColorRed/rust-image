@@ -81,10 +81,10 @@ function fixture() {
     thumbnailSourceAsync(width, height) {
       f.requests.push([width, height]);
       const small = owned('base');
-      small.renderThumbnailAsync = (effects, operation) => {
+      small.renderThumbnailAsync = effects => {
         f.active++;
         f.maxActive = Math.max(f.maxActive, f.active);
-        const effect = operation?.key ?? effects[0]?.key;
+        const effect = effects[0]?.key;
         const promise = new Promise((resolve, reject) => {
           const job = {
             effect,
@@ -111,6 +111,7 @@ function fixture() {
   const nativeImages = load('native-image', { '@alakazam/mobile': bindings });
   const sections = {
     EDIT_SECTIONS: [section],
+    leafControls: controls => controls,
     effectList: effect => (Array.isArray(effect) ? effect : [effect]),
     scaleBetween: () => 1,
     preloadFor: () => undefined,
@@ -175,9 +176,9 @@ test('cards publish progressively in completion order with at most two effects i
   assert.equal(f.maxActive, 2);
 });
 
-test('editing reuses native components and non-live edits run as native operations', async () => {
+test('editing reuses native components', async () => {
   const f = fixture();
-  f.controls[0] = { key: 'warm', kind: 'action', label: 'Rotate', operation: { key: 'rotate' } };
+  f.controls[0] = { key: 'warm', kind: 'action', label: 'Rotate', live: () => [{ key: 'rotate' }] };
   const first = build(f);
   await first.done;
   const second = build(f, first.result);

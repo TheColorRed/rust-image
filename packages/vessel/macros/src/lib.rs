@@ -63,7 +63,9 @@ pub fn derive_component(p_input: TokenStream) -> TokenStream {
   };
   // `#[component(plain)]` on the struct: never mounted on a host view, so nothing is exported to it.
   let plain = input.attrs.iter().filter(|attribute| attribute.path().is_ident("component")).any(|attribute| {
-    attribute.parse_nested_meta(|meta| if meta.path.is_ident("plain") { Ok(()) } else { Err(meta.error("expected `plain`")) }).is_ok()
+    attribute
+      .parse_nested_meta(|meta| if meta.path.is_ident("plain") { Ok(()) } else { Err(meta.error("expected `plain`")) })
+      .is_ok()
   });
   if !input.generics.params.is_empty() {
     return syn::Error::new_spanned(&input.generics, "a component exported to a host view cannot be generic")
@@ -80,8 +82,14 @@ pub fn derive_component(p_input: TokenStream) -> TokenStream {
     Fields::Unnamed(fields) => fields.unnamed.iter().collect(),
     Fields::Unit => Vec::new(),
   };
-  let Some(position) = fields.iter().position(|field| field.attrs.iter().any(|attribute| attribute.path().is_ident("component"))).or(if fields.is_empty() { None } else { Some(0) }) else {
-    return syn::Error::new_spanned(name, "the struct needs a field that holds the component").to_compile_error().into();
+  let Some(position) = fields
+    .iter()
+    .position(|field| field.attrs.iter().any(|attribute| attribute.path().is_ident("component")))
+    .or(if fields.is_empty() { None } else { Some(0) })
+  else {
+    return syn::Error::new_spanned(name, "the struct needs a field that holds the component")
+      .to_compile_error()
+      .into();
   };
   let field = match &fields[position].ident {
     Some(ident) => quote!(#ident),

@@ -2,8 +2,8 @@
 //! This crate is intended to be light-weight and free of heavy dependencies such as IO and transforms.
 
 pub mod channels;
-pub mod gaussian;
 pub mod color;
+pub mod gaussian;
 pub mod image;
 pub mod resolution;
 

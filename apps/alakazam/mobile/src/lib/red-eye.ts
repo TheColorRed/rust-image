@@ -1,5 +1,4 @@
 import { channelMix } from '@abra/core/adjustments';
-import { AiModel } from '@abra/core';
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import {
@@ -7,26 +6,19 @@ import {
   type Rect,
   pointFLerp,
   rectCenter,
-  rectIntersect,
   rectNew,
   rectOrigin,
-  rectRoundedOut,
   rectScaled,
-  rectSquared,
   rectTranslated,
 } from '@abra/core/geometry';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { aiModelPath, type AbraImageLike } from '@alakazam/mobile';
+import { type AbraImageLike } from '@alakazam/mobile';
+import { FACE_MODELS, findFaces, inside, model, owning } from '@/src/lib/faces';
 
-const PERSON_DETECTION = 'person-detection';
-const FACE_PARSING = 'face-parsing';
-const FACE_LANDMARKS = 'face-landmarks';
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */
-export const RED_EYE_MODELS = [PERSON_DETECTION, FACE_PARSING, FACE_LANDMARKS] as const;
+export const RED_EYE_MODELS = FACE_MODELS;
 const EYES = ['left eye', 'right eye'];
-/** The face-parsing classes that only a face has. Skin is left out: a body has plenty of it. */
-const FACE_FEATURES = ['left eyebrow', 'right eyebrow', 'left eye', 'right eye', 'nose', 'mouth', 'upper lip', 'lower lip'];
 /** The mesh points of the two irises: the center, then four points around it. */
 const IRIS_STARTS = [468, 473];
 /**
@@ -36,21 +28,6 @@ const IRIS_STARTS = [468, 473];
 const PUPIL_OF_IRIS = 0.7;
 /** How soft the edge of the corrected area is, as a fraction of the pupil's width, so it fades out and leaves no ring. */
 const SOFT_EDGE = 0.12;
-/** The smallest crop, in pixels, worth running a model on. */
-const MIN_CROP_SIDE = 32;
-/**
- * Finding a face is done from coarse to fine, because a face in a full-length photo is small and in a close-up it fills the
- * picture, and the face parser only works on a crop where the face is a good part of it. First look in a square at the top of
- * the person, trying small squares (as a fraction of the person's height) before larger ones, until one leads to a face.
- */
-const HEAD_SQUARES = [0.18, 0.3, 0.5, 0.75, 1];
-const HEAD_RISE = 0.05;
-/** The landmark model's score, from 0 to 1, above which a crop is taken to hold a face. */
-const MIN_FACE_PRESENCE = 0.5;
-/** Then crop tightly around the eyes: this many times the width of the eyes, so the face fills the crop. */
-const EYES_TO_CROP = 3.2;
-/** The landmark model gets the box around the face features, grown by this much, as a square. */
-const FACE_GROWTH = 1.8;
 /** What counts as the red of a flash: how far from pure red in hue (degrees), how saturated and bright, and how soft the edge. */
 const RED_HUE_RANGE = 25;
 const RED_MIN_SATURATION = 0.35;
@@ -109,33 +86,6 @@ const TAP_RIM_FEATHER = 0.3;
 const PUPIL_LEVEL = 0.6;
 const RED_OF_AVERAGE = 0.8;
 
-const models: Record<string, ReturnType<typeof AiModel.load>> = {};
-
-/** A model by its role, or nothing when it is not downloaded on this device (or has no manifest yet). */
-const model = (role: string): ReturnType<typeof AiModel.load> | undefined => {
-  try {
-    return (models[role] ??= AiModel.load(aiModelPath(role)));
-  } catch {
-    return undefined;
-  }
-};
-
-/** The part of `box` that is on whole pixels inside `frame`, or nothing when it is smaller than `side` across. */
-const inside = (box: Rect, frame: Rect, side = MIN_CROP_SIDE): Rect | undefined => {
-  const part = rectIntersect(rectRoundedOut(box), frame);
-  return part.width >= side && part.height >= side ? part : undefined;
-};
-
-/** Runs `work`, then frees everything it kept, as the editor does for its images. Whatever the library hands back is kept. */
-function owning<T>(work: (keep: <V>(value: V) => V) => T): T {
-  const owned: unknown[] = [];
-  try {
-    return work((value) => (owned.push(value), value));
-  } finally {
-    owned.forEach((value) => (value as { uniffiDestroy(): void }).uniffiDestroy());
-  }
-}
-
 /**
  * The mask of where the pupils are, made soft. Blurring the edge makes the correction fade out instead of stopping at a ring;
  * adding the blurred mask to itself doubles it, so the correction is at full strength right up to the rim of the pupil and the
@@ -163,67 +113,32 @@ function correct(photo: ImageLike, pupils: MaskLike, keep: <V>(value: V) => V) {
  * counts as red. Returns how many faces were corrected: none when the models are missing or no face was found.
  */
 export const removeRedEye = (photo: ImageLike): number => {
-  const people = model(PERSON_DETECTION);
-  const parser = model(FACE_PARSING);
-  const landmarker = model(FACE_LANDMARKS);
-  if (!people || !parser || !landmarker) return 0;
+  if (FACE_MODELS.some(role => !model(role))) return 0;
 
   return owning((keep) => {
-    const frame = rectNew({ x: 0, y: 0 }, { width: photo.width(), height: photo.height() });
     const white = keep(Color.fromRgba(255, 255, 255, 255));
     let redEyes: MaskLike | undefined;
     let faces = 0;
 
-    for (const person of keep(people.run(photo)).instances()) {
-      const body = keep(person).bounds();
-
-      // Try a small square at the top of the person first and larger ones after it, because a face in a full-length photo is
-      // small and in a close-up it fills the picture. A square counts when it leads to a face the landmark model accepts.
-      for (const fraction of HEAD_SQUARES) {
-        const side = body.height * fraction;
-        const head = inside(
-          rectNew({ x: body.x + body.width / 2 - side / 2, y: body.y - side * HEAD_RISE }, { width: side, height: side }),
-          frame,
-        );
-        if (!head) continue;
-
-        // Coarse: the eyes the parser sees in this square.
-        const seen = keep(keep(keep(parser.run(keep(photo.cropped(head.x, head.y, head.width, head.height)))).labels()).maskNamed(EYES)).bounds(0);
-        if (!seen) continue;
-
-        // Fine: a crop around the eyes where the face fills the picture, so the parser finds the features properly.
-        const zoom = inside(rectScaled(rectSquared(rectTranslated(seen, head.x, head.y)), EYES_TO_CROP, EYES_TO_CROP), frame);
-        if (!zoom) continue;
-        const labels = keep(keep(parser.run(keep(photo.cropped(zoom.x, zoom.y, zoom.width, zoom.height)))).labels());
-        const features = keep(labels.maskNamed(FACE_FEATURES)).bounds(0);
-        const face =
-          features && inside(rectTranslated(rectScaled(rectSquared(features), FACE_GROWTH, FACE_GROWTH), zoom.x, zoom.y), frame);
-        if (!face) continue;
-
-        const faceImage = keep(photo.cropped(face.x, face.y, face.width, face.height));
-        const landmarks = keep(landmarker.run(faceImage)).landmarks();
-        if (landmarks.presence < MIN_FACE_PRESENCE) continue;
-
-        // The eyes the parser found, limited to a disc over the pupil of each iris the landmarks found, and to the pixels that are red.
-        const eyesOnPhoto = keep(keep(labels.maskNamed(EYES)).placed(photo.width(), photo.height(), rectOrigin(zoom)));
-        const eyesInFace = keep(eyesOnPhoto.cropped(face));
-        const irises = keep(Mask.empty(face.width, face.height));
-        let pupilWidth = 0;
-        for (const start of IRIS_STARTS) {
-          const [center, ...ring] = landmarks.landmarks.slice(start, start + 5).map((landmark) => landmark.point);
-          if (!center || ring.length !== 4) continue;
-          const disc = keep(Area.circleAround(center, ring.map((point) => pointFLerp(center, point, PUPIL_OF_IRIS))));
-          irises.drawArea(disc, white, rectOrigin(disc.bounds()));
-          pupilWidth = Math.max(pupilWidth, disc.bounds().width);
-        }
-        const red = keep(Mask.fromColorRange(faceImage, keep(Color.red()), RED_HUE_RANGE, RED_MIN_SATURATION, RED_MIN_VALUE, RED_FEATHER));
-        const redPupils = keep(keep(eyesInFace.minimum(irises)).minimum(red));
-        const soft = keep(softened(redPupils, pupilWidth, keep).minimum(eyesInFace));
-        const here = keep(soft.placed(photo.width(), photo.height(), rectOrigin(face)));
-        redEyes = redEyes ? keep(redEyes.maximum(here)) : here;
-        faces++;
-        break;
+    for (const { labels, zoom, face, faceImage, landmarks } of findFaces(photo, keep)) {
+      // The eyes the parser found, limited to a disc over the pupil of each iris the landmarks found, and to the pixels that are red.
+      const eyesOnPhoto = keep(keep(labels.maskNamed(EYES)).placed(photo.width(), photo.height(), rectOrigin(zoom)));
+      const eyesInFace = keep(eyesOnPhoto.cropped(face));
+      const irises = keep(Mask.empty(face.width, face.height));
+      let pupilWidth = 0;
+      for (const start of IRIS_STARTS) {
+        const [center, ...ring] = landmarks.landmarks.slice(start, start + 5).map((landmark) => landmark.point);
+        if (!center || ring.length !== 4) continue;
+        const disc = keep(Area.circleAround(center, ring.map((point) => pointFLerp(center, point, PUPIL_OF_IRIS))));
+        irises.drawArea(disc, white, rectOrigin(disc.bounds()));
+        pupilWidth = Math.max(pupilWidth, disc.bounds().width);
       }
+      const red = keep(Mask.fromColorRange(faceImage, keep(Color.red()), RED_HUE_RANGE, RED_MIN_SATURATION, RED_MIN_VALUE, RED_FEATHER));
+      const redPupils = keep(keep(eyesInFace.minimum(irises)).minimum(red));
+      const soft = keep(softened(redPupils, pupilWidth, keep).minimum(eyesInFace));
+      const here = keep(soft.placed(photo.width(), photo.height(), rectOrigin(face)));
+      redEyes = redEyes ? keep(redEyes.maximum(here)) : here;
+      faces++;
     }
 
     if (redEyes) correct(photo, redEyes, keep);

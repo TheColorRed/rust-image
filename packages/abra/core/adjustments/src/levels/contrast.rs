@@ -8,7 +8,6 @@ use options::{Effect, Options};
 
 use rayon::prelude::*;
 
-
 /// Adjusts the contrast of an image.
 fn apply_contrast(p_image: &mut Image, p_amount: impl Into<f64>) {
   let p_amount = p_amount.into().clamp(-100.0, 100.0) as f32;
