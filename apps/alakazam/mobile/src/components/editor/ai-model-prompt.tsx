@@ -2,12 +2,13 @@ import { aiModels, downloadAiModel, refreshAiModels, type AiModelListing } from 
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
+import { detectSkin } from '@/src/lib/analysis';
 import { errorMessage } from '@/src/lib/error-message';
 import { formatBytes } from '@/src/lib/format-bytes';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsOfferDeclined, aiModelsRequested, aiModelsRequested$, aiModelsVersion } from '@/src/state/ai-models';
 import { isPersonControlFocused$ } from '@/src/state/edits';
-import { currentImage, editBaseImage } from '@/src/state/session';
+import { currentImage, editBaseImage, originalImage } from '@/src/state/session';
 
 /**
  * Offers to download AI models in two cases:
@@ -95,8 +96,10 @@ export function AiModelPrompt() {
         return;
       }
       // Switch the open photo from color-based to AI skin detection.
-      const images = [currentImage.value, editBaseImage.value].filter(image => image !== null);
-      await Promise.all(images.map(image => image.detectSkinAsync()));
+      const photo = originalImage.value ?? editBaseImage.value ?? currentImage.value;
+      if (photo) {
+        await detectSkin(photo);
+      }
       setMissing([]);
       aiModelsVersion.next(aiModelsVersion.value + 1);
     } catch (e) {

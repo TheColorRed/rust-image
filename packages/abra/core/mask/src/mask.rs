@@ -360,6 +360,85 @@ impl From<Mask> for Image {
   }
 }
 
+/// How a [`Blob`] fades from its middle out to its edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Falloff {
+  /// A bell: `exp(-fade * d²)`, where `d` is the distance from the middle in half sizes (`1` is the edge of the oval), out to
+  /// `reach` (`d²` up to this, as `1.7`) and nothing beyond. A bigger `fade` is a tighter bell with a harder edge.
+  Gaussian { fade: f32, reach: f32 },
+  /// Full at the middle and nothing at the edge (`d` = `1`), along a smooth curve with no line anywhere. `fade` is how much of the
+  /// way in from the edge the curve takes: `1` fades from the middle, and a smaller `fade` is full for longer and harder at the edge.
+  Smooth { fade: f32 },
+}
+
+/// A soft oval to put in a mask: a place, a size, a turn and how it fades. See [`Mask::from_blobs`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Blob {
+  /// The middle of the oval, in pixels of the mask.
+  pub center: PointF,
+  /// Half the length (along its turn) and half the thickness (across it) of the oval, in pixels.
+  pub half_size: Size,
+  /// How far the oval is turned from lying flat, in radians.
+  pub angle: f32,
+  /// How it fades from its middle to its edge.
+  pub falloff: Falloff,
+}
+
+impl Blob {
+  /// How many half sizes out from the middle (`d`) the blob reaches anything.
+  fn reach(&self) -> f32 {
+    match self.falloff {
+      Falloff::Gaussian { reach, .. } => reach.max(0.0).sqrt(),
+      Falloff::Smooth { .. } => 1.0,
+    }
+  }
+
+  /// How strong the blob is at a pixel, `0` to `255`.
+  fn strength(&self, p_x: f32, p_y: f32, p_cos: f32, p_sin: f32) -> u8 {
+    let (dx, dy) = (p_x - self.center.x, p_y - self.center.y);
+    let along = (dx * p_cos + dy * p_sin) / self.half_size.width;
+    let across = (-dx * p_sin + dy * p_cos) / self.half_size.height;
+    let squared = along * along + across * across;
+    match self.falloff {
+      Falloff::Gaussian { fade, reach } if squared < reach => (255.0 * (-fade * squared).exp()).round() as u8,
+      Falloff::Gaussian { .. } => 0,
+      Falloff::Smooth { fade } => {
+        let edge = ((1.0 - squared.sqrt()) / fade).clamp(0.0, 1.0);
+        (255.0 * edge * edge * (3.0 - 2.0 * edge)).round() as u8
+      }
+    }
+  }
+}
+
+impl Mask {
+  /// A mask of soft ovals, for shading a face or any region with a place and a shape. Where ovals overlap the strongest one
+  /// wins. Only the pixels an oval can reach are worked on, a row at a time in parallel, so a few small ovals on a large mask
+  /// cost little.
+  /// - `p_width`, `p_height`: The size of the mask.
+  /// - `p_blobs`: The ovals. One with no size is left out.
+  pub fn from_blobs(p_width: u32, p_height: u32, p_blobs: &[Blob]) -> Mask {
+    let (width, height) = (p_width as usize, p_height as usize);
+    let mut values = vec![0u8; width * height];
+    for blob in p_blobs.iter().filter(|blob| blob.half_size.width > 0.0 && blob.half_size.height > 0.0) {
+      let (sin, cos) = blob.angle.sin_cos();
+      let radius = blob.half_size.width.max(blob.half_size.height) * blob.reach();
+      let left = (blob.center.x - radius).floor().max(0.0) as usize;
+      let right = ((blob.center.x + radius).ceil().max(0.0) as usize + 1).min(width);
+      let top = (blob.center.y - radius).floor().max(0.0) as usize;
+      let bottom = ((blob.center.y + radius).ceil().max(0.0) as usize + 1).min(height);
+      if left >= right || top >= bottom {
+        continue;
+      }
+      values.par_chunks_mut(width).enumerate().skip(top).take(bottom - top).for_each(|(y, row)| {
+        for x in left..right {
+          row[x] = row[x].max(blob.strength(x as f32, y as f32, cos, sin));
+        }
+      });
+    }
+    Mask::from_values(p_width, p_height, values)
+  }
+}
+
 impl From<Image> for Mask {
   fn from(p_img: Image) -> Mask {
     Mask::from_image(p_img)
@@ -391,6 +470,17 @@ impl Mask {
   pub fn apply_to_image(&self, p_image: &mut Image) {
     if let Some(pixels) = p_image.colors().as_slice_mut() {
       apply_mask_to_pixels_rgba(pixels, self.values());
+    }
+  }
+
+  /// Multiplies the image's alpha by the mask, so what is already transparent stays so and white keeps the image as it is
+  /// (`apply_to_image` replaces the alpha instead). The mask size must match the image size.
+  pub fn multiply_alpha(&self, p_image: &mut Image) {
+    assert_eq!(self.dimensions::<u32>(), p_image.dimensions::<u32>(), "mask must be the same size as the image");
+    if let Some(pixels) = p_image.colors().as_slice_mut() {
+      for (rgba, &m) in pixels.chunks_mut(4).zip(self.values()) {
+        rgba[3] = ((rgba[3] as u16 * m as u16 + 127) / 255) as u8;
+      }
     }
   }
 
@@ -450,6 +540,62 @@ fn apply_mask_to_rgba_pixels(p_pixels: &mut [u8], p_mask: &[u8], p_px_count: usi
 mod tests {
   use super::*;
   use abra_core::{Area, Color, Image};
+
+  #[test]
+  fn a_gaussian_blob_is_full_in_the_middle_and_fades_out() {
+    let blob = Blob {
+      center: PointF::new(20.0, 10.0),
+      half_size: Size::new(8.0, 4.0),
+      angle: 0.0,
+      falloff: Falloff::Gaussian { fade: 3.0, reach: 1.7 },
+    };
+    let mask = Mask::from_blobs(40, 20, &[blob]);
+
+    assert_eq!(mask.get(20, 10), Some(255));
+    // One half width out is `d²` of 1: `255 * exp(-3)`.
+    assert_eq!(mask.get(28, 10), Some((255.0 * (-3.0f32).exp()).round() as u8));
+    assert!(mask.get(24, 10).unwrap() > mask.get(28, 10).unwrap());
+    // Past the reach, and a long way off the mask's own edge, there is nothing.
+    assert_eq!(mask.get(33, 10), Some(0));
+    assert_eq!(mask.get(0, 0), Some(0));
+  }
+
+  #[test]
+  fn a_smooth_blob_is_nothing_at_its_edge_and_turns_with_its_angle() {
+    let flat = Blob {
+      center: PointF::new(20.0, 20.0),
+      half_size: Size::new(10.0, 4.0),
+      angle: 0.0,
+      falloff: Falloff::Smooth { fade: 1.0 },
+    };
+    let upright = Blob { angle: std::f32::consts::FRAC_PI_2, ..flat };
+    let flat_mask = Mask::from_blobs(40, 40, &[flat]);
+    let upright_mask = Mask::from_blobs(40, 40, &[upright]);
+
+    assert_eq!(flat_mask.get(20, 20), Some(255));
+    assert_eq!(flat_mask.get(30, 20), Some(0));
+    assert!(flat_mask.get(25, 20).unwrap() > 0);
+    // Flat it reaches 5 pixels sideways and not up; turned a quarter it is the other way round.
+    assert!(flat_mask.get(25, 20).unwrap() > flat_mask.get(20, 25).unwrap());
+    assert!(upright_mask.get(20, 25).unwrap() > upright_mask.get(25, 20).unwrap());
+  }
+
+  #[test]
+  fn overlapping_blobs_keep_the_stronger_and_blobs_off_the_mask_are_left_out() {
+    let blob = |x: f32, strength_fade: f32| Blob {
+      center: PointF::new(x, 5.0),
+      half_size: Size::new(4.0, 4.0),
+      angle: 0.0,
+      falloff: Falloff::Gaussian { fade: strength_fade, reach: 1.7 },
+    };
+    let both = Mask::from_blobs(20, 10, &[blob(8.0, 1.0), blob(10.0, 6.0), blob(-500.0, 1.0), blob(500.0, 1.0)]);
+    let first = Mask::from_blobs(20, 10, &[blob(8.0, 1.0)]);
+    let second = Mask::from_blobs(20, 10, &[blob(10.0, 6.0)]);
+
+    for x in 0..20 {
+      assert_eq!(both.get(x, 5), Some(first.get(x, 5).unwrap().max(second.get(x, 5).unwrap())));
+    }
+  }
 
   #[test]
   fn borrowed_mask_input_keeps_the_original_reference() {

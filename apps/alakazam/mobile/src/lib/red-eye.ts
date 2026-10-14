@@ -226,7 +226,7 @@ export type RedEyeChange = { type: 'red-eye'; x: number; y: number } | { type: '
  * the image is left as it was.
  */
 export function applyRedEyeStep(image: AbraImageLike, change: RedEyeChange): boolean {
-  const photo = image.toImage();
+  const photo = image.clone();
   try {
     const fixed = change.type === 'red-eye' ? fixRedEyeAt(photo, change.x, change.y) : removeRedEye(photo) > 0;
     if (fixed) image.replaceWith(photo);

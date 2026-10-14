@@ -1,7 +1,7 @@
 import { autoTone, invert } from '@abra/core/adjustments';
 import { sharpen } from '@abra/core/filters';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { AbraImage, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
+import { AbraImage, applyEffect, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
 import { useEffect, useRef, useState } from 'react';
 import { Button, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FilePicker, type PickedImage } from '@/src/components/file-picker';
@@ -13,11 +13,11 @@ import { useLiveSession } from '@/src/hooks/useLiveSession';
 type Operation = { label: string; run?: (image: AbraImageLike) => void; tool?: (photo: ImageLike) => void };
 
 const OPERATIONS: Operation[] = [
-  { label: 'Grayscale', run: (image) => image.applyEffect(EffectSpec.Grayscale.new()) },
+  { label: 'Grayscale', run: (image) => applyEffect(image, EffectSpec.Grayscale.new(), undefined) },
   { label: 'Invert', tool: (photo) => invert().apply(photo) },
-  { label: 'Brightness +40', run: (image) => image.applyEffect(EffectSpec.Brightness.new({ amount: 40 })) },
+  { label: 'Brightness +40', run: (image) => applyEffect(image, EffectSpec.Brightness.new({ amount: 40 }), undefined) },
   { label: 'Auto tone', tool: (photo) => autoTone().apply(photo) },
-  { label: 'Blur 8px', run: (image) => image.applyEffect(EffectSpec.GaussianBlur.new({ radius: 8 })) },
+  { label: 'Blur 8px', run: (image) => applyEffect(image, EffectSpec.GaussianBlur.new({ radius: 8 }), undefined) },
   { label: 'Sharpen', tool: (photo) => sharpen().apply(photo) },
 ];
 
@@ -62,7 +62,7 @@ export default function AbraScreen() {
       const t0 = Date.now();
       if (operation.run) operation.run(image);
       else if (operation.tool) {
-        const photo = image.toImage();
+        const photo = image.clone();
         try {
           operation.tool(photo);
           image.replaceWith(photo);
@@ -85,7 +85,7 @@ export default function AbraScreen() {
     try {
       const started = Date.now();
       const outPath = `${toPath(source.uri).replace(/\.[^./]+$/, '')}-abra.jpg`;
-      image.write(outPath);
+      image.write(outPath, undefined);
       setStatus(`Saved ${outPath.split('/').pop()} in ${Date.now() - started} ms`);
     } catch (e: any) {
       setStatus(`Failed: ${String(e?.message ?? e)}`);

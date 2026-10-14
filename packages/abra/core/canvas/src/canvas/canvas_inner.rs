@@ -8,6 +8,7 @@ use abra_core::WriterOptions;
 use abra_core::blend::blend as blend_images;
 use abra_core::image::image_ext::*;
 use abra_core::writer;
+use mask::Mask;
 use abra_core::{ResizeTarget, Size, Transform, TransformAlgorithm};
 use std::cell::Cell;
 use std::sync::Arc;
@@ -63,6 +64,8 @@ pub(crate) struct CanvasInner<'a> {
   origin: Origin,
   /// The effects applied to the entire canvas.
   effects: LayerEffects<'a>,
+  /// Limits where the canvas shows: multiplied into the composite of its layers and children, so it limits all of them.
+  mask: Option<Mask>,
 }
 
 impl<'a> CanvasInner<'a> {
@@ -89,6 +92,7 @@ impl<'a> CanvasInner<'a> {
       opacity: Cell::new(1.0),
       origin: Origin::default(),
       effects: LayerEffects::new(),
+      mask: None,
     }
   }
 
@@ -125,6 +129,12 @@ impl<'a> CanvasInner<'a> {
   /// Whether the canvas has changed since it was last composed.
   pub fn is_dirty(&self) -> bool {
     self.needs_recompose.get()
+  }
+
+  /// Whether this canvas or any canvas inside it has changed since it was last composed. A change inside a child canvas only
+  /// marks that child, so the canvas above it has to look down the tree to know its picture is out of date.
+  fn tree_is_dirty(&self) -> bool {
+    self.needs_recompose.get() || self.canvases.iter().any(|child| child.lock().unwrap().tree_is_dirty())
   }
 
   /// Queues proportional scaling for direct layers, then recurses into child canvases.
@@ -293,7 +303,10 @@ impl<'a> CanvasInner<'a> {
     }
 
     // Composite child canvases and local layers into the canvas (handles pass-through logic)
-    self.composite_into(&mut canvas, 0, 0);
+    self.composite_into(&mut canvas, 0, 0, false);
+    if let Some(mask) = &self.mask {
+      mask.multiply_alpha(&mut canvas);
+    }
 
     // Note: local layers are already blended by composite_into in the pass-through path
     // Apply canvas-level effects (if any) to the composite
@@ -315,7 +328,9 @@ impl<'a> CanvasInner<'a> {
 
   /// Composite this canvas' layers and children into the destination image, honoring pass-through.
   /// `p_offset_x` and `p_offset_y` are positions applied to the layers (accumulated parent offsets).
-  pub fn composite_into(&self, p_dest: &mut Image, p_offset_x: i32, p_offset_y: i32) {
+  /// `p_dest_has_content` is true when `p_dest` already holds pixels (a pass-through child drawn over its parent's), so even
+  /// this canvas's first layer keeps its blend mode instead of being laid down as Normal on an empty image.
+  pub fn composite_into(&self, p_dest: &mut Image, p_offset_x: i32, p_offset_y: i32, p_dest_has_content: bool) {
     // Composite child canvases first (so child layers can be behind local layers)
     for child_inner_rc in self.canvases.iter() {
       let child_inner = child_inner_rc.lock().unwrap();
@@ -328,10 +343,9 @@ impl<'a> CanvasInner<'a> {
       let dest_x = p_offset_x + child_x;
       let dest_y = p_offset_y + child_y;
 
-      if child_inner.pass_through() && child_inner.rotation().is_none() {
+      if child_inner.pass_through() && child_inner.rotation().is_none() && child_inner.mask.is_none() {
         // Composite child's layers directly into `dest` with accumulated offsets
-        let child_inner_ref = child_inner_rc.lock().unwrap();
-        child_inner_ref.composite_into(p_dest, dest_x, dest_y);
+        child_inner.composite_into(p_dest, dest_x, dest_y, true);
       } else {
         // Composite child's flattened result
         let mut child_result = child_inner.get_result_image();
@@ -350,10 +364,45 @@ impl<'a> CanvasInner<'a> {
 
     // Composite local layers into destination
     let canvas_dims = (self.width.get() as i32, self.height.get() as i32);
-    let dest_has_content = !self.canvases.is_empty();
+    let dest_has_content = p_dest_has_content || !self.canvases.is_empty();
     let mut first_layer = true;
     for layer in self.layers.iter() {
       let mut layer_ref = layer.lock().unwrap();
+      if layer_ref.adjustment_type().is_some() {
+        // An adjustment layer changes what is already composited beneath it instead of drawing its own pixels.
+        let opacity = layer_ref.opacity().clamp(0.0, 1.0);
+        if layer_ref.is_visible() && opacity > 0.0 {
+          let mut adjusted = p_dest.clone();
+          for effect in layer_ref.live_effects() {
+            effect.apply_cpu(&mut adjusted);
+          }
+          // The mask and opacity say how much of the adjusted picture replaces the one beneath.
+          let (dest_w, dest_h) = p_dest.dimensions::<u32>();
+          let (x0, y0) = layer_ref.position();
+          let layer_mask = layer_ref.mask();
+          let channels = 4;
+          let adjusted_pixels = adjusted.rgba().to_vec();
+          let Some(dest_pixels) = p_dest.colors().as_slice_mut() else { continue };
+          for y in 0..dest_h {
+            for x in 0..dest_w {
+              let mask_value = match layer_mask {
+                Some(mask) => {
+                  let (mx, my) = (x as i32 - p_offset_x - x0, y as i32 - p_offset_y - y0);
+                  if mx < 0 || my < 0 { 0 } else { mask.get(mx as u32, my as u32).unwrap_or(0) }
+                }
+                None => 255,
+              };
+              let strength = mask_value as f32 / 255.0 * opacity;
+              let at = (y * dest_w + x) as usize * channels;
+              for c in 0..channels {
+                let (from, to) = (dest_pixels[at + c] as f32, adjusted_pixels[at + c] as f32);
+                dest_pixels[at + c] = (from + (to - from) * strength).round() as u8;
+              }
+            }
+          }
+        }
+        continue;
+      }
       let rendered_image = layer_ref.apply_pending_effects();
       layer_ref.apply_anchor_with_canvas_dimensions(canvas_dims.0, canvas_dims.1);
       if layer_ref.is_visible() {
@@ -446,6 +495,14 @@ impl<'a> CanvasInner<'a> {
     self.pass_through
   }
 
+  /// Limits where the canvas shows. The mask is multiplied into the composite of everything in the canvas (white shows, black
+  /// hides), so it must be the same size as the canvas. A masked canvas is composited as one picture even when it is
+  /// pass-through. `None` removes it.
+  pub fn set_mask(&mut self, p_mask: Option<Mask>) {
+    self.mask = p_mask;
+    self.mark_dirty();
+  }
+
   /// Sets the canvas opacity (0.0-1.0) when composited into the parent.
   pub fn set_opacity(&mut self, p_opacity: f32) {
     self.opacity.set(p_opacity.clamp(0.0, 1.0));
@@ -492,7 +549,7 @@ impl<'a> CanvasInner<'a> {
   /// Saves the project to the given path.
   pub fn save(&mut self, p_path: impl Into<String>, p_options: impl Into<Option<WriterOptions>>) {
     let start = std::time::Instant::now();
-    if self.needs_recompose.get() {
+    if self.tree_is_dirty() {
       self.update_canvas();
     }
     println!("Canvas recomposed in {:?}", start.elapsed());
@@ -506,7 +563,7 @@ impl<'a> CanvasInner<'a> {
 
   /// Converts the entire canvas into a single Image by flattening all layers and child canvases.
   pub fn as_image(&mut self) -> Image {
-    if self.needs_recompose.get() {
+    if self.tree_is_dirty() {
       self.update_canvas();
     }
     self.result.clone()

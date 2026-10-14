@@ -1,14 +1,17 @@
+import { selectedSkinMask, skinMaskSized } from '@/src/lib/analysis';
 import { preloadFor } from '@/src/lib/editor-preloads';
+import { withLayers, type Painting, type Sheet } from '@/src/lib/layers';
+import { type BlendMode } from '@abra/core/blend';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { MaskLike } from '@abra/core/mask';
-import { type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
+import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
+import { applyEffect, type AbraImageLike, type EffectSpec } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
 import { beauty } from './edit-sections/beauty';
-import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
 import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
 import { detail } from './edit-sections/detail';
 import { effects } from './edit-sections/effects';
+import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
 import { colorization } from './edit-sections/mood';
 import { sharpen } from './edit-sections/sharpen';
 import { transform } from './edit-sections/transform';
@@ -35,11 +38,33 @@ export type ToolContext = {
    * The box of the one person the edit is for, in pixels of the photo the tool is given, for a control that can be set for one
    * person. Missing when the edit is for everyone.
    */
-  person?: { x: number; y: number; width: number; height: number };
+  person?: { x: number; y: number; width: number; height: number; id?: number };
+  /**
+   * Makes the mask of the skin the editor found, of the person the edit is for or of everyone, at the size of the photo the tool
+   * is given. It is nothing while the skin has not been found. Each call makes a new mask that the tool must free.
+   */
+  skin?: () => MaskLike | undefined;
+  /**
+   * The ids of the people who have a value of their own for this control, for the layer that is for everyone. Their skin and
+   * faces are left out of it, so their own value replaces this one for them. Missing for a layer that is for one person.
+   */
+  others?: number[];
 };
 
 /** What a `preload` makes, as the tool gets it: an array, or an object with a name for each image or mask. */
 export type Preloaded = DataLike[] | Record<string, DataLike>;
+
+/**
+ * The mask of the skin that the editor found, of the person with this id or of everyone, resized to `photo`. Nothing while the
+ * skin has not been found. The caller frees it.
+ */
+export const skinMaskFor = (
+  person: number | undefined,
+  photo: { width(): number; height(): number },
+  others?: number[],
+): MaskLike | undefined => {
+  return skinMaskSized(person, photo.width(), photo.height(), others);
+};
 
 /** How much smaller `image` is than `full`, from 0 to 1: 1 when it is as wide, or when there is no full-size photo to compare. */
 export const scaleBetween = (image: { width(): number }, full: { width(): number } | null | undefined): number => {
@@ -97,14 +122,17 @@ export type SliderControl<T = unknown> = {
   /**
    * Applies the slider's effect to an image. Without it, replaying the slider applies its `live` effect, which is the same
    * definition. Only for a control with one slider: use `tool` for several.
+   *
+   * @deprecated - Use `tool` instead: it is written against the Abra library, supports several sliders, and is the one definition of the control.
    */
   apply?: (image: AbraImageLike, value: number, context: ToolContext) => void;
   /**
    * A Vessel component to show in place of the plain slider, for a slider whose value is better picked another way; one for
-   * each slider of a control that has several. The value is still 0 to 1 on the slider's scale. 'skin-tan' is the bar of tans,
-   * which needs the control's `live` effect; 'hue' is the bar of colors, which only picks.
+   * each slider of a control that has several. The value is still 0 to 1 on the slider's scale. 'skin-tan' is the bar of tans;
+   * 'hue' is the bar of colors and 'shade' the bar of shadow shades (a light tan to a dark
+   * brown), which only pick.
    */
-  picker?: PerSlider<'skin-tan' | 'hue'>;
+  picker?: PerSlider<'skin-tan' | 'hue' | 'shade'>;
   /**
    * Ready-made choices shown above a picker, for people who would not know which sliders to move to get a color (black is no
    * brightness). Tapping one sets the sliders it lists, in `values` (one for each slider; `undefined` leaves a slider alone),
@@ -114,6 +142,8 @@ export type SliderControl<T = unknown> = {
   /**
    * When set, dragging previews this effect live (GPU where available) before the release commits it via `apply`, or this same
    * effect when there is no `apply`. Only for a control with one slider: use `tool` for several.
+   *
+   * @deprecated - Use `tool` instead: it is written against the Abra library and supports several sliders; `live` is limited to one slider and the effects that have a shader form.
    */
   live?: (value: number) => EffectSpec;
   /**
@@ -130,7 +160,7 @@ export type SliderControl<T = unknown> = {
    * place and return nothing, which makes the changed image the result, or return a new image, which is then the result and
    * the image it was given is thrown away. It runs on a screen-sized copy while the slider is dragged and on the full image
    * when the edit is replayed, so it is the one definition of the control. Use it for what the library can do and the effects
-   * (`live`) cannot yet.
+   * (`live`, deprecated) cannot yet.
    *
    * It gets the control's values as an array of `T`, which is `unknown` unless the control says otherwise, so a tool declares
    * the type it knows in its own parameters: `tool: (photo, [strength]: number[]) => vignette(photo, strength / 100)`. This is a
@@ -138,10 +168,26 @@ export type SliderControl<T = unknown> = {
    */
   tool?(photo: ImageLike, value: T[], context: ToolContext): ImageLike | void;
   /**
+   * Puts the control on a layer of its own over the photo, in the editor's canvas, instead of drawing on the photo, and replaces
+   * `tool`. `paint` gets the sheet (which knows the size of the photo) and paints the color where it goes with `paintSheet`; the
+   * sheet is cut down to the part that was painted. The sheet is laid over the photo with `blend`, shown at `opacity`, so the
+   * strength is a layer setting. Used by makeup.
+   */
+  layer?: {
+    /** The group canvas the layer goes in. Makeup when not given. */
+    group?: 'skin' | 'makeup';
+    /** Paints the sheet from the control's values, with the same context a tool gets. */
+    paint: (sheet: Painting, values: number[], context: ToolContext) => void;
+    /** How the sheet is laid over what is under it, or a function of the control's values that picks it. */
+    blend: BlendMode | ((values: number[]) => BlendMode);
+    /** How much of the sheet shows, 0 to 1, from the control's values. */
+    opacity: (values: number[]) => number;
+  };
+  /**
    * Makes the control's thumbnail, in sections that show one. It gets a thumbnail-size copy of the photo, which is its own to
    * change: it changes it in place and returns nothing, or returns a new image to use instead. A slider has no single value
    * to show, so it gets only the image (and the context, whose `scale` is small here) and picks what to illustrate. Used in
-   * place of `live` when it is set.
+   * place of `live` (deprecated) when it is set.
    */
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };
@@ -151,7 +197,11 @@ export type ActionControl = {
   kind: 'action';
   key: string;
   label: string;
-  /** @deprecated Use `tool` instead for custom on-image interactions. */
+  /**
+   * Applies the action's effect to an image. Without it, replaying the action applies its `tool` or `live` effect.
+   *
+   * @deprecated - Use `tool` instead: it is written against the Abra library and is the one definition of the control.
+   */
   apply?: (image: AbraImageLike, context: ToolContext) => void;
   /**
    * Controls sharing a group are mutually exclusive: applying one clears any other applied
@@ -159,23 +209,24 @@ export type ActionControl = {
    */
   group?: string;
   /**
-   * @deprecated Use `tool` instead for custom on-image interactions.
    * The effects this action applies, as one effect or several that run in order. Tapping previews them at once in a live
    * image while the full-resolution edit replays behind it; effects without a shader run on the CPU at preview size.
    * Without `apply`, replaying the action applies these same effects, so there is one definition of the action.
+   *
+   * @deprecated - Use `tool` instead: it is written against the Abra library and can do what the effects cannot.
    */
   live?: () => EffectSpec | EffectSpec[];
   /**
    * A tool written against the Abra library (`@abra/core`), the same as a slider's: it gets an image that is its own to
    * change, and either changes it in place and returns nothing, or returns a new image to use instead. An action has no
    * value, so it gets only the image. It runs on the full image when the edit is replayed; there is no instant preview of it
-   * yet, as there is for `live`.
+   * yet, as there is for `live` (deprecated).
    */
   tool?(photo: ImageLike, context: ToolContext): ImageLike | void;
   /**
    * Makes the action's thumbnail, in sections that show one. It gets a thumbnail-size copy of the photo, which is its own to
    * change: it changes it in place and returns nothing, or returns a new image to use instead. Used in place of `live` when it
-   * is set, so a control whose `tool` has no effect form can still show what it does.
+   * is set (`live` is deprecated), so a control whose `tool` has no effect form can still show what it does.
    */
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };
@@ -209,19 +260,22 @@ export type ToolControl<T = unknown> = {
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };
 
-/** Applies an action to `image`: its own `apply`, or else its tool, or else its live effect, which is the same definition. */
+/**
+ * Applies an action to `image`: its own `apply`, or else its tool, or else its live effect, which is the same definition.
+ * The `apply` and `live` paths are deprecated (see `ActionControl.apply` and `ActionControl.live`); use `tool`.
+ */
 export const applyAction = (control: ActionControl, image: AbraImageLike, scale = 1) => {
   const context: ToolContext = { scale };
   if (control.apply) control.apply(image, context);
   else if (control.tool) {
-    const photo = image.toImage();
+    const photo = image.clone();
     // The tool changed `photo` in place, or made a new image to use instead.
     const returned = control.tool(photo, context) as ImageLike | undefined;
     image.replaceWith(returned ?? photo);
     // They are native images the garbage collector cannot see the size of.
     (photo as AbraPixels).uniffiDestroy();
     if (returned) (returned as AbraPixels).uniffiDestroy();
-  } else if (control.live) for (const effect of effectList(control.live())) image.applyEffect(effect);
+  } else if (control.live) for (const effect of effectList(control.live())) applyEffect(image, effect, selectedSkinMask());
 };
 
 /** One slider of a control, with every setting filled in. */
@@ -269,7 +323,38 @@ export const sliderValues = (control: SliderControl, value?: AdjustmentValue): n
   return defaults.map((fallback, index) => committed[index] ?? fallback);
 };
 
-/** Applies a slider at `value` to `image`: its own `apply`, or else its tool, or else its live effect. */
+/** What a slider's tool is told besides the photo, when it is applied to `image` (the photo, or a copy of it at the same size). */
+export const sliderContext = (
+  control: SliderControl,
+  image: AbraImageLike,
+  scale: number,
+  person?: ToolContext['person'],
+  others?: number[],
+): ToolContext => ({
+  scale,
+  preloaded: control.preload ? preloadFor(control, image.width(), image) : undefined,
+  person,
+  others,
+  skin: () => skinMaskFor(person?.id, image, others),
+});
+
+/** The sheet a control with a `layer` paints, for these slider values. `name` is the layer's name: the control's key, or its key for one person. */
+export const layerSheet = (control: SliderControl, values: number[], context: ToolContext, name = control.key): Sheet => {
+  const { layer } = control;
+  if (!layer) throw new Error(`The control "${control.key}" has no layer to paint`);
+  return {
+    name,
+    group: layer.group,
+    blend: typeof layer.blend === 'function' ? layer.blend(values) : layer.blend,
+    opacity: layer.opacity(values),
+    paint: sheet => layer.paint(sheet, values, context),
+  };
+};
+
+/**
+ * Applies a slider at `value` to `image`: its own `apply`, or else its tool, or else its live effect.
+ * The `apply` and `live` paths are deprecated (see `SliderControl.apply` and `SliderControl.live`); use `tool`.
+ */
 export const applySlider = (
   control: SliderControl,
   image: AbraImageLike,
@@ -278,21 +363,21 @@ export const applySlider = (
   person?: ToolContext['person'],
 ) => {
   const values = sliderValues(control, value);
-  const context: ToolContext = {
-    scale,
-    preloaded: control.preload ? preloadFor(control, image.width(), image) : undefined,
-    person,
-  };
-  if (control.apply) control.apply(image, values[0], context);
+  const context = sliderContext(control, image, scale, person);
+  if (control.layer) {
+    const laid = withLayers(image, [layerSheet(control, values, context)]);
+    image.replaceWith(laid);
+    (laid as AbraPixels).uniffiDestroy();
+  } else if (control.apply) control.apply(image, values[0], context);
   else if (control.tool) {
-    const photo = image.toImage();
+    const photo = image.clone();
     // The tool changed `photo` in place, or made a new image to use instead.
     const returned = control.tool(photo, values, context) as ImageLike | undefined;
     image.replaceWith(returned ?? photo);
     // They are native images the garbage collector cannot see the size of.
     (photo as AbraPixels).uniffiDestroy();
     if (returned) (returned as AbraPixels).uniffiDestroy();
-  } else if (control.live) image.applyEffect(control.live(values[0]));
+  } else if (control.live) applyEffect(image, control.live(values[0]), selectedSkinMask());
 };
 
 /** Whether a slider's effect is on, given its committed value (undefined when it has none). */
@@ -346,15 +431,18 @@ export const EDIT_SECTIONS: EditSection[] = [
 export const leafControls = (controls: EditControl[]): Exclude<EditControl, GroupControl>[] =>
   controls.flatMap(control => (control.kind === 'group' ? leafControls(control.controls) : [control]));
 
-/** The group with this key, at any depth, or nothing. */
-export const findGroup = (controls: EditControl[], key: string): GroupControl | undefined => {
+/**
+ * The groups to open, outermost first, to reach the group with this key at any depth: the last is that group and the one before
+ * it is the group to go back to. Empty when there is no such group.
+ */
+export const groupPath = (controls: EditControl[], key: string): GroupControl[] => {
   for (const control of controls) {
     if (control.kind !== 'group') continue;
-    if (control.key === key) return control;
-    const found = findGroup(control.controls, key);
-    if (found) return found;
+    if (control.key === key) return [control];
+    const inside = groupPath(control.controls, key);
+    if (inside.length) return [control, ...inside];
   }
-  return undefined;
+  return [];
 };
 
 export const findSection = (key: string): EditSection =>

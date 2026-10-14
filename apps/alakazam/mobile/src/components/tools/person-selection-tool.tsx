@@ -1,14 +1,18 @@
-import { personDetectionDownloaded } from '@alakazam/mobile';
+import { type Image as AbraPixels } from '@abra/core/image';
+import { findPeopleAsync, personDetectionDownloaded } from '@alakazam/mobile';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
+import { detectSkin, personAt } from '@/src/lib/analysis';
+import { findFaceBoxes } from '@/src/lib/faces';
 import { computePreviewImagePoint } from '@/src/lib/preview-coordinates';
-import { editorLive } from '@/src/lib/editor-live';
+import { editorPreview } from '@/src/lib/editor-preview';
 import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsVersion$ } from '@/src/state/ai-models';
+import { faceBoxes$, people } from '@/src/state/analysis';
 import { isPersonControlFocused$ } from '@/src/state/edits';
 import {
   personOutlinesVisible,
@@ -17,8 +21,12 @@ import {
   selectionNeeded,
 } from '@/src/state/person-selection';
 import { openProject } from '@/src/state/project-session';
-import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
-import { currentImage, currentImage$, editBaseImage, editBaseImage$ } from '@/src/state/session';
+import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue, springPreview } from '@/src/state/gestures';
+import { currentImage, currentImage$, editBaseImage, editBaseImage$, originalImage } from '@/src/state/session';
+
+/** Zoomed to a face, the shorter side of the preview is this many times the face, and the zoom never goes past `MAX_FACE_ZOOM`. */
+const FACE_FILL = 1.6;
+const MAX_FACE_ZOOM = 8;
 
 /** Detects people while the selector is open and maps image taps to the Rust-owned instance masks. */
 export function PersonSelectionToolController() {
@@ -52,6 +60,11 @@ export function PersonSelectionToolController() {
             });
             return;
           }
+          // The skin model runs now that a control that uses the skin is open, and not when the photo opens. Without it the
+          // controls find the skin by its color.
+          detectSkin(originalImage.value ?? image).catch(error => {
+            if (__DEV__) console.debug('[image] skin detection unavailable:', errorMessage(error));
+          });
           // Without the body model there is nothing to detect; skin effects apply to the whole photo. Detection starts once
           // the model is downloaded.
           if (!personDetectionDownloaded() && !openProject.value?.people) {
@@ -64,16 +77,25 @@ export function PersonSelectionToolController() {
             loading: true,
             error: null,
           });
-          image.findPeopleAsync().then(
-            people => {
-              if (requestId !== currentRequest || !personSelection.value.focused) return;
+          // The people were found already when the photo is a saved project, or when the selector was opened before.
+          (people.value ? Promise.resolve(people.value) : findPeopleAsync(image)).then(
+            found => {
+              if (requestId !== currentRequest || !personSelection.value.focused) {
+                if (found !== people.value) found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
+                return;
+              }
+              people.next(found);
               personSelection.next({
                 focused: true,
                 loading: false,
-                people,
-                selectedId: image.selectedPerson() ?? null,
+                people: found,
+                selectedId: personSelection.value.selectedId,
                 error: null,
               });
+              // The faces are found after the people are shown, because the face models take a moment.
+              setTimeout(() => {
+                if (requestId === currentRequest && personSelection.value.focused) findFaceBoxes(image);
+              }, 0);
             },
             error => {
               if (requestId !== currentRequest || !personSelection.value.focused) return;
@@ -86,6 +108,34 @@ export function PersonSelectionToolController() {
               });
             },
           );
+        }),
+      // Zoom the preview to the selected person's face, and back out for everyone.
+      combineLatest([
+        personSelection$.pipe(
+          map(state => state.selectedId),
+          distinctUntilChanged(),
+        ),
+        faceBoxes$,
+      ])
+        .pipe(
+          map(([selectedId, boxes]) => [selectedId, selectedId === null ? undefined : boxes?.[selectedId]] as const),
+          distinctUntilChanged(([previousId, previousFace], [id, face]) => previousId === id && previousFace === face),
+        )
+        .subscribe(([selectedId, face]) => {
+          const image = getPersonSelectionImage();
+          const box = previewBox.value;
+          if (!personSelection.value.focused || !image || !box) return;
+          if (selectedId === null) return springPreview({ x: 0, y: 0, scale: 1 });
+          const mask = people.value?.find(person => person.id === selectedId)?.mask;
+          if (!face || !mask) return;
+
+          // Where the face is on the contained photo, as an offset from the middle of the preview.
+          const contain = Math.min(box.width / image.width(), box.height / image.height());
+          const side = (face.width / mask.width()) * image.width() * contain;
+          const centerX = ((face.x + face.width / 2) / mask.width() - 0.5) * image.width() * contain;
+          const centerY = ((face.y + face.height / 2) / mask.height() - 0.5) * image.height() * contain;
+          const scale = Math.min(MAX_FACE_ZOOM, Math.max(1, Math.min(box.width, box.height) / (side * FACE_FILL)));
+          springPreview({ x: -centerX * scale, y: -centerY * scale, scale });
         }),
       previewPressed$.subscribe(event => {
         if (!personSelection.value.focused) return;
@@ -105,8 +155,8 @@ export function PersonSelectionToolController() {
 
         personOutlinesVisible.next(true);
         try {
-          editorLive.hide();
-          const selectedId = image.selectPersonAt(point.x, point.y);
+          editorPreview.hide();
+          const selectedId = personAt(point.x, point.y, image.width(), image.height());
           if (selectedId !== undefined) personSelection.next({ ...personSelection.value, selectedId });
         } catch (error) {
           personSelection.next({ ...personSelection.value, error: errorMessage(error) });
@@ -148,8 +198,7 @@ export function PersonSelectionControls() {
           const image = getPersonSelectionImage();
           if (!image) return;
           try {
-            editorLive.hide();
-            image.selectPerson(undefined);
+            editorPreview.hide();
             personSelection.next({ ...personSelection.value, selectedId: null, error: null });
           } catch (error) {
             personSelection.next({ ...personSelection.value, error: errorMessage(error) });
@@ -158,7 +207,7 @@ export function PersonSelectionControls() {
         style={[styles.chip, state.selectedId === null && styles.disabled]}
         disabled={state.selectedId === null}
       >
-        <Text style={styles.label}>All bodies</Text>
+        <Text style={styles.label}>Everyone</Text>
       </Pressable>
     </View>
   );

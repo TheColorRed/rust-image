@@ -1,7 +1,8 @@
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
+import { AbraImage, renderThumbnailAsync, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
 import { effectList, leafControls, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
+import { selectedSkinMask } from '@/src/lib/analysis';
 import { ownedImage } from '@/src/lib/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
@@ -9,12 +10,19 @@ export const THUMBNAIL_WIDTH = 112;
 export const THUMBNAIL_HEIGHT = 80;
 const THUMBNAIL_WORKERS = 2;
 
+/** The pixel size of a preview card at this screen's density: what the cached thumbnail-size photo is made at. */
+export function thumbnailPixels() {
+  const density = PixelRatio.get();
+  return { width: Math.round(THUMBNAIL_WIDTH * density), height: Math.round(THUMBNAIL_HEIGHT * density) };
+}
+
 /**
  * Keeps pixels in Rust, requests at most two effects at once, and publishes each completed card.
  * Cancellation stops scheduling and prevents retired native components from being updated.
  */
 export function buildControlThumbnails(
-  image: AbraImage,
+  /** The edit as it looks now at thumbnail size (see `thumbnailPixels`); this takes ownership and frees it when done. */
+  source: AbraImage,
   section: EditSection,
   previous: Record<string, ThumbnailPreview>,
   publish: (key: string, preview: ThumbnailPreview) => void,
@@ -22,22 +30,17 @@ export function buildControlThumbnails(
   full: AbraImage | null = null,
 ) {
   let cancelled = false;
-  const density = PixelRatio.get();
-  const width = Math.round(THUMBNAIL_WIDTH * density);
-  const height = Math.round(THUMBNAIL_HEIGHT * density);
+  const { width, height } = thumbnailPixels();
   const done = (async () => {
     const started = Date.now();
-    let sourceMs: number | undefined;
     let firstCardMs: number | undefined;
     let firstEffectMs: number | undefined;
     let firstComponentMs: number | undefined;
     let completed = 0;
-    let source: AbraImage | undefined;
+    const cards: string[] = [];
     let next = 0;
     let succeeded = true;
     try {
-      source = ownedImage(await image.thumbnailSourceAsync(width, height));
-      sourceMs = Date.now() - started;
       if (cancelled) return false;
       const thumbnailSource = source;
       const render = async () => {
@@ -50,11 +53,11 @@ export function buildControlThumbnails(
             const effectStarted = Date.now();
             if (control.thumb) {
               // The control makes its own thumbnail, on a copy of the thumbnail-size photo that is its own to change.
-              const target = ownedImage(thumbnailSource.copy());
-              const photo = target.toImage();
+              const target = ownedImage(thumbnailSource.clone());
+              const photo = target.clone();
               let returned: ImageLike | undefined;
               try {
-                returned = control.thumb(photo, { scale: scaleBetween(photo, full ?? image) }) as ImageLike | undefined;
+                returned = control.thumb(photo, { scale: scaleBetween(photo, full ?? source) }) as ImageLike | undefined;
                 target.replaceWith(returned ?? photo);
                 pixels = target;
               } catch (error) {
@@ -70,7 +73,7 @@ export function buildControlThumbnails(
                 throw new Error(`Thumbnail action "${control.key}" needs a live effect or thumb`);
               }
               const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
-              pixels = ownedImage(await thumbnailSource.renderThumbnailAsync(effects));
+              pixels = ownedImage(await renderThumbnailAsync(thumbnailSource, effects, selectedSkinMask()));
             }
             if (cancelled) return;
             const effectMs = Date.now() - effectStarted;
@@ -85,6 +88,7 @@ export function buildControlThumbnails(
               created = undefined;
             }
             completed++;
+            cards.push(`${control.key}: effect ${effectMs}, card ${Date.now() - componentStarted}, at ${Date.now() - started}`);
             if (firstCardMs === undefined) {
               firstCardMs = Date.now() - started;
               firstEffectMs = effectMs;
@@ -105,15 +109,15 @@ export function buildControlThumbnails(
       if (!cancelled) console.warn('[edit] preparing native thumbnail source threw:', error);
       return false;
     } finally {
-      source?.uniffiDestroy();
+      source.uniffiDestroy();
       if (__DEV__ && !cancelled) {
         console.debug('[thumbnails]', section.key, {
-          sourceMs,
           firstCardMs,
           firstEffectMs,
           firstComponentMs,
           totalMs: Date.now() - started,
           completed,
+          cards,
         });
       }
     }

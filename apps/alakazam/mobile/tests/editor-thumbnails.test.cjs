@@ -392,7 +392,7 @@ test('closing an editor during async decoding releases late native images withou
     '@/src/lib/batch': { batch: run => run() },
     '@/src/lib/edit-source': { resolveLocalPhotoPath: async () => 'photo.png', toLocalPath: path => path },
     '@/src/lib/editor-history': { clearTimeline() {}, keepBlemishBase() {} },
-    '@/src/lib/editor-live': { startEditorLive: () => ({ unsubscribe() {} }) },
+    '@/src/lib/editor-preview': { startEditorPreview: () => ({ unsubscribe() {} }) },
     '@/src/lib/editor-replay': {
       startReplay: () => ({ unsubscribe() {} }),
       clearControlThumbnails() {},

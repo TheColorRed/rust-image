@@ -1,6 +1,8 @@
 import { previewBox } from '@/src/state/gestures';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { originalImage } from '@/src/state/session';
+import { ResizeTarget } from '@abra/core/canvas';
+import { resize } from '@abra/core/transform';
 import type { AbraImage } from '@alakazam/mobile';
 import { Dimensions, PixelRatio } from 'react-native';
 
@@ -13,10 +15,19 @@ import { Dimensions, PixelRatio } from 'react-native';
 // This module holds native images, and it imports nothing from the controls or the replay: saving a control or a tool re-runs
 // those and everything that imports them, and what is held here must survive that, not be started again empty.
 
+/** A copy of `source` shrunk to fit within `width` x `height`, or just a copy when it already fits. The caller owns it. */
+export function fitted(source: AbraImage, width: number, height: number): AbraImage {
+  const copy = source.clone() as AbraImage;
+  if (copy.width() > width || copy.height() > height) resize(ResizeTarget.Fit.new({ width, height })).apply(copy);
+  return copy;
+}
+
 /** A screen-size copy of a full-size image, and what it was made from, so it is only made again when either changes. */
 type Shrunk = { source: AbraImage; width: number; height: number; image: AbraImage };
 let shrunkBase: Shrunk | null = null;
 let shrunkOriginal: Shrunk | null = null;
+/** The thumbnail-size copy of the edit base, which every control's preview card starts from. */
+let shrunkThumbnail: Shrunk | null = null;
 /** The edited screen-size picture that is on screen. Owned here. */
 let shown: AbraImage | null = null;
 
@@ -37,15 +48,23 @@ function drawSize(): { width: number; height: number } {
   return { width: Math.round(screen.width * density), height: Math.round(screen.height * density) };
 }
 
-/** The screen-size copy of `source`, which stays the same copy until `source` or the size changes. Owned by the cache. */
-export function shrunkOf(slot: 'base' | 'original', source: AbraImage): AbraImage {
-  const { width, height } = drawSize();
-  const held = slot === 'base' ? shrunkBase : shrunkOriginal;
+/**
+ * The screen-size copy of `source` (or a `size` one, for the thumbnails), which stays the same copy until `source` or the size
+ * changes. Owned by the cache.
+ */
+export function shrunkOf(
+  slot: 'base' | 'original' | 'thumbnail',
+  source: AbraImage,
+  size: { width: number; height: number } = drawSize(),
+): AbraImage {
+  const { width, height } = size;
+  const held = slot === 'base' ? shrunkBase : slot === 'original' ? shrunkOriginal : shrunkThumbnail;
   if (held && held.source === source && held.width === width && held.height === height) return held.image;
   held?.image.uniffiDestroy();
-  const next: Shrunk = { source, width, height, image: source.shrunk(width, height) as AbraImage };
+  const next: Shrunk = { source, width, height, image: fitted(source, width, height) };
   if (slot === 'base') shrunkBase = next;
-  else shrunkOriginal = next;
+  else if (slot === 'original') shrunkOriginal = next;
+  else shrunkThumbnail = next;
   return next.image;
 }
 
@@ -69,14 +88,15 @@ export const shownImage = (): AbraImage | null => shown;
 /** Shows a saved project's picture, shrunk, while the project loads. The first replay replaces it. */
 export function showStandIn(image: AbraImage) {
   const { width, height } = drawSize();
-  setShown(image.shrunk(width, height) as AbraImage);
+  setShown(fitted(image, width, height));
 }
 
 /** Lets go of every screen-size picture, when the session ends. */
 export function releasePictures() {
-  const images = [shown, shrunkBase?.image, shrunkOriginal?.image];
+  const images = [shown, shrunkBase?.image, shrunkOriginal?.image, shrunkThumbnail?.image];
   shown = null;
   shrunkBase = null;
   shrunkOriginal = null;
+  shrunkThumbnail = null;
   for (const image of images) image?.uniffiDestroy();
 }

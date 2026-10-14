@@ -14,30 +14,10 @@ pub struct ThumbnailPreview {
   preview_size: (u32, u32),
 }
 
-struct ThumbnailSource(Arc<abra_uniffi::Image>);
-
-impl Trackable for ThumbnailSource {
-  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
-    let image = Arc::clone(&self.0);
-    p_size.combine_latest(image.revision()).filter_map(move |(size, _)| {
-      if size.0 == 0 || size.1 == 0 { return None }
-      let preview = image.preview(size.0, size.1);
-      Some(Picture::Pixels(Arc::new(Frame {
-        width: preview.width,
-        height: preview.height,
-        pixels: preview.data.into(),
-      })))
-    })
-  }
-}
-
 fn background(p_image: &Arc<abra_uniffi::Image>, p_width: u32, p_height: u32) -> Image {
-  // Seed a frame before attaching the reactive source.
-  let pixels = p_image.preview(p_width, p_height);
-  Image::new()
-    .with_fit(Fit::Cover)
-    .with_pixels(pixels.width, pixels.height, pixels.data)
-    .track(&ThumbnailSource(Arc::clone(p_image)))
+  let pixels = super::image_preview::fitted(&p_image.core(), p_width, p_height);
+  let (width, height) = pixels.dimensions::<u32>();
+  Image::new().with_fit(Fit::Cover).with_pixels(width, height, pixels.into_rgba_vec())
 }
 
 fn gradient_overlay(p_width: u32, p_height: u32) -> Image {
@@ -231,21 +211,6 @@ mod tests {
   }
 
   #[test]
-  fn the_background_still_tracks_edits_after_its_initial_frame() {
-    let red = [200, 0, 0, 255];
-    let blue = [0, 0, 200, 255];
-    let image = source(red);
-    let preview = ThumbnailPreview::new(Arc::clone(&image), "Warm".into(), 112, 80);
-    preview.size().next((112, 80));
-    rendered(&preview, red);
-    image.edit(|pixels| {
-      *pixels = AbraPixels::new_from_color(16, 32, Color::from_rgba(0, 0, 200, 255));
-    });
-    drop(image);
-    rendered(&preview, blue);
-  }
-
-  #[test]
   fn gradients_are_present_on_first_frame_for_every_aspect_ratio_and_survive_source_replacement() {
     let white = [200, 200, 200, 255];
     for (width, height) in [(16, 32), (32, 16), (32, 32), (1, 1)] {
@@ -276,22 +241,4 @@ mod tests {
     }
   }
 
-  #[test]
-  fn thumbnail_sources_publish_cpu_pixels_even_when_the_gpu_is_enabled() {
-    let image = source([200, 0, 0, 255]);
-    let size = BehaviorSubject::new((112, 80));
-    let pictures = image.thumbnail_pictures(&size);
-    let seen = Arc::new(std::sync::Mutex::new(0));
-    let count = Arc::clone(&seen);
-    let _subscription = pictures.subscribe(move |picture| {
-      let Picture::Pixels(frame) = picture else { panic!("CPU-composed thumbnails must not allocate GPU frames") };
-      assert!(frame.width > 0 && frame.height > 0);
-      *count.lock().unwrap() += 1;
-    });
-    size.next((224, 160));
-    image.with_image_mut(|pixels| {
-      *pixels = AbraPixels::new_from_color(16, 32, Color::black());
-    });
-    assert!(*seen.lock().unwrap() >= 2);
-  }
 }

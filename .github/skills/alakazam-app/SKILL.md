@@ -36,6 +36,10 @@ The app is for people who are not artists. See the [usability document](./refere
 (plain words, not trade words), how common choices are offered as named swatches, what a control should show when it opens, and
 how a control that applies to a person behaves with one person or several. Read it before adding or renaming an edit control.
 
+## AI
+
+AI models run only when a control that needs one is used, and run once per photo. Whatever they find that an edit needs is saved to the project (masks as files, data in `project.json`) so a project opens and replays with no model installed or run. See the AI rules in the [mobile structure document](./references/mobile-structure.md#ai-rules).
+
 ## Bindings
 
 The Alakazam App integrates with the Abra library using both Node and uniffi bindings. The Node bindings are used for the desktop app, while the uniffi bindings are used for the mobile app.

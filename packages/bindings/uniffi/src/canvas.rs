@@ -6,7 +6,6 @@
 //! What is not exported, and why:
 //! - `with_image_mut` takes a Rust closure which cannot cross FFI; callers use `layer.image()` / `layer.set_image()`
 //!   or the transform and effect methods.
-//! - `set_live_effects` takes trait objects (`LiveEffect`); live effects are evaluated internally.
 //! - Non-solid fills in `DropShadow` and `Stroke` use `with_color(color)` for cross-language convenience.
 
 use std::sync::Arc;
@@ -451,6 +450,11 @@ impl Canvas {
     self.0.set_opacity(opacity);
   }
 
+  /// Limits where the canvas shows; the mask must be the size of the canvas. `None` removes it.
+  pub fn set_mask(&self, mask: Option<Arc<crate::Mask>>) {
+    self.0.set_mask(mask.map(|m| m.core()));
+  }
+
   /// Whether the canvas has uncomposed changes.
   pub fn is_dirty(&self) -> bool {
     self.0.is_dirty()
@@ -663,6 +667,17 @@ impl Layer {
   /// Sets the opacity of the layer (0.0 to 1.0).
   pub fn set_opacity(&self, opacity: f32) {
     self.0.set_opacity(opacity);
+  }
+
+  /// Limits where the layer shows; the mask must be the size of the layer. `None` removes it.
+  pub fn set_mask(&self, mask: Option<Arc<crate::Mask>>) {
+    self.0.set_mask(mask.map(|m| m.core()));
+  }
+
+  /// Replaces the live effects of the layer: effects made by an effect's `live_effect`, re-run when the canvas composes.
+  /// On an adjustment layer they change the picture beneath it. An empty list removes them.
+  pub fn set_live_effects(&self, effects: Vec<Arc<crate::LiveEffect>>) {
+    self.0.set_live_effects(effects.iter().map(|effect| effect.core()).collect());
   }
 
   /// The blend mode of the layer.
@@ -1006,6 +1021,80 @@ mod tests {
       }),
     );
     assert_eq!(child_handle.name(), "Child");
+  }
+
+  #[test]
+  fn an_adjustment_layer_with_a_live_effect_and_mask_changes_only_the_masked_picture_beneath() {
+    let canvas = Canvas::new_blank("Adjust".into(), 2, 1);
+    canvas.add_layer_from_image("base".into(), test_image(2, 1, Arc::new(Color::from_rgba(100, 100, 100, 255))), None);
+    let adjustment = canvas.add_adjustment_layer("lighten".into(), AdjustmentLayerType::BrightnessContrast);
+    adjustment.set_live_effects(vec![crate::brightness(40).live_effect()]);
+    adjustment.set_mask(Some(Arc::new(crate::Mask::from_values(2, 1, vec![255, 0]))));
+    assert_eq!(canvas.as_image().rgba(), vec![140, 140, 140, 255, 100, 100, 100, 255]);
+
+    adjustment.set_live_effects(Vec::new());
+    assert_eq!(canvas.as_image().rgba(), vec![100, 100, 100, 255, 100, 100, 100, 255]);
+  }
+
+  #[test]
+  fn an_adjusted_masked_skin_canvas_between_the_base_and_the_makeup_changes_only_the_skin() {
+    let gray = || test_image(3, 1, Arc::new(Color::from_rgba(100, 100, 100, 255)));
+    let root = Canvas::new_blank("root".into(), 3, 1);
+
+    let base = Arc::new(Canvas::new_blank("base".into(), 3, 1));
+    base.add_layer_from_image("photo".into(), gray(), None);
+    root.add_canvas(base, None);
+
+    // The skin canvas holds its own copy of the photo, brightened by an adjustment layer, and shows only where the mask is white.
+    let skin = Arc::new(Canvas::new_blank("skin".into(), 3, 1));
+    skin.add_layer_from_image("photo".into(), gray(), None);
+    let tone = skin.add_adjustment_layer("tone".into(), AdjustmentLayerType::BrightnessContrast);
+    tone.set_live_effects(vec![crate::brightness(40).live_effect()]);
+    skin.set_mask(Some(Arc::new(crate::Mask::from_values(3, 1, vec![255, 0, 255]))));
+    root.add_canvas(skin, None);
+
+    // The makeup covers the last pixel, which is skin, and is on top of it.
+    let makeup = Arc::new(Canvas::new_blank("makeup".into(), 3, 1));
+    let red = makeup.add_layer_from_image("lips".into(), test_image(1, 1, Arc::new(Color::from_rgba(255, 0, 0, 255))), None);
+    red.set_global_position(2, 0);
+    root.add_canvas(makeup, None);
+
+    assert_eq!(root.as_image().rgba(), vec![140, 140, 140, 255, 100, 100, 100, 255, 255, 0, 0, 255]);
+
+    // Taking the tone off puts the skin back to the photo, and the makeup stays.
+    tone.set_live_effects(Vec::new());
+    assert_eq!(root.as_image().rgba(), vec![100, 100, 100, 255, 100, 100, 100, 255, 255, 0, 0, 255]);
+  }
+
+  #[test]
+  fn tan_and_tone_adjustment_layers_in_a_masked_canvas_match_the_skin_tools() {
+    let skin = || test_image(4, 1, Arc::new(Color::from_rgba(200, 140, 100, 255)));
+    let values = vec![255, 255, 0, 0];
+    let tan = Arc::new(Color::from_rgb(210, 150, 100));
+
+    let canvas = Canvas::new_blank("skin".into(), 4, 1);
+    canvas.add_layer_from_image("photo".into(), skin(), None);
+    let tint = canvas.add_adjustment_layer("tan".into(), AdjustmentLayerType::BrightnessContrast);
+    tint.set_live_effects(vec![crate::color_multiply(tan.clone()).live_effect()]);
+    let tone = canvas.add_adjustment_layer("tone".into(), AdjustmentLayerType::BrightnessContrast);
+    tone.set_live_effects(vec![crate::exposure(0.0).with_gamma(1.4_f64.powf(0.8)).live_effect()]);
+
+    let root = Canvas::new_blank("root".into(), 4, 1);
+    let base = Arc::new(Canvas::new_blank("base".into(), 4, 1));
+    base.add_layer_from_image("photo".into(), skin(), None);
+    root.add_canvas(base, None);
+    canvas.set_mask(Some(Arc::new(crate::Mask::from_values(4, 1, values.clone()))));
+    root.add_canvas(Arc::new(canvas), None);
+    let layered = root.as_image().rgba();
+
+    let expected = Arc::new(crate::Image::from_core(skin().core()));
+    let mask = || Arc::new(crate::Mask::from_values(4, 1, values.clone()));
+    crate::skin_tan(tan).with_mask(mask()).apply(expected.clone());
+    crate::skin_tone(-80.0).with_mask(mask()).apply(expected.clone());
+
+    assert_ne!(layered[0..4], skin().rgba()[0..4], "the skin changed");
+    assert_eq!(layered[8..12], skin().rgba()[8..12], "outside the mask is untouched");
+    assert_eq!(layered, expected.rgba());
   }
 
   #[test]

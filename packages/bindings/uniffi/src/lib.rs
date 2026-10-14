@@ -16,10 +16,12 @@
 
 mod adjustments;
 mod ai;
+mod beauty;
 mod blend;
 mod canvas;
 mod color;
 mod effect;
+pub use effect::LiveEffect;
 mod filters;
 mod geometry;
 mod gradient;
@@ -28,6 +30,10 @@ mod mask;
 mod tools;
 mod transform;
 
+pub use abra::abra_core::ResizeTarget;
+pub use abra::canvas::prelude::{
+  AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
+};
 pub use adjustments::{
   AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, Contrast, Exposure, FilterType, GradientMap, Grayscale,
   HighlightsShadows, Hue, Invert, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment, Posterize,
@@ -36,15 +42,12 @@ pub use adjustments::{
   threshold, vibrance,
 };
 pub use ai::{AiModel, AiOutput, AiOutputKind, Instance, LabelMap};
+pub use beauty::{SkinSmooth, SkinTan, SkinTone, skin_smooth, skin_tan, skin_tone};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};
 pub use canvas::{
   AddCanvasOptions, Canvas, CanvasTransform, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
   add_canvas_options, new_layer_options,
 };
-pub use abra::canvas::prelude::{
-  AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
-};
-pub use abra::abra_core::ResizeTarget;
 pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
 pub use filters::{
   Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, LensBlur, Median,
@@ -65,8 +68,9 @@ pub use geometry::{
 };
 pub use gradient::{ColorStop, Gradient, radial_gradient};
 pub use image::{Image, channel_index, channels_bytes_per_pixel, resolution_new, resolution_uniform};
+pub use abra::mask::prelude::{Blob, Falloff};
 pub use mask::{Mask, apply_mask_to_image, apply_mask_to_pixels_rgba, mask_value_to_alpha, rgba_to_gray};
 pub use tools::{Remover, RemoverShape, remover};
-pub use transform::{FlipImage, RotateImage, flip, rotate};
+pub use transform::{FlipImage, ResizeImage, RotateImage, flip, resize, rotate};
 
 uniffi::setup_scaffolding!();

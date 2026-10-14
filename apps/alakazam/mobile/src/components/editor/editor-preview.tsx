@@ -1,6 +1,6 @@
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
 import { comparisonImage, shownImage } from '@/src/lib/editor-pictures';
-import { editorLive } from '@/src/lib/editor-live';
+import { editorPreview } from '@/src/lib/editor-preview';
 import { waitForPreviewFrame } from '@/src/lib/preview-handoff';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import {
@@ -20,6 +20,8 @@ import {
   previewPressed,
   previewScale,
   previewScale$,
+  previewScaleValue,
+  previewScaleSettled$,
   previewTranslateX,
   previewTranslateX$,
   previewTranslateY,
@@ -46,9 +48,11 @@ import {
   loadError as previewError,
   loadError$,
 } from '@/src/state/session';
+import { faceBoxes, faceBoxes$ } from '@/src/state/analysis';
 import { personOutlinesVisible$, personSelection, personSelection$, selectionNeeded } from '@/src/state/person-selection';
 import { ImagePreview } from '@alakazam/mobile';
 import { VesselView } from '@vessel/react-native';
+import Svg, { Path } from 'react-native-svg';
 import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
 import {
   ActivityIndicator,
@@ -87,9 +91,11 @@ export function EditorPreview() {
   const liveViewRef = useRef<ElementRef<NonNullable<typeof VesselView>> | null>(null);
   const checkpointHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkpointPreviewActive = useRef(false);
+  // Set when a touch ended a hold, whose release is not a tap on the photo.
+  const holdEnded = useRef(false);
   const touchTargetRef = useRef<ElementRef<typeof Pressable> | null>(null);
   const [baseView, setBaseView] = useState<ImagePreview | null>(null);
-  const liveView = useSyncObservable(editorLive.view, null);
+  const liveView = useSyncObservable(editorPreview.view, null);
   const box = useObservable(previewBox$, null);
   const loadError = useObservable(loadError$, null);
   const busy = useObservable(busy$, false);
@@ -114,6 +120,7 @@ export function EditorPreview() {
     touchTargetRef.current?.measureInWindow((left, top) => previewOrigin.next({ x: left, y: top }));
     if (checkpointHoldTimer.current) clearTimeout(checkpointHoldTimer.current);
     checkpointPreviewActive.current = false;
+    holdEnded.current = false;
     checkpointHoldTimer.current = setTimeout(() => {
       checkpointHoldTimer.current = null;
       checkpointPreviewActive.current = true;
@@ -126,10 +133,12 @@ export function EditorPreview() {
     checkpointHoldTimer.current = null;
     if (!checkpointPreviewActive.current) return;
     checkpointPreviewActive.current = false;
+    holdEnded.current = true;
     restorePreviewRequested.next();
   }, []);
 
   const handlePreviewPress = useCallback((event: GestureResponderEvent) => {
+    if (holdEnded.current) return;
     const { pageX, pageY } = event.nativeEvent;
     // locationX/Y can be relative to the transformed photo or outline child that was hit.
     touchTargetRef.current?.measureInWindow((left, top) => {
@@ -187,11 +196,11 @@ export function EditorPreview() {
       current = new ImagePreview(source);
       setBaseView(current);
       previewSize.next({ width: source.width(), height: source.height() });
-      const activity = editorLive.activity;
+      const activity = editorPreview.activity;
       cancelHandoff = waitForPreviewFrame(
         current,
         () => {
-          if (editorLive.activity === activity) editorLive.hide();
+          if (editorPreview.activity === activity) editorPreview.hide();
         },
         error => {
           console.warn('[preview] could not present the edited frame:', error);
@@ -270,6 +279,33 @@ export function EditorPreview() {
             )}
           </Animated.View>
         )}
+        {photo && box && VesselView && skinControlFocused && personSelectionState.focused && outlinesVisible && selectionNeeded(personSelectionState) && (
+          // Outside the zoomed view so the notice keeps its size and stays centered while the photo is zoomed.
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 12,
+              alignSelf: 'center',
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 14,
+              backgroundColor: 'rgba(0,0,0,0.68)',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+              {personSelectionState.error
+                ? personSelectionState.error
+                : personSelectionState.loading
+                  ? 'Finding bodies…'
+                  : personSelectionState.people.length === 0
+                    ? 'No bodies detected; skin effects still work'
+                    : personSelectionState.selectedId === null
+                      ? 'Tap a person to target skin effects'
+                      : `Body ${personSelectionState.selectedId + 1} selected`}
+            </Text>
+          </View>
+        )}
         {blemishFocused && <BlemishReticle />}
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}
       </Pressable>
@@ -292,37 +328,40 @@ function PersonDetectionOverlay({
   imageSize: { width: number; height: number };
   previewSize: { width: number; height: number };
 }) {
+  const faces = useObservable(faceBoxes$, faceBoxes.value);
+  const scale = useObservable(previewScaleSettled$, previewScaleValue.value);
   const fit = Math.min(previewSize.width / imageSize.width, previewSize.height / imageSize.height);
   const offsetX = (previewSize.width - imageSize.width * fit) / 2;
   const offsetY = (previewSize.height - imageSize.height * fit) / 2;
 
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View
-        style={{
-          position: 'absolute',
-          top: 12,
-          alignSelf: 'center',
-          paddingHorizontal: 10,
-          paddingVertical: 5,
-          borderRadius: 14,
-          backgroundColor: 'rgba(0,0,0,0.68)',
-        }}
-      >
-        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-          {error
-            ? error
-            : loading
-              ? 'Finding bodies…'
-              : people.length === 0
-                ? 'No bodies detected; skin effects still work'
-                : selectedId === null
-                  ? 'Tap a body to target skin effects'
-                  : `Body ${selectedId + 1} selected`}
-        </Text>
-      </View>
       {people.map(person => {
         const selected = person.id === selectedId;
+        const face = faces?.[person.id];
+        const color = PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length];
+        const opacity = selectedId === null || selected ? 1 : 0.55;
+        // The overlay is zoomed with the photo, so divide by the zoom to keep the lines the same thickness on screen.
+        const strokeWidth = (selected ? 3 : 2) / scale;
+        // A face is framed by a short arc at each side of a tall oval, with the top and bottom left open, and never filled in.
+        if (face) {
+          const cx = offsetX + (face.x + face.width / 2) * fit;
+          const cy = offsetY + (face.y + face.height / 2) * fit;
+          const rx = face.width * fit * 0.47;
+          const ry = face.height * fit * 0.62;
+          const point = (degrees: number) => {
+            const radians = (degrees * Math.PI) / 180;
+            return `${cx + rx * Math.cos(radians)} ${cy + ry * Math.sin(radians)}`;
+          };
+          const arc = (from: number, to: number) => `M ${point(from)} A ${rx} ${ry} 0 0 1 ${point(to)}`;
+          return (
+            <Svg key={person.id} style={StyleSheet.absoluteFill} opacity={opacity}>
+              <Path d={arc(-28, 28)} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" fill="none" />
+              <Path d={arc(152, 208)} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" fill="none" />
+            </Svg>
+          );
+        }
+        // Until the face is found, the frame is the box around the body.
         return (
           <View
             key={person.id}
@@ -332,30 +371,11 @@ function PersonDetectionOverlay({
               top: offsetY + person.y * fit,
               width: person.width * fit,
               height: person.height * fit,
-              borderWidth: selected ? 3 : 2,
-              borderColor: PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length],
-              backgroundColor: selected
-                ? `${PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length]}22`
-                : 'transparent',
+              opacity,
+              borderWidth: strokeWidth,
+              borderColor: color,
             }}
-          >
-            <Text
-              style={{
-                position: 'absolute',
-                top: -2,
-                left: -2,
-                paddingHorizontal: 5,
-                paddingVertical: 2,
-                overflow: 'hidden',
-                color: '#fff',
-                backgroundColor: PERSON_OUTLINE_COLORS[person.id % PERSON_OUTLINE_COLORS.length],
-                fontSize: 11,
-                fontWeight: '700',
-              }}
-            >
-              {person.id + 1}
-            </Text>
-          </View>
+          />
         );
       })}
     </View>

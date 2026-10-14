@@ -185,6 +185,13 @@ impl Image {
     Arc::new(Self::from_core(self.core()))
   }
 
+  /// Makes this image the same as another, as `*image = other.clone()` does in the library. A handle cannot be assigned to, so
+  /// this is how a tool that made a new image takes the place of the one it was given.
+  pub fn replace_with(&self, other: Arc<Image>) {
+    let other = other.core();
+    self.edit(|image| *image = other);
+  }
+
   /// A copy cropped to `[x, y, width, height]`. The rectangle is clipped to the image.
   pub fn cropped(&self, x: u32, y: u32, width: u32, height: u32) -> Arc<Image> {
     let mut image = self.core();
@@ -402,6 +409,15 @@ mod tests {
 mod bridge {
   use super::*;
   use uniffi::HandleAlloc;
+
+  #[test]
+  fn replacing_an_image_takes_the_size_and_pixels_of_the_other() {
+    let image = Image::new_from_color(2, 1, Arc::new(Color::from_rgba(9, 8, 7, 255)));
+    let other = Arc::new(Image::new_from_color(3, 2, Arc::new(Color::from_rgba(1, 2, 3, 255))));
+    image.replace_with(other.clone());
+    assert_eq!((image.width(), image.height()), (3, 2));
+    assert_eq!(image.rgba(), other.rgba());
+  }
 
   #[test]
   fn the_clone_of_the_bridge_is_a_new_image() {

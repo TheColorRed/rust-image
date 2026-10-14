@@ -70,5 +70,7 @@ A control that applies to a person needs to know which one, but only when there 
 - With one person in the photo, or none, do not show the "tap a person" bar or the outlines: the effect is for everyone, which
   is the same thing.
 - With two or more, the person selector shows, and each control's values are kept for each person.
+- A control that starts with a look when it opens (`applyOnSelect`) does that at once for one person or none. With two or more it
+  puts nothing on until a person is tapped, and then only on that person. Never put it on everyone behind the person's back.
 - The model that finds people may not be downloaded. Offer the download when a control needs it, and do not leave the control
   silently applying to the wrong thing.

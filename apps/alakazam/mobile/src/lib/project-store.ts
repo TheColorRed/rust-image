@@ -40,6 +40,11 @@ export interface Project {
    * the model, so the edits replay with the same mask (even when the model is not on this device) and open faster.
    */
   skinMaskFile?: string;
+  /**
+   * The masks the face models made for the original, one saved WebP each, by the name the makeup controls know them by. Opening
+   * the project loads them instead of running the models. Left out until the models have found a face.
+   */
+  makeupMasks?: { name: string; file: string }[];
   /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
   people?: SavedPersonDetection[];
   /** Every step, in the order it was performed, including ones that were undone and can be redone. */

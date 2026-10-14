@@ -1,21 +1,32 @@
-import { HuePicker } from '@/src/components/editor/hue-picker';
-import { SkinTanPicker } from '@/src/components/editor/skin-tan-picker';
+import { filter, takeUntil } from 'rxjs/operators';
+import { ColorBarPicker } from '@/src/components/editor/color-bar-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonSelectionControls, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
+import { SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
 import { missingModels } from '@/src/lib/ai-model-availability';
 import { FACE_MODELS } from '@/src/lib/faces';
 import { aiModelsRequested } from '@/src/state/ai-models';
-import { BROW_BONE_KEY, EYELINER_KEY, EYESHADOW_KEY, LIPSTICK_KEY, UNDER_EYE_KEY } from '@/src/lib/edit-sections/keys';
-import { useLiveAction } from '@/src/hooks/useLiveAction';
-import { useLiveSlider } from '@/src/hooks/useLiveSlider';
+import {
+  CONTOUR_KEY,
+  HIGHLIGHTER_KEY,
+  BLUSH_KEY,
+  LIP_LINER_KEY,
+  BROW_BONE_KEY,
+  EYELINER_KEY,
+  EYESHADOW_KEY,
+  LIPSTICK_KEY,
+  UNDER_EYE_KEY,
+} from '@/src/lib/edit-sections/keys';
+import { useActionPreview } from '@/src/hooks/useActionPreview';
+import { useSliderPreview } from '@/src/hooks/useSliderPreview';
 import {
   BLEMISH_TOOL_KEY,
   RED_EYE_TOOL_KEY,
   EDIT_SECTIONS,
   appliesOnSelect,
-  findGroup,
+  groupPath,
   findSection,
   isMultiSlider,
   type EditControl,
@@ -27,7 +38,7 @@ import {
   sliderValues,
 } from '@/src/lib/edit-sections';
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
-import { editorLive } from '@/src/lib/editor-live';
+import { editorPreview } from '@/src/lib/editor-preview';
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor-thumbnails';
 import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import { useTheme } from '@/src/lib/theme';
@@ -71,6 +82,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
 
+/** The colors of the bar that picks a color, by the name a control gives its `picker`. */
+const barColors = { hue: hueColors, shade: () => SHADE_COLORS, 'skin-tan': () => TAN_COLORS };
+
 /** The control that is open in the active section, or undefined. */
 function useFocusedControl() {
   const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
@@ -87,7 +101,9 @@ export function EditorPanel() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const activeSection = findSection(activeKey);
-  useLiveAction();
+  const openKey = useObservable(openGroupKey$, openGroupKey.value);
+  const groups = openKey ? groupPath(activeSection.controls, openKey) : [];
+  useActionPreview();
   const focusedControl = useFocusedControl();
   const isPersonControlFocused = useObservable(isPersonControlFocused$, false);
 
@@ -112,7 +128,17 @@ export function EditorPanel() {
         } else if (control.kind === 'group') {
           openGroupKey.next(control.key);
         } else if (
-          [LIPSTICK_KEY, EYELINER_KEY, EYESHADOW_KEY, BROW_BONE_KEY, UNDER_EYE_KEY].includes(control.key) &&
+          [
+            LIPSTICK_KEY,
+            EYELINER_KEY,
+            EYESHADOW_KEY,
+            BROW_BONE_KEY,
+            UNDER_EYE_KEY,
+            BLUSH_KEY,
+            LIP_LINER_KEY,
+            HIGHLIGHTER_KEY,
+            CONTOUR_KEY,
+          ].includes(control.key) &&
           missingModels(FACE_MODELS).length > 0
         ) {
           // Finding the lips needs the face models; opening the slider without them would do nothing.
@@ -128,7 +154,24 @@ export function EditorPanel() {
             appliesOnSelect(control) &&
             adjustmentsState.value[control.key] === undefined
           ) {
-            commitSlider(control, sliderDefault(control));
+            if (!isPersonAdjustment(control.key)) {
+              commitSlider(control, sliderDefault(control));
+            } else {
+              // A control for a person starts once it is known who it is for. The people are found a moment after it opens: with
+              // one (or none), the starting look goes on everyone, as before; with several, nothing goes on until a person is
+              // tapped, and then it goes on that person only.
+              personSelection$
+                .pipe(
+                  filter(state => state.focused && !state.loading),
+                  takeUntil(focusedControlKey$.pipe(filter(focused => focused !== control.key))),
+                )
+                .subscribe(state => {
+                  if (state.people.length > 1 && state.selectedId === null) return;
+                  if (adjustmentsState.value[adjustmentKey(control.key, state.selectedId)] === undefined) {
+                    commitSlider(control, sliderDefault(control));
+                  }
+                });
+            }
           }
         }
       }),
@@ -143,6 +186,24 @@ export function EditorPanel() {
       <RedEyeToolController />
       <PersonSelectionToolController />
       <View style={styles.history}>
+        <View style={styles.breadcrumbs}>
+          {[
+            { key: null, label: activeSection.label, open: null },
+            ...groups.map(group => ({ key: group.key, label: group.label, open: group.key })),
+            ...(focusedControl ? [{ key: focusedControl.key, label: focusedControl.label, open: undefined }] : []),
+          ].map((crumb, index, all) => (
+              <Pressable
+                key={crumb.key ?? 'section'}
+                onPress={() => crumb.open !== undefined && openGroupKey.next(crumb.open)}
+                hitSlop={8}
+              >
+                <Text numberOfLines={1} style={index === all.length - 1 ? styles.crumbCurrent : styles.crumb}>
+                  {index > 0 ? '› ' : ''}
+                  {crumb.label}
+                </Text>
+              </Pressable>
+            ))}
+        </View>
         <Pressable style={styles.historyButton} onPress={() => undoRequested.next()} disabled={!canUndo} hitSlop={8}>
           <Undo2 color={canUndo ? colors.textPrimary : colors.textTertiary} size={20} />
         </Pressable>
@@ -201,8 +262,8 @@ function SliderEditor() {
   const historyVersion = useObservable(historyVersion$, historyVersionState.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const onLiveChange = useLiveSlider(control?.kind === 'slider' ? control : undefined);
-  const preview = useSyncObservable(editorLive.view, null);
+  const onLiveChange = useSliderPreview(control?.kind === 'slider' ? control : undefined);
+  const preview = useSyncObservable(editorPreview.view, null);
   // The value of every slider as the user has set them, for a control with several: moving one sends all of them.
   const sliderState = useRef<{ resetKey: string; values: number[] }>({ resetKey: '', values: [] });
   // Which slider a control that shows them one at a time (`display: 'tabulated'`) has open.
@@ -265,6 +326,13 @@ function SliderEditor() {
     </Pressable>
   );
 
+  // The bar that picks this control's slider, when it has one in place of the plain slider.
+  const barKindAt = (index: number) => {
+    const picker = Array.isArray(control.picker) ? control.picker[index] : control.picker;
+    return picker && picker in barColors ? (picker as keyof typeof barColors) : undefined;
+  };
+  const barKind = barKindAt(0);
+
   return (
     <View
       style={styles.sliderPanel}
@@ -272,143 +340,119 @@ function SliderEditor() {
         if (personSelection.value.focused) personOutlinesVisible.next(false);
       }}
     >
-      {control.picker === 'skin-tan' ? (
-        <>
+      <View style={styles.sliderStack}>
+        {(isMultiSlider(control) || barKind) && (
+          // The back and close buttons belong to the control, so with several sliders they get a header of their own and
+          // every slider looks the same. A bar has no header of its own either.
           <View style={styles.sliderHeader}>
             {back}
-            <Text style={styles.sliderTitle}>{control.label}</Text>
+            <View style={styles.sliderHeaderSpacer} />
+            {isMultiSlider(control) && resetAll}
             {close}
           </View>
-          <View style={styles.sliderTrack}>
-            <SkinTanPicker
-              key={targetKey + '-' + historyVersion}
-              preview={preview}
-              value={sliderValues(control, adjustments[targetKey])[0]}
-              onTouch={() => editorLive.show()}
-              onRelease={value => sliderCommitRequested.next({ control, value })}
-            />
-          </View>
-        </>
-      ) : (
-        <View style={styles.sliderStack}>
-          {isMultiSlider(control) && (
-            // The back and close buttons belong to the control, so with several sliders they get a header of their own and
-            // every slider looks the same.
-            <View style={styles.sliderHeader}>
-              {back}
-              <Text style={styles.sliderTitle}>{control.label}</Text>
-              {resetAll}
-              {close}
-            </View>
-          )}
-          {tabulated && (
-            <View style={styles.sliderPills}>
-              {specs.map((spec, index) => (
-                <Pressable
-                  key={index}
-                  style={[styles.sliderPill, index === openSlider && styles.sliderPillOpen]}
-                  onPress={() => setSelectedSlider({ key: control.key, index })}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: index === openSlider }}
-                >
-                  <Text style={[styles.sliderPillText, index === openSlider && styles.sliderPillTextOpen]}>
-                    {spec.label}
-                  </Text>
-                  {/* A dot marks a slider that is off its default, as the committed value has it. */}
-                  {committed[index] !== spec.defaultValue && (
-                    <View style={[styles.sliderPillDot, index === openSlider && styles.sliderPillDotOpen]} />
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          )}
-          {specs.map((spec, index) =>
-            tabulated && index !== openSlider ? null : (Array.isArray(control.picker)
-                ? control.picker[index]
-                : undefined) === 'hue' ? (
-              <View key={resetKey + '-' + index}>
-                {control.swatches && (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.swatchRow}
-                  >
-                    {control.swatches.map(swatch => {
-                      const chosen = swatch.values.every(
-                        (wanted, swatchIndex) => wanted === undefined || Math.abs(values[swatchIndex] - wanted) < 0.005,
-                      );
-                      return (
-                        <Pressable
-                          key={swatch.label}
-                          style={styles.swatch}
-                          accessibilityRole="button"
-                          accessibilityLabel={swatch.label}
-                          accessibilityState={{ selected: chosen }}
-                          onPress={() => {
-                            swatch.values.forEach((wanted, swatchIndex) => {
-                              if (wanted !== undefined) values[swatchIndex] = wanted;
-                            });
-                            setValueSets(sets => sets + 1);
-                            sliderCommitRequested.next({ control, value: committedValue() });
-                          }}
-                        >
-                          <View
-                            style={[styles.swatchDot, { backgroundColor: swatch.color }, chosen && styles.swatchChosen]}
-                          />
-                          <Text numberOfLines={2} style={[styles.swatchLabel, chosen && styles.swatchLabelChosen]}>
-                            {swatch.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
+        )}
+        {tabulated && (
+          <View style={styles.sliderPills}>
+            {specs.map((spec, index) => (
+              <Pressable
+                key={index}
+                style={[styles.sliderPill, index === openSlider && styles.sliderPillOpen]}
+                onPress={() => setSelectedSlider({ key: control.key, index })}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: index === openSlider }}
+              >
+                <Text style={[styles.sliderPillText, index === openSlider && styles.sliderPillTextOpen]}>
+                  {spec.label}
+                </Text>
+                {/* A dot marks a slider that is off its default, as the committed value has it. */}
+                {committed[index] !== spec.defaultValue && (
+                  <View style={[styles.sliderPillDot, index === openSlider && styles.sliderPillDotOpen]} />
                 )}
-                <View style={styles.sliderTrack}>
-                  <HuePicker
-                    key={valueSets}
-                    value={values[index]}
-                    onChange={value => {
-                      values[index] = value;
-                      onLiveChange?.([...values]);
-                    }}
-                    onRelease={value => {
-                      values[index] = value;
-                      sliderCommitRequested.next({ control, value: committedValue() });
-                    }}
-                  />
-                </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
+        {specs.map((spec, index) =>
+          tabulated && index !== openSlider ? null : barKindAt(index) ? (
+            <View key={resetKey + '-' + index}>
+              {control.swatches && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.swatchRow}>
+                  {control.swatches.map(swatch => {
+                    const chosen = swatch.values.every(
+                      (wanted, swatchIndex) => wanted === undefined || Math.abs(values[swatchIndex] - wanted) < 0.005,
+                    );
+                    return (
+                      <Pressable
+                        key={swatch.label}
+                        style={styles.swatch}
+                        accessibilityRole="button"
+                        accessibilityLabel={swatch.label}
+                        accessibilityState={{ selected: chosen }}
+                        onPress={() => {
+                          swatch.values.forEach((wanted, swatchIndex) => {
+                            if (wanted !== undefined) values[swatchIndex] = wanted;
+                          });
+                          setValueSets(sets => sets + 1);
+                          sliderCommitRequested.next({ control, value: committedValue() });
+                        }}
+                      >
+                        <View
+                          style={[styles.swatchDot, { backgroundColor: swatch.color }, chosen && styles.swatchChosen]}
+                        />
+                        <Text numberOfLines={2} style={[styles.swatchLabel, chosen && styles.swatchLabelChosen]}>
+                          {swatch.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              <View style={styles.sliderTrack}>
+                <ColorBarPicker
+                  key={valueSets + '-' + historyVersion}
+                  colors={barColors[barKindAt(index)!]()}
+                  value={values[index]}
+                  onChange={value => {
+                    values[index] = value;
+                    onLiveChange?.([...values]);
+                  }}
+                  onRelease={value => {
+                    values[index] = value;
+                    sliderCommitRequested.next({ control, value: committedValue() });
+                  }}
+                />
               </View>
-            ) : (
-              <Slider
-                key={resetKey + '-' + index + '-' + valueSets}
-                // A single slider carries the buttons in its own header.
-                leading={!isMultiSlider(control) && index === 0 ? back : undefined}
-                trailing={!isMultiSlider(control) && index === 0 ? close : undefined}
-                label={spec.label}
-                min={spec.min}
-                max={spec.max}
-                step={spec.step}
-                initialValue={values[index]}
-                resetValue={spec.defaultValue}
-                triggerType="release"
-                onChange={value => {
-                  values[index] = value;
-                  onLiveChange?.([...values]);
-                }}
-                reset
-                onTrigger={value => {
-                  values[index] = value;
-                  sliderCommitRequested.next({ control, value: committedValue() });
-                }}
-                onReset={() => {
-                  values[index] = spec.defaultValue;
-                  sliderCommitRequested.next({ control, value: committedValue() });
-                }}
-              />
-            ),
-          )}
-        </View>
-      )}
+            </View>
+          ) : (
+            <Slider
+              key={resetKey + '-' + index + '-' + valueSets}
+              // A single slider carries the buttons in its own header.
+              leading={!isMultiSlider(control) && index === 0 ? back : undefined}
+              trailing={!isMultiSlider(control) && index === 0 ? close : undefined}
+              label={spec.label}
+              min={spec.min}
+              max={spec.max}
+              step={spec.step}
+              initialValue={values[index]}
+              resetValue={spec.defaultValue}
+              triggerType="release"
+              onChange={value => {
+                values[index] = value;
+                onLiveChange?.([...values]);
+              }}
+              reset
+              onTrigger={value => {
+                values[index] = value;
+                sliderCommitRequested.next({ control, value: committedValue() });
+              }}
+              onReset={() => {
+                values[index] = spec.defaultValue;
+                sliderCommitRequested.next({ control, value: committedValue() });
+              }}
+            />
+          ),
+        )}
+      </View>
     </View>
   );
 }
@@ -462,7 +506,8 @@ function ChipControls() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const groupKey = useObservable(openGroupKey$, openGroupKey.value);
   const activeSection = findSection(sectionKey);
-  const group = groupKey ? findGroup(activeSection.controls, groupKey) : undefined;
+  const path = groupKey ? groupPath(activeSection.controls, groupKey) : [];
+  const group = path[path.length - 1];
   const isApplied = (control: Exclude<EditControl, GroupControl>) =>
     control.kind === 'action'
       ? appliedActions.includes(control.key)
@@ -479,7 +524,7 @@ function ChipControls() {
       contentContainerStyle={styles.chipRow}
     >
       {group && (
-        <Pressable style={styles.backChip} onPress={() => openGroupKey.next(null)} hitSlop={8}>
+        <Pressable style={styles.backChip} onPress={() => openGroupKey.next(path[path.length - 2]?.key ?? null)} hitSlop={8}>
           <ChevronLeft color={colors.textPrimary} size={18} />
         </Pressable>
       )}
@@ -504,6 +549,10 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     panel: { backgroundColor: colors.surface, paddingTop: 10 },
     history: { height: 36, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 24 },
     historyButton: { padding: 6 },
+    // Pinned to the left so the undo and redo buttons stay centered; long trails are cut short rather than reaching them.
+    breadcrumbs: { position: 'absolute', left: 16, maxWidth: '35%', flexDirection: 'row', alignItems: 'center', gap: 4 },
+    crumb: { color: colors.textTertiary, fontSize: 12 },
+    crumbCurrent: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
     controls: { justifyContent: 'center' },
     fixedControls: { height: 96 },
     // An open slider control is as tall as its sliders, so several of them do not spill over the buttons above and the tabs below.
@@ -550,7 +599,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     sliderPillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
     sliderPillDotOpen: { backgroundColor: '#fff' },
     sliderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    sliderTitle: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+    sliderHeaderSpacer: { flex: 1 },
     // Same side margin as the slider track, so the tan bar also stays clear of the screen edge.
     sliderTrack: { height: 40, marginHorizontal: 20, justifyContent: 'center' },
     backChip: {

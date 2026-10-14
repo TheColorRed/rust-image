@@ -11,6 +11,11 @@ import {
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
   UNDER_EYE_KEY,
+  BLUSH_KEY,
+  LIP_LINER_KEY,
+  HIGHLIGHTER_KEY,
+  CONTOUR_KEY,
+  TEETH_WHITENING_KEY,
 } from '@/src/lib/edit-sections/keys';
 import type { AdjustmentValue } from '@/src/lib/edit-sections';
 
@@ -51,7 +56,12 @@ export const isPersonControlFocused$ = focusedControlKey$.pipe(
       key === EYELINER_KEY ||
       key === EYESHADOW_KEY ||
       key === BROW_BONE_KEY ||
-      key === UNDER_EYE_KEY,
+      key === UNDER_EYE_KEY ||
+      key === BLUSH_KEY ||
+      key === LIP_LINER_KEY ||
+      key === HIGHLIGHTER_KEY ||
+      key === CONTOUR_KEY ||
+      key === TEETH_WHITENING_KEY,
   ),
   distinctUntilChanged(),
 );

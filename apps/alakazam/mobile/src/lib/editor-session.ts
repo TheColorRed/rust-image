@@ -1,3 +1,4 @@
+import { clearAnalysis } from '@/src/lib/analysis';
 import { batch } from '@/src/lib/batch';
 import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/edit-source';
 import {
@@ -8,13 +9,22 @@ import {
   healBlemish,
   keepBlemishBase,
 } from '@/src/lib/editor-history';
-import { startEditorLive } from '@/src/lib/editor-live';
-import { clearControlThumbnails, releaseShownImages, renderRecipe, startReplay } from '@/src/lib/editor-replay';
+import { analysisOf, provideAnalysis } from '@/src/lib/editor-preloads';
+import { makeupMasks } from '@/src/lib/eye-makeup';
+import { startEditorPreview } from '@/src/lib/editor-preview';
+import {
+  clearControlThumbnails,
+  flushFullReplay,
+  releaseShownImages,
+  renderRecipe,
+  startReplay,
+} from '@/src/lib/editor-replay';
 import { showStandIn } from '@/src/lib/editor-pictures';
 import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
-import { projectImageUri, type ProjectRecipe } from '@/src/lib/project-store';
+import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
+import { people, skinMask } from '@/src/state/analysis';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -22,7 +32,9 @@ import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { updateProject } from '@/src/state/projects';
 import { busy, currentImage, editBaseImage, loadError, originalImage, ready } from '@/src/state/session';
-import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
+import { type Image as AbraPixels } from '@abra/core/image';
+import { Mask, type MaskLike } from '@abra/core/mask';
+import { AbraImage, personDetectionDownloaded, readImageAsync, type PersonDetection } from '@alakazam/mobile';
 import { Alert, AppState } from 'react-native';
 import { type BehaviorSubject } from 'rxjs';
 
@@ -43,6 +55,7 @@ function resetSessionState() {
   openProject.next(null);
   historyReady.next(false);
   clearControlThumbnails();
+  clearAnalysis();
   adjustments.next({});
   appliedActions.next([]);
   focusedControlKey.next(null);
@@ -65,27 +78,57 @@ const JPEG_FALLBACK_QUALITY = 90;
 
 const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-/**
- * Runs optional AI skin detection only after React has had a frame to lay out the editor. `readAsync` intentionally only
- * decodes pixels, so selecting a photo never waits for a model. Copies of an AbraImage share the resulting mask; nudging
- * the adjustment stream when it arrives redraws the current edit (including anything the user changed in the meantime).
- */
-function detectSkinInBackground(image: AbraImage, isCancelled: () => boolean) {
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      if (isCancelled()) return;
-      void image.detectSkinAsync().then(
-        () => {
-          if (isCancelled() || originalImage.value !== image) return;
-          adjustments.next({ ...adjustments.value });
-        },
-        error => {
-          // The model is optional. Without it, skin controls keep using their color-based fallback.
-          if (__DEV__ && !isCancelled())
-            console.debug('[image] background skin detection unavailable:', errorMessage(error));
-        },
-      );
-    }, 0);
+/** The masks a project saved, read back as they were, so the edits replay with the same masks without running the models. */
+async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () => boolean) {
+  const readMask = async (file: string, sameSize = true) => {
+    const image = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${file}`)));
+    const mask = Mask.fromImage(image);
+    image.uniffiDestroy();
+    if (sameSize && (mask.width() !== photo.width() || mask.height() !== photo.height())) {
+      throw new Error(`The saved mask ${file} does not match the project image`);
+    }
+    return mask;
+  };
+  if (project.skinMaskFile) {
+    const mask = await readMask(project.skinMaskFile);
+    if (isCancelled()) return (mask as unknown as AbraPixels).uniffiDestroy();
+    skinMask.next(mask);
+  }
+  if (project.makeupMasks?.length) {
+    const masks = Object.fromEntries(
+      await Promise.all(project.makeupMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
+    );
+    if (isCancelled()) return Object.values(masks).forEach(mask => (mask as unknown as AbraPixels).uniffiDestroy());
+    provideAnalysis(makeupMasks, masks);
+  }
+  if (project.people) {
+    const found = await Promise.all(
+      project.people.map(async person => ({
+        ...person,
+        // Projects saved before the masks sat beside the photo kept them in a folder of their own.
+        mask: await readMask(`person-${person.id}.webp`).catch(() => readMask(`people/person-${person.id}.webp`)),
+      })),
+    );
+    if (isCancelled()) return found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
+    people.next(found);
+  }
+}
+
+/** Saves a mask as a gray image. */
+function writeMask(mask: MaskLike, file: string) {
+  const image = mask.toImage();
+  try {
+    image.write(file, undefined);
+  } finally {
+    (image as AbraPixels).uniffiDestroy();
+  }
+}
+
+/** Saves each person's mask in the project's folder and gives back what is left to remember about them. */
+function writePeople(found: PersonDetection[], directory: string): SavedPersonDetection[] {
+  return found.map(({ mask, ...person }) => {
+    writeMask(mask, `${directory}/person-${person.id}.webp`);
+    return person;
   });
 }
 
@@ -104,21 +147,34 @@ function saveOpenProject() {
   if (!project || !base || !historyReady.value) return;
   const { entries, cursor } = timeline.value;
   // The skin mask belongs to the original, so it is saved once: the first time the image has one.
-  const skinMaskFile =
-    project.skinMaskFile ??
-    (originalImage.value?.writeSkinMask(toLocalPath(`${project.dir}/skin-mask.webp`)) ? 'skin-mask.webp' : undefined);
-  const people = originalImage.value?.writePersonMasks(toLocalPath(`${project.dir}/people`)) ?? project.people;
+  let skinMaskFile = project.skinMaskFile;
+  if (!skinMaskFile && skinMask.value) {
+    writeMask(skinMask.value, toLocalPath(`${project.dir}/skin-mask.webp`));
+    skinMaskFile = 'skin-mask.webp';
+  }
+  // Like the skin mask, the people belong to the original, so they are saved once: the first time the photo has them.
+  // So are the masks the face models made, so the project opens without running them.
+  let makeupFiles = project.makeupMasks;
+  const faces = analysisOf(makeupMasks);
+  if (!makeupFiles && faces && !Array.isArray(faces)) {
+    makeupFiles = Object.entries(faces).map(([name, mask], index) => {
+      writeMask(mask as MaskLike, toLocalPath(`${project.dir}/makeup-${index}.webp`));
+      return { name, file: `makeup-${index}.webp` };
+    });
+  }
+  const savedPeople = project.people ?? (people.value ? writePeople(people.value, toLocalPath(project.dir)) : undefined);
   const entriesWithResources = entries.map((entry, index) => {
     if (!changesPixels(entry.change)) return entry;
     const checkpoint = checkpointFor(entry);
     if (!checkpoint) return entry;
     const checkpointFile = entry.checkpointFile ?? `checkpoint-${index}.webp`;
-    checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`));
+    checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`), undefined);
     return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
   });
   if (
     skinMaskFile === project.skinMaskFile &&
-    JSON.stringify([entriesWithResources, cursor, people]) ===
+    makeupFiles === project.makeupMasks &&
+    JSON.stringify([entriesWithResources, cursor, savedPeople]) ===
       JSON.stringify([project.timeline, project.cursor, project.people])
   )
     return;
@@ -131,21 +187,25 @@ function saveOpenProject() {
     if (cursor > 0) {
       const stamp = Date.now();
       resultFile = `result-${stamp}.webp`;
-      const final = hasRecipe ? renderRecipe(base, recipe) : base;
+      // The replay already made the full-size picture of this recipe (`currentImage`), so it is written as it is. Rendering it again
+      // would hold a second full-size copy, and every layer of a canvas, next to the original, the base and that one.
+      if (hasRecipe) flushFullReplay();
+      const rendered = hasRecipe && !currentImage.value ? renderRecipe(base, recipe) : null;
+      const final = rendered ?? (hasRecipe ? currentImage.value! : base);
       try {
         try {
-          final.writeWithQuality(toLocalPath(`${project.dir}/${resultFile}`), RESULT_QUALITY);
+          final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: RESULT_QUALITY });
         } catch (error) {
           // WebP cannot hold a side over 16383 pixels, and may run out of memory on a very large photo. JPEG still can.
           console.warn('[project] WebP result failed, saving a JPEG instead:', errorMessage(error));
           resultFile = `result-${stamp}.jpg`;
-          final.writeWithQuality(toLocalPath(`${project.dir}/${resultFile}`), JPEG_FALLBACK_QUALITY);
+          final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: JPEG_FALLBACK_QUALITY });
         }
       } finally {
-        if (final !== base) final.uniffiDestroy();
+        rendered?.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, people };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, people: savedPeople };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {
@@ -163,8 +223,9 @@ function saveOpenProject() {
 export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
+  if (__DEV__ && project) console.log('[project] opened', project.id, project.dir);
   const replay = startReplay();
-  const live = startEditorLive();
+  const live = startEditorPreview();
   // Phones kill apps in the background without warning, so save when the app leaves the foreground too.
   const appState = AppState.addEventListener('change', state => {
     if (state !== 'active') saveOpenProject();
@@ -173,7 +234,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   (async () => {
     try {
       if (project?.resultFile) {
-        const result = ownedImage(await AbraImage.readAsync(toLocalPath(projectImageUri(project))));
+        const result = ownedImage(await readImageAsync(toLocalPath(projectImageUri(project))));
         if (cancelled) {
           result.uniffiDestroy();
           return;
@@ -182,7 +243,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         // edits are pending work: they are merged into the saved edits once the real base is ready. The first replay
         // destroys the shown image, like any image it replaces.
         batch(() => {
-          editBaseImage.next(result.copy() as AbraImage);
+          editBaseImage.next(result.clone() as AbraImage);
           currentImage.next(result);
           showStandIn(result);
           ready.next(true);
@@ -193,16 +254,12 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       if (cancelled) return;
       const started = Date.now();
       // A saved skin mask is loaded as it was, rather than running the skin model again.
-      const original = ownedImage(
-        project
-          ? await AbraImage.readWithProjectResourcesAsync(
-              path,
-              project.skinMaskFile ? toLocalPath(`${project.dir}/${project.skinMaskFile}`) : undefined,
-              project.people ? toLocalPath(`${project.dir}/people`) : undefined,
-              project.people,
-            )
-          : await AbraImage.readAsync(path),
-      );
+      const original = ownedImage(await readImageAsync(path));
+      if (cancelled) {
+        original.uniffiDestroy();
+        return;
+      }
+      if (project) await loadAnalysis(project, original, () => cancelled);
       if (cancelled) {
         original.uniffiDestroy();
         return;
@@ -221,11 +278,11 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       for (const entry of saved) {
         if (!changesPixels(entry.change) || !entry.checkpointFile) continue;
         const checkpoint = ownedImage(
-          await AbraImage.readAsync(toLocalPath(`${project!.dir}/${entry.checkpointFile}`)),
+          await readImageAsync(toLocalPath(`${project!.dir}/${entry.checkpointFile}`)),
         );
         keepBlemishBase(entry, checkpoint);
       }
-      let base = original.copy() as AbraImage;
+      let base = original.clone() as AbraImage;
       const rebuilt: TimelineEntry[] = [];
       let restoreFailed = false;
       // Without the person model, an edit made to one person cannot be replayed (it would only throw).
@@ -237,7 +294,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
             const checkpoint = checkpointFor(entry);
             let healed: AbraImage;
             if (checkpoint) {
-              healed = checkpoint.copy() as AbraImage;
+              healed = checkpoint.clone() as AbraImage;
             } else {
               await nextFrame();
               if (cancelled) {
@@ -246,7 +303,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
                 return;
               }
               healed = healBlemish(base, entry);
-              keepBlemishBase(entry, healed.copy() as AbraImage);
+              keepBlemishBase(entry, healed.clone() as AbraImage);
             }
             base.uniffiDestroy();
             base = healed;
@@ -292,9 +349,6 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         historyReady.next(true);
         ready.next(true);
       });
-      // A saved mask was loaded above and needs no model. Otherwise begin detection after the decoded photo and editor UI
-      // are both usable; the result is shared by the base and all of its copies.
-      if (!project) detectSkinInBackground(original, () => cancelled);
     } catch (e: any) {
       busy.next(false);
       if (!cancelled) loadError.next(String(e?.message ?? e));

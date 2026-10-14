@@ -43,6 +43,12 @@ macro_rules! effect_methods {
         ::std::sync::Arc::new(Self(::std::sync::RwLock::new(::abra::options::prelude::Effect::with_options(effect, options))))
       }
 
+      /// The effect as a live effect, for `Layer::set_live_effects`: a copy of it as it is now.
+      pub fn live_effect(&self) -> ::std::sync::Arc<$crate::LiveEffect> {
+        let effect = self.0.read().unwrap().clone();
+        ::std::sync::Arc::new($crate::LiveEffect::new(::std::sync::Arc::new(effect)))
+      }
+
       /// Applies the effect to the image now, on whichever hardware suits.
       pub fn apply(&self, image: ::std::sync::Arc<$crate::Image>) {
         let effect = self.0.read().unwrap().clone();
@@ -90,6 +96,11 @@ macro_rules! effect_methods {
         ::std::sync::Arc::new(Self(::abra::options::prelude::Effect::with_options(effect, options)))
       }
 
+      /// The effect as a live effect, for `Layer::set_live_effects`: a copy of it as it is now.
+      pub fn live_effect(&self) -> ::std::sync::Arc<$crate::LiveEffect> {
+        ::std::sync::Arc::new($crate::LiveEffect::new(::std::sync::Arc::new(self.0.clone())))
+      }
+
       /// Applies the effect to the image now, on whichever hardware suits.
       pub fn apply(&self, image: ::std::sync::Arc<$crate::Image>) {
         image.edit(|image| ::abra::options::prelude::Effect::apply(&self.0, image));
@@ -112,3 +123,17 @@ macro_rules! effect_methods {
 }
 
 pub(crate) use effect_methods;
+
+/// An effect a layer holds as live settings, made by an effect's `live_effect`. See `Layer::set_live_effects`.
+#[derive(uniffi::Object)]
+pub struct LiveEffect(::std::sync::Arc<dyn ::abra::abra_core::image::gpu::LiveEffect>);
+
+impl LiveEffect {
+  pub(crate) fn new(effect: ::std::sync::Arc<dyn ::abra::abra_core::image::gpu::LiveEffect>) -> Self {
+    Self(effect)
+  }
+
+  pub(crate) fn core(&self) -> ::std::sync::Arc<dyn ::abra::abra_core::image::gpu::LiveEffect> {
+    self.0.clone()
+  }
+}

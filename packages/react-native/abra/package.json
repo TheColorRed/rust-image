@@ -10,6 +10,7 @@
   "exports": {
     ".": "./index.ts",
     "./adjustments": "./entries/adjustments.ts",
+    "./beauty": "./entries/beauty.ts",
     "./blend": "./entries/blend.ts",
     "./canvas": "./entries/canvas.ts",
     "./color": "./entries/color.ts",

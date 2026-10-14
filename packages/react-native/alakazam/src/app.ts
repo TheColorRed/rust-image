@@ -17,3 +17,7 @@ if (typeof (globalThis as any).uniffi === 'undefined') {
 }
 
 export * from './generated/alakazam_mobile';
+// The editor's image is the shared Abra UniFFI image. These aliases preserve the mobile package's public import path while
+// avoiding a second native image wrapper.
+export { Image as AbraImage } from './generated/abra_uniffi';
+export type { ImageLike as AbraImageLike } from './generated/abra_uniffi';

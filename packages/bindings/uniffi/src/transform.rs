@@ -1,13 +1,13 @@
-//! Rotating and flipping an image, from the `transform` module of `abra-core`.
+//! Rotating, flipping and resizing an image, from the `transform` module of `abra-core`.
 //!
 //! A transform is made by its function and then applied to an image, as in the library: `rotate(90).apply(image)`. The
 //! library changes the image in place, so `apply` does too.
 //!
-//! Not exported: `crop`, `resize`, `zoom` and `warp`, and the `Transform` trait of one-call shortcuts on `Image`.
+//! Not exported: `crop`, `zoom` and `warp`, and the `Transform` trait of one-call shortcuts on `Image`.
 
 use std::sync::Arc;
 
-use abra::abra_core::TransformAlgorithm;
+use abra::abra_core::{ResizeTarget, TransformAlgorithm};
 use abra::transform::prelude::{self as library, FlipAxis, TransformFit};
 
 use crate::Image;
@@ -73,6 +73,29 @@ impl FlipImage {
   }
 }
 
+/// A resize that has been described but not yet run. Made by [`resize`].
+#[derive(uniffi::Object)]
+pub struct ResizeImage(library::ResizeImage);
+
+/// Resizes the image to the target. `Fit` keeps the proportions and stays inside the size, so it also enlarges a smaller image.
+#[uniffi::export]
+pub fn resize(target: ResizeTarget) -> Arc<ResizeImage> {
+  Arc::new(ResizeImage(library::resize(target)))
+}
+
+#[uniffi::export]
+impl ResizeImage {
+  /// A copy of the resize that samples with this algorithm. Without one, the best is picked automatically.
+  pub fn with_algorithm(&self, algorithm: Option<TransformAlgorithm>) -> Arc<ResizeImage> {
+    Arc::new(ResizeImage(library::resize(self.0.target).with_algorithm(algorithm)))
+  }
+
+  /// Resizes the image in place.
+  pub fn apply(&self, image: Arc<Image>) {
+    image.edit(|image| self.0.apply(image));
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -107,6 +130,16 @@ mod tests {
       .with_fit(TransformFit::Fill)
       .with_algorithm(TransformAlgorithm::Bilinear)
       .apply(&mut expected);
+    assert_eq!(handle.core().rgba(), expected.rgba());
+  }
+
+  #[test]
+  fn resize_matches_the_library() {
+    let (handle, mut expected) = gradient(40, 20);
+    let target = ResizeTarget::Fit(abra::abra_core::Size { width: 10.0, height: 10.0 });
+    resize(target).apply(handle.clone());
+    library::resize(target).apply(&mut expected);
+    assert_eq!(handle.core().dimensions::<u32>(), (10, 5));
     assert_eq!(handle.core().rgba(), expected.rgba());
   }
 

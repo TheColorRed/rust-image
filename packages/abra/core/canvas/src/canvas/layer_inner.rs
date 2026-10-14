@@ -6,8 +6,10 @@ use abra_core::{FlipAxis, Image, ResizeTarget, Resolution, Transform, TransformA
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::Weak;
 
 use abra_core::Channels;
+use mask::Mask;
 use abra_core::image::gpu::{ChainRenderer, GpuSession, Hardware, LiveEffect, ready_gpu_provider};
 
 use crate::Origin;
@@ -78,7 +80,9 @@ pub struct LayerInner<'a> {
   /// A UUID for the layer.
   id: String,
   /// Reference to the canvas.
-  canvas: Arc<Mutex<CanvasInner<'a>>>,
+  /// The canvas that holds this layer. Weak, because the canvas holds the layer strongly and a strong link back would be a cycle
+  /// that frees neither.
+  canvas: Weak<Mutex<CanvasInner<'a>>>,
   /// The anchor point for positioning relative to the canvas.
   anchor: Option<Anchor>,
   /// The origin point within the layer that the anchor refers to.
@@ -94,6 +98,8 @@ pub struct LayerInner<'a> {
   adjustment_layer_type: Option<crate::AdjustmentLayerType>,
   /// Effects evaluated over the source image at composition time.
   live: LiveState,
+  /// Limits where the layer shows: the mask is multiplied into the layer's alpha when it is composed.
+  mask: Option<Arc<Mask>>,
 }
 
 impl Debug for LayerInner<'_> {
@@ -126,7 +132,7 @@ impl Default for LayerInner<'_> {
       blend_mode: BlendMode::Normal,
       x: 0,
       y: 0,
-      canvas: Arc::new(Mutex::new(CanvasInner::new("Temporary"))),
+      canvas: Weak::new(),
       anchor: None,
       origin: Origin::default(),
       anchor_dimensions: None,
@@ -134,6 +140,7 @@ impl Default for LayerInner<'_> {
       effects: LayerEffects::new(),
       adjustment_layer_type: None,
       live: LiveState::default(),
+      mask: None,
     }
   }
 }
@@ -173,7 +180,12 @@ impl<'a> LayerInner<'a> {
 
   /// Sets the canvas reference for the layer.
   pub(crate) fn set_canvas(&mut self, p_canvas: Arc<Mutex<CanvasInner<'a>>>) {
-    self.canvas = p_canvas.clone();
+    self.canvas = Arc::downgrade(&p_canvas);
+  }
+
+  /// The canvas that holds this layer, or a temporary empty one when the layer is in none (or its canvas is gone).
+  fn canvas(&self) -> Arc<Mutex<CanvasInner<'a>>> {
+    self.canvas.upgrade().unwrap_or_else(|| Arc::new(Mutex::new(CanvasInner::new("Temporary"))))
   }
 
   /// Gets the UUID of the layer.
@@ -183,7 +195,7 @@ impl<'a> LayerInner<'a> {
 
   /// Marks the layer's canvas as needing to recompose.
   pub fn mark_dirty(&mut self) {
-    self.canvas.lock().unwrap().mark_dirty();
+    self.canvas().lock().unwrap().mark_dirty();
   }
 
   /// Gets the anchor point of the layer.
@@ -209,10 +221,12 @@ impl<'a> LayerInner<'a> {
     self.mark_dirty();
   }
 
-  /// Sets the position of the layer.
+  /// Sets the position of the layer, with its top left corner at that point of the canvas. A position is where the layer goes, so
+  /// it replaces the anchor: an anchor (new layers start anchored to the middle) would put the layer back at its own place.
   pub fn set_global_position(&mut self, p_x: i32, p_y: i32) {
     self.x = p_x;
     self.y = p_y;
+    self.anchor = None;
     self.mark_dirty();
   }
 
@@ -222,10 +236,11 @@ impl<'a> LayerInner<'a> {
     self.mark_dirty();
   }
 
-  /// Sets the position of the layer relative to another layer
+  /// Sets the position of the layer relative to another layer. Like [`LayerInner::set_global_position`], it replaces the anchor.
   pub fn set_relative_position(&mut self, p_x: i32, p_y: i32, p_layer: &LayerInner) {
     self.x = p_layer.x + p_x;
     self.y = p_layer.y + p_y;
+    self.anchor = None;
     self.mark_dirty();
   }
 
@@ -395,13 +410,30 @@ impl<'a> LayerInner<'a> {
 
   /// Renders the layer effects without replacing the layer's source image.
   pub fn apply_pending_effects(&mut self) -> Arc<Image> {
-    let image_arc = self.render_live();
+    let mut image_arc = self.render_live();
+    if let Some(mask) = &self.mask {
+      let mut masked = (*image_arc).clone();
+      mask.multiply_alpha(&mut masked);
+      image_arc = Arc::new(masked);
+    }
     let result = self.effects.apply_with_offset(image_arc);
     let (orig_w, orig_h) = result.content_dimensions;
     self.set_anchor_dimensions(orig_w, orig_h);
     let (pad_left, pad_top) = result.offset;
     self.set_anchor_offset(-pad_left, -pad_top);
     result.image
+  }
+
+  /// Limits where the layer shows. The mask is multiplied into the layer's alpha when it is composed (white shows, black hides),
+  /// so it must be the same size as the layer. `None` removes it.
+  pub fn set_mask(&mut self, p_mask: Option<Mask>) {
+    self.mask = p_mask.map(Arc::new);
+    self.mark_dirty();
+  }
+
+  /// The mask limiting where the layer shows, if any.
+  pub fn mask(&self) -> Option<&Mask> {
+    self.mask.as_deref()
   }
 
   /// Replaces the live effects evaluated over this layer's image and marks the canvas dirty. Only the effects are
@@ -463,7 +495,8 @@ impl<'a> LayerInner<'a> {
     let current_index = self.current_index();
 
     if let Some(current_idx) = current_index {
-      let mut canvas = self.canvas.lock().unwrap();
+      let canvas = self.canvas();
+      let mut canvas = canvas.lock().unwrap();
       // Directly manipulate layers vec
       if current_idx != p_index && p_index <= canvas.layers.len() {
         let layer = canvas.layers.remove(current_idx);
@@ -476,7 +509,8 @@ impl<'a> LayerInner<'a> {
 
   /// Gets the current index of this layer in the canvas's layer stack
   pub fn current_index(&self) -> Option<usize> {
-    let canvas = self.canvas.lock().unwrap();
+    let canvas = self.canvas();
+    let canvas = canvas.lock().unwrap();
     canvas.layers.iter().enumerate().find_map(|(i, layer_rc)| {
       if let Ok(layer) = layer_rc.try_lock() {
         if layer.id == self.id { Some(i) } else { None }
@@ -496,12 +530,12 @@ impl<'a> LayerInner<'a> {
     let Some(current_index) = self.current_index() else { return };
     let target_index = match p_action {
       LayerMove::Up => {
-        let len = self.canvas.lock().unwrap().layers.len();
+        let len = self.canvas().lock().unwrap().layers.len();
         (current_index + 1 < len).then_some(current_index + 1)
       }
       LayerMove::Down => current_index.checked_sub(1),
       LayerMove::Top => {
-        let top = self.canvas.lock().unwrap().layers.len().saturating_sub(1);
+        let top = self.canvas().lock().unwrap().layers.len().saturating_sub(1);
         (current_index != top).then_some(top)
       }
       LayerMove::Bottom => (current_index != 0).then_some(0),
@@ -526,7 +560,8 @@ impl<'a> LayerInner<'a> {
     new_layer.set_name(format!("{} clone", new_layer.name()).as_str());
 
     let layer_rc = {
-      let mut canvas = self.canvas.lock().unwrap();
+      let canvas = self.canvas();
+      let mut canvas = canvas.lock().unwrap();
       canvas.add_layer(new_layer).clone()
     };
 
@@ -594,6 +629,22 @@ mod tests {
   }
 
   #[test]
+  fn layer_mask_limits_where_the_layer_shows() {
+    let canvas = Canvas::new_blank("test", 2, 1);
+    let layer = canvas.add_layer_from_image(
+      "red",
+      Image::new_from_color(2, 1, abra_core::Color::from_rgba(255, 0, 0, 255)),
+      None,
+    );
+    layer.set_global_position(0, 0);
+    layer.set_mask(Some(Mask::from_values(2, 1, vec![255, 0])));
+
+    let result = canvas.as_image();
+    assert_eq!(result.get_pixel(0, 0).unwrap().3, 255);
+    assert_eq!(result.get_pixel(1, 0).unwrap().3, 0);
+  }
+
+  #[test]
   fn layer_transforms_materialize_during_canvas_composition() {
     let canvas = Canvas::new_blank("test", 40, 40);
     let layer = canvas.add_layer_from_image("source", Image::new(10, 10), None);
@@ -629,6 +680,7 @@ impl<'a> Clone for LayerInner<'a> {
       effects: self.effects.clone(),
       adjustment_layer_type: self.adjustment_layer_type.clone(),
       live: self.live.clone(),
+      mask: self.mask.clone(),
     }
   }
 }

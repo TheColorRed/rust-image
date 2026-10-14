@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { AbraImage } from '@alakazam/mobile';
 import { useObservable } from 'react-rx';
-import { type SliderControl } from '@/src/lib/edit-sections';
+import { layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/edit-sections';
 import { preloadFor } from '@/src/lib/editor-preloads';
-import { ensureBase, editorLive, showTool } from '@/src/lib/editor-live';
-import { hasOtherSteps, renderStackWithoutSlider } from '@/src/lib/editor-replay';
-import { adjustmentKey, scaledPersonBounds } from '@/src/lib/skin-adjustments';
+import { ensureBase, editorPreview, showTool } from '@/src/lib/editor-preview';
+import { hasOtherSteps, renderStackWithoutSlider, renderStepsAfterSlider } from '@/src/lib/editor-replay';
+import { withLayers } from '@/src/lib/layers';
+import { adjustmentKey, personAdjustmentTargets, scaledPersonBounds } from '@/src/lib/skin-adjustments';
 import { personSelection$, personSelection } from '@/src/state/person-selection';
 import { appliedActions$, adjustments$ } from '@/src/state/edits';
+import { editBaseImage } from '@/src/state/session';
 import { previewBox$ } from '@/src/state/gestures';
 
 /**
@@ -17,14 +20,18 @@ import { previewBox$ } from '@/src/state/gestures';
  * The drag is shown by the editor's live renderer, which is already connected to the GPU: it only hands Rust the slider's
  * `live` effect at the new value. With nothing else applied the effect goes over the untouched edit base. Otherwise the rest of
  * the stack is rendered on the CPU once, and only the dragged slider's effect runs on top of it.
+ *
+ * The `live` path (`SliderControl.live`) is deprecated: it only serves controls that have not moved to `tool` yet, and can be
+ * removed with it, leaving only the tool path.
  */
-export function useLiveSlider(p_control: SliderControl | undefined): ((values: number[]) => void) | undefined {
+export function useSliderPreview(p_control: SliderControl | undefined): ((values: number[]) => void) | undefined {
   const box = useObservable(previewBox$, null);
   const adjustments = useObservable(adjustments$, {});
   const actions = useObservable(appliedActions$, []);
   const selection = useObservable(personSelection$, personSelection.value);
   const live = p_control?.live;
   const tool = p_control?.tool;
+  const layer = p_control?.layer;
   const key = p_control?.key;
 
   // Everything except this slider changes what a drag should start from; its own value does not.
@@ -36,18 +43,18 @@ export function useLiveSlider(p_control: SliderControl | undefined): ((values: n
 
   // Open the preview this drag needs before it starts: the shared edit base, or the CPU-rendered rest of the stack.
   useEffect(() => {
-    if (!(live || tool) || !key || !box) return;
+    if (!(live || tool || layer) || !key || !box) return;
     if (!hasOtherSteps(key)) {
       ensureBase();
       return;
     }
-    editorLive.ensure(`rest:${others}`, () => renderStackWithoutSlider(key), true);
-  }, [live, tool, key, box, others]);
+    editorPreview.ensure(`rest:${others}`, () => renderStackWithoutSlider(key), true);
+  }, [live, tool, layer, key, box, others]);
 
   // When the slider closes its frames go away, and the renderer goes back to the edit base for the next tap or drag.
   useEffect(
     () => () => {
-      editorLive.hide();
+      editorPreview.hide();
       ensureBase();
     },
     [],
@@ -57,15 +64,20 @@ export function useLiveSlider(p_control: SliderControl | undefined): ((values: n
   // makes the picture fall behind the finger. The newest values wait here for the next frame, and moves that arrive meanwhile
   // only replace them.
   const waiting = useRef<{ values: number[]; frame: number | null }>({ values: [], frame: null });
+  // The rest of the stack at screen size, which every frame of the drag starts from. It is made on the first frame after the
+  // other edits change, and let go of when they change again or the slider closes.
+  const rest = useRef<{ key: string; image: AbraImage | null }>({ key: '', image: null });
   useEffect(
     () => () => {
       if (waiting.current.frame !== null) cancelAnimationFrame(waiting.current.frame);
+      rest.current.image?.uniffiDestroy();
+      rest.current = { key: '', image: null };
     },
     [],
   );
 
   if (!key || !box) return undefined;
-  if (tool) {
+  if (tool || layer) {
     // The tool runs on the photo at the size the preview is drawn at, so a drag costs what the screen shows.
     return values => {
       const pending = waiting.current;
@@ -73,19 +85,36 @@ export function useLiveSlider(p_control: SliderControl | undefined): ((values: n
       if (pending.frame !== null) return;
       pending.frame = requestAnimationFrame(() => {
         pending.frame = null;
-        showTool((photo, context) =>
-          tool(photo, pending.values, {
+        if (rest.current.key !== others) {
+          rest.current.image?.uniffiDestroy();
+          rest.current = { key: others, image: hasOtherSteps(key) ? renderStackWithoutSlider(key, true) : null };
+        }
+        showTool((photo, context) => {
+          const person = scaledPersonBounds(
+            personSelection.value.people.find(found => found.id === personSelection.value.selectedId),
+            context.scale,
+          );
+          // For everyone: leave out the people who have their own value, as the final render does.
+          const ownPeople = person
+            ? undefined
+            : personAdjustmentTargets(adjustments, key ?? '').flatMap(target => (target.personId === null ? [] : [target.personId]));
+          const toolContext = {
             ...context,
             preloaded: preloadFor(p_control, photo.width()),
-            person: scaledPersonBounds(
-              personSelection.value.people.find(person => person.id === personSelection.value.selectedId),
-              context.scale,
-            ),
-          }),
-        );
+            person,
+            others: ownPeople,
+            skin: () => skinMaskFor(person?.id, photo, ownPeople),
+          };
+          // A control with a layer paints its own sheet, which is shown over the photo; the photo itself is not changed.
+          if (p_control.layer) return withLayers(photo, [layerSheet(p_control, pending.values, toolContext, targetKey)]);
+          // The steps that come after this control in the stack (makeup over the skin) go back over what the drag made.
+          const made = (tool!(photo, pending.values, toolContext) ?? photo) as AbraImage;
+          renderStepsAfterSlider(key, made);
+          return made === photo ? undefined : made;
+        }, rest.current.image ?? undefined);
       });
     };
   }
   if (!live) return undefined;
-  return values => editorLive.showEffects([live(values[0])]);
+  return values => editorPreview.showEffects([live(values[0])]);
 }

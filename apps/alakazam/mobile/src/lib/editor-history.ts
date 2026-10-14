@@ -139,7 +139,7 @@ const endsWithSlider = (key: string) => {
 
 /** A slider was released at `value`. */
 function commitSlider(control: SliderControl, value: AdjustmentValue) {
-  replayHidden.next(!!(control.live || control.tool));
+  replayHidden.next(!!(control.live || control.tool || control.layer));
   lastGroup = null;
   const key = adjustmentKey(control.key, personSelection.value.selectedId);
   const next = { ...adjustments.value, [key]: value };
@@ -149,9 +149,11 @@ function commitSlider(control: SliderControl, value: AdjustmentValue) {
 
 /** A slider's effect was turned off: it has no value again, so it is not part of the stack. Does nothing if it was already off. */
 function removeSlider(control: SliderControl) {
-  const key = adjustmentKey(control.key, personSelection.value.selectedId);
+  // A look put on everyone is stored under the plain key, so it is still the one to remove when a person is picked afterwards.
+  const personKey = adjustmentKey(control.key, personSelection.value.selectedId);
+  const key = adjustments.value[personKey] === undefined ? control.key : personKey;
   if (adjustments.value[key] === undefined) return;
-  replayHidden.next(!!(control.live || control.tool));
+  replayHidden.next(!!(control.live || control.tool || control.layer));
   lastGroup = null;
   const { [key]: _removed, ...rest } = adjustments.value;
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));
@@ -172,9 +174,9 @@ function commitRetouch(change: PixelChange) {
     before: { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] },
   };
   record(entry);
-  blemishBases.set(entry, image.copy() as AbraImage);
+  blemishBases.set(entry, image.clone() as AbraImage);
   editBaseImage.value?.uniffiDestroy();
-  editBaseImage.next(image.copy() as AbraImage);
+  editBaseImage.next(image.clone() as AbraImage);
   lastGroup = null;
   adjustments.next({});
   appliedActions.next([]);
@@ -214,7 +216,7 @@ function moveTo(cursor: number) {
   timeline.next(after);
   if (source) {
     editBaseImage.value?.uniffiDestroy();
-    editBaseImage.next(source.copy() as AbraImage);
+    editBaseImage.next(source.clone() as AbraImage);
   }
   const recipe = recipeAt(after.entries, after.cursor);
   adjustments.next(recipe.adjustments);
@@ -232,7 +234,7 @@ export function resetEdits() {
   batch(() => {
     clearTimeline();
     editBaseImage.value?.uniffiDestroy();
-    editBaseImage.next(original.copy() as AbraImage);
+    editBaseImage.next(original.clone() as AbraImage);
     focusedControlKey.next(null);
     replayHidden.next(false);
     // The replay follows these, so the picture is drawn again from the original.

@@ -127,3 +127,44 @@ mod tests {
     assert!(mask.get(8, 6).unwrap() > 0);
   }
 }
+
+/// Detects teeth-colored pixels and returns a soft grayscale mask for them: bright, not very colorful, and more yellow than
+/// skin. White pixels are included, so lowering the color through this mask only takes the yellow out.
+///
+/// A supplied mask, such as the inside of the mouth, limits where teeth are looked for; it is resized to `p_image` and faded
+/// as [`soften_skin_mask`] does with `p_feather`.
+pub fn teeth_mask(p_image: &Image, p_limit: Option<&Mask>, p_feather: impl IntoNumber) -> Mask {
+  let (width, height) = p_image.dimensions::<u32>();
+  let limit = p_limit.map(|mask| soften_skin_mask(p_image, mask, p_feather));
+  let ramp = |value: f32, start: f32, end: f32| ((value - start) / (end - start)).clamp(0.0, 1.0);
+  let values = p_image
+    .rgba()
+    .par_chunks_exact(4)
+    .enumerate()
+    .map(|(index, pixel)| {
+      let (r, g, b) = (pixel[0] as f32, pixel[1] as f32, pixel[2] as f32);
+      let high = r.max(g).max(b);
+      let chroma = if high > 0.0 { (high - r.min(g).min(b)) / high } else { 0.0 };
+      let bright = ramp(0.299 * r + 0.587 * g + 0.114 * b, 110.0, 160.0);
+      let plain = 1.0 - ramp(chroma, 0.35, 0.55);
+      let yellow = if r > 0.0 { ramp(g / r, 0.78, 0.88) } else { 0.0 };
+      let inside = limit.as_ref().map_or(1.0, |mask| mask.values()[index] as f32 / 255.0);
+      (bright * plain * yellow * inside * 255.0).round() as u8
+    })
+    .collect();
+  Mask::from_values(width, height, values)
+}
+
+#[cfg(test)]
+mod teeth_tests {
+  use super::*;
+  use abra_core::Color;
+
+  #[test]
+  fn teeth_mask_picks_yellow_white_and_not_skin() {
+    let teeth = teeth_mask(&Image::new_from_color(8, 8, Color::from_rgb(235, 215, 170)), None, 1.0);
+    let skin = teeth_mask(&Image::new_from_color(8, 8, Color::from_rgb(200, 140, 100)), None, 1.0);
+    assert_eq!(teeth.values()[0], 255);
+    assert_eq!(skin.values()[0], 0);
+  }
+}

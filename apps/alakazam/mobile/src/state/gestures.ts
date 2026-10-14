@@ -1,6 +1,6 @@
 import { Animated, PanResponder, type GestureResponderEvent } from 'react-native';
 import { BehaviorSubject, combineLatest, merge, Observable, Subject, type Subscription } from 'rxjs';
-import { filter, map, startWith, tap } from 'rxjs/operators';
+import { debounceTime, filter, map, startWith, tap } from 'rxjs/operators';
 import { isBlemishToolFocused } from '@/src/state/edits';
 
 // #region: Preview layout
@@ -27,6 +27,8 @@ export const previewTranslateY = new BehaviorSubject(new Animated.Value(0));
 export const previewTranslateY$ = previewTranslateY.asObservable();
 export const previewScaleValue = new BehaviorSubject(1);
 export const previewScaleValue$ = previewScaleValue.asObservable();
+/** The zoom once it stops changing, for overlays that would stutter the pinch if they re-rendered every frame. */
+export const previewScaleSettled$ = previewScaleValue.pipe(debounceTime(120));
 export const previewTranslateValue = new BehaviorSubject({ x: 0, y: 0 });
 export const previewTranslateValue$ = previewTranslateValue.asObservable();
 export const gestureStart = new BehaviorSubject({

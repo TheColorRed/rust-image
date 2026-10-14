@@ -582,6 +582,12 @@ impl<'a> Canvas<'a> {
     canvas.set_opacity(p_opacity);
   }
 
+  /// Limits where the canvas shows; the mask must be the size of the canvas. `None` removes it.
+  pub fn set_mask(&self, p_mask: Option<mask::Mask>) {
+    let mut canvas = self.inner.lock().unwrap();
+    canvas.set_mask(p_mask);
+  }
+
   /// Gets the canvas opacity (0.0 - 1.0).
   pub fn opacity(&self) -> f32 {
     let canvas = self.inner.lock().unwrap();
@@ -597,6 +603,7 @@ impl<'a> Canvas<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use abra_core::Color;
 
   #[test]
   fn resample_scales_child_canvases_and_layers() {
@@ -610,5 +617,35 @@ mod tests {
     assert_eq!(child.dimensions::<u32>(), (10, 10));
     root.as_image();
     assert_eq!(layer.dimensions(), (10, 10));
+  }
+
+  #[test]
+  fn canvas_mask_limits_everything_inside_even_a_pass_through_child() {
+    let root = Canvas::new_blank("root", 2, 1);
+    let child = root.add_canvas(Canvas::new_blank("child", 2, 1), None);
+    child.set_pass_through(true);
+    child.add_layer_from_image("red", Image::new_from_color(2, 1, Color::from_rgba(255, 0, 0, 255)), None);
+    child.set_mask(Some(mask::Mask::from_values(2, 1, vec![255, 0])));
+
+    let image = root.as_image();
+
+    assert_eq!(image.get_pixel(0, 0).unwrap().3, 255, "inside the mask");
+    assert_eq!(image.get_pixel(1, 0).unwrap().3, 0, "outside the mask");
+  }
+
+  #[test]
+  fn a_small_layer_is_drawn_at_its_position_on_the_canvas() {
+    let canvas = Canvas::new_blank("canvas", 100, 80);
+    canvas.add_layer_from_image("base", Image::new_from_color(100, 80, Color::from_rgba(255, 255, 255, 255)), None);
+    let patch = canvas.add_layer_from_image("patch", Image::new_from_color(10, 6, Color::from_rgba(255, 0, 0, 255)), None);
+    // A new layer is anchored to the middle of the canvas; giving it a position replaces that anchor.
+    patch.set_global_position(50, 20);
+
+    let image = canvas.as_image();
+
+    assert_eq!(image.get_pixel(55, 22), Some((255, 0, 0, 255)), "inside the patch");
+    assert_eq!(image.get_pixel(49, 22), Some((255, 255, 255, 255)), "left of the patch");
+    assert_eq!(image.get_pixel(55, 26), Some((255, 255, 255, 255)), "below the patch");
+    assert_eq!(image.get_pixel(55, 60), Some((255, 255, 255, 255)), "far below the patch");
   }
 }

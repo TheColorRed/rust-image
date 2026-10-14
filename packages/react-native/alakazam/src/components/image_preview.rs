@@ -17,33 +17,34 @@ use crate::{effect_spec::EffectSpec, live_image::LiveImage};
 struct PreviewSource {
   image: Arc<abra_uniffi::Image>,
   live: BehaviorSubject<Vec<EffectSpec>>,
+  /// The mask the skin effects work on, or none to find the skin by its color.
+  skin: BehaviorSubject<Option<Arc<abra_uniffi::Mask>>>,
   tool_image: BehaviorSubject<Option<Arc<abra::prelude::Image>>>,
 }
 
 impl PreviewSource {
   fn new(image: Arc<abra_uniffi::Image>) -> Self {
-    Self { image, live: BehaviorSubject::new(Vec::new()), tool_image: BehaviorSubject::new(None) }
+    Self { image, live: BehaviorSubject::new(Vec::new()), skin: BehaviorSubject::new(None), tool_image: BehaviorSubject::new(None) }
   }
 }
 
 impl Trackable for PreviewSource {
   fn pictures(&self, size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
     let source = Arc::clone(&self.image);
-    let selected_skin = source.selected_skin_mask();
-    let changes = size.combine_latest(source.revision()).combine_latest(&self.live).combine_latest(selected_skin);
+    let changes = size.combine_latest(&self.live).combine_latest(&self.skin);
     let changes = changes.combine_latest(&self.tool_image);
-    let mut rendering: Option<(((u32, u32), u64), LiveImage)> = None;
-    Offscreen::new(&changes, move |((((size, revision), live), selected_skin), tool)| {
+    let mut rendering: Option<((u32, u32), LiveImage)> = None;
+    Offscreen::new(&changes, move |(((size, live), skin), tool)| {
       if size.0 == 0 || size.1 == 0 { return None }
       if let Some(image) = tool {
         return Some(RenderedFrame::Pixels(Arc::new(frame_of(image))));
       }
-      let key = (*size, *revision);
-      if rendering.as_ref().is_none_or(|(rendered_for, _)| *rendered_for != key) {
-        let preview = source.preview(size.0, size.1);
-        rendering = LiveImage::new(preview.width, preview.height, preview.data).ok().map(|image| (key, image));
+      if rendering.as_ref().is_none_or(|(rendered_for, _)| rendered_for != size) {
+        let preview = fitted(&source.core(), size.0, size.1);
+        let (width, height) = preview.dimensions::<u32>();
+        rendering = LiveImage::new(width, height, preview.into_rgba_vec()).ok().map(|image| (*size, image));
       }
-      let skin = selected_skin.as_deref().cloned().or_else(|| source.base_skin_mask());
+      let skin = skin.as_ref().map(|mask| mask.core());
       let picture = rendering.as_mut()?.1.picture_with_skin_mask(live.iter(), skin.as_ref())?;
       Some(match picture {
         Picture::Pixels(frame) => RenderedFrame::Pixels(frame),
@@ -54,6 +55,17 @@ impl Trackable for PreviewSource {
       RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
     })
   }
+}
+
+/// The image shrunk to fit within `width` x `height`, or as it is when it already fits.
+pub(crate) fn fitted(image: &abra::prelude::Image, width: u32, height: u32) -> abra::prelude::Image {
+  let mut shrunk = image.clone();
+  let (current_width, current_height) = shrunk.dimensions::<u32>();
+  if current_width > width || current_height > height {
+    abra::transform::prelude::resize(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(width as f32, height as f32)))
+      .apply(&mut shrunk);
+  }
+  shrunk
 }
 
 fn frame_of(image: &abra::prelude::Image) -> Frame {
@@ -67,7 +79,6 @@ fn frame_of(image: &abra::prelude::Image) -> Frame {
 pub struct ImagePreview {
   image: Image,
   presented: Arc<AtomicBool>,
-  source: Arc<PreviewSource>,
 }
 
 /// Everything React can tell a view.
@@ -79,6 +90,10 @@ pub enum Message {
   /// Shows this image, which a tool written in TypeScript made, in place of the photo and any effects. The next `Show`
   /// goes back to the photo.
   ShowImage(Arc<abra_uniffi::Image>),
+  /// Makes the skin effects work on this mask of the skin.
+  Skin(Arc<abra_uniffi::Mask>),
+  /// Makes the skin effects find the skin by its color, as they do until they are given a mask.
+  FindSkin,
 }
 
 #[uniffi::export]
@@ -103,25 +118,20 @@ impl ImagePreview {
           if source.tool_image.peek().is_some() { source.tool_image.next(None); }
         }
         Message::ShowImage(image) => source.tool_image.next(Some(Arc::new(image.core()))),
+        Message::Skin(mask) => source.skin.next(Some(Arc::clone(mask))),
+        Message::FindSkin => source.skin.next(None),
       }
     });
 
     Arc::new(Self {
       image,
       presented,
-      source,
     })
   }
 
   /// Tells the view what changed.
   pub fn send(&self, message: Message) {
     self.image.subject::<Message>().next(message);
-  }
-
-  /// The photo shrunk to fit within `width` x `height` pixels, for a tool to run on while a slider is dragged. The same size
-  /// of the same edit gives the same image without resizing again.
-  pub fn source(&self, width: u32, height: u32) -> Arc<abra_uniffi::Image> {
-    self.source.image.shrunk(width, height)
   }
 
   /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.
@@ -233,9 +243,7 @@ mod tests {
     let view = view(7004);
     let surface = surface_of(7004);
     assert_eq!(newest(&surface, |_| true), 100);
-    // The source is the photo at the size asked for, and a tool answers with a new image of its own.
-    let source = view.source(2, 2);
-    assert_eq!(source.width(), 2);
+    // A tool answers with a new image of its own.
     let made = AbraPixels::new_from_color(2, 2, abra::abra_core::Color::from_rgba(30, 60, 90, 255));
     view.send(Message::ShowImage(Arc::new(abra_uniffi::Image::from_core(made))));
     assert_eq!(newest(&surface, |pixel| pixel == 30), 30);
@@ -252,7 +260,9 @@ mod tests {
     assert_eq!(newest(&surface, |_| true), 100);
     // A solid dark red over the gray photo, made with the same calls a tool makes. On a machine with a GPU the result is
     // a recipe the view draws itself; without one it is plain pixels. Either way the view shows the red.
-    let source = view.source(4, 4);
+    let source = Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_pixels(
+      4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA,
+    )));
     let red = Arc::new(Color::from_rgba(50, 0, 0, 255));
     let gradient = Arc::new(Gradient::new(vec![
       Arc::new(ColorStop::new(red.clone(), 0.0)),
@@ -263,20 +273,6 @@ mod tests {
     blend(edges).apply(source.clone());
     view.send(Message::ShowImage(source));
     assert_eq!(newest(&surface, |pixel| pixel == 50), 50);
-  }
-
-  #[test]
-  fn an_edit_to_the_image_shows_up_on_the_view() {
-    let image = Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_pixels(
-      4, 4, [100u8, 100, 100, 255].repeat(16), Channels::RGBA,
-    )));
-    let view = ImagePreview::new(Arc::clone(&image));
-    view.mount(7002);
-    let surface = surface_of(7002);
-    assert_eq!(newest(&surface, |_| true), 100);
-    crate::effect_spec::apply_effect(Arc::clone(&image), EffectSpec::Invert);
-    assert_eq!(newest(&surface, |pixel| pixel == 155), 155);
-    drop(view);
   }
 
   #[test]

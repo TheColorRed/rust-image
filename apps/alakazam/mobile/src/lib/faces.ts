@@ -2,6 +2,8 @@ import { AiModel } from '@abra/core';
 import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTranslated, type Rect } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
 import { aiModelPath } from '@alakazam/mobile';
+import { personIn } from '@/src/lib/analysis';
+import { faceBoxes, people } from '@/src/state/analysis';
 
 export const PERSON_DETECTION = 'person-detection';
 export const FACE_PARSING = 'face-parsing';
@@ -27,6 +29,10 @@ const MIN_FACE_PRESENCE = 0.5;
 const EYES_TO_CROP = 3.2;
 /** The landmark model gets the box around the face features, grown by this much, as a square. */
 const FACE_GROWTH = 1.8;
+/** The outline drawn for a face is the box around its landmarks grown by this much, so it takes in the forehead and the cheeks. */
+const OUTLINE_GROWTH = 1.5;
+/** The outline is moved up by this fraction of its side, because the landmarks stop at the forehead and the top of the head is above. */
+const OUTLINE_RISE = 0.05;
 
 const models: Record<string, ReturnType<typeof AiModel.load>> = {};
 
@@ -127,19 +133,69 @@ export const boxKey = (body: Rect, photo: ImageLike): string =>
     .join(',');
 
 /**
+ * Finds the face of each person in `photo` with the face models, unless that has been done, and keeps its square in `faceBoxes`, in
+ * the pixels the people were found in. Each face goes to the person whose box has the face's person's middle in it. Does nothing
+ * until the people are known, and a model that is missing leaves `faceBoxes` empty.
+ */
+export const findFaceBoxes = (photo: ImageLike) => {
+  const found = people.value;
+  if (!found || faceBoxes.value) return;
+  const boxes: Record<number, Rect> = {};
+  owning(keep => {
+    for (const { body, face: crop, landmarks } of findFaces(photo, keep)) {
+      // The landmarks cover the whole face, so the box around them is the face even when it is turned or tilted. The landmark
+      // model draws its mesh inside the crop it is given, so a crop cut too tight gives a mesh that is too small: look again in a
+      // crop made around the first mesh, and keep the second look when the landmark model accepts it.
+      const bounds = (mesh: typeof landmarks, area: Rect) => {
+        const xs = mesh.landmarks.map(landmark => landmark.point.x);
+        const ys = mesh.landmarks.map(landmark => landmark.point.y);
+        return {
+          x: area.x + (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: area.y + (Math.min(...ys) + Math.max(...ys)) / 2,
+          side: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
+        };
+      };
+      let { x, y, side } = bounds(landmarks, crop);
+      const wider = inside(
+        rectNew({ x: x - side, y: y - side }, { width: side * 2, height: side * 2 }),
+        rectNew({ x: 0, y: 0 }, { width: photo.width(), height: photo.height() }),
+      );
+      const landmarker = model(FACE_LANDMARKS);
+      if (wider && landmarker) {
+        const again = keep(landmarker.run(keep(photo.cropped(wider.x, wider.y, wider.width, wider.height)))).landmarks();
+        if (again.presence >= MIN_FACE_PRESENCE) ({ x, y, side } = bounds(again, wider));
+      }
+      side *= OUTLINE_GROWTH;
+      const face = { x: x - side / 2, y: y - side / 2 - side * OUTLINE_RISE, width: side, height: side };
+      const middle = { x: body.x + body.width / 2, y: body.y + body.height / 2 };
+      const owner = found.find(person => {
+        const area = personIn(photo.width(), person.id)!;
+        return middle.x >= area.x && middle.x <= area.x + area.width && middle.y >= area.y && middle.y <= area.y + area.height;
+      });
+      if (!owner || boxes[owner.id]) continue;
+      const scale = owner.mask.width() / photo.width();
+      boxes[owner.id] = { x: face.x * scale, y: face.y * scale, width: face.width * scale, height: face.height * scale };
+    }
+  });
+  faceBoxes.next(boxes);
+};
+
+/**
  * Whether the face named by `box` (from `boxKey`) is of `person`, a box in pixels of `photo`: its person's middle is inside it.
- * With no `person` it is everyone's.
+ * With no `person` it is everyone's, except the faces of the `others` (ids of people with a value of their own).
  */
 export const belongsTo = (
   box: string,
-  photo: ImageLike,
+  photo: { width(): number; height(): number },
   person: { x: number; y: number; width: number; height: number } | undefined,
+  others: number[] = [],
 ): boolean => {
-  if (!person) return true;
   const [x, y, width, height] = box.split(',').map(Number);
   const middleX = (x + width / 2) * photo.width();
   const middleY = (y + height / 2) * photo.height();
-  return (
-    middleX >= person.x && middleX <= person.x + person.width && middleY >= person.y && middleY <= person.y + person.height
-  );
+  const inside = (area: { x: number; y: number; width: number; height: number }) =>
+    middleX >= area.x && middleX <= area.x + area.width && middleY >= area.y && middleY <= area.y + area.height;
+  // The people with a value of their own are left out of what is for everyone.
+  if (others.some(id => { const area = personIn(photo.width(), id); return !!area && inside(area); })) return false;
+  return !person || inside(person);
 };

@@ -1,20 +1,25 @@
+import { personIn, skinMaskOf } from '@/src/lib/analysis';
 import { batch } from '@/src/lib/batch';
 import {
   applyAction,
   applySlider,
   EDIT_SECTIONS,
   findSection,
+  layerSheet,
   leafControls,
   isSliderApplied,
   scaleBetween,
+  sliderContext,
   sliderDefault,
+  sliderValues,
   type AdjustmentValue,
   type ActionControl,
   type EditSection,
 } from '@/src/lib/edit-sections';
 import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor-pictures';
-import { clearPreloads, preloadFor } from '@/src/lib/editor-preloads';
-import { buildControlThumbnails } from '@/src/lib/editor-thumbnails';
+import { withLayers, type Sheet } from '@/src/lib/layers';
+import { clearPreloads, preloadFor, releasePreloads } from '@/src/lib/editor-preloads';
+import { buildControlThumbnails, thumbnailPixels } from '@/src/lib/editor-thumbnails';
 import { type ProjectRecipe } from '@/src/lib/project-store';
 import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import {
@@ -31,7 +36,8 @@ import { previewBox$ } from '@/src/state/gestures';
 import { personSelection } from '@/src/state/person-selection';
 import { controlThumbnails } from '@/src/state/preview';
 import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
-import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
+import { type Image as AbraPixels } from '@abra/core/image';
+import { AbraImage, applyEffect, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { filter, switchMap, tap } from 'rxjs/operators';
 
@@ -41,11 +47,20 @@ import { filter, switchMap, tap } from 'rxjs/operators';
 const FULL_REPLAY_DELAY_MS = 150;
 let fullReplayTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Makes the edit on the full-size photo. It is not shown: it is `currentImage`, for what needs every pixel. */
-function runFullReplay() {
+/**
+ * Makes the edit on the full-size photo. It is not shown: it is `currentImage`, for what needs every pixel. It takes seconds on
+ * a large photo and holds the JavaScript thread while it does, so unless it is `forced` it waits for the thumbnails being built.
+ */
+function runFullReplay(forced = false) {
   fullReplayTimer = undefined;
+  if (!forced && thumbnailBuild) {
+    fullReplayTimer = setTimeout(runFullReplay, FULL_REPLAY_DELAY_MS);
+    return;
+  }
   const base = editBaseImage.value;
-  if (!base) return;
+  // A new base was swapped in since the last replay, and the replay of it is on its way and will make this one again. Running
+  // now would do the work for the new photo first, with the edits and the preloads of the old one still in place.
+  if (!base || (!forced && base !== replayedBase)) return;
   const started = Date.now();
   const next = renderEditStack(base, undefined, true);
   currentImage.value?.uniffiDestroy();
@@ -65,7 +80,7 @@ function scheduleFullReplay() {
 export function flushFullReplay() {
   if (fullReplayTimer === undefined) return;
   clearTimeout(fullReplayTimer);
-  runFullReplay();
+  runFullReplay(true);
 }
 
 function cancelFullReplay() {
@@ -76,8 +91,9 @@ function cancelFullReplay() {
 /** Lets go of every screen-size picture and stops a waiting full-size edit, when the session ends. */
 export function releaseShownImages() {
   cancelFullReplay();
-  clearPreloads();
+  releasePreloads();
   preloadedBase = null;
+  replayedBase = null;
   releasePictures();
 }
 
@@ -86,11 +102,24 @@ export function releaseShownImages() {
 /** Gap between an edit and its replay, so the tap's immediate UI feedback can be drawn first. */
 const REPLAY_DELAY_MS = 60;
 
-const findAction = (key: string): ActionControl | undefined => {
+const findAction = (key: string): { control: ActionControl; section: EditSection } | undefined => {
   for (const section of EDIT_SECTIONS) {
-    for (const control of leafControls(section.controls)) if (control.kind === 'action' && control.key === key) return control;
+    for (const control of leafControls(section.controls)) {
+      if (control.kind === 'action' && control.key === key) return { control, section };
+    }
   }
   return undefined;
+};
+
+/**
+ * Where in the stack a step runs. The beauty fixes come first, then the makeup, which is laid on the photo as layers of its own
+ * (the canvas has the photo as its `base` layer and a layer for each makeup control), then the look (the moods and the
+ * adjustments), so the look covers the makeup too, and then the rest. Steps keep their order within a stage.
+ */
+const stageOf = (sectionKey: string, layered: boolean): number => {
+  if (layered) return 1;
+  if (sectionKey === 'section-beauty') return 0;
+  return sectionKey === 'section-colorization' || sectionKey === 'section-adjustments' ? 2 : 3;
 };
 
 /** One applied control: how to run it on an image. */
@@ -98,7 +127,11 @@ type Step = {
   key: string;
   /** The slider's value; actions have none. */
   value?: AdjustmentValue;
+  /** Where in the stack it runs: see `stageOf`. */
+  stage: number;
   run: (image: AbraImageLike, scale: number) => void;
+  /** For a control that has a layer: the layer's sheet, so that the steps next to it go on one canvas. `run` does it alone. */
+  sheet?: (image: AbraImageLike, scale: number) => Sheet;
 };
 
 /**
@@ -120,31 +153,49 @@ function appliedSteps(
       ? [...recipe.appliedActions, pending.key]
       : recipe.appliedActions;
   for (const key of keys) {
-    const control = findAction(key);
-    if (!control || (!control.apply && !control.live && !control.tool)) continue;
+    const found = findAction(key);
+    if (!found) continue;
+    const { control, section } = found;
+    if (!control.apply && !control.live && !control.tool) continue;
     // The action about to be applied replaces the others in its group, so it is never left out with them.
     if (control !== pending && control.group && excludeGroups?.has(control.group)) continue;
-    steps.push({ key, run: (image, scale) => applyAction(control, image, scale) });
+    steps.push({ key, stage: stageOf(section.key, false), run: (image, scale) => applyAction(control, image, scale) });
   }
   for (const section of EDIT_SECTIONS) {
     for (const control of leafControls(section.controls)) {
       if (control.kind !== 'slider') continue;
       if (isPersonAdjustment(control.key)) {
         const effect = control.live;
-        if (!effect && !control.tool) throw new Error(`Person control has no effect definition: ${control.key}`);
+        if (!effect && !control.tool && !control.layer) throw new Error(`Person control has no effect definition: ${control.key}`);
         const activeKey = adjustmentKey(control.key, personSelection.value.selectedId);
-        for (const target of personAdjustmentTargets(recipe.adjustments, control.key)) {
+        const targets = personAdjustmentTargets(recipe.adjustments, control.key);
+        // The people with a value of their own, who the layer for everyone leaves out.
+        const own = targets.flatMap(target => (target.personId === null ? [] : [target.personId]));
+        for (const target of targets) {
           if (slider?.key === control.key && target.key === activeKey) continue;
           if (!isSliderApplied(control, target.value)) continue;
+          // The box of the person, in the pixels of the image it is run on.
+          const personOn = (image: AbraImageLike) => personIn(image.width(), target.personId);
           steps.push({
             key: target.key,
             value: target.value,
+            stage: stageOf(section.key, !!control.layer),
+            sheet: control.layer
+              ? (image, scale) =>
+                  layerSheet(
+                    control,
+                    sliderValues(control, target.value),
+                    sliderContext(control, image, scale, personOn(image), target.personId === null ? own : undefined),
+                    target.key,
+                  )
+              : undefined,
             run: (image, scale) => {
               // A live person effect has one slider; multi-slider person controls use `tool` below.
-              if (effect) return image.applyEffectToPerson(effect(target.value as number), target.personId ?? undefined);
-              // A tool is told where the person is. The image gives the box in its own pixels, so it is not scaled again.
-              const person = target.personId === null ? undefined : image.findPeople().find(found => found.id === target.personId);
-              applySlider(control, image, target.value, scale, person);
+              if (effect) {
+                return applyEffect(image, effect(target.value as number), skinMaskOf(target.personId));
+              }
+              // A tool is told where the person is, in the pixels of the image it is run on.
+              applySlider(control, image, target.value, scale, personOn(image));
             },
           });
         }
@@ -158,16 +209,21 @@ function appliedSteps(
       steps.push({
         key: control.key,
         value,
+        stage: stageOf(section.key, !!control.layer),
+        sheet: control.layer
+          ? (image, scale) => layerSheet(control, sliderValues(control, value), sliderContext(control, image, scale))
+          : undefined,
         run: (image, scale) => applySlider(control, image, value, scale),
       });
     }
   }
-  return steps;
+  // Array.sort keeps the order of steps with the same stage.
+  return steps.sort((first, second) => first.stage - second.stage);
 }
 
 /** Renders a saved recipe onto a fresh copy of `base`, without touching the live edit state. The caller owns the result. */
 export function renderRecipe(base: AbraImage, recipe: ProjectRecipe): AbraImage {
-  const next = base.copy() as AbraImage;
+  const next = base.clone() as AbraImage;
   runSteps(next, appliedSteps(undefined, undefined, undefined, recipe), base);
   return next;
 }
@@ -177,7 +233,7 @@ export function renderRecipe(base: AbraImage, recipe: ProjectRecipe): AbraImage 
  * the result.
  */
 function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, full = false) {
-  const next = (full ? base : shrunkOf('base', base)).copy() as AbraImage;
+  const next = (full ? base : shrunkOf('base', base)).clone() as AbraImage;
   runSteps(next, appliedSteps(excludeGroups), base);
   return next;
 }
@@ -185,22 +241,69 @@ function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, f
 /** Runs the steps on `image`, telling each how much smaller it is than `full`, the photo they are all edits of. */
 function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
   const scale = scaleBetween(image, full);
-  for (const step of steps) step.run(image, scale);
+  // Steps with a layer wait here until a step that is not one comes (or the steps end), and then go on a canvas over the photo.
+  let sheets: Sheet[] = [];
+  const lay = () => {
+    if (sheets.length === 0) return;
+    const laid = withLayers(image, sheets);
+    image.replaceWith(laid);
+    // They are native images the garbage collector cannot see the size of.
+    (laid as AbraPixels).uniffiDestroy();
+    sheets = [];
+  };
+  const timings: string[] = [];
+  const timed = <T>(label: string, run: () => T): T => {
+    const started = Date.now();
+    const result = run();
+    timings.push(`${label} ${Date.now() - started}`);
+    return result;
+  };
+  for (const step of steps) {
+    if (step.sheet) {
+      sheets.push(timed(`${step.key} sheet`, () => step.sheet!(image, scale)));
+      continue;
+    }
+    timed('layers', lay);
+    timed(step.key, () => step.run(image, scale));
+  }
+  timed('layers', lay);
+  if (__DEV__) console.debug(`[steps] ${image.width()}px:`, timings.join(', '));
 }
 
 /** Whether any control other than the slider is applied, so a drag of it has to start from the stack rendered without it. */
 export const hasOtherSteps = (sliderKey: string): boolean => appliedSteps(undefined, { key: sliderKey }).length > 0;
 
 /**
- * The edit stack without one slider, rendered on the CPU: what a drag of that slider starts from, with the slider's effect
- * shown on top by the live preview. The caller owns the result.
+ * The steps other than the slider's, split by where the slider sits in the stack (see `stageOf`): the ones that run before it
+ * and the ones that run after it.
  */
-export function renderStackWithoutSlider(sliderKey: string): AbraImage | null {
+function stepsAroundSlider(sliderKey: string) {
+  const stages = EDIT_SECTIONS.flatMap(section =>
+    leafControls(section.controls).flatMap(control =>
+      control.kind === 'slider' && control.key === sliderKey ? [stageOf(section.key, !!control.layer)] : [],
+    ),
+  );
+  const steps = appliedSteps(undefined, { key: sliderKey });
+  return { before: steps.filter(step => step.stage <= stages[0]), after: steps.filter(step => step.stage > stages[0]) };
+}
+
+/**
+ * The edit stack without one slider, rendered on the CPU: what a drag of that slider starts from, with the slider's effect
+ * shown on top by the live preview. With `beforeOnly`, the steps that come after the slider in the stack (such as makeup over
+ * the skin) are left out, and `renderStepsAfterSlider` puts them back over what the drag makes. The caller owns the result.
+ */
+export function renderStackWithoutSlider(sliderKey: string, beforeOnly = false): AbraImage | null {
   const base = editBaseImage.value;
   if (!base) return null;
-  const next = shrunkOf('base', base).copy() as AbraImage;
-  runSteps(next, appliedSteps(undefined, { key: sliderKey }), base);
+  const next = shrunkOf('base', base).clone() as AbraImage;
+  runSteps(next, beforeOnly ? stepsAroundSlider(sliderKey).before : appliedSteps(undefined, { key: sliderKey }), base);
   return next;
+}
+
+/** Runs the steps that come after the slider in the stack on `image`, which a drag of the slider made from the steps before it. */
+export function renderStepsAfterSlider(sliderKey: string, image: AbraImage) {
+  const base = editBaseImage.value;
+  if (base) runSteps(image, stepsAroundSlider(sliderKey).after, base);
 }
 
 /**
@@ -225,6 +328,8 @@ const imageId = (image: object) => {
 let cachedThumbnailKey = '';
 /** The edit base the preloaded images were made from. */
 let preloadedBase: AbraImage | null = null;
+/** The edit base the last screen-size replay was made from. */
+let replayedBase: AbraImage | null = null;
 let preloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
@@ -280,7 +385,7 @@ export function clearControlThumbnails() {
  * against the image *without* that group applied, so picking one doesn't change the others' previews;
  * everything else previews against the current image. Reused as-is while their inputs are unchanged.
  */
-function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraImage) {
+function sectionThumbnails(section: EditSection, base: AbraImage) {
   if (!section.previewThumbnails) {
     cachedThumbnailKey = '';
     replaceThumbnails({});
@@ -289,7 +394,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
   const groups = new Set<string>();
   for (const control of section.controls) if (control.kind === 'action' && control.group) groups.add(control.group);
   const applied = appliedActions.value;
-  const inGroup = applied.filter(key => groups.has(findAction(key)?.group ?? ''));
+  const inGroup = applied.filter(key => groups.has(findAction(key)?.control.group ?? ''));
   const key = JSON.stringify([
     section.key,
     imageId(base),
@@ -299,8 +404,13 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
   if (key === cachedThumbnailKey) return;
   cachedThumbnailKey = '';
 
-  const source = inGroup.length ? renderEditStack(base, groups) : current;
+  // The edit is replayed on the cached thumbnail-size copy of the photo, so nothing here shrinks a picture again.
+  // It is made from the screen-size copy, not the full-size photo, so a large photo costs no more to shrink than a small one.
+  const started = Date.now();
+  const source = shrunkOf('thumbnail', shrunkOf('base', base), thumbnailPixels()).clone() as AbraImage;
   try {
+    runSteps(source, appliedSteps(inGroup.length ? groups : undefined), base);
+    if (__DEV__) console.debug('[thumbnails] small-size replay ms:', Date.now() - started);
     const previous = Object.fromEntries(
       section.controls.flatMap(control => {
         const preview = controlThumbnails.value[control.key];
@@ -323,8 +433,9 @@ function sectionThumbnails(section: EditSection, base: AbraImage, current: AbraI
       thumbnailBuild = undefined;
       cachedThumbnailKey = succeeded ? key : '';
     });
-  } finally {
-    if (source !== current) source.uniffiDestroy();
+  } catch (error) {
+    source.uniffiDestroy();
+    throw error;
   }
 }
 
@@ -333,6 +444,12 @@ function replay() {
   const base = editBaseImage.value;
   replayHidden.next(false);
   if (!base) return busy.next(false);
+
+  // A new photo makes what was preloaded from the old one again, when its control is next used. This comes before anything is
+  // drawn, so the edits drawn now (and the thumbnails after them) share what is made for the new photo and do not lose it.
+  if (preloadedBase && preloadedBase !== base) clearPreloads();
+  preloadedBase = base;
+  replayedBase = base;
 
   const started = Date.now();
   const next = renderEditStack(base);
@@ -348,11 +465,8 @@ function replay() {
     thumbnailTimer = setTimeout(() => {
       thumbnailTimer = undefined;
       try {
-        // A new photo makes what was preloaded from the old one again, when its control is next used.
-        if (preloadedBase && preloadedBase !== base) clearPreloads();
-        preloadedBase = base;
         preloadFocused();
-        sectionThumbnails(findSection(activeSectionKey.value), base, next);
+        sectionThumbnails(findSection(activeSectionKey.value), base);
       } catch (error) {
         console.warn('[edit] preparing thumbnail edit stack threw:', error);
       }

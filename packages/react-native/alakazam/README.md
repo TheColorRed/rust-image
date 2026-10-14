@@ -61,7 +61,7 @@ Destroy the thumbnail itself when it is no longer displayed.
 The mobile editor uses 112 × 80 dp landscape cards, with density-adjusted
 preview pixels, cover fitting, and a React Native press target and selection
 outline around each native view.
-Thumbnail backgrounds follow completed image edits as CPU pixels, avoiding a
+A thumbnail's background is set from the image it is given, and replaced with `setImage`, as CPU pixels, avoiding a
 GPU upload/readback for each CPU-composed card. Transient live effects remain
 on the editor's live preview. A separate transparent gradient overlays each
 card immediately and stays in place when its photo is replaced.
@@ -69,9 +69,8 @@ The overlay keeps RGB black throughout and increases alpha from zero on the
 first row to the configured opacity on the last row. A 40% black endpoint
 retains approximately 60% of the underlying photo's channel values.
 
-Thumbnail generation uses `await image.thumbnailSourceAsync(width, height)`
-to downscale once in Rust, followed by
-`await source.renderThumbnailAsync(effects, operation)` for each control.
+Thumbnail generation starts from a card-size copy of the photo that the editor keeps and replays the edits on, followed by
+`await renderThumbnailAsync(source, effects, skinMask)` for each control.
 Pixels stay in native memory throughout. Decoding and thumbnail jobs share
 two native image workers; the editor submits at most two thumbnail effects
 at once, in control order (the initially visible cards first), and publishes
@@ -85,7 +84,7 @@ Full-resolution edit replay remains synchronous, but thumbnail generation
 starts after the main-preview update has had a chance to commit. Matching
 gradient overlays share cached native pixels instead of being rebuilt per card.
 Debug builds log decode/segmentation time, full-resolution replay time, and
-thumbnail source/first-card/total time separately so bottlenecks can be measured.
+thumbnail first-card/total time separately so bottlenecks can be measured.
 
 `VesselView` automatically supplies the platform UI font and default text size,
 scaled for screen density and accessibility text scaling. Explicit Rust font

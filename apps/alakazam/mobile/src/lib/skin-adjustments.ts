@@ -8,6 +8,11 @@ import {
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
   UNDER_EYE_KEY,
+  BLUSH_KEY,
+  LIP_LINER_KEY,
+  HIGHLIGHTER_KEY,
+  CONTOUR_KEY,
+  TEETH_WHITENING_KEY,
 } from '@/src/lib/edit-sections/keys';
 
 /** The controls that can be set for one person, or for everyone. */
@@ -20,7 +25,12 @@ export function isPersonAdjustment(key: string): boolean {
     key === EYELINER_KEY ||
     key === EYESHADOW_KEY ||
     key === BROW_BONE_KEY ||
-    key === UNDER_EYE_KEY
+    key === UNDER_EYE_KEY ||
+      key === BLUSH_KEY ||
+      key === LIP_LINER_KEY ||
+      key === HIGHLIGHTER_KEY ||
+      key === CONTOUR_KEY ||
+      key === TEETH_WHITENING_KEY
   );
 }
 
@@ -46,7 +56,14 @@ export function personAdjustmentTargets(
 }
 
 /** The box of a detected person, shrunk to a photo that is `scale` times the size the person was found in. */
-export const scaledPersonBounds = (
-  person: { x: number; y: number; width: number; height: number } | undefined,
+export const scaledPersonBounds = <P extends { x: number; y: number; width: number; height: number }>(
+  person: P | undefined,
   scale: number,
-) => person && { x: person.x * scale, y: person.y * scale, width: person.width * scale, height: person.height * scale };
+) =>
+  person && {
+    ...person,
+    x: person.x * scale,
+    y: person.y * scale,
+    width: person.width * scale,
+    height: person.height * scale,
+  };

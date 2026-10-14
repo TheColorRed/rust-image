@@ -4,7 +4,7 @@
 //! `remover(RemoverShape.Circle.new(6)).withPosition(ShapePosition.Point.new({ x: 120, y: 80 })).apply(photo)`. The `with_*`
 //! functions return a new remover, as the library's builders take and return the remover by value.
 //!
-//! Not exported: the skin tools and the alignment and atlas tools, and `Tool::apply_to`. `with_position` takes the
+//! Not exported: the alignment and atlas tools, and `Tool::apply_to`. The skin tools are in `beauty`. `with_position` takes the
 //! [`ShapePosition`] that the library's `impl Into<ShapePosition>` turns a point or a pair of points into, and `with_path` takes
 //! a list of points, one of the types the library's `impl IntoPathPoints` accepts.
 

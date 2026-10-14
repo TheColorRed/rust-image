@@ -1,4 +1,3 @@
-import { channelMix } from '@abra/core/adjustments';
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { rectOrigin } from '@abra/core/geometry';
@@ -6,10 +5,35 @@ import { type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/edit-sections';
 import { derivedFor } from '@/src/lib/editor-preloads';
+import { paintSheet, type Painting } from '@/src/lib/layers';
 import { FACE_MODELS, belongsTo, boxKey, findFaces, model, owning } from '@/src/lib/faces';
 
 const LIPS = ['upper lip', 'lower lip'];
-const LUMA = [0.299, 0.587, 0.114];
+
+/** How much of a skin edit the lips and the mouth get: half, so they match the face without being as strong as the skin. */
+const MOUTH_SHARE = 0.5;
+/** How wide the fade from the skin into the mouth is, as a fraction of the mouth's width. */
+const MOUTH_FADE = 0.12;
+
+/**
+ * `skin` with the lips and the mouth of the faces in `preloaded` (what `makeupMasks` made) weaker, for a skin edit that would
+ * otherwise tint them as strongly as the skin: they get `MOUTH_SHARE` of it, faded in softly at the edge. Anything made is handed to
+ * `keep`; `skin` itself is not changed.
+ */
+export const skinWithMouthEased = (skin: MaskLike, preloaded: ToolContext['preloaded'], keep: <T>(item: T) => T): MaskLike => {
+  if (!preloaded || Array.isArray(preloaded)) return skin;
+  let eased = skin;
+  const half = keep(Mask.fromValues(skin.width(), skin.height(), new Uint8Array(skin.width() * skin.height()).fill(Math.round(255 * MOUTH_SHARE)).buffer));
+  for (const [key, part] of Object.entries(preloaded)) {
+    if (!key.startsWith('lipstick|') && !key.startsWith('mouth|')) continue;
+    const box = (part as MaskLike).bounds(0);
+    if (!box) continue;
+    const blurred = keep((part as MaskLike).toImage());
+    keep(gaussianBlur(box.width * MOUTH_FADE)).apply(blurred);
+    eased = keep(eased.subtracted(keep(keep(Mask.fromImage(blurred)).multiplied(half))));
+  }
+  return eased;
+};
 
 type EyeMakeup = 'eyeliner' | 'eyeshadow' | 'brow-bone' | 'under-eye';
 
@@ -28,13 +52,11 @@ const WORK_WIDTH = 1280;
 
 /**
  * The fullest a region can be, and the least. A region is made once at the fullest, as a map of how near each pixel is to the eye
- * (see `eyeField`), and the fullness slider only chooses how much of the map is shown, so moving it makes no shape. An eyeliner
- * has no fullness: it is as full as it goes.
+ * (see `eyeField`), and the fullness slider only chooses how much of the map is shown, so moving it makes no shape. An eyeliner's
+ * fullness is its width.
  */
 const FULL_MAX = 3;
 const FULL_MIN = 0.3;
-/** The fullest a region of this kind can be. */
-const fullestOf = (kind: EyeMakeup) => (kind === 'eyeliner' ? 1 : FULL_MAX);
 
 /** How sharply the edge of the shown part of the map falls off, as a multiple of the map's own steepness. */
 const EDGE_GAIN = 2;
@@ -73,7 +95,7 @@ const eyeField = (
 ): { field: MaskLike; limits: MaskLike } | undefined => {
   const eyeBounds = eyes.bounds(0);
   if (!eyeBounds) return undefined;
-  const fullest = fullestOf(kind);
+  const fullest = FULL_MAX;
 
   // A crop around the eye with room for the fullest region.
   const reach = Math.max(eyeBounds.width, eyeBounds.height) * 3 * fullest;
@@ -203,7 +225,7 @@ const regionAt = (
   fullness: number,
   keep: <V>(value: V) => V,
 ): MaskLike => {
-  const reach = Math.min(1, Math.max(0, (fullness - FULL_MIN) / (fullestOf(kind) - FULL_MIN)));
+  const reach = Math.min(1, Math.max(0, (fullness - FULL_MIN) / (FULL_MAX - FULL_MIN)));
   const image = keep(field.toImage());
   image.sub(255 * 0.85 * (1 - reach) ** 1.5);
   image.mul(EDGE_GAIN);
@@ -212,7 +234,7 @@ const regionAt = (
 
 /**
  * Runs face analysis once and keeps what every region of the Makeup group is made from: the lips, and the eye and eyebrow of each
- * side, named `lipstick|person`, `nose|person`, `eye|person|side` and `brow|person|side` (the person is the box around them, as fractions of the photo: see `boxKey`). The regions
+ * side, named `lipstick|person`, `skin|person`, `nose|person`, `eye|person|side` and `brow|person|side` (the person is the box around them, as fractions of the photo: see `boxKey`). The regions
  * themselves are made when the color is applied, because their size is a slider.
  */
 export const makeupMasks = (photo: ImageLike): Record<string, MaskLike> | undefined => {
@@ -224,6 +246,10 @@ export const makeupMasks = (photo: ImageLike): Record<string, MaskLike> | undefi
       const place = (mask: MaskLike) => mask.placed(photo.width(), photo.height(), rectOrigin(zoom));
       const lips = keep(labels.maskNamed(LIPS));
       if (lips.bounds(0)) made[`lipstick|${box}`] = place(lips);
+      const mouth = keep(labels.maskNamed(['mouth']));
+      if (mouth.bounds(0)) made[`mouth|${box}`] = place(mouth);
+      const skin = keep(labels.maskNamed(['skin']));
+      if (skin.bounds(0)) made[`skin|${box}`] = place(skin);
       const nose = keep(labels.maskNamed(['nose']));
       if (nose.bounds(0)) made[`nose|${box}`] = place(nose);
       for (const side of ['left', 'right'] as const) {
@@ -239,36 +265,31 @@ export const makeupMasks = (photo: ImageLike): Record<string, MaskLike> | undefi
 };
 
 /**
- * Adds a color while retaining the light and shade already present around the eyes. `fullness` is how far the color reaches out
+ * Paints the color of a hue (0 to 1 along `Gradient.hue()`), as colorful as `saturation` and as bright as `brightness` (both 0 to
+ * 1), around each eye of the person in `context` (or of everyone) on `sheet`, which becomes a layer over the photo. How much of
+ * it shows is the layer's opacity, and how it mixes with the skin is the layer's blend. `fullness` is how far the color reaches out
  * from each eye (1 is as made; more covers more of the lid, brow bone or under eye).
  */
 export const applyEyeMakeup = (
   kind: EyeMakeup,
-  photo: ImageLike,
+  sheet: Painting,
   hue: number,
-  strength: number,
   saturation: number,
   brightness: number,
   fullness: number,
-  { preloaded, person }: ToolContext,
+  { preloaded, person, others }: ToolContext,
 ) => {
   if (!preloaded || Array.isArray(preloaded)) return;
   owning(keep => {
-    const rgb = Array.from(
-      new Uint8Array(keep(Color.fromHsv(360 * (1 - hue), saturation, brightness)).rgb()),
-      value => value / 255,
-    );
-    const mix = rgb.map((channel, target) =>
-      LUMA.map((weight, source) => (1 - strength) * (source === target ? 1 : 0) + strength * channel * weight),
-    );
-    const color = keep(channelMix(mix[0], mix[1], mix[2]));
+    const color = keep(Color.fromHsv(360 * (1 - hue), saturation, brightness));
+    const regions: MaskLike[] = [];
     for (const key of Object.keys(preloaded)) {
       const [maskKind, box, side] = key.split('|');
       if (maskKind !== 'eye' || !box || !side) continue;
-      if (!belongsTo(box, photo, person)) continue;
+      if (!belongsTo(box, sheet, person, others)) continue;
       // The map of how near each pixel is to the eye, and what limits it, are made once for this eye and kept: no slider changes them.
       // Regions are made at a working size, not the photo's (see `WORK_WIDTH`).
-      const shrink = Math.min(1, WORK_WIDTH / photo.width());
+      const shrink = Math.min(1, WORK_WIDTH / sheet.width());
       let limits: MaskLike | undefined;
       const field = derivedFor(preloaded, `${kind}|${key}|field`, '', () =>
         owning(own => {
@@ -286,7 +307,7 @@ export const applyEyeMakeup = (
             const bounds = atWorkSize(`eye|${box}|${each}`)?.bounds(0);
             return bounds ? [bounds.x + bounds.width / 2] : [];
           });
-          const midline = eyeCenters.length === 2 ? (eyeCenters[0] + eyeCenters[1]) / 2 : (photo.width() * shrink) / 2;
+          const midline = eyeCenters.length === 2 ? (eyeCenters[0] + eyeCenters[1]) / 2 : (sheet.width() * shrink) / 2;
           const made = eyeField(eye, atWorkSize(`brow|${box}|${side}`), atWorkSize(`nose|${box}`), kind, midline, own);
           limits = made?.limits;
           return made?.field;
@@ -297,10 +318,11 @@ export const applyEyeMakeup = (
       // Showing part of the map is a few passes over it, whatever the slider is.
       const region = owning(own => {
         const shown = regionAt(field, limitsHeld, kind, fullness, own);
-        return shrink === 1 ? shown : own(shown).resized(photo.width(), photo.height(), TransformAlgorithm.Bilinear);
+        return shrink === 1 ? shown : own(shown).resized(sheet.width(), sheet.height(), TransformAlgorithm.Bilinear);
       });
       keep(region);
-      if (region) keep(color.withMask(region)).apply(photo);
+      if (region) regions.push(region);
     }
+    paintSheet(sheet, regions, color);
   });
 };

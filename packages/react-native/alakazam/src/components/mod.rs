@@ -1,6 +1,5 @@
-pub mod hue_color_picker;
+pub mod color_bar_picker;
 pub mod image_preview;
-pub mod skin_tan_color_picker;
 pub mod thumbnail_preview;
 
 use vessel::prelude::Frame;

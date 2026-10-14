@@ -1,4 +1,5 @@
 import { type ImageLike } from '@abra/core/image';
+import { type MaskLike } from '@abra/core/mask';
 import { ImagePreview, Message, type AbraImage, type EffectSpec } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
 
@@ -21,6 +22,7 @@ type Open = {
  */
 export class LiveRenderer {
   private open: Open | null = null;
+  private skin: MaskLike | undefined;
   private activityVersion = 0;
 
   /** Changes whenever a new live interaction starts, so an older committed frame cannot hide it. */
@@ -55,6 +57,7 @@ export class LiveRenderer {
         preview: new ImagePreview(image),
       };
       this.view.next(this.open.preview);
+      if (this.skin) this.open.preview.send(Message.Skin.new(this.skin));
       return true;
     } catch (error) {
       console.warn(`[live] could not open a preview:`, error);
@@ -79,12 +82,12 @@ export class LiveRenderer {
   }
 
   /**
-   * The open photo shrunk to fit `width` x `height` pixels: what a tool runs on while a slider is dragged. The same size of
-   * the same edit gives the same image, so a drag resizes once. The preview owns it, so do not destroy it. `null` when there
-   * is no open preview.
+   * Makes the skin effects work on this mask of the skin, or on the skin found by its color when there is none. It is kept for
+   * the previews opened later.
    */
-  source(width: number, height: number): ImageLike | null {
-    return this.open?.preview.source(width, height) ?? null;
+  setSkin(mask: MaskLike | undefined) {
+    this.skin = mask;
+    this.open?.preview.send(mask ? Message.Skin.new(mask) : Message.FindSkin.new());
   }
 
   /**

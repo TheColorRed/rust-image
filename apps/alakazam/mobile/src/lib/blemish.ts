@@ -8,7 +8,7 @@ import { type AbraImageLike } from '@alakazam/mobile';
  * an appropriately sized sample.
  */
 export function removeBlemish(image: AbraImageLike, x: number, y: number, radius: number) {
-  const photo = image.toImage();
+  const photo = image.clone();
   try {
     remover(RemoverShape.Circle.new(radius))
       .withDistance(Units.Pixels.new(Math.max(Math.round(radius * 0.6), 3)))

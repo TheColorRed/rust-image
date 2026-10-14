@@ -221,21 +221,14 @@ pub fn effect_has_gpu(effect: EffectSpec) -> bool {
   effect.has_gpu()
 }
 
-/// Applies one editor effect to the shared Abra image.
+/// Applies one editor effect to the Abra image. Skin effects work on the `skin_mask` when there is one, and find the skin by
+/// its color when there is not.
 #[uniffi::export]
-pub fn apply_effect(image: std::sync::Arc<abra_uniffi::Image>, effect: EffectSpec) {
-  let skin_mask = image.skin_mask();
+pub fn apply_effect(
+  image: std::sync::Arc<abra_uniffi::Image>, effect: EffectSpec, skin_mask: Option<std::sync::Arc<abra_uniffi::Mask>>,
+) {
+  let skin_mask = skin_mask.map(|mask| mask.core());
   image.edit(|pixels| effect.apply_with_skin_mask(pixels, skin_mask.as_ref()));
-}
-
-/// Applies an effect to one cached person without changing the live selection.
-#[uniffi::export]
-pub fn apply_effect_to_person(
-  image: std::sync::Arc<abra_uniffi::Image>, effect: EffectSpec, person_id: Option<u32>,
-) -> Result<(), crate::AbraError> {
-  let skin_mask = image.skin_mask_for_person(person_id).map_err(|message| crate::AbraError::Ai { message })?;
-  image.edit(|pixels| effect.apply_with_skin_mask(pixels, skin_mask.as_ref()));
-  Ok(())
 }
 
 #[cfg(test)]

@@ -166,4 +166,4 @@ The preview receives only the changed value and decides what to render. For a va
 
 - `apps/examples/vessel-panels` demonstrates a complete desktop window app and reactive drawing.
 - `packages/react-native/alakazam/src/components/thumbnail_preview.rs` demonstrates a tracked image with an overlaid label and reactive replacement.
-- `packages/react-native/alakazam/src/components/skin_tan_color_picker.rs` demonstrates custom slider images and forwarding typed messages.
+- `packages/react-native/alakazam/src/components/color_bar_picker.rs` demonstrates custom slider images and forwarding typed messages.

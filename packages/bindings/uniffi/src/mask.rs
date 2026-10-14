@@ -8,8 +8,9 @@
 
 use std::sync::{Arc, RwLock};
 
-use abra::abra_core::{PointF, Rect, TransformAlgorithm};
+use abra::abra_core::{PointF, Rect, Size, TransformAlgorithm};
 use abra::mask::prelude as library;
+use abra::mask::prelude::{Blob, Falloff};
 
 use crate::{Area, Color, Image};
 
@@ -23,6 +24,22 @@ pub enum TransformAlgorithm {
   EdgeDirectNEDI,
   EdgeDirectEDI,
   Auto,
+}
+
+/// How a `Blob` fades from its middle out to its edge.
+#[uniffi::remote(Enum)]
+pub enum Falloff {
+  Gaussian { fade: f32, reach: f32 },
+  Smooth { fade: f32 },
+}
+
+/// A soft oval to put in a mask: a place, a size, a turn and how it fades.
+#[uniffi::remote(Record)]
+pub struct Blob {
+  pub center: PointF,
+  pub half_size: Size,
+  pub angle: f32,
+  pub falloff: Falloff,
 }
 
 /// One byte for each pixel of a picture: `255` is fully applied, `0` is untouched and values between apply partially.
@@ -65,6 +82,12 @@ impl Mask {
   #[uniffi::constructor]
   pub fn from_image(image: Arc<Image>) -> Self {
     Self::from_core(library::Mask::from_image(image.core()))
+  }
+
+  /// A mask of soft ovals, for shading a face or any region with a place and a shape. Where ovals overlap the strongest one wins.
+  #[uniffi::constructor]
+  pub fn from_blobs(width: u32, height: u32, blobs: Vec<Blob>) -> Self {
+    Self::from_core(library::Mask::from_blobs(width, height, &blobs))
   }
 
   /// A mask of the pixels of an image that are close to a color: `255` where a pixel has the color's hue (within `hue_range`

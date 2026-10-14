@@ -780,6 +780,7 @@ dependencies = [
  "drawing",
  "filters",
  "gpu",
+ "mask",
  "rayon",
  "typography",
  "uuid",

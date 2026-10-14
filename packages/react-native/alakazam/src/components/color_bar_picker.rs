@@ -1,76 +1,63 @@
 use std::sync::Arc;
 
 use abra::{
+  abra_core::{Color, Gradient},
   drawing::prelude::fill,
   prelude::{Area, Image, Size},
 };
-use vessel::prelude::{Component, Frame, Observable, Observer, Slider};
+use vessel::prelude::{Component, Frame, Slider};
 
-use crate::{
-  components::image_preview::{ImagePreview, Message},
-  effect_spec::{EffectSpec, skin_tan_gradient},
-  components::frame_of,
-};
+use crate::components::frame_of;
 
-/// A bar of tans with a handle: the user drags it to pick how tanned the skin in the photo gets. The preview shows each
-/// position as it is picked; the value is read when the user lets go, to apply it to the edit.
+/// A bar of colors with a handle: the user drags it to pick one. Read the value when the user lets go. The colors are given, so
+/// one bar serves a control that picks a hue, a shade or a tan, and any other bar of colors.
 #[derive(uniffi::Object, Component)]
-pub struct SkinTanColorPicker {
+pub struct ColorBarPicker {
   slider: Slider,
 }
 
 #[uniffi::export]
-impl SkinTanColorPicker {
-  /// A picker that shows its tans on `p_preview` and starts at `p_value` (0 to 1, where 0 is no tan).
+impl ColorBarPicker {
+  /// A picker that starts at `p_value` (0 to 1 along the bar) and shows `p_colors`, each as red, green and blue from 0 to 255,
+  /// evenly spaced from the start of the bar to its end. Panics when a color has fewer than three channels.
   #[uniffi::constructor]
-  pub fn new(p_preview: Arc<ImagePreview>, p_value: f64) -> Arc<Self> {
+  pub fn new(p_value: f64, p_colors: Vec<Vec<u8>>) -> Arc<Self> {
+    let colors = p_colors.iter().map(|color| Color::from_rgb(color[0], color[1], color[2])).collect();
     let slider = Slider::new(p_value as f32)
-      .with_track_image(Arc::new(SkinTanColorPicker::create_gradient_image()))
-      .with_thumb_image(Arc::new(SkinTanColorPicker::create_gradient_handle()));
-
-    // Send each position to the image_preview component.
-    let preview = p_preview.subject::<Message>();
-    slider.changes().subscribe(move |changed| {
-      preview.next(Message::Show(vec![EffectSpec::SkinTan {
-        offset: changed.0 as f64,
-      }]))
-    });
+      .with_track_image(Arc::new(ColorBarPicker::create_gradient_image(&Gradient::evenly(colors))))
+      .with_thumb_image(Arc::new(ColorBarPicker::create_gradient_handle()));
 
     Arc::new(Self { slider })
   }
 
-  /// Where the handle is now, 0 to 1 (0 is no tan, 1 is the darkest).
+  /// Where the handle is now, 0 to 1 along the bar.
   ///
-  /// Call it when the user lets go, to apply the tan to the edit (`sliderCommitRequested` in the editor). You do not need
-  /// it while they drag: the picker already sends every position to the preview itself, so the photo follows the handle
-  /// with no help from JavaScript. Reading it is cheap and does not change anything.
+  /// Call it while the user drags, to show what is picked, and when they let go, to apply it to the edit
+  /// (`sliderCommitRequested` in the editor). Reading it is cheap and does not change anything.
   pub fn value(&self) -> f64 {
     self.slider.value() as f64
   }
 
-  /// Moves the handle to `p_value` (0 to 1) from the program, as when an edit is undone or reset and the handle has to
-  /// show what is applied now.
+  /// Moves the handle to `p_value` (0 to 1) from the program, as when an edit is undone or reset and the handle has to show
+  /// what is applied now.
   ///
-  /// It only moves the handle: nothing is sent to the preview, because the photo is already showing that state (the
-  /// edit's result). To also preview a value that is not applied yet, send a `Message::Show` to the preview as well. The
-  /// user's own drags do not need this, since the handle follows their finger. The editor currently makes a new picker
-  /// for a new starting value instead of calling this.
+  /// The editor currently makes a new picker for a new starting value instead of calling this.
   pub fn set_value(&self, p_value: f64) {
     self.slider.set_value(p_value as f32);
   }
 }
 
-impl SkinTanColorPicker {
-  /// The tan scale as a picture, for the bar. Its height is the bar's thickness.
-  fn create_gradient_image() -> Frame {
+impl ColorBarPicker {
+  /// The colors laid out as a bar. Its height is the bar's thickness.
+  fn create_gradient_image(p_gradient: &Gradient) -> Frame {
     let area = Area::from_size(Size::new(200, 14));
     let mut image = Image::new(200, 14);
-    fill(&area, &skin_tan_gradient()).apply(&mut image);
+    fill(&area, p_gradient).apply(&mut image);
     frame_of(&image)
   }
 
   /// The handle as a picture: a white ring with a soft shadow, hollow so the tan under it shows through.
-  pub(crate) fn create_gradient_handle() -> Frame {
+  fn create_gradient_handle() -> Frame {
     const SIZE: u32 = 36;
     // The ring runs from `INNER` to `OUTER` pixels from the center, edged on the inside with a thin dark line, and the
     // shadow fades out beyond it.

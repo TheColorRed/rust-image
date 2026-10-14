@@ -1,9 +1,21 @@
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use abra::prelude::{Image as CoreImage, ImageExt};
-use abra_uniffi::{Image, PersonDetection};
+use abra_uniffi::{Image, Mask};
 
 use crate::{AbraError, effect_spec::{EffectSpec, apply_effect}, models};
+
+/// One person found in a photo: where they are in the photo's pixels, how sure the model is, and the mask of their body.
+#[derive(uniffi::Record)]
+pub struct PersonDetection {
+  pub id: u32,
+  pub x: u32,
+  pub y: u32,
+  pub width: u32,
+  pub height: u32,
+  pub confidence: f64,
+  pub mask: Arc<Mask>,
+}
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -71,54 +83,41 @@ pub async fn read_image_async(path: String) -> Result<Arc<Image>, AbraError> {
 }
 
 #[uniffi::export]
-pub async fn read_image_with_project_resources_async(
-  path: String,
-  skin_mask_path: Option<String>,
-  people_dir: Option<String>,
-  people: Option<Vec<PersonDetection>>,
+pub async fn render_thumbnail_async(
+  image: Arc<Image>, effects: Vec<EffectSpec>, skin_mask: Option<Arc<Mask>>,
 ) -> Result<Arc<Image>, AbraError> {
-  run(move || Ok(Arc::new(Image::read_with_project_resources(path, skin_mask_path, people_dir, people)))).await
-}
-
-#[uniffi::export]
-pub async fn thumbnail_source_async(image: Arc<Image>, width: u32, height: u32) -> Result<Arc<Image>, AbraError> {
-  if width == 0 || height == 0 {
-    return Err(AbraError::InvalidPixels { message: "Thumbnail dimensions must be positive".to_owned() });
-  }
-  run(move || Ok(image.shrunk(width, height))).await
-}
-
-#[uniffi::export]
-pub async fn render_thumbnail_async(image: Arc<Image>, effects: Vec<EffectSpec>) -> Result<Arc<Image>, AbraError> {
   run(move || {
     let rendered = image.duplicate();
-    for effect in effects { apply_effect(Arc::clone(&rendered), effect); }
+    for effect in effects { apply_effect(Arc::clone(&rendered), effect, skin_mask.clone()); }
     Ok(rendered)
   }).await
 }
 
+/// The mask of the skin in the photo.
 #[uniffi::export]
-pub async fn detect_skin_async(image: Arc<Image>) -> Result<(), AbraError> {
-  if image.base_skin_mask().is_some() { return Ok(()) }
+pub async fn detect_skin_async(image: Arc<Image>) -> Result<Arc<Mask>, AbraError> {
   let pixels = image.core();
   run(move || {
     let mask = models::skin_segmenter()?.process(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
-    if image.base_skin_mask().is_none() { image.set_skin_mask(mask); }
-    Ok(())
+    Ok(Arc::new(Mask::from_core(mask)))
   }).await
 }
 
+/// The people in the photo, each with the mask of their body.
 #[uniffi::export]
 pub async fn find_people_async(image: Arc<Image>) -> Result<Vec<PersonDetection>, AbraError> {
-  if image.cached_people().is_none() {
-    let pixels = image.core();
-    let target = Arc::clone(&image);
-    let people = run(move || {
-      models::person_segmenter()?.process(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })
-    }).await?;
-    if target.cached_people().is_none() { target.set_people(people); }
-  }
-  Ok(image.find_people())
+  let pixels = image.core();
+  let (width, height) = (image.width(), image.height());
+  run(move || {
+    let people = models::person_segmenter()?.process(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    Ok(people.iter().enumerate().map(|(id, person)| {
+      let bounds = person.bounds_in(width, height);
+      PersonDetection {
+        id: id as u32, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+        confidence: person.confidence as f64, mask: Arc::new(Mask::from_core(person.mask.clone())),
+      }
+    }).collect())
+  }).await
 }
 
 #[cfg(test)]
@@ -165,21 +164,17 @@ mod tests {
   fn async_thumbnail_edits_match_replay_and_leave_the_source_unchanged() {
     use abra::abra_core::Channels;
     use crate::effect_spec::EffectSpec;
-    let pixels: Vec<u8> = (0..32 * 16).flat_map(|i| [(i % 255) as u8, 80, 120, 255]).collect();
-    let image = Arc::new(Image::from_core(CoreImage::new_from_pixels(32, 16, pixels.clone(), Channels::RGBA)));
-    let source = futures::executor::block_on(thumbnail_source_async(Arc::clone(&image), 16, 16)).unwrap();
-    assert_eq!((source.width(), source.height()), (16, 8));
-    assert_eq!(image.rgba(), pixels);
+    let pixels: Vec<u8> = (0..16 * 8).flat_map(|i| [(i % 255) as u8, 80, 120, 255]).collect();
+    let source = Arc::new(Image::from_core(CoreImage::new_from_pixels(16, 8, pixels, Channels::RGBA)));
     let original = source.rgba();
     let effects = vec![EffectSpec::Brightness { amount: 20 }, EffectSpec::Invert];
     let expected = source.duplicate();
     for effect in &effects {
-      apply_effect(Arc::clone(&expected), effect.clone());
+      apply_effect(Arc::clone(&expected), effect.clone(), None);
     }
-    let thumbnail = futures::executor::block_on(render_thumbnail_async(Arc::clone(&source), effects)).unwrap();
+    let thumbnail = futures::executor::block_on(render_thumbnail_async(Arc::clone(&source), effects, None)).unwrap();
     assert_eq!(thumbnail.rgba(), expected.rgba());
     assert_eq!(source.rgba(), original);
-    assert!(futures::executor::block_on(thumbnail_source_async(image, 0, 16)).is_err());
   }
 
   #[test]

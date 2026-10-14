@@ -214,6 +214,12 @@ impl<'a> Layer<'a> {
     self.borrow_mut().set_live_effects(p_effects);
   }
 
+  /// Limits where the layer shows: the mask is multiplied into the layer's alpha (white shows, black hides). It must be the
+  /// same size as the layer. `None` removes it.
+  pub fn set_mask(&self, p_mask: Option<mask::Mask>) {
+    self.borrow_mut().set_mask(p_mask);
+  }
+
   /// Sets all effects for the layer.
   pub fn set_effects(&self, p_effects: LayerEffects<'a>) {
     self.borrow_mut().set_effects(p_effects);
