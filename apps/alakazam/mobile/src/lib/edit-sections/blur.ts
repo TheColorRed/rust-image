@@ -1,5 +1,4 @@
-import { applyEffect, EffectSpec } from "@alakazam/mobile";
-import { boxBlur } from '@abra/core/filters';
+import { boxBlur, gaussianBlur } from '@abra/core/filters';
 import { EditSection, SliderControl } from "../edit-sections";
 
 export const blur: EditSection = {
@@ -15,9 +14,9 @@ export const blur: EditSection = {
       step: 1,
       defaultValue: 0,
       applyOnSelect: false,
-      apply: (image, value) => applyEffect(image, EffectSpec.GaussianBlur.new({ radius: value }), undefined),
-      live: value => EffectSpec.GaussianBlur.new({ radius: value }),
-    },
+      deferred: true,
+      tool: (photo, [value], { scale }) => gaussianBlur(value * scale).applyDeferred(photo),
+    } satisfies SliderControl<number>,
     {
       kind: 'slider',
       key: 'action-box-blur',
@@ -27,7 +26,8 @@ export const blur: EditSection = {
       step: 1,
       defaultValue: 0,
       applyOnSelect: false,
-      tool: (photo, [value], { scale }) => boxBlur(value * scale).apply(photo),
+      deferred: true,
+      tool: (photo, [value], { scale }) => boxBlur(value * scale).applyDeferred(photo),
     } satisfies SliderControl<number>,
   ],
 };

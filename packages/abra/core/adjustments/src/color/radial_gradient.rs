@@ -57,7 +57,7 @@ impl Generator for RadialGradient {
     let uniforms: Vec<u8> =
       [self.center.0, self.center.1, inverse.0, inverse.1].into_iter().flat_map(f32::to_le_bytes).collect();
     Some(vec![
-      GpuPass::new(include_str!("./radial_gradient.wgsl"), uniforms).with_aux(GpuAux {
+      GpuPass::new(include_str!("./radial_gradient.wgsl"), uniforms).with_window().with_aux(GpuAux {
         width: LUT_SIZE,
         height: 1,
         rgba: self.lut.clone(),
@@ -123,6 +123,65 @@ mod tests {
     assert_eq!(pixel(&image, 0, 0), [0, 0, 255, 255]);
     let halfway = pixel(&image, 75, 50);
     assert!((halfway[0] as i32 - 128).abs() <= 3 && (halfway[2] as i32 - 128).abs() <= 3, "{halfway:?}");
+  }
+
+  /// A vignette (a radial gradient blended over a photo, as a tool makes it) drawn in a window at another zoom is the whole
+  /// photo's vignette viewed at that zoom: the gradient and the picture over the photo both follow where the window is.
+  #[test]
+  fn a_vignette_in_a_window_at_another_zoom_is_the_whole_photo_s_vignette_viewed() -> anyhow::Result<()> {
+    use abra_core::BlendMode;
+    use abra_core::image::gpu::GPU_PROVIDER_LOCK;
+    use abra_core::image::recipe::{blended, gpu_run};
+    use gpu::{GpuContext, LiveRenderer, TileOptions, TiledRenderer, Window};
+
+    let _guard = GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    gpu::register();
+    let context = GpuContext::new_default_blocking()?;
+    let size = 200u32;
+    let mut photo = Vec::new();
+    for y in 0..size {
+      for x in 0..size {
+        photo.extend_from_slice(&[x as u8, y as u8, 128, 255]);
+      }
+    }
+    let photo = Image::new_from_pixels(size, size, photo, abra_core::Channels::RGBA);
+    let clear = Color::from_rgba(0, 0, 0, 0);
+    let dark = Color::from_rgba(0, 0, 0, 255);
+    let edges = radial_gradient(size, size, &Gradient::from_to(clear, dark), (100.0, 100.0), (100.0, 100.0));
+    let vignette = blended(&photo, &edges, BlendMode::Normal, 1.0);
+    let (root, passes) = gpu_run(&vignette).expect("the vignette is still a recipe on the GPU");
+
+    let reference = LiveRenderer::new(context.clone()).process(&passes, size, size, root.rgba())?;
+    let viewed_at = |channel: usize, x: f32, y: f32| {
+      let (x, y) = ((x - 0.5).clamp(0.0, 199.0), (y - 0.5).clamp(0.0, 199.0));
+      let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+      let (x1, y1) = ((x0 + 1).min(199), (y0 + 1).min(199));
+      let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+      let at = |x: usize, y: usize| reference[(y * 200 + x) * 4 + channel] as f32;
+      (at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx) * (1.0 - fy) + (at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx) * fy
+    };
+
+    let mut windowed =
+      TiledRenderer::with_options(context, size, size, root.rgba().to_vec().into(), TileOptions::default().with_tile_size(64))?;
+    // The whole photo at two zooms, and a quarter of it magnified, which a window at the wrong place would get wrong.
+    for (x, y, extent, out) in [(0.0, 0.0, 200.0, 100u32), (0.0, 0.0, 200.0, 400), (100.0, 100.0, 100.0, 200)] {
+      let scale = extent / out as f32;
+      let window = Window { x, y, width: extent, height: extent, out_width: out, out_height: out, pad: 0 };
+      windowed.render(&window, &passes)?;
+      let drawn = windowed.read_pixels()?;
+      let mut worst = 0.0f32;
+      for row in 0..out {
+        for column in 0..out {
+          for channel in 0..3 {
+            let got = drawn[((row * out + column) * 4) as usize + channel] as f32;
+            let want = viewed_at(channel, x + (column as f32 + 0.5) * scale, y + (row as f32 + 0.5) * scale);
+            worst = worst.max((got - want).abs());
+          }
+        }
+      }
+      assert!(worst <= 6.0, "window at {x},{y} showing {extent} pixels in {out}: off by {worst}");
+    }
+    Ok(())
   }
 
   /// Registers the library's real GPU provider wrapped in one that counts its runs, and returns the counter (reset to zero).

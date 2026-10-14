@@ -29,6 +29,11 @@ impl Effect for Smooth {
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_smooth(p_image);
   }
+
+  /// A kernel of one pixel on each side: at a smaller picture it is the same kernel, as wide as a pixel of that picture.
+  fn for_level(&self, _p_level: u32) -> Option<std::sync::Arc<dyn abra_core::image::gpu::CpuProcessor>> {
+    Some(std::sync::Arc::new(Smooth { ..self.clone() }))
+  }
 }
 pub fn smooth() -> Smooth {
   Smooth { options: None }

@@ -21,7 +21,7 @@ const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
 const loaded = { exports: {} };
 // The sections and the native packages are not needed to read a control's settings, so they load as empty modules.
 // The cache of what a control preloads is a module of its own, and is loaded as it is.
-const preloads = loadTs('lib/editor-preloads.ts', {});
+const preloads = loadTs('lib/editor-preloads.ts', { '@/src/lib/editor-pictures': { fitted: source => Object.assign(source.clone(), { width: () => source.width() }) }, '@abra/core/mask': { TransformAlgorithm: {} } });
 const stubbed = specifier =>
   specifier === '@/src/lib/editor-preloads'
     ? preloads
@@ -40,7 +40,7 @@ const {
   sliderValues,
   scaleBetween,
 } = loaded.exports;
-const { preloadFor, clearPreloads } = preloads;
+const { preloadFor, releasePreloads } = preloads;
 
 const single = extra => ({ kind: 'slider', key: 'single', label: 'Single', ...extra });
 const multi = extra => ({ kind: 'slider', key: 'multi', label: 'Multi', sliderLabel: ['A', 'B'], ...extra });
@@ -129,7 +129,7 @@ test('a slider with no label of its own takes the label of the control', () => {
 const fakeImage = () => {
   const log = { replaced: [], destroyed: [] };
   const photo = { name: 'photo', uniffiDestroy: () => log.destroyed.push('photo') };
-  const image = { toImage: () => photo, replaceWith: made => log.replaced.push(made.name) };
+  const image = { height: () => 3000, clone: () => photo, replaceWith: made => log.replaced.push(made.name) };
   return { image, photo, log };
 };
 
@@ -200,7 +200,7 @@ test('a tool, an apply and a thumb are told the scale, which is 1 unless the edi
 });
 
 test('a preload runs once for a photo width, its result reaches the tool, and clearing frees it', () => {
-  clearPreloads();
+  releasePreloads();
   const mask = {
     destroyed: 0,
     uniffiDestroy() {
@@ -225,13 +225,13 @@ test('a preload runs once for a photo width, its result reaches the tool, and cl
   image.width = () => 4000;
   applySlider(control, image, 3);
   assert.equal(runs, 2, 'a different size makes its own');
-  clearPreloads();
+  releasePreloads();
   assert.equal(mask.destroyed, 2);
   assert.equal(preloadFor(control, 320), undefined, 'and nothing is left');
 });
 
 test('controls sharing a preload function share one result at the same photo width', () => {
-  clearPreloads();
+  releasePreloads();
   const mask = {
     destroyed: 0,
     uniffiDestroy() {
@@ -247,7 +247,7 @@ test('controls sharing a preload function share one result at the same photo wid
   assert.deepEqual(preloadFor(first, 320, image), [mask]);
   assert.deepEqual(preloadFor(second, 320, image), [mask]);
   assert.equal(runs, 1);
-  clearPreloads();
+  releasePreloads();
   assert.equal(mask.destroyed, 1, 'the shared result is owned and freed once');
 });
 
@@ -259,7 +259,7 @@ test('a control with no preload is told no preloaded images', () => {
 });
 
 test('a preload can return an object of masks, an array, one mask or nothing, and all of them are freed', () => {
-  clearPreloads();
+  releasePreloads();
   const data = () => ({
     destroyed: 0,
     uniffiDestroy() {
@@ -283,7 +283,7 @@ test('a preload can return an object of masks, an array, one mask or nothing, an
   assert.deepEqual(seen.array, [c]);
   assert.deepEqual(seen.single, [d], 'one mask becomes an array of one');
   assert.deepEqual(seen.nothing, [], 'nothing becomes an empty array');
-  clearPreloads();
+  releasePreloads();
   assert.deepEqual(
     [a, b, c, d].map(item => item.destroyed),
     [1, 1, 1, 1],
@@ -291,7 +291,7 @@ test('a preload can return an object of masks, an array, one mask or nothing, an
 });
 
 test('what a preload made is made again when the control gets a new preload function, and the old is freed', () => {
-  clearPreloads();
+  releasePreloads();
   const data = () => ({
     destroyed: 0,
     uniffiDestroy() {
@@ -309,5 +309,5 @@ test('what a preload made is made again when the control gets a new preload func
   );
   assert.equal(old.destroyed, 1, 'it was made by a function the control no longer has');
   assert.equal(preloadFor(single({ preload: () => fresh }), 100, image)[0], fresh);
-  clearPreloads();
+  releasePreloads();
 });

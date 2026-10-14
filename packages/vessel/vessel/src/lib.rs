@@ -36,5 +36,6 @@ pub mod prelude {
   pub use vessel_macros::Component;
   pub use vessel_ui::{
     Button, Changed, Clicked, Container, Fit, Image, Label, Picture, Slider, Trackable, UiBackground, VerticalAlign,
+    Viewport,
   };
 }

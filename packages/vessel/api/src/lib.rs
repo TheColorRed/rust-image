@@ -43,7 +43,7 @@ pub use self::session::{Drawn, Session};
 pub use self::{
   app::{App, AppFrame, AppOptions},
   canvas::Canvas,
-  component::{Component, Renderable, WeakComponent},
+  component::{Component, Renderable, Tick, WeakComponent},
   font::{Face, Font, TextAlign},
   gpu::GpuPicture,
   input::{KeyEvent, PointerButton, PointerEvent, Quit},
@@ -58,7 +58,7 @@ pub mod prelude {
   pub use crate::run;
   pub use crate::{
     Align, App, AppFrame, AppOptions, Background, Canvas, Component, Direction, Display, Edges, Face, Font, GpuPicture,
-    Justify, KeyEvent, PointerButton, PointerEvent, Quit, Renderable, TextAlign, Theme, ThemePatch, Track, Units,
+    Justify, KeyEvent, PointerButton, PointerEvent, Quit, Renderable, TextAlign, Theme, ThemePatch, Tick, Track, Units,
     WeakComponent,
   };
   #[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]

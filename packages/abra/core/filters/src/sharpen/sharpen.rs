@@ -32,6 +32,11 @@ impl Effect for Sharpen {
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_sharpen(p_image);
   }
+
+  /// A kernel of one pixel on each side: at a smaller picture it is the same kernel, as wide as a pixel of that picture.
+  fn for_level(&self, _p_level: u32) -> Option<std::sync::Arc<dyn abra_core::image::gpu::CpuProcessor>> {
+    Some(std::sync::Arc::new(Sharpen { ..self.clone() }))
+  }
 }
 pub fn sharpen() -> Sharpen {
   Sharpen { options: None }

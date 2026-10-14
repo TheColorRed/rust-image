@@ -16,15 +16,19 @@ pub mod context;
 pub mod present;
 #[cfg(feature = "runtime")]
 pub mod renderer;
+#[cfg(feature = "runtime")]
+pub mod tiles;
 #[cfg(feature = "vessel-target")]
 pub mod target;
 
 #[cfg(feature = "runtime")]
 pub use context::GpuContext;
 #[cfg(feature = "runtime")]
-pub use present::Presenter;
+pub use present::{PresentOptions, Presenter};
 #[cfg(feature = "runtime")]
 pub use renderer::{Frame, LiveRenderer};
+#[cfg(feature = "runtime")]
+pub use tiles::{Regions, TileOptions, TiledRenderer, Window};
 
 /// A small RGBA texture handed to a shader at binding 3, such as a gradient lookup table.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,7 +47,14 @@ pub struct GpuAux {
 /// The shader must use the bindings: 0 = input `texture_2d<f32>`, 1 = output
 /// `texture_storage_2d<rgba8unorm, write>`, 2 = uniform (only when `uniforms` is non-empty),
 /// 3 = `texture_2d<f32>` (only when `aux` is set), 4 = `texture_2d<f32>` (only when `base` is set), with an
-/// `@workgroup_size(8, 8)` entry point named `main`.
+/// `@workgroup_size(8, 8)` entry point named `main`, and 5 = uniform (only when `window` is set).
+///
+/// A pass that sets `window` also gets, at binding 5, where the image it is run on sits in the photo it is a view of:
+/// `struct Window { origin: vec2<f32>, scale: f32, scale_y: f32, full: vec2<f32>, pad2: vec2<f32> }`. A pixel `p` of the image
+/// is the photo's pixel `origin + (p + 0.5) * scale`, in a photo `full` pixels across. (`scale_y` is the same as `scale`
+/// unless the picture is stretched, and a pass that asks for the window is only given a picture that is not.) For an image that is the whole
+/// photo, `origin` is zero and `scale` is one. A pass whose result depends on where a pixel is in the photo (a gradient,
+/// a vignette) or on a distance in photo pixels (a blur radius) reads it, so it is the same however the photo is zoomed.
 ///
 /// The renderer compiles each distinct `shader` once and reuses it, so changing `uniforms` or `aux` between frames
 /// is cheap and never rebuilds a pipeline.
@@ -58,6 +69,15 @@ pub struct GpuPass {
   /// Also binds, at binding 4, the image as it was before the first pass of the effect this pass belongs to. Used by
   /// a pass that combines an effect's result with its input, such as a masked blend.
   pub base: bool,
+  /// Also binds, at binding 5, where the image sits in the photo. See above.
+  pub window: bool,
+  /// How far, in photo pixels, this pass reads beyond a pixel (a blur's radius). A renderer that draws part of a photo
+  /// pads the picture by this much, so the pixels at its edge have the neighbours they need. Zero for a pass that reads
+  /// only the pixel it writes.
+  pub reach: f32,
+  /// The pass reads other pixels, or depends on where a pixel is, and has no `window` version: it is only right when the
+  /// image is drawn at its own size. A renderer that draws part of a photo at another size refuses it.
+  pub pixel_exact: bool,
 }
 
 impl GpuPass {
@@ -70,7 +90,28 @@ impl GpuPass {
       uniforms: p_uniforms.into(),
       aux: None,
       base: false,
+      window: false,
+      reach: 0.0,
+      pixel_exact: false,
     }
+  }
+
+  /// Says how far, in photo pixels, the pass reads beyond a pixel. See [`GpuPass::reach`].
+  pub fn with_reach(mut self, p_pixels: f32) -> GpuPass {
+    self.reach = p_pixels;
+    self
+  }
+
+  /// Marks the pass as right only at the image's own size. See [`GpuPass::pixel_exact`].
+  pub fn with_pixel_exact(mut self) -> GpuPass {
+    self.pixel_exact = true;
+    self
+  }
+
+  /// Binds where the image sits in the photo at binding 5. See [`GpuPass::window`].
+  pub fn with_window(mut self) -> GpuPass {
+    self.window = true;
+    self
   }
 
   /// Binds the effect's input image at binding 4. See [`GpuPass::base`].

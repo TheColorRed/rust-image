@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use abra::prelude::{Image as CoreImage, ImageExt};
 use abra_uniffi::{Image, Mask};
 
-use crate::{AbraError, effect_spec::{EffectSpec, apply_effect}, models};
+use crate::{AbraError, models};
 
 /// One person found in a photo: where they are in the photo's pixels, how sure the model is, and the mask of their body.
 #[derive(uniffi::Record)]
@@ -82,17 +82,6 @@ pub async fn read_image_async(path: String) -> Result<Arc<Image>, AbraError> {
   run(move || CoreImage::read(path).map(Image::from_core).map(Arc::new).map_err(|message| AbraError::Io { message })).await
 }
 
-#[uniffi::export]
-pub async fn render_thumbnail_async(
-  image: Arc<Image>, effects: Vec<EffectSpec>, skin_mask: Option<Arc<Mask>>,
-) -> Result<Arc<Image>, AbraError> {
-  run(move || {
-    let rendered = image.duplicate();
-    for effect in effects { apply_effect(Arc::clone(&rendered), effect, skin_mask.clone()); }
-    Ok(rendered)
-  }).await
-}
-
 /// The mask of the skin in the photo.
 #[uniffi::export]
 pub async fn detect_skin_async(image: Arc<Image>) -> Result<Arc<Mask>, AbraError> {
@@ -158,23 +147,6 @@ mod tests {
     assert!(started.iter().all(|name| name.starts_with("abra-image-")));
     assert!(extra.is_err(), "the pool must never run more than {} jobs at once", worker_count());
     assert!(results.into_iter().all(|result| result.is_ok()));
-  }
-
-  #[test]
-  fn async_thumbnail_edits_match_replay_and_leave_the_source_unchanged() {
-    use abra::abra_core::Channels;
-    use crate::effect_spec::EffectSpec;
-    let pixels: Vec<u8> = (0..16 * 8).flat_map(|i| [(i % 255) as u8, 80, 120, 255]).collect();
-    let source = Arc::new(Image::from_core(CoreImage::new_from_pixels(16, 8, pixels, Channels::RGBA)));
-    let original = source.rgba();
-    let effects = vec![EffectSpec::Brightness { amount: 20 }, EffectSpec::Invert];
-    let expected = source.duplicate();
-    for effect in &effects {
-      apply_effect(Arc::clone(&expected), effect.clone(), None);
-    }
-    let thumbnail = futures::executor::block_on(render_thumbnail_async(Arc::clone(&source), effects, None)).unwrap();
-    assert_eq!(thumbnail.rgba(), expected.rgba());
-    assert_eq!(source.rgba(), original);
   }
 
   #[test]

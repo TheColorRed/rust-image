@@ -55,6 +55,14 @@ macro_rules! effect_methods {
         image.edit(|image| ::abra::options::prelude::Effect::apply(&effect, image));
       }
 
+      /// Applies the effect to the image later, as the library's `apply(deferred(&mut image))`: the image remembers the effect
+      /// and the GPU does it when the picture is drawn, in one run with the effects after it. The effect is applied now when
+      /// it cannot wait (no shader, an area or a mask, set to the CPU, or no GPU).
+      pub fn apply_deferred(&self, image: ::std::sync::Arc<$crate::Image>) {
+        let effect = self.0.read().unwrap().clone();
+        image.edit(|image| ::abra::options::prelude::Effect::apply(&effect, ::abra::options::prelude::deferred(image)));
+      }
+
       /// Applies the effect to the image now, on the CPU.
       pub fn apply_on_cpu(&self, image: ::std::sync::Arc<$crate::Image>) {
         let effect = self.0.read().unwrap().clone();
@@ -104,6 +112,13 @@ macro_rules! effect_methods {
       /// Applies the effect to the image now, on whichever hardware suits.
       pub fn apply(&self, image: ::std::sync::Arc<$crate::Image>) {
         image.edit(|image| ::abra::options::prelude::Effect::apply(&self.0, image));
+      }
+
+      /// Applies the effect to the image later, as the library's `apply(deferred(&mut image))`: the image remembers the effect
+      /// and the GPU does it when the picture is drawn, in one run with the effects after it. The effect is applied now when
+      /// it cannot wait (no shader, an area or a mask, set to the CPU, or no GPU).
+      pub fn apply_deferred(&self, image: ::std::sync::Arc<$crate::Image>) {
+        image.edit(|image| ::abra::options::prelude::Effect::apply(&self.0, ::abra::options::prelude::deferred(image)));
       }
 
       /// Applies the effect to the image now, on the CPU.

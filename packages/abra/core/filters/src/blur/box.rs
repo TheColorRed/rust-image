@@ -114,6 +114,12 @@ impl Effect for BoxBlur {
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_box_blur(p_image, self.radius);
   }
+
+  /// The same effect for a picture halved `p_level` times: the radius is half as long for each halving.
+  fn for_level(&self, p_level: u32) -> Option<std::sync::Arc<dyn abra_core::image::gpu::CpuProcessor>> {
+    let radius = abra_core::image::levels::scaled_to_level(self.radius as f32, p_level).round() as u32;
+    Some(std::sync::Arc::new(BoxBlur { radius, ..self.clone() }))
+  }
 }
 
 pub fn box_blur(p_radius: impl Into<f64>) -> BoxBlur {

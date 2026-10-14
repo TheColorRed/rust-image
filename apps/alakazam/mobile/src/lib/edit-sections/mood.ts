@@ -1,9 +1,8 @@
-import { FilterType } from '@abra/core/adjustments';
-import { EffectSpec } from '@alakazam/mobile';
+import { brightness, contrast, FilterType, PhotoFilter, photoFilter, saturation, vibrance } from '@abra/core/adjustments';
 import { EditSection } from '../edit-sections';
 
-// Ordered by how often people tend to reach for each mood, most popular first. Each mood is its `live` effects, which
-// run in order for the instant preview and are what the replay applies.
+// Ordered by how often people tend to reach for each mood, most popular first. Each mood is its `tool`, which runs its
+// adjustments in order for the instant preview and is what the replay applies.
 export const colorization: EditSection = {
   key: 'section-mood',
   label: 'Mood',
@@ -14,152 +13,187 @@ export const colorization: EditSection = {
       key: 'action-mood-vibrant',
       label: 'Vibrant',
       group: 'mood',
-      live: () => [EffectSpec.Saturation.new({ amount: 30 }), EffectSpec.Vibrance.new({ vibrance: 30, saturation: 0 })],
+      deferred: true,
+      tool: photo => {
+        saturation(30).applyDeferred(photo);
+        vibrance(30).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-warm',
       label: 'Warm',
       group: 'mood',
-      live: () =>
-        EffectSpec.PhotoFilter.new({ filter: FilterType.WarmingLight, density: 0.35, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-golden-hour',
       label: 'Golden Hour',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.WarmingLight, density: 0.45, preserveLuminosity: false }),
-        EffectSpec.Brightness.new({ amount: 12 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.45).withPreserveLuminosity(false).applyDeferred(photo);
+        brightness(12).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-vintage',
       label: 'Vintage',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.Sepia, density: 0.2, preserveLuminosity: false }),
-        EffectSpec.Contrast.new({ amount: -10 }),
-        EffectSpec.Saturation.new({ amount: -20 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.Sepia)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
+        contrast(-10).applyDeferred(photo);
+        saturation(-20).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-noir',
       label: 'Noir',
       group: 'mood',
-      live: () => [EffectSpec.Saturation.new({ amount: -100 }), EffectSpec.Contrast.new({ amount: 20 })],
+      deferred: true,
+      tool: photo => {
+        saturation(-100).applyDeferred(photo);
+        contrast(20).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-moody',
       label: 'Moody',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.CoolingLight, density: 0.25, preserveLuminosity: false }),
-        EffectSpec.Contrast.new({ amount: 15 }),
-        EffectSpec.Brightness.new({ amount: -10 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.25).withPreserveLuminosity(false).applyDeferred(photo);
+        contrast(15).applyDeferred(photo);
+        brightness(-10).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-sunny',
       label: 'Sunny',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.WarmingLight, density: 0.2, preserveLuminosity: false }),
-        EffectSpec.Vibrance.new({ vibrance: 20, saturation: 0 }),
-        EffectSpec.Brightness.new({ amount: 8 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
+        vibrance(20).applyDeferred(photo);
+        brightness(8).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-cold',
       label: 'Cold',
       group: 'mood',
-      live: () =>
-        EffectSpec.PhotoFilter.new({ filter: FilterType.CoolingLight, density: 0.35, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-fade',
       label: 'Fade',
       group: 'mood',
-      live: () => [EffectSpec.Contrast.new({ amount: -20 }), EffectSpec.Saturation.new({ amount: -15 })],
+      deferred: true,
+      tool: photo => {
+        contrast(-20).applyDeferred(photo);
+        saturation(-15).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-sepia',
       label: 'Sepia',
       group: 'mood',
-      live: () => EffectSpec.PhotoFilter.new({ filter: FilterType.Sepia, density: 0.35, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.Sepia)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-dreamy',
       label: 'Dreamy',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.WarmingLight, density: 0.15, preserveLuminosity: false }),
-        EffectSpec.Contrast.new({ amount: -15 }),
-        EffectSpec.Saturation.new({ amount: -10 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.15).withPreserveLuminosity(false).applyDeferred(photo);
+        contrast(-15).applyDeferred(photo);
+        saturation(-10).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-cloudy',
       label: 'Cloudy',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.CoolingLight, density: 0.2, preserveLuminosity: false }),
-        EffectSpec.Saturation.new({ amount: -20 }),
-        EffectSpec.Brightness.new({ amount: -6 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
+        saturation(-20).applyDeferred(photo);
+        brightness(-6).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-midnight',
       label: 'Midnight',
       group: 'mood',
-      live: () => [
-        EffectSpec.PhotoFilter.new({ filter: FilterType.CoolingDark, density: 0.4, preserveLuminosity: false }),
-        EffectSpec.Brightness.new({ amount: -20 }),
-        EffectSpec.Contrast.new({ amount: 15 }),
-        EffectSpec.Saturation.new({ amount: -10 }),
-      ],
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark)).withDensity(0.4).withPreserveLuminosity(false).applyDeferred(photo);
+        brightness(-20).applyDeferred(photo);
+        contrast(15).applyDeferred(photo);
+        saturation(-10).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-ocean',
       label: 'Ocean',
       group: 'mood',
-      live: () =>
-        EffectSpec.PhotoFilter.new({ filter: FilterType.Underwater, density: 0.35, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.Underwater)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-forest',
       label: 'Forest',
       group: 'mood',
-      live: () =>
-        EffectSpec.PhotoFilter.new({ filter: FilterType.DeepEmerald, density: 0.3, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.DeepEmerald)).withDensity(0.3).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-frost',
       label: 'Frost',
       group: 'mood',
-      live: () =>
-        EffectSpec.PhotoFilter.new({ filter: FilterType.CoolingDark, density: 0.3, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark)).withDensity(0.3).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
     {
       kind: 'action',
       key: 'action-mood-neon',
       label: 'Neon',
       group: 'mood',
-      live: () => EffectSpec.PhotoFilter.new({ filter: FilterType.Magenta, density: 0.25, preserveLuminosity: false }),
+      deferred: true,
+      tool: photo => {
+        photoFilter(PhotoFilter.Preset.new(FilterType.Magenta)).withDensity(0.25).withPreserveLuminosity(false).applyDeferred(photo);
+      },
     },
   ],
 };

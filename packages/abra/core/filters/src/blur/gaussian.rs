@@ -1,5 +1,6 @@
 use crate::common::*;
-use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor};
+use abra_core::image::gpu::{CpuProcessor, GpuAux, GpuPass, GpuProcessor};
+use abra_core::image::levels::scaled_to_level;
 use abra_core::{Channels, ResizeTarget, Size, Transform};
 use abra_core::{IntoNumber, if_pick};
 use primitives::gaussian::gaussian_weights;
@@ -128,7 +129,7 @@ impl GpuProcessor for GaussianBlur {
     let table: std::sync::Arc<[u8]> = table.into();
     let pass = |direction: u32| {
       let uniforms: Vec<u8> = [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
-      GpuPass::new(include_str!("./gaussian.wgsl"), uniforms).with_aux(GpuAux {
+      GpuPass::new(include_str!("./gaussian.wgsl"), uniforms).with_window().with_reach(self.radius as f32).with_aux(GpuAux {
         width: 2 * self.radius + 1,
         height: 1,
         rgba: table.clone(),
@@ -157,6 +158,12 @@ impl Effect for GaussianBlur {
 
   fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
     Some(self)
+  }
+
+  /// A blur that is half as wide for a picture that is half as wide, rounded to a whole pixel.
+  fn for_level(&self, p_level: u32) -> Option<std::sync::Arc<dyn CpuProcessor>> {
+    let radius = scaled_to_level(self.radius as f32, p_level).round() as u32;
+    Some(std::sync::Arc::new(GaussianBlur { radius, ..self.clone() }))
   }
 }
 
@@ -233,6 +240,57 @@ mod tests {
         );
       }
     }
+  }
+
+  /// Viewing a blurred photo at another zoom gives what blurring the whole photo and then looking at it gives, so a slider
+  /// moved while zoomed shows the same blur as at the photo's own size.
+  #[test]
+  fn a_blur_in_a_window_at_another_zoom_is_the_whole_photo_blurred_then_viewed() -> anyhow::Result<()> {
+    use gpu::{GpuContext, LiveRenderer, TileOptions, TiledRenderer, Window};
+    let context = GpuContext::new_default_blocking()?;
+    let (width, height) = (200u32, 200u32);
+    // A white square in the middle of black: a blur of it is smooth, and wrong radii or places show.
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height {
+      for x in 0..width {
+        let at = ((y * width + x) * 4) as usize;
+        let inside = (80..120).contains(&x) && (80..120).contains(&y);
+        pixels[at..at + 4].copy_from_slice(&[if inside { 255 } else { 0 }, 0, 0, 255]);
+      }
+    }
+    let passes = vec![gaussian_blur(16).passes(width, height)];
+    let reference = LiveRenderer::new(context.clone()).process(&passes, width, height, &pixels)?;
+    // The whole photo's blur, read between its pixels like the screen would.
+    let blurred_at = |x: f32, y: f32| {
+      let (x, y) = ((x - 0.5).clamp(0.0, 199.0), (y - 0.5).clamp(0.0, 199.0));
+      let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+      let (x1, y1) = ((x0 + 1).min(199), (y0 + 1).min(199));
+      let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+      let at = |x: usize, y: usize| reference[(y * 200 + x) * 4] as f32;
+      let top = at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx;
+      let bottom = at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx;
+      top * (1.0 - fy) + bottom * fy
+    };
+
+    let mut photo = TiledRenderer::with_options(context, width, height, pixels.into(), TileOptions::default().with_tile_size(64))?;
+    for out in [100u32, 400] {
+      let scale = 200.0 / out as f32;
+      let window = Window { x: 0.0, y: 0.0, width: 200.0, height: 200.0, out_width: out, out_height: out, pad: 0 };
+      photo.render(&window, &passes)?;
+      let drawn = photo.read_pixels()?;
+      let side = ((drawn.len() / 4) as f32).sqrt() as u32;
+      let pad = (side - out) / 2;
+      assert!(pad as f32 * scale >= 15.0, "the blur's reach is padded for: {pad} pixels at {scale} photo pixels each");
+      let mut worst = 0.0f32;
+      for y in 0..out {
+        for x in 0..out {
+          let got = drawn[(((y + pad) * side + x + pad) * 4) as usize] as f32;
+          worst = worst.max((got - blurred_at((x as f32 + 0.5) * scale, (y as f32 + 0.5) * scale)).abs());
+        }
+      }
+      assert!(worst <= 8.0, "at {out} pixels across the blur is off by {worst}");
+    }
+    Ok(())
   }
 
   #[test]
@@ -430,5 +488,51 @@ mod tests {
     assert!(
       vertical[idx] != pixels[idx] || vertical[idx + 1] != pixels[idx + 1] || vertical[idx + 2] != pixels[idx + 2]
     );
+  }
+  /// A `p_width` x `p_height` image with detail in every channel, so a blur that read the wrong pixels shows.
+  fn busy_image(p_width: u32, p_height: u32) -> Image {
+    let mut pixels = Vec::new();
+    for y in 0..p_height {
+      for x in 0..p_width {
+        pixels.extend_from_slice(&[(x * 37 + y * 11) as u8, (x * 5 ^ y * 29) as u8, (x * y) as u8, 255]);
+      }
+    }
+    Image::new_from_pixels(p_width, p_height, pixels, abra_core::Channels::RGBA)
+  }
+
+  #[test]
+  fn a_part_of_a_deferred_blur_is_the_same_as_the_blur_of_the_whole_there_even_at_the_edges() {
+    use abra_core::image::image_ext::ImageExt;
+    let image = busy_image(64, 48);
+    let mut whole = image.clone();
+    gaussian_blur(5).apply_on_cpu(&mut whole);
+    let mut later = image.clone();
+    gaussian_blur(5).apply(options::deferred(&mut later));
+    assert!(later.deferred().is_some());
+    for (left, top, width, height) in [(20, 10, 16, 12), (0, 0, 9, 9), (55, 40, 9, 8), (-3, 20, 8, 6), (60, 44, 10, 10)] {
+      assert_eq!(
+        later.region(0, left, top, width, height),
+        whole.region(0, left, top, width, height),
+        "the part at {left},{top} {width}x{height}"
+      );
+    }
+    assert!(later.deferred().is_some(), "only the parts were made, not the picture");
+  }
+
+  #[test]
+  fn a_zoomed_out_part_of_a_deferred_blur_is_a_narrower_blur_of_the_zoomed_out_picture() {
+    use abra_core::image::image_ext::ImageExt;
+    let image = busy_image(64, 48);
+    let mut later = image.clone();
+    gaussian_blur(8).apply(options::deferred(&mut later));
+    // A picture a quarter as wide is blurred a quarter as much: radius 2.
+    let quarter = image.region(2, 0, 0, 16, 12);
+    let mut expected = Image::new_from_pixels(16, 12, quarter, abra_core::Channels::RGBA);
+    gaussian_blur(2).apply_on_cpu(&mut expected);
+    assert_eq!(later.region(2, 3, 2, 8, 6), expected.region(0, 3, 2, 8, 6));
+    // And a radius that rounds away at that zoom leaves the picture as it is.
+    let mut small = image.clone();
+    gaussian_blur(1).apply(options::deferred(&mut small));
+    assert_eq!(small.region(2, 0, 0, 16, 12), image.region(2, 0, 0, 16, 12));
   }
 }

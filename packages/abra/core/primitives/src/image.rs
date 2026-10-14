@@ -1,9 +1,10 @@
 use core::ops::{Add, Div, Mul, Sub};
 use ndarray::{Array1, Axis};
 use rayon::prelude::*;
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::borrow::Cow;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::channels::{Channel, Channels};
 use crate::color::Color;
@@ -18,6 +19,14 @@ pub trait DeferredPixels: Send + Sync + std::fmt::Debug {
   /// The `width * height * 4` RGBA pixels. This must always succeed: if the fast way to make them fails, such as a GPU that
   /// went away, it makes them the slow way, so the picture is never lost.
   fn render(&self) -> Vec<u8>;
+
+  /// Just a part of the picture, without making the rest: the rectangle `p_width` x `p_height` whose top left is at
+  /// `(p_left, p_top)` in the pixels of the picture at `p_level` (the picture halved that many times, see `level_size` in
+  /// `abra-core`), as RGBA, where a pixel past an edge is the pixel at that edge. `None` (the default) when it cannot, and
+  /// then the caller makes all the pixels with [`render`](Self::render) and cuts the rectangle out.
+  fn region(&self, _p_level: u32, _p_left: i32, _p_top: i32, _p_width: u32, _p_height: u32) -> Option<Vec<u8>> {
+    None
+  }
 
   /// This as `Any`, so whoever made the recipe can recognise it again and use it without making the pixels.
   fn as_any(&self) -> &dyn Any;
@@ -52,6 +61,56 @@ pub struct Image {
   deferred: Option<Arc<Deferred>>,
   pub anti_aliasing_level: u32,
   resolution: Resolution,
+  /// Names these pixels: a number no other image or change has had, so two images with the same one hold the same pixels.
+  version: u64,
+  /// What higher crates worked out from the pixels (see [`Image::derived`]). Clones share it, and it starts empty again
+  /// whenever the pixels change.
+  derived: Arc<Mutex<Vec<(TypeId, Arc<dyn Any + Send + Sync>)>>>,
+}
+
+/// The last version handed out. Starts at 1, so 0 is never a version.
+static LAST_VERSION: AtomicU64 = AtomicU64::new(0);
+
+impl Image {
+  /// The next number nothing has been named with.
+  fn next_version() -> u64 {
+    LAST_VERSION.fetch_add(1, Ordering::Relaxed) + 1
+  }
+
+  /// Marks the pixels as changed: they get a new version, and what was worked out from the old ones is let go.
+  fn touch(&mut self) {
+    self.version = Self::next_version();
+    self.derived = Arc::default();
+  }
+
+  /// A number that names these pixels. It is the same for an image and its clones, and different after any change to the
+  /// pixels, size or recipe (also after the image is replaced by another), so a caller that drew an image can tell with one
+  /// comparison whether it has to draw it again. It only ever says "different", never how.
+  pub fn version(&self) -> u64 {
+    self.version
+  }
+
+  /// Something worked out from these pixels, made by `p_make` the first time it is asked for and kept until the pixels change
+  /// (a smaller copy of the image, say). Clones of an image share it. One value is kept for each type `T`.
+  pub fn derived<T: Any + Send + Sync>(&self, p_make: impl FnOnce(&Image) -> T) -> Arc<T> {
+    let find = || {
+      let derived = self.derived.lock().unwrap();
+      derived.iter().find(|(id, _)| *id == TypeId::of::<T>()).map(|(_, value)| Arc::clone(value))
+    };
+    let value = find().unwrap_or_else(|| {
+      // Made without holding the lock, so whatever it makes may ask for other derived values of this image.
+      let made: Arc<dyn Any + Send + Sync> = Arc::new(p_make(self));
+      let mut derived = self.derived.lock().unwrap();
+      match derived.iter().find(|(id, _)| *id == TypeId::of::<T>()) {
+        Some((_, existing)) => Arc::clone(existing),
+        None => {
+          derived.push((TypeId::of::<T>(), Arc::clone(&made)));
+          made
+        }
+      }
+    });
+    value.downcast::<T>().expect("a derived value is stored under its own type")
+  }
 }
 
 impl Image {
@@ -72,6 +131,8 @@ impl Image {
       deferred: None,
       anti_aliasing_level: 4,
       resolution: Resolution::default(),
+      version: Self::next_version(),
+      derived: Arc::default(),
     }
   }
 
@@ -180,6 +241,7 @@ impl Image {
   pub fn clear_color(&mut self, p_color: Color) {
     let rgba = [p_color.r, p_color.g, p_color.b, p_color.a];
     let pixel_count = self.pixel_count();
+    self.touch();
     // Everything is overwritten, so a deferred image does not need its pixels made first.
     if self.deferred.take().is_some() {
       self.colors = Arc::new(Array1::from_vec(rgba.repeat(pixel_count)));
@@ -229,6 +291,7 @@ impl Image {
       }
     };
 
+    self.touch();
     self.width = p_width;
     self.height = p_height;
     self.deferred = None;
@@ -279,6 +342,7 @@ impl Image {
     debug_assert!(p_x < self.width && p_y < self.height, "Pixel ({}, {}) is out of bounds", p_x, p_y);
     let index = (p_y as usize * self.width as usize + p_x as usize) * 4;
     self.make_ready();
+    self.touch();
     let arr = Arc::make_mut(&mut self.colors);
     arr[index] = p_pixel.0;
     arr[index + 1] = p_pixel.1;
@@ -335,6 +399,7 @@ impl Image {
   pub fn copy_channel_data(&mut self, p_src: &Image) {
     self.colors = Arc::clone(p_src.ready());
     self.deferred = None;
+    self.touch();
   }
 
   /// Get a mutable reference to the internal pixel buffer as an `ndarray`.
@@ -342,6 +407,7 @@ impl Image {
   /// This triggers copy-on-write if the underlying buffer is shared.
   pub fn colors(&mut self) -> &mut Array1<u8> {
     self.make_ready();
+    self.touch();
     Arc::make_mut(&mut self.colors)
   }
 
@@ -421,6 +487,7 @@ impl Image {
     F: Fn(ndarray::ArrayViewMut1<u8>) + Send + Sync,
   {
     self.make_ready();
+    self.touch();
     Arc::make_mut(&mut self.colors)
       .axis_chunks_iter_mut(Axis(0), 4)
       .into_par_iter()
@@ -443,6 +510,7 @@ impl Image {
   /// Mutable RGBA slice, triggering copy-on-write if the buffer is shared.
   fn pixels_mut(&mut self) -> &mut [u8] {
     self.make_ready();
+    self.touch();
     Arc::make_mut(&mut self.colors).as_slice_mut().expect("Image colors must be contiguous")
   }
 }
@@ -637,5 +705,60 @@ mod tests {
     assert_eq!(img.rgba(), &[200, 255, 20, 50]);
     let _ = &mut img - 30.0f32;
     assert_eq!(img.rgba(), &[170, 225, 0, 50]);
+  }
+  #[test]
+  fn the_version_names_the_pixels_so_clones_match_and_any_change_makes_it_different() {
+    let mut image = Image::new_from_pixels(1, 1, vec![1, 2, 3, 4], Channels::RGBA);
+    let clone = image.clone();
+    assert_eq!(image.version(), clone.version(), "a clone holds the same pixels");
+    assert_ne!(image.version(), Image::new_from_pixels(1, 1, vec![1, 2, 3, 4], Channels::RGBA).version(), "an equal image is not the same pixels");
+    let before = image.version();
+    image.set_pixel(0, 0, (9, 9, 9, 9));
+    assert_ne!(image.version(), before, "a changed pixel");
+    assert_eq!(clone.version(), before, "the clone did not change");
+    let mut versions = vec![image.version()];
+    for change in [
+      |image: &mut Image| image.clear_color(Color::from_rgba(1, 1, 1, 1)),
+      |image: &mut Image| image.set_rgba(vec![5, 5, 5, 5]),
+      |image: &mut Image| image.mut_channels(Channel::RGB, |value| 255 - value),
+      |image: &mut Image| image.mut_pixels(|mut pixel| pixel[0] = 1),
+      |image: &mut Image| image.colors()[0] = 7,
+    ] {
+      change(&mut image);
+      assert!(!versions.contains(&image.version()), "every change is a version nobody had");
+      versions.push(image.version());
+    }
+  }
+
+  #[test]
+  fn making_the_pixels_of_a_deferred_image_does_not_change_its_version() {
+    let image = Image::from_deferred(1, 1, counting(vec![1, 2, 3, 4]));
+    let before = image.version();
+    image.rgba();
+    assert_eq!(image.version(), before);
+    assert_ne!(before, Image::from_deferred(1, 1, counting(vec![1, 2, 3, 4])).version());
+  }
+
+  #[test]
+  fn a_derived_value_is_made_once_shared_by_clones_and_let_go_when_the_pixels_change() {
+    let made = std::sync::atomic::AtomicUsize::new(0);
+    let mut image = Image::new_from_pixels(1, 1, vec![1, 2, 3, 4], Channels::RGBA);
+    let clone = image.clone();
+    let first = image.derived(|image| {
+      made.fetch_add(1, Ordering::SeqCst);
+      image.rgba()[0] as u32
+    });
+    let second = clone.derived(|_| {
+      made.fetch_add(1, Ordering::SeqCst);
+      0u32
+    });
+    assert_eq!((*first, *second), (1, 1), "the clone gets what the first made");
+    assert_eq!(made.load(Ordering::SeqCst), 1);
+    // Another type is kept next to it.
+    assert_eq!(*image.derived(|_| "text"), "text");
+    assert_eq!(*image.derived(|_| 0u32), 1);
+    image.set_pixel(0, 0, (8, 0, 0, 0));
+    assert_eq!(*image.derived(|image| image.rgba()[0] as u32), 8, "made again from the new pixels");
+    assert_eq!(*clone.derived(|_| 0u32), 1, "the clone still has its own");
   }
 }

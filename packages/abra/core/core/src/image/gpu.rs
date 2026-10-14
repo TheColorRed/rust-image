@@ -7,7 +7,7 @@
 //! The data a GPU runs ([`GpuPass`], [`GpuAux`]) and the [`GpuSession`] trait live in the standalone `gpu-passes`
 //! package, which knows nothing about abra. An effect here only describes itself as passes ([`GpuEffect`]); whoever runs
 //! them is a separate crate.
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 pub use gpu_passes::{GpuAux, GpuPass, GpuSession};
 
@@ -92,6 +92,24 @@ pub trait CpuProcessor: Send + Sync {
 
   /// The GPU version of this effect, or `None` (the default) when it only runs on the CPU.
   fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    None
+  }
+
+  /// How many pixels around a pixel the effect reads to work out that pixel, such as a blur's radius. Defaults to `0`.
+  fn padding(&self) -> i32 {
+    0
+  }
+
+  /// Whether the effect depends on where a pixel is in the image or on the image's size, so that it cannot be run on a
+  /// part of the image alone. Defaults to `false`.
+  fn positional(&self) -> bool {
+    false
+  }
+
+  /// This effect for a picture that is halved `p_level` times, such as a blur that is a quarter as wide for a picture a
+  /// quarter as wide, so a zoomed-out part of the image can be made without making all of it. `None` (the default) when the
+  /// effect cannot be told apart from its settings at another size, and then the part is cut from the whole picture.
+  fn at_level(&self, _p_level: u32) -> Option<Arc<dyn CpuProcessor>> {
     None
   }
 }

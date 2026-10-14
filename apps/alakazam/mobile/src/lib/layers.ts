@@ -30,6 +30,8 @@ export type Sheet = {
   group?: 'skin' | 'makeup';
   blend: BlendMode;
   opacity: number;
+  /** The sheet is a changed copy of the photo laid over the skin, so it is cut from the photo with the earlier sheets already laid, and does not cover them. */
+  overEarlier?: boolean;
   /** Paints the sheet. A sheet that paints nothing is left out of the canvas. */
   paint: (painting: Painting) => void;
 };

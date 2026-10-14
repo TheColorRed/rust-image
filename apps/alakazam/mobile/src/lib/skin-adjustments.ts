@@ -4,6 +4,7 @@ import {
   EYELINER_KEY,
   EYESHADOW_KEY,
   LIPSTICK_KEY,
+  SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
@@ -18,6 +19,7 @@ import {
 /** The controls that can be set for one person, or for everyone. */
 export function isPersonAdjustment(key: string): boolean {
   return (
+    key === SKIN_EVEN_OUT_KEY ||
     key === SKIN_SMOOTH_KEY ||
     key === SKIN_TAN_KEY ||
     key === SKIN_TONE_KEY ||

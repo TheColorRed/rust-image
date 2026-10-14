@@ -54,6 +54,14 @@ The root crate of the Abra library is located in the root of the workspace. It i
 - `/packages/vessel/surface`: Surfaces that frames are drawn on, looked up by id (`Surface` trait; a native Android window is the first kind). No abra dependency.
 - `/packages/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
 
+## Images That Wait, and Parts of Images
+
+An image can stand for work that has not run. `effect.apply(deferred(&mut image))` (see `abra-core`, `image/effect.rs`) makes the image remember the effect instead of applying it, for any effect (a shader is not needed), unless the effect has an area or a mask or is set to the CPU. Nothing is made until somebody reads the pixels, or asks for just a part:
+
+- `ImageExt::region(level, left, top, width, height)` (`abra-core`, `image/image_ext`) returns a rectangle of the image at a zoom-out `level` (level 0 is the image, each level above it is the one before halved; see `image/levels.rs`). A pixel past an edge is the pixel at that edge. A waiting CPU effect makes only that part, plus the `padding()` around it that the effect reads (`image/recipe.rs`); an effect says how it works at a zoomed-out level with `Effect::for_level`, and one that does not is made whole once and cut from that.
+- `Image::version()` (`primitives`) is a number that names the pixels: clones share it and any change makes a new one, so a caller can tell whether it has to draw an image again with one comparison. `Image::derived(..)` keeps something worked out from the pixels (the zoom-out levels) until they change.
+- `recipe::gpu_run(&image)` gives the image the shader passes start from and the passes, for a surface that can draw them itself. A CPU-only effect in the chain is where that image starts.
+
 ## Examples
 
 Examples are mini applications that implement specific features of the Abra library. They can be found in the `/apps/examples` directory of the repository. Each example demonstrates how to use different parts of the Abra library to achieve specific image manipulation tasks.

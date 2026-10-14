@@ -19,13 +19,23 @@ const MOUTH_FADE = 0.12;
  * `skin` with the lips and the mouth of the faces in `preloaded` (what `makeupMasks` made) weaker, for a skin edit that would
  * otherwise tint them as strongly as the skin: they get `MOUTH_SHARE` of it, faded in softly at the edge. Anything made is handed to
  * `keep`; `skin` itself is not changed.
+ *
+ * `ease` is how much of `skin` is taken off where a part is (1 takes it all off), and `parts` are the names in `preloaded` that start
+ * a part to take it off: the lips and the mouth by default; `eye|` and `brow|` are the eyes and the eyebrows. A skin edit that
+ * replaces color, and so would show on the lips, the whites of the eyes and the eyebrows, takes all of them off.
  */
-export const skinWithMouthEased = (skin: MaskLike, preloaded: ToolContext['preloaded'], keep: <T>(item: T) => T): MaskLike => {
+export const skinWithMouthEased = (
+  skin: MaskLike,
+  preloaded: ToolContext['preloaded'],
+  keep: <T>(item: T) => T,
+  ease = MOUTH_SHARE,
+  parts = ['lipstick|', 'mouth|'],
+): MaskLike => {
   if (!preloaded || Array.isArray(preloaded)) return skin;
   let eased = skin;
-  const half = keep(Mask.fromValues(skin.width(), skin.height(), new Uint8Array(skin.width() * skin.height()).fill(Math.round(255 * MOUTH_SHARE)).buffer));
+  const half = keep(Mask.fromValues(skin.width(), skin.height(), new Uint8Array(skin.width() * skin.height()).fill(Math.round(255 * ease)).buffer));
   for (const [key, part] of Object.entries(preloaded)) {
-    if (!key.startsWith('lipstick|') && !key.startsWith('mouth|')) continue;
+    if (!parts.some(start => key.startsWith(start))) continue;
     const box = (part as MaskLike).bounds(0);
     if (!box) continue;
     const blurred = keep((part as MaskLike).toImage());

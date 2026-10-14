@@ -139,7 +139,7 @@ const endsWithSlider = (key: string) => {
 
 /** A slider was released at `value`. */
 function commitSlider(control: SliderControl, value: AdjustmentValue) {
-  replayHidden.next(!!(control.live || control.tool || control.layer));
+  replayHidden.next(!!(control.tool || control.layer));
   lastGroup = null;
   const key = adjustmentKey(control.key, personSelection.value.selectedId);
   const next = { ...adjustments.value, [key]: value };
@@ -153,7 +153,7 @@ function removeSlider(control: SliderControl) {
   const personKey = adjustmentKey(control.key, personSelection.value.selectedId);
   const key = adjustments.value[personKey] === undefined ? control.key : personKey;
   if (adjustments.value[key] === undefined) return;
-  replayHidden.next(!!(control.live || control.tool || control.layer));
+  replayHidden.next(!!(control.tool || control.layer));
   lastGroup = null;
   const { [key]: _removed, ...rest } = adjustments.value;
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));

@@ -80,4 +80,4 @@ the image looks like.
     shader and this frame's uniforms). See `Exposure` for an example.
 
   Everything else is provided: limiting it to an area and mask, choosing the GPU or CPU, and working in a live image.
-  To use it from the bindings, add it to `EffectSpec` in `packages/abra/abra/src/live.rs`.
+  To use it from the bindings, expose it in `abra-uniffi` and call it from a tool.

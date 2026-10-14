@@ -1,22 +1,27 @@
-import { RotateCcw, X } from 'lucide-react-native';
-import { useEffect, useMemo } from 'react';
+import { CircleQuestionMark, RotateCcw, X } from 'lucide-react-native';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
+import { ImageInfoDialog } from '@/src/components/editor/image-info-dialog';
+import { type EditablePhoto } from '@/src/lib/edit-source';
 import { resetEdits } from '@/src/lib/editor-history';
+import { editorPreview } from '@/src/lib/editor-preview';
 import { useTheme } from '@/src/lib/theme';
 import { closeRequested, closeRequested$ } from '@/src/state/commands';
 import { timeline$ } from '@/src/state/history';
 import { topInset$ } from '@/src/state/preview';
 
 export interface EditorToolbarProps {
+  photo: EditablePhoto;
   onClose: () => void;
 }
 
-/** The close button floating over the photo, and the handler for closing. */
-export function EditorToolbar({ onClose }: EditorToolbarProps) {
+/** The buttons floating over the photo: close on the left, and on the right the photo's information and the reset of the edits. */
+export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
   const topInset = useObservable(topInset$, 0);
   const hasEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
   const { colors } = useTheme();
+  const [infoOpen, setInfoOpen] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -33,20 +38,35 @@ export function EditorToolbar({ onClose }: EditorToolbarProps) {
       <Pressable style={styles.iconButton} onPress={() => closeRequested.next()} hitSlop={8}>
         <X color={overlayIconColor} size={22} />
       </Pressable>
-      {hasEdits ? (
-        <Pressable
-          style={styles.iconButton}
-          hitSlop={8}
-          onPress={() =>
-            Alert.alert('Reset all edits?', 'The photo goes back to how it was opened, and the history is cleared.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Reset', style: 'destructive', onPress: resetEdits },
-            ])
-          }
-        >
-          <RotateCcw color={overlayIconColor} size={22} />
+      <View style={styles.right}>
+        <Pressable accessibilityLabel="Photo information" style={styles.iconButton} onPress={() => setInfoOpen(true)} hitSlop={8}>
+          <CircleQuestionMark color={overlayIconColor} size={22} />
         </Pressable>
-      ) : null}
+        {hasEdits ? (
+          <Pressable
+            accessibilityLabel="Reset all edits"
+            style={styles.iconButton}
+            hitSlop={8}
+            onPress={() =>
+              Alert.alert('Reset all edits?', 'The photo goes back to how it was opened, and the history is cleared.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Reset',
+                  style: 'destructive',
+                  // The live view still shows the last tool's result over the photo, so it is taken off with the edits.
+                  onPress: () => {
+                    editorPreview.hide();
+                    resetEdits();
+                  },
+                },
+              ])
+            }
+          >
+            <RotateCcw color={overlayIconColor} size={22} />
+          </Pressable>
+        ) : null}
+      </View>
+      <ImageInfoDialog photo={photo} visible={infoOpen} onClose={() => setInfoOpen(false)} />
     </View>
   );
 }
@@ -60,6 +80,11 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+    },
+    right: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
     },
     iconButton: {
       width: 40,

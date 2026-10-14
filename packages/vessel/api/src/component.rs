@@ -14,6 +14,11 @@ use crate::theme::Background;
 use crate::theme::ThemePatch;
 use crate::{Canvas, Face, Font, GpuPicture, KeyEvent, PointerEvent, Quit, TextAlign, Theme};
 
+/// Sent on a component's `subject::<Tick>()` before each frame while it is animating (see `Component::set_animating`). It
+/// holds the time since the previous frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tick(pub std::time::Duration);
+
 /// A child, and the picture it last drew, kept until it changes.
 struct Slot {
   component: Component,
@@ -77,9 +82,16 @@ struct Inner {
   pointer: Mutex<(f32, f32)>,
   /// Whether this component already passes input on to its children.
   routing: AtomicBool,
+  /// True while the component moves by itself and needs a frame on every tick.
+  animating: AtomicBool,
 }
 
 impl Inner {
+  /// Whether this component or anything inside it asked for a frame every tick.
+  fn is_animating(&self) -> bool {
+    self.animating.load(Ordering::SeqCst) || self.children.lock().unwrap().iter().any(|slot| slot.component.inner.is_animating())
+  }
+
   fn wake(&self) {
     if let Some(waker) = self.waker.lock().unwrap().as_ref() {
       waker.wake();
@@ -246,6 +258,7 @@ impl Component {
         captured: Mutex::new(None),
         pointer: Mutex::new((0.0, 0.0)),
         routing: AtomicBool::new(false),
+        animating: AtomicBool::new(false),
       }),
     };
     // A new size is a reason to draw again.
@@ -259,6 +272,24 @@ impl Component {
       }
     });
     component
+  }
+
+  /// Asks the engine for a frame on every tick (`true`) while this component moves by itself, such as a camera gliding, or
+  /// lets it sleep again (`false`). While on, [`Tick`] is sent to the component before each frame is made.
+  pub fn set_animating(&self, p_animating: bool) {
+    self.inner.animating.store(p_animating, Ordering::SeqCst);
+    if p_animating {
+      self.inner.changed_self();
+    }
+  }
+
+  /// Sends [`Tick`] to this component if it is animating, and to every descendant.
+  fn send_tick(&self, p_delta: Duration) {
+    if self.inner.animating.load(Ordering::SeqCst) {
+      self.events::<Tick>().next(Tick(p_delta));
+    }
+    let children: Vec<Component> = self.inner.children.lock().unwrap().iter().map(|slot| slot.component.clone()).collect();
+    children.iter().for_each(|child| child.send_tick(p_delta));
   }
 
   /// The name the component was given.
@@ -1138,7 +1169,7 @@ impl<E: Send + Sync + 'static> Observer<E> for Component {
 
 impl MediaSource for Component {
   fn pacing(&self) -> Pacing {
-    Pacing::OnDemand
+    if self.inner.is_animating() { Pacing::Continuous } else { Pacing::OnDemand }
   }
 
   fn has_changed(&self) -> bool {
@@ -1146,11 +1177,13 @@ impl MediaSource for Component {
     width > 0 && height > 0 && self.inner.dirty.load(Ordering::SeqCst)
   }
 
-  fn render(&mut self, _p_delta: Duration) -> Frame {
+  fn render(&mut self, p_delta: Duration) -> Frame {
+    self.send_tick(p_delta);
     self.compose()
   }
 
-  fn render_gpu(&mut self, _p_delta: Duration) -> Option<Arc<dyn GpuFrame>> {
+  fn render_gpu(&mut self, p_delta: Duration) -> Option<Arc<dyn GpuFrame>> {
+    self.send_tick(p_delta);
     let frame = self.inner.gpu_frame.lock().unwrap().clone();
     if frame.is_some() {
       self.inner.dirty.store(false, Ordering::SeqCst);
@@ -1312,6 +1345,32 @@ mod tests {
     assert!(!component.clone().has_changed());
     component.size().next((4, 4));
     assert!(component.clone().has_changed());
+  }
+
+  #[test]
+  fn an_animating_component_gets_a_tick_every_frame_and_a_sleeping_one_gets_none() {
+    let parent = flex(Direction::Row);
+    let child = Component::new("child");
+    parent.add(child.clone());
+    parent.size().next((4, 4));
+    assert_eq!(parent.clone().pacing(), Pacing::OnDemand);
+
+    let ticks = Arc::new(Mutex::new(Vec::new()));
+    child.subject::<Tick>().subscribe({
+      let ticks = Arc::clone(&ticks);
+      move |tick| ticks.lock().unwrap().push(tick.0)
+    });
+    parent.clone().render(Duration::from_millis(5));
+    assert!(ticks.lock().unwrap().is_empty(), "a component that is not animating gets no tick");
+
+    child.set_animating(true);
+    assert_eq!(parent.clone().pacing(), Pacing::Continuous, "a child that animates keeps its parents ticking");
+    parent.clone().render(Duration::from_millis(16));
+    parent.clone().render(Duration::from_millis(17));
+    assert_eq!(*ticks.lock().unwrap(), vec![Duration::from_millis(16), Duration::from_millis(17)]);
+
+    child.set_animating(false);
+    assert_eq!(parent.clone().pacing(), Pacing::OnDemand);
   }
 
   #[test]

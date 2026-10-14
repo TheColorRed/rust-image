@@ -4,7 +4,7 @@ import { useObservable } from 'react-rx';
 import { layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/edit-sections';
 import { preloadFor } from '@/src/lib/editor-preloads';
 import { ensureBase, editorPreview, showTool } from '@/src/lib/editor-preview';
-import { hasOtherSteps, renderStackWithoutSlider, renderStepsAfterSlider } from '@/src/lib/editor-replay';
+import { hasOtherSteps, isStackDeferred, renderStackWithoutSlider, renderStepsAfterSlider } from '@/src/lib/editor-replay';
 import { withLayers } from '@/src/lib/layers';
 import { adjustmentKey, personAdjustmentTargets, scaledPersonBounds } from '@/src/lib/skin-adjustments';
 import { personSelection$, personSelection } from '@/src/state/person-selection';
@@ -13,23 +13,18 @@ import { editBaseImage } from '@/src/state/session';
 import { previewBox$ } from '@/src/state/gestures';
 
 /**
- * Live GPU preview for a slider drag. Returns the change handler to give the slider, or undefined when the control has no
- * live form. Frames are drawn over the editor preview until the released value is committed and replayed.
+ * Preview for a slider drag. Returns the change handler to give the slider, or undefined when the control has no tool or
+ * layer. Frames are drawn over the editor preview until the released value is committed and replayed.
  *
  * The handler takes the value of every slider of the control (one for a control with one slider) each time any one moves.
- * The drag is shown by the editor's live renderer, which is already connected to the GPU: it only hands Rust the slider's
- * `live` effect at the new value. With nothing else applied the effect goes over the untouched edit base. Otherwise the rest of
- * the stack is rendered on the CPU once, and only the dragged slider's effect runs on top of it.
- *
- * The `live` path (`SliderControl.live`) is deprecated: it only serves controls that have not moved to `tool` yet, and can be
- * removed with it, leaving only the tool path.
+ * With nothing else applied the tool runs over the untouched edit base. Otherwise the rest of the stack is rendered on the
+ * CPU once, and only the dragged slider's tool runs on top of it.
  */
 export function useSliderPreview(p_control: SliderControl | undefined): ((values: number[]) => void) | undefined {
   const box = useObservable(previewBox$, null);
   const adjustments = useObservable(adjustments$, {});
   const actions = useObservable(appliedActions$, []);
   const selection = useObservable(personSelection$, personSelection.value);
-  const live = p_control?.live;
   const tool = p_control?.tool;
   const layer = p_control?.layer;
   const key = p_control?.key;
@@ -43,13 +38,14 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
 
   // Open the preview this drag needs before it starts: the shared edit base, or the CPU-rendered rest of the stack.
   useEffect(() => {
-    if (!(live || tool || layer) || !key || !box) return;
-    if (!hasOtherSteps(key)) {
+    if (!(tool || layer) || !key || !box) return;
+    // Nothing else to start from, or only controls that make the photo remember effects: the drag is made over the full-size photo.
+    if (!hasOtherSteps(key) || (p_control?.deferred && isStackDeferred(key))) {
       ensureBase();
       return;
     }
     editorPreview.ensure(`rest:${others}`, () => renderStackWithoutSlider(key), true);
-  }, [live, tool, layer, key, box, others]);
+  }, [tool, layer, key, box, others]);
 
   // When the slider closes its frames go away, and the renderer goes back to the edit base for the next tap or drag.
   useEffect(
@@ -85,9 +81,11 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
       if (pending.frame !== null) return;
       pending.frame = requestAnimationFrame(() => {
         pending.frame = null;
+        // A control that makes the photo remember effects is dragged on the full-size photo, so what is drawn is sharp when zoomed in.
+        const full = !!p_control.deferred && isStackDeferred(key);
         if (rest.current.key !== others) {
           rest.current.image?.uniffiDestroy();
-          rest.current = { key: others, image: hasOtherSteps(key) ? renderStackWithoutSlider(key, true) : null };
+          rest.current = { key: others, image: hasOtherSteps(key) ? renderStackWithoutSlider(key, true, full) : null };
         }
         showTool((photo, context) => {
           const person = scaledPersonBounds(
@@ -111,10 +109,9 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
           const made = (tool!(photo, pending.values, toolContext) ?? photo) as AbraImage;
           renderStepsAfterSlider(key, made);
           return made === photo ? undefined : made;
-        }, rest.current.image ?? undefined);
+        }, rest.current.image ?? (full ? (editBaseImage.value ?? undefined) : undefined));
       });
     };
   }
-  if (!live) return undefined;
-  return values => editorPreview.showEffects([live(values[0])]);
+  return undefined;
 }

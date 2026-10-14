@@ -67,6 +67,7 @@ pub fn brightness(p_amount: i32) -> Brightness {
 mod tests {
   use super::*;
   use abra_core::Image;
+  use abra_core::image::effect::deferred;
   use primitives::Color;
 
   #[test]
@@ -84,6 +85,26 @@ mod tests {
     assert!(r > 100);
 
     // Clear provider so other tests are unaffected
+    abra_core::image::gpu::clear_gpu_provider();
+  }
+
+  #[test]
+  fn a_deferred_brightness_is_a_pass_list_over_the_untouched_photo_and_gives_the_same_pixels() {
+    let _guard = abra_core::image::gpu::GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    gpu::register();
+
+    let pixels: Vec<u8> = (0..16 * 16).flat_map(|i| [(i % 251) as u8, (i * 7 % 256) as u8, (i * 13 % 256) as u8, 255]).collect();
+    let photo = Image::new_from_pixels(16, 16, pixels, abra_core::Channels::RGBA);
+    let mut now = photo.clone();
+    brightness(40).with_hardware(abra_core::image::gpu::Hardware::Cpu).apply(&mut now);
+
+    let mut later = photo.clone();
+    brightness(40).apply(deferred(&mut later));
+    let (root, passes) = abra_core::image::recipe::gpu_run(&later).expect("a deferred brightness has a run");
+    assert_eq!(root.rgba(), photo.rgba(), "the photo is not touched");
+    assert_eq!(passes.len(), 1);
+    assert_eq!(later.rgba(), now.rgba(), "the same pixels as doing it now");
+
     abra_core::image::gpu::clear_gpu_provider();
   }
 }

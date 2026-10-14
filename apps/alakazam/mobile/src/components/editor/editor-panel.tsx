@@ -3,8 +3,8 @@ import { ColorBarPicker } from '@/src/components/editor/color-bar-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
-import { PersonSelectionControls, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
-import { SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
+import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
+import { GLOW_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
 import { missingModels } from '@/src/lib/ai-model-availability';
 import { FACE_MODELS } from '@/src/lib/faces';
 import { aiModelsRequested } from '@/src/state/ai-models';
@@ -83,7 +83,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
 
 /** The colors of the bar that picks a color, by the name a control gives its `picker`. */
-const barColors = { hue: hueColors, shade: () => SHADE_COLORS, 'skin-tan': () => TAN_COLORS };
+const barColors = { hue: hueColors, shade: () => SHADE_COLORS, glow: () => GLOW_COLORS, 'skin-tan': () => TAN_COLORS };
 
 /** The control that is open in the active section, or undefined. */
 function useFocusedControl() {
@@ -105,12 +105,18 @@ export function EditorPanel() {
   const groups = openKey ? groupPath(activeSection.controls, openKey) : [];
   useActionPreview();
   const focusedControl = useFocusedControl();
-  const isPersonControlFocused = useObservable(isPersonControlFocused$, false);
 
   useEffect(() => {
     const subscriptions = [
-      undoRequested$.subscribe(undoHistory),
-      redoRequested$.subscribe(redoHistory),
+      // The live view keeps showing the last tool's result over the photo, so going back or forward has to take that off too.
+      undoRequested$.subscribe(() => {
+        editorPreview.hide();
+        undoHistory();
+      }),
+      redoRequested$.subscribe(() => {
+        editorPreview.hide();
+        redoHistory();
+      }),
       // Picking a section closes any open slider, including when it is the section already showing, so its controls come back.
       selectSectionRequested$.subscribe(key => {
         focusedControlKey.next(null);
@@ -119,10 +125,12 @@ export function EditorPanel() {
       }),
       selectControlRequested$.subscribe(control => {
         if (control.kind === 'action') {
-          if (control.live || control.tool) {
+          if (control.tool) {
             // Applying previews at once; removing has nothing to preview, but the same short replay needs no spinner either.
             replayHidden.next(true);
             if (!appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
+            // The live view is still showing the tool's result over the photo, so taking the tool off has to take that off too.
+            else editorPreview.hide();
           }
           toggleAction(control);
         } else if (control.kind === 'group') {
@@ -226,10 +234,7 @@ export function EditorPanel() {
         ) : focusedControl?.kind === 'tool' && focusedControl.key === RED_EYE_TOOL_KEY ? (
           <RedEyeControls onBack={() => focusedControlKey.next(null)} onAuto={() => redEyeAutoRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
-          <>
-            {isPersonControlFocused && <PersonSelectionControls />}
-            <SliderEditor />
-          </>
+          <SliderEditor />
         ) : activeSection.previewThumbnails ? (
           <ThumbnailControls />
         ) : (
@@ -259,6 +264,7 @@ function SliderEditor() {
   // an empty one would start its sliders from the defaults and keep them.
   const adjustments = useObservable(adjustments$, adjustmentsState.value);
   const selection = useObservable(personSelection$, personSelection.value);
+  const isPersonControlFocused = useObservable(isPersonControlFocused$, false);
   const historyVersion = useObservable(historyVersion$, historyVersionState.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -326,6 +332,8 @@ function SliderEditor() {
     </Pressable>
   );
 
+  const everyone = isPersonControlFocused ? <PersonEveryoneButton /> : null;
+
   // The bar that picks this control's slider, when it has one in place of the plain slider.
   const barKindAt = (index: number) => {
     const picker = Array.isArray(control.picker) ? control.picker[index] : control.picker;
@@ -347,6 +355,7 @@ function SliderEditor() {
           <View style={styles.sliderHeader}>
             {back}
             <View style={styles.sliderHeaderSpacer} />
+            {everyone}
             {isMultiSlider(control) && resetAll}
             {close}
           </View>
@@ -393,6 +402,8 @@ function SliderEditor() {
                             if (wanted !== undefined) values[swatchIndex] = wanted;
                           });
                           setValueSets(sets => sets + 1);
+                          // Draws the color on the live preview as a drag of the bar does, then commits it.
+                          onLiveChange?.([...values]);
                           sliderCommitRequested.next({ control, value: committedValue() });
                         }}
                       >
@@ -428,7 +439,14 @@ function SliderEditor() {
               key={resetKey + '-' + index + '-' + valueSets}
               // A single slider carries the buttons in its own header.
               leading={!isMultiSlider(control) && index === 0 ? back : undefined}
-              trailing={!isMultiSlider(control) && index === 0 ? close : undefined}
+              trailing={
+                !isMultiSlider(control) && index === 0 ? (
+                  <>
+                    {everyone}
+                    {close}
+                  </>
+                ) : undefined
+              }
               label={spec.label}
               min={spec.min}
               max={spec.max}

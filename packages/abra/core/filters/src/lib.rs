@@ -11,6 +11,9 @@ pub mod sobel;
 
 mod kernel;
 
+#[cfg(test)]
+mod zoomed_out;
+
 pub use options::Effect;
 
 pub(crate) mod common {

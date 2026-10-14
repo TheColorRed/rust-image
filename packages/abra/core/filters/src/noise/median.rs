@@ -174,6 +174,12 @@ impl Effect for Median {
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_median(p_image, self.radius);
   }
+
+  /// The same effect for a picture halved `p_level` times: the radius is half as long for each halving.
+  fn for_level(&self, p_level: u32) -> Option<std::sync::Arc<dyn abra_core::image::gpu::CpuProcessor>> {
+    let radius = abra_core::image::levels::scaled_to_level(self.radius, p_level).round();
+    Some(std::sync::Arc::new(Median { radius, ..self.clone() }))
+  }
 }
 pub fn median(p_radius: f32) -> Median {
   Median {

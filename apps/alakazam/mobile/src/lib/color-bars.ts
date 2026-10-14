@@ -35,6 +35,18 @@ export const shadeGradient = once(() =>
   Gradient.evenly(SHADE_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
 );
 
+/** The tints of a highlighter: pearl, champagne, gold, peach and rose, from the palest to the pinkest. */
+export const GLOW_COLORS = [
+  [255, 250, 245],
+  [247, 231, 206],
+  [234, 200, 120],
+  [255, 190, 150],
+  [244, 170, 180],
+];
+export const glowGradient = once(() =>
+  Gradient.evenly(GLOW_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
+);
+
 /** The tan scale, from no tan to the darkest: white, tan, light brown, brown, dark brown and black. */
 export const TAN_COLORS = [
   [255, 255, 255],

@@ -20,6 +20,12 @@ pub trait GpuFrame: Send + Sync + 'static {
   /// This frame as `Any`, so a [`GpuTarget`] that knows its kind can get at it.
   fn as_any(&self) -> &dyn Any;
 
+  /// The part of the picture to show, as `[x, y, width, height]` in 0..1 of it. The whole picture by default. A target that
+  /// can crop on the GPU shows only this part, scaled to the surface.
+  fn view(&self) -> [f32; 4] {
+    [0.0, 0.0, 1.0, 1.0]
+  }
+
   /// Copies the picture to the CPU, for a surface that cannot show it from GPU memory. Slow, and `None` when the frame
   /// cannot be read back.
   fn read_back(&self) -> Option<Frame> {
@@ -39,6 +45,12 @@ pub trait GpuFrame: Send + Sync + 'static {
 pub trait GpuTarget: Send {
   /// Draws a GPU frame. Returns whether it reached the surface; `false` means the surface is gone.
   fn present(&mut self, p_frame: &dyn GpuFrame) -> bool;
+
+  /// Draws only part of a GPU frame, `p_view` being `[x, y, width, height]` in 0..1 of the frame. A target that cannot crop
+  /// draws the whole frame.
+  fn present_view(&mut self, p_frame: &dyn GpuFrame, _p_view: [f32; 4]) -> bool {
+    self.present(p_frame)
+  }
 
   /// Draws plain pixels, for a frame that was made on the CPU. Returns whether it reached the surface.
   fn present_pixels(&mut self, p_frame: &Frame) -> bool;

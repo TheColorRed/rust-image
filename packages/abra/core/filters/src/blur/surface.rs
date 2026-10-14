@@ -150,7 +150,7 @@ impl GpuProcessor for SurfaceBlur {
     uniforms.extend_from_slice(&self.radius.to_le_bytes());
     uniforms.extend_from_slice(&(self.threshold as u32).to_le_bytes());
     uniforms.extend_from_slice(&(self.step as u32).to_le_bytes());
-    vec![GpuPass::new(include_str!("./surface.wgsl"), uniforms)]
+    vec![GpuPass::new(include_str!("./surface.wgsl"), uniforms).with_pixel_exact()]
   }
 }
 

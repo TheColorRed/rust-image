@@ -57,7 +57,12 @@ export const PAN_START_THRESHOLD = 6;
 type Touches = GestureResponderEvent['nativeEvent']['touches'];
 
 /** Raw touch stream from the preview's PanResponder; `startPreviewGestures` turns it into transforms. */
-export type PreviewTouchEvent = { type: 'grant' | 'move' | 'release' | 'terminate'; touches: Touches };
+/** `velocity` (screen px per ms) is how fast the fingers were moving when they lifted. */
+export type PreviewTouchEvent = {
+  type: 'grant' | 'move' | 'release' | 'terminate';
+  touches: Touches;
+  velocity?: { x: number; y: number };
+};
 export const previewTouch = new Subject<PreviewTouchEvent>();
 
 /** A tap relative to the untransformed preview, independent of which image child received it. */
@@ -206,6 +211,12 @@ export function startPreviewGestures(): Subscription {
       // leaving it a hair off — a deliberate zoom-out should feel like it actually reset.
       if (event.type === 'release' && !isBlemishToolFocused() && previewScaleValue.value <= MIN_PREVIEW_ZOOM + 0.05) {
         springPreview({ x: 0, y: 0, scale: 1 });
+      } else if (event.type === 'release' && event.velocity && previewScaleValue.value > MIN_PREVIEW_ZOOM) {
+        // Keep gliding the way the fingers were going, slowing down like a game camera coasting to a stop.
+        Animated.parallel([
+          Animated.decay(previewTranslateX.value, { velocity: event.velocity.x, deceleration: 0.995, useNativeDriver: true }),
+          Animated.decay(previewTranslateY.value, { velocity: event.velocity.y, deceleration: 0.995, useNativeDriver: true }),
+        ]).start();
       }
     }),
     map((): GestureStep => ({ kind: 'end' })),
@@ -213,6 +224,9 @@ export function startPreviewGestures(): Subscription {
 
   return merge(grants$, moves$, ends$).subscribe(step => {
     if (step.kind === 'baseline') {
+      // A new touch catches the glide instead of fighting it.
+      previewTranslateX.value.stopAnimation();
+      previewTranslateY.value.stopAnimation();
       gestureStart.next(baselineOf(step.touches));
     } else if (step.kind === 'end') {
       gestureStart.next({ ...gestureStart.value, active: false });
@@ -245,7 +259,12 @@ export function createPreviewPanResponder() {
     },
     onPanResponderGrant: event => previewTouch.next({ type: 'grant', touches: event.nativeEvent.touches }),
     onPanResponderMove: event => previewTouch.next({ type: 'move', touches: event.nativeEvent.touches }),
-    onPanResponderRelease: event => previewTouch.next({ type: 'release', touches: event.nativeEvent.touches }),
+    onPanResponderRelease: (event, gestureState) =>
+      previewTouch.next({
+        type: 'release',
+        touches: event.nativeEvent.touches,
+        velocity: { x: gestureState.vx, y: gestureState.vy },
+      }),
     onPanResponderTerminate: event => previewTouch.next({ type: 'terminate', touches: event.nativeEvent.touches }),
   });
 }

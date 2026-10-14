@@ -9,6 +9,7 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use crate::fs::WriterOptions;
+use crate::image::levels::{Levels, copy_clamped};
 use crate::{Area, Image, PointF, Rect, Size, polygon_contains, reader, writer};
 
 /// Methods `abra-core` adds to [`Image`].
@@ -21,6 +22,13 @@ pub trait ImageExt {
   fn size(&self) -> Size;
   /// The RGBA bytes of the pixels whose centers are inside the area, row by row. The area can be any shape.
   fn rgba_in_area(&self, p_area: &Area) -> Vec<u8>;
+  /// The rectangle `p_width` x `p_height` whose top left is at `(p_left, p_top)` in the image at `p_level`, as RGBA. Level 0
+  /// is the image, and each level above it is the one before halved (see [`level_size`](crate::image::levels::level_size)).
+  /// A pixel past an edge is the pixel at that edge, so a rectangle can reach out of the image.
+  ///
+  /// Only what is asked for is made: the zoomed-out levels the first time they are needed, and an image that is still a
+  /// recipe, when it can, only the part asked for. Whatever was made is kept with the image until its pixels change.
+  fn region(&self, p_level: u32, p_left: i32, p_top: i32, p_width: u32, p_height: u32) -> Vec<u8>;
 }
 
 impl ImageExt for Image {
@@ -35,6 +43,18 @@ impl ImageExt for Image {
   fn size(&self) -> Size {
     let (width, height) = self.dimensions::<u32>();
     Size::new(width, height)
+  }
+
+  fn region(&self, p_level: u32, p_left: i32, p_top: i32, p_width: u32, p_height: u32) -> Vec<u8> {
+    if let Some(pixels) = self.deferred().and_then(|recipe| recipe.region(p_level, p_left, p_top, p_width, p_height)) {
+      return pixels;
+    }
+    let (width, height) = self.dimensions::<u32>();
+    if p_level == 0 {
+      return copy_clamped(self.rgba(), width, height, p_left, p_top, p_width, p_height);
+    }
+    let level = self.derived(|_| Levels::default()).level(self, p_level);
+    copy_clamped(&level.pixels, level.width, level.height, p_left, p_top, p_width, p_height)
   }
 
   fn rgba_in_area(&self, p_area: &Area) -> Vec<u8> {
@@ -95,5 +115,27 @@ mod tests {
     let img = coordinate_image(3, 2);
     assert_eq!(img.rgba_in_area(&Area::new_from_image(&img)).len(), 3 * 2 * 4);
     assert_eq!(img.size(), Size::new(3, 2));
+  }
+  #[test]
+  fn a_region_is_the_rectangle_of_the_image_at_that_level_and_reaches_past_the_edge() {
+    let img = coordinate_image(4, 4);
+    assert_eq!(img.region(0, 1, 2, 2, 1), vec![1, 2, 0, 255, 2, 2, 0, 255]);
+    // Level 1 is 2 x 2: the mean of each block of four, rounded.
+    assert_eq!(img.region(1, 0, 0, 2, 2), vec![1, 1, 0, 255, 3, 1, 0, 255, 1, 3, 0, 255, 3, 3, 0, 255]);
+    // Level 2 is one pixel, and a rectangle past it is that pixel.
+    assert_eq!(img.region(2, -1, -1, 2, 2), vec![2, 2, 0, 255].repeat(4));
+  }
+
+  #[test]
+  fn the_levels_are_kept_until_the_pixels_change_and_a_clone_shares_them() {
+    let mut img = coordinate_image(4, 4);
+    let clone = img.clone();
+    assert_eq!(img.region(2, 0, 0, 1, 1), vec![2, 2, 0, 255]);
+    let levels = img.derived(|_| Levels::default());
+    assert!(std::sync::Arc::ptr_eq(&levels, &clone.derived(|_| Levels::default())), "the clone shares what was made");
+    img.set_pixel(0, 0, (255, 255, 255, 255));
+    assert!(!std::sync::Arc::ptr_eq(&levels, &img.derived(|_| Levels::default())), "a change starts the levels again");
+    assert_eq!(img.region(2, 0, 0, 1, 1)[0], 18, "the new level has the changed pixel in its mean");
+    assert_eq!(clone.region(2, 0, 0, 1, 1), vec![2, 2, 0, 255], "the clone did not change");
   }
 }

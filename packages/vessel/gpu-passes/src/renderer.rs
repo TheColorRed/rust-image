@@ -65,6 +65,7 @@ pub(crate) struct PipelineKey {
   uniforms: bool,
   aux: bool,
   base: bool,
+  window: bool,
 }
 
 impl PipelineKey {
@@ -74,6 +75,7 @@ impl PipelineKey {
       uniforms: !p_pass.uniforms.is_empty(),
       aux: p_pass.aux.is_some(),
       base: p_pass.base,
+      window: p_pass.window,
     }
   }
 }
@@ -96,7 +98,8 @@ struct AuxSlot {
   rgba: std::sync::Arc<[u8]>,
 }
 
-/// Number of staging buffers readback rotates through, so a new frame can be requested while earlier ones are still
+/// Number of staging buffers readback rotates through unless [`LiveRenderer::with_readback_slots`] says otherwise, so a new
+/// frame can be requested while earlier ones are still
 /// being copied back.
 const READBACK_SLOTS: usize = 3;
 
@@ -159,6 +162,11 @@ pub struct LiveRenderer {
   readback: Option<Readback>,
   next_frame: u64,
   output: Output,
+  /// Where the next render's image sits in the photo, for the passes that ask: `[origin x, origin y, scale, scale y, photo
+  /// width, photo height, 0, 0]`. Taken by the render; without it the image is the whole photo.
+  window: Option<[f32; 8]>,
+  window_buffer: Option<wgpu::Buffer>,
+  readback_slots: usize,
 }
 
 impl LiveRenderer {
@@ -174,7 +182,18 @@ impl LiveRenderer {
       readback: None,
       next_frame: 0,
       output: Output::Source,
+      window: None,
+      window_buffer: None,
+      readback_slots: READBACK_SLOTS,
     }
+  }
+
+  /// How many staging buffers readback rotates through (at least one; the default is 3). More let a caller that reads back
+  /// every frame have more in flight at once, at the cost of memory for each; one means a frame waits for the one before.
+  /// Set it before the first [`request_frame`](Self::request_frame).
+  pub fn with_readback_slots(mut self, p_slots: usize) -> Self {
+    self.readback_slots = p_slots.max(1);
+    self
   }
 
   /// The context this renderer runs on.
@@ -205,18 +224,7 @@ impl LiveRenderer {
         p_rgba.len()
       ));
     }
-    if self.size() != Some((p_width, p_height)) {
-      let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC;
-      self.source = Some((Target::new(&self.ctx, "live::source", p_width, p_height, usage), p_width, p_height));
-      let work_usage =
-        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
-      self.work = Some([
-        Target::new(&self.ctx, "live::work_a", p_width, p_height, work_usage),
-        Target::new(&self.ctx, "live::work_b", p_width, p_height, work_usage),
-      ]);
-      let base_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
-      self.base = Some(Target::new(&self.ctx, "live::base", p_width, p_height, base_usage));
-    }
+    self.ensure_size(p_width, p_height);
     if let Some((target, width, height)) = &self.source {
       target.write(&self.ctx, *width, *height, p_rgba);
     }
@@ -224,11 +232,57 @@ impl LiveRenderer {
     Ok(())
   }
 
+  /// Makes the source and working textures `p_width` x `p_height`, keeping them when they already are.
+  fn ensure_size(&mut self, p_width: u32, p_height: u32) {
+    if self.size() == Some((p_width, p_height)) {
+      return;
+    }
+    let usage = wgpu::TextureUsages::TEXTURE_BINDING
+      | wgpu::TextureUsages::COPY_DST
+      | wgpu::TextureUsages::COPY_SRC
+      | wgpu::TextureUsages::RENDER_ATTACHMENT;
+    self.source = Some((Target::new(&self.ctx, "live::source", p_width, p_height, usage), p_width, p_height));
+    let work_usage =
+      wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
+    self.work = Some([
+      Target::new(&self.ctx, "live::work_a", p_width, p_height, work_usage),
+      Target::new(&self.ctx, "live::work_b", p_width, p_height, work_usage),
+    ]);
+    let base_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+    self.base = Some(Target::new(&self.ctx, "live::base", p_width, p_height, base_usage));
+  }
+
+  /// The source texture at `p_width` x `p_height`, for something other than an upload to draw the image into. The next
+  /// [`render`](Self::render) runs the effects over what was drawn.
+  pub(crate) fn source_view(&mut self, p_width: u32, p_height: u32) -> wgpu::TextureView {
+    self.ensure_size(p_width, p_height);
+    self.output = Output::Source;
+    self.source.as_ref().expect("just made").0.view.clone()
+  }
+
+  /// Says where the image of the next [`render`](Self::render) sits in the photo, for the passes that ask.
+  pub(crate) fn set_window(&mut self, p_window: [f32; 8]) {
+    self.window = Some(p_window);
+  }
+
   /// Runs the effects over the source image in order. This only submits GPU work and does not wait for it, so it is
   /// cheap to call every frame. Use [`read_pixels`](Self::read_pixels) or [`output_texture`](Self::output_texture)
   /// to get the result.
   pub fn render(&mut self, p_effects: &[Vec<GpuPass>]) -> Result<()> {
     let (width, height) = self.size().ok_or_else(|| anyhow!("set_source must be called before render"))?;
+    let window = self.window.take().unwrap_or([0.0, 0.0, 1.0, 1.0, width as f32, height as f32, 0.0, 0.0]);
+    let window_buffer = self
+      .window_buffer
+      .get_or_insert_with(|| {
+        self.ctx.device.create_buffer(&wgpu::BufferDescriptor {
+          label: Some("live::window"),
+          size: 32,
+          usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+          mapped_at_creation: false,
+        })
+      })
+      .clone();
+    self.ctx.queue.write_buffer(&window_buffer, 0, &window.map(f32::to_ne_bytes).concat());
     // An effect with a pass that needs its input image has that image copied aside before its first pass runs.
     let mut passes: Vec<(&GpuPass, bool)> = Vec::new();
     for effect_passes in p_effects {
@@ -311,6 +365,12 @@ impl LiveRenderer {
         entries.push(wgpu::BindGroupEntry {
           binding: 4,
           resource: wgpu::BindingResource::TextureView(&base.view),
+        });
+      }
+      if pass.window {
+        entries.push(wgpu::BindGroupEntry {
+          binding: 5,
+          resource: window_buffer.as_entire_binding(),
         });
       }
       let bind_group = self.ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -398,7 +458,7 @@ impl LiveRenderer {
         let _guard = self.ctx.gate();
         self.ctx.device.poll(wgpu::PollType::wait_indefinitely())?;
       }
-      let slots = (0..READBACK_SLOTS)
+      let slots = (0..self.readback_slots)
         .map(|_| ReadbackSlot {
           buffer: self.ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("live::readback"),
@@ -629,6 +689,19 @@ impl LiveRenderer {
           sample_type: wgpu::TextureSampleType::Float { filterable: false },
           view_dimension: wgpu::TextureViewDimension::D2,
           multisampled: false,
+        },
+        count: None,
+      });
+    }
+
+    if key.window {
+      entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 5,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+          ty: wgpu::BufferBindingType::Uniform,
+          has_dynamic_offset: false,
+          min_binding_size: None,
         },
         count: None,
       });

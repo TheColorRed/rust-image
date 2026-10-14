@@ -10,6 +10,7 @@ use crate::image::apply_area::{
   ApplyContext, apply_in_area, apply_in_area_gpu, apply_to_whole_image_in_area, apply_to_whole_image_in_area_gpu,
 };
 use crate::image::gpu::{CpuProcessor, GpuEffect, GpuProcessor, Hardware, ready_gpu_provider};
+use crate::image::recipe::effect_applied;
 use crate::{Area, GrayPlane, Image, ImageRef};
 use std::sync::Arc;
 
@@ -94,6 +95,14 @@ pub trait Effect: Sized + Send + Sync {
   /// The GPU version of the operation, or `None` (the default) when it only runs on the CPU. Override with
   /// `Some(self)` after implementing [`GpuProcessor`].
   fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    None
+  }
+
+  /// This operation for a picture that is halved `p_level` times: a blur a quarter as wide for a picture a quarter as wide.
+  /// It lets a zoomed-out part of an image be made without making all of it. `None` (the default) when the operation cannot
+  /// be worked out for another size, and then the part is cut from the whole picture. An operation that only looks at the
+  /// pixel it changes returns itself.
+  fn for_level(&self, _p_level: u32) -> Option<Arc<dyn CpuProcessor>> {
     None
   }
 
@@ -189,6 +198,18 @@ impl<T: Effect> CpuProcessor for T {
   fn gpu(&self) -> Option<&dyn GpuProcessor> {
     self.gpu_processor()
   }
+
+  fn padding(&self) -> i32 {
+    Effect::padding(self)
+  }
+
+  fn positional(&self) -> bool {
+    Effect::positional(self)
+  }
+
+  fn at_level(&self, p_level: u32) -> Option<Arc<dyn CpuProcessor>> {
+    self.for_level(p_level)
+  }
 }
 
 /// Something an effect `E` can be applied to. Images and image references are targets automatically; other targets,
@@ -201,6 +222,31 @@ pub trait ApplyTarget<E> {
 impl<'a, E: Effect, T: Into<ImageRef<'a>>> ApplyTarget<E> for T {
   fn receive(self, p_effect: &E) {
     p_effect.apply_to_image(self);
+  }
+}
+
+/// An image that takes an effect without doing the work: `effect.apply(Deferred(&mut image))` turns the image into one that
+/// remembers the effect, and it is done only when somebody looks: by the GPU for the part a preview draws, or by the CPU for
+/// just the part asked for ([`region`](crate::image::image_ext::ImageExt::region)). The pixels are the same either way. When
+/// it cannot be deferred, because the effect has an area or a mask or is set to the CPU, the effect is applied now, as
+/// `apply(&mut image)` does.
+pub struct Deferred<'a>(pub &'a mut Image);
+
+/// Makes `p_image` a target that takes an effect later: `brightness(30).apply(deferred(&mut image))`. See [`Deferred`].
+pub fn deferred(p_image: &mut Image) -> Deferred<'_> {
+  Deferred(p_image)
+}
+
+impl<'a, E: Effect + Clone + 'static> ApplyTarget<E> for Deferred<'a> {
+  fn receive(self, p_effect: &E) {
+    let options = p_effect.options().as_ref();
+    let whole = options.is_none_or(|options| options.area().is_none() && options.mask().is_none());
+    let hardware = options.and_then(|options| options.hardware().copied()).unwrap_or_default();
+    if whole && hardware != Hardware::Cpu {
+      *self.0 = effect_applied(self.0, Arc::new(p_effect.clone()));
+      return;
+    }
+    p_effect.apply_to_image(self.0);
   }
 }
 

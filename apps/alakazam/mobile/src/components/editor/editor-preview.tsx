@@ -1,7 +1,6 @@
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
 import { comparisonImage, shownImage } from '@/src/lib/editor-pictures';
 import { editorPreview } from '@/src/lib/editor-preview';
-import { waitForPreviewFrame } from '@/src/lib/preview-handoff';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import {
   restorePreviewRequested,
@@ -23,6 +22,7 @@ import {
   previewScaleValue,
   previewScaleSettled$,
   previewTranslateX,
+  previewTranslateValue,
   previewTranslateX$,
   previewTranslateY,
   previewTranslateY$,
@@ -50,7 +50,7 @@ import {
 } from '@/src/state/session';
 import { faceBoxes, faceBoxes$ } from '@/src/state/analysis';
 import { personOutlinesVisible$, personSelection, personSelection$, selectionNeeded } from '@/src/state/person-selection';
-import { ImagePreview } from '@alakazam/mobile';
+import { ImagePreview, type AbraImage } from '@alakazam/mobile';
 import { VesselView } from '@vessel/react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useCallback, useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
@@ -95,6 +95,8 @@ export function EditorPreview() {
   const holdEnded = useRef(false);
   const touchTargetRef = useRef<ElementRef<typeof Pressable> | null>(null);
   const [baseView, setBaseView] = useState<ImagePreview | null>(null);
+  // The base preview that is alive now. State is a render behind it, and a viewport sent to one that was just let go of fails.
+  const baseViewRef = useRef<ImagePreview | null>(null);
   const liveView = useSyncObservable(editorPreview.view, null);
   const box = useObservable(previewBox$, null);
   const loadError = useObservable(loadError$, null);
@@ -111,6 +113,27 @@ export function EditorPreview() {
   const translateX = useObservable(previewTranslateX$, previewTranslateX.value);
   const translateY = useObservable(previewTranslateY$, previewTranslateY.value);
   const panResponder = useObservable(previewPanResponder$, null);
+  // The native views always fill the preview box. Zoom and pan only move the camera: the part of the photo the box shows
+  // is sent to the GPU on every change, which draws it from the photo that already sits there. Nothing is laid out again,
+  // so the photo is complete at every frame of a gesture, and the part past its edges is black.
+  useEffect(() => {
+    if (!photo || !box) return;
+    const fit = Math.min(box.width / photo.width, box.height / photo.height);
+    const size = { width: Math.max(1, photo.width * fit), height: Math.max(1, photo.height * fit) };
+    const subscription = combineLatest([previewScaleValue, previewTranslateValue]).subscribe(([zoom, move]) => {
+      const left = (-box.width / 2 - move.x) / zoom;
+      const top = (-box.height / 2 - move.y) / zoom;
+      const viewport: [number, number, number, number] = [
+        (left + size.width / 2) / size.width,
+        (top + size.height / 2) / size.height,
+        box.width / zoom / size.width,
+        box.height / zoom / size.height,
+      ];
+      baseViewRef.current?.setViewport(...viewport);
+      liveView?.setViewport(...viewport);
+    });
+    return () => subscription.unsubscribe();
+  }, [photo, box, baseView, liveView]);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -178,35 +201,37 @@ export function EditorPreview() {
     };
   }, []);
 
-  // Show the source image on the native view under the live one; Vessel draws it at the view's size. Each new source
-  // replaces the previous preview, which lets go of the view as it goes.
+  // Show the source image on the native view under the live one; Vessel draws it at the view's size. One preview is open over
+  // the edit base for as long as it is the same photo. It shares an image of its own, and each new source is put in that
+  // image, so the photo stays on the GPU and a picture that is only the photo with effects over it costs the effects. A new
+  // photo opens a new preview.
   useEffect(() => {
     let current: ImagePreview | null = null;
-    let cancelHandoff: (() => void) | undefined;
+    let display: AbraImage | null = null;
+    let over: unknown = null;
     const release = () => {
-      cancelHandoff?.();
-      cancelHandoff = undefined;
+      baseViewRef.current = null;
       current?.uniffiDestroy();
+      display?.uniffiDestroy();
       current = null;
+      display = null;
+      over = null;
       setBaseView(null);
     };
-    const subscription = combineLatest([previewSourceImage$, previewBox$]).subscribe(([source, size]) => {
-      release();
-      if (!source || !size) return;
-      current = new ImagePreview(source);
-      setBaseView(current);
+    const subscription = combineLatest([previewSourceImage$, previewBox$, editBaseImage$]).subscribe(([source, size, base]) => {
+      if (!source || !size || !base) return release();
+      if (over !== base || !current || !display) {
+        release();
+        display = source.clone() as AbraImage;
+        current = new ImagePreview(display);
+        over = base;
+        baseViewRef.current = current;
+        setBaseView(current);
+      } else {
+        display.replaceWith(source);
+        current.refresh();
+      }
       previewSize.next({ width: source.width(), height: source.height() });
-      const activity = editorPreview.activity;
-      cancelHandoff = waitForPreviewFrame(
-        current,
-        () => {
-          if (editorPreview.activity === activity) editorPreview.hide();
-        },
-        error => {
-          console.warn('[preview] could not present the edited frame:', error);
-          previewError.next(error.message);
-        },
-      );
     });
     return () => {
       subscription.unsubscribe();
@@ -223,6 +248,7 @@ export function EditorPreview() {
     });
     return () => subscription.unsubscribe();
     // Subscribing again once the view has mounted applies the current state to it.
+    // The layout style carries the live view's opacity, so every new layout needs it applied again.
   }, [photo, box]);
 
   // A long press is a temporary before/after preview that restores on release; it changes no edit state.
@@ -257,16 +283,30 @@ export function EditorPreview() {
         {loadError && <Text style={styles.error}>{loadError}</Text>}
         {!loadError && !photo && <ActivityIndicator size="large" color={colors.textPrimary} />}
         {photo && box && VesselView && (
-          <Animated.View
-            style={{ width: box.width, height: box.height, transform: [{ translateX }, { translateY }, { scale }] }}
-          >
-            <VesselView source={baseView} pointerEvents="none" style={photoStyle(box, photo, true)} />
+          <>
+            <VesselView
+              source={baseView}
+              pointerEvents="none"
+              style={{ position: 'absolute', left: 0, top: 0, width: box.width, height: box.height, opacity: 1 }}
+            />
             <VesselView
               ref={liveViewRef}
               source={liveView}
               pointerEvents="none"
-              style={photoStyle(box, photo, false)}
+              style={{ position: 'absolute', left: 0, top: 0, width: box.width, height: box.height, opacity: 0 }}
             />
+          </>
+        )}
+        {photo && box && VesselView && (
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              width: box.width,
+              height: box.height,
+              transform: [{ translateX }, { translateY }, { scale }],
+            }}
+          >
             {skinControlFocused && personSelectionState.focused && outlinesVisible && selectionNeeded(personSelectionState) && (
               <PersonDetectionOverlay
                 people={personSelectionState.people}
@@ -380,28 +420,6 @@ function PersonDetectionOverlay({
       })}
     </View>
   );
-}
-
-/**
- * Fits the photo's aspect ratio inside the preview box, centered. The live view keeps this size while hidden so its
- * surface is already the right size when the first frame is drawn on it.
- */
-function photoStyle(
-  p_box: { width: number; height: number },
-  p_photo: { width: number; height: number },
-  p_visible: boolean,
-) {
-  const fit = Math.min(p_box.width / p_photo.width, p_box.height / p_photo.height);
-  const width = Math.max(1, p_photo.width * fit);
-  const height = Math.max(1, p_photo.height * fit);
-  return {
-    position: 'absolute' as const,
-    left: (p_box.width - width) / 2,
-    top: (p_box.height - height) / 2,
-    width,
-    height,
-    opacity: p_visible ? 1 : 0,
-  };
 }
 
 function createStyles(colors: ThemeColors) {

@@ -74,7 +74,7 @@ pub(super) fn passes(p_radii: [u32; 2]) -> Vec<GpuPass> {
   for direction in 0..2u32 {
     let uniforms =
       [p_radii[0], p_radii[1], direction, maximum].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>();
-    passes.push(GpuPass::new(include_str!("./highlights_shadows_blur.wgsl"), uniforms).with_aux(GpuAux {
+    passes.push(GpuPass::new(include_str!("./highlights_shadows_blur.wgsl"), uniforms).with_pixel_exact().with_aux(GpuAux {
       width,
       height: 2,
       rgba: table.clone(),

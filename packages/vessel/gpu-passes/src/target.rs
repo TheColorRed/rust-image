@@ -13,7 +13,7 @@ use std::sync::Arc;
 use vessel_engine::surface::{self, AndroidWindow};
 use vessel_engine::{Frame, GpuFrame, GpuTarget};
 
-use crate::{GpuContext, Presenter};
+use crate::{GpuContext, PresentOptions, Presenter};
 #[cfg(target_os = "ios")]
 use vessel_engine::surface::IosSurface;
 
@@ -25,6 +25,11 @@ use vessel_engine::surface::IosSurface;
 pub struct TextureFrame {
   context: GpuContext,
   texture: wgpu::Texture,
+  /// The part of the texture to show, `[x, y, width, height]` in 0..1 of it.
+  view: [f32; 4],
+  /// How a window that shows this picture draws it. Only the first picture a window shows decides, since that is when its
+  /// target is made; change it later with the target's presenter.
+  present: PresentOptions,
 }
 
 impl TextureFrame {
@@ -33,7 +38,19 @@ impl TextureFrame {
     Self {
       context: p_context.clone(),
       texture: p_texture,
+      view: [0.0, 0.0, 1.0, 1.0],
+      present: PresentOptions::default(),
     }
+  }
+
+  /// The same texture, drawn on a window as `p_options` say (when it is vsynced, what color shows past the picture).
+  pub fn with_present_options(&self, p_options: PresentOptions) -> Self {
+    Self { present: p_options, ..self.clone() }
+  }
+
+  /// The same texture, showing only `p_view` (`[x, y, width, height]` in 0..1 of it). Nothing is copied.
+  pub fn with_view(&self, p_view: [f32; 4]) -> Self {
+    Self { view: p_view, ..self.clone() }
   }
 
   /// The texture that holds the picture.
@@ -49,6 +66,10 @@ impl GpuFrame for TextureFrame {
 
   fn as_any(&self) -> &dyn Any {
     self
+  }
+
+  fn view(&self) -> [f32; 4] {
+    self.view
   }
 
   fn read_back(&self) -> Option<Frame> {
@@ -98,19 +119,35 @@ impl GpuFrame for TextureFrame {
     }
     drop(mapped);
     buffer.unmap();
-    Some(Frame {
-      width,
-      height,
-      pixels: Arc::new(pixels),
-    })
+    let [view_x, view_y, view_width, view_height] = self.view;
+    if self.view == [0.0, 0.0, 1.0, 1.0] {
+      return Some(Frame { width, height, pixels: Arc::new(pixels) });
+    }
+    // Only the part that is shown, the same rectangle the screen target would show. Where the view reaches past the
+    // texture the screen target draws black, so the cut is black there too.
+    let left = (view_x * width as f32).floor() as i64;
+    let top = (view_y * height as f32).floor() as i64;
+    let cut_width = ((view_width * width as f32).round() as i64).max(1);
+    let cut_height = ((view_height * height as f32).round() as i64).max(1);
+    let mut cut = [0u8, 0, 0, 255].repeat(cut_width as usize * cut_height as usize);
+    let (from, to) = (left.max(0), (left + cut_width).min(width as i64));
+    if from < to {
+      for row in top.max(0)..(top + cut_height).min(height as i64) {
+        let source = (row as usize * width as usize + from as usize) * 4;
+        let target = (((row - top) * cut_width + (from - left)) as usize) * 4;
+        let length = (to - from) as usize * 4;
+        cut[target..target + length].copy_from_slice(&pixels[source..source + length]);
+      }
+    }
+    Some(Frame { width: cut_width as u32, height: cut_height as u32, pixels: Arc::new(cut) })
   }
 
   fn target_for(&self, p_surface_id: i32) -> Option<Box<dyn GpuTarget>> {
     #[cfg(target_os = "ios")]
-    return Some(Box::new(IosTarget::new(&self.context, p_surface_id)?));
+    return Some(Box::new(IosTarget::with_options(&self.context, p_surface_id, &self.present)?));
 
     #[cfg(not(target_os = "ios"))]
-    Some(Box::new(AndroidTarget::new(&self.context, p_surface_id)?))
+    Some(Box::new(AndroidTarget::with_options(&self.context, p_surface_id, &self.present)?))
   }
 }
 
@@ -127,12 +164,20 @@ pub struct IosTarget {
 impl IosTarget {
   /// Creates a target using the frame's GPU, or returns `None` if that GPU cannot present to the layer.
   pub fn new(p_context: &GpuContext, p_surface_id: i32) -> Option<Self> {
+    Self::with_options(p_context, p_surface_id, &PresentOptions::default())
+  }
+
+  /// Like [`new`](Self::new), drawing as `p_options` say.
+  pub fn with_options(p_context: &GpuContext, p_surface_id: i32, p_options: &PresentOptions) -> Option<Self> {
     let surface = surface::get_as::<IosSurface>(p_surface_id)?;
     let mut created = None;
     surface.with_layer(|layer, size| {
       // SAFETY: the target retains the surface until after the presenter is dropped.
       match unsafe { Presenter::from_metal_layer(p_context, layer, size.0, size.1) } {
-        Ok(presenter) => {
+        Ok(mut presenter) => {
+          if let Err(error) = presenter.set_options(p_options) {
+            eprintln!("vessel: {error}");
+          }
           created = Some((presenter, size));
           true
         }
@@ -175,6 +220,17 @@ impl GpuTarget for IosTarget {
     })
   }
 
+  fn present_view(&mut self, p_frame: &dyn GpuFrame, p_view: [f32; 4]) -> bool {
+    let Some(frame) = p_frame.as_any().downcast_ref::<TextureFrame>() else { return false };
+    self.draw(|presenter| match presenter.try_present_view(frame.texture(), p_view) {
+      Ok(drawn) => drawn,
+      Err(error) => {
+        eprintln!("vessel: iOS GPU presentation failed: {error}");
+        false
+      }
+    })
+  }
+
   fn present_pixels(&mut self, p_frame: &Frame) -> bool {
     self.draw(|presenter| match presenter.try_present_pixels(p_frame.width, p_frame.height, &p_frame.pixels) {
       Ok(drawn) => drawn,
@@ -199,6 +255,12 @@ impl AndroidTarget {
   /// A target for the window registered under `p_surface_id`, or `None` if its view has not reported a window yet or the
   /// GPU cannot draw on it.
   pub fn new(p_context: &GpuContext, p_surface_id: i32) -> Option<Self> {
+    Self::with_options(p_context, p_surface_id, &PresentOptions::default())
+  }
+
+  /// Like [`new`](Self::new), drawing as `p_options` say. A present mode the window cannot do is reported and the default
+  /// one is used.
+  pub fn with_options(p_context: &GpuContext, p_surface_id: i32, p_options: &PresentOptions) -> Option<Self> {
     let window = surface::get_as::<AndroidWindow>(p_surface_id)?;
     let (width, height) = {
       let state = window.state.lock().ok()?;
@@ -208,7 +270,10 @@ impl AndroidTarget {
       (state.width, state.height)
     };
     // SAFETY: the window is held by this target for as long as the presenter, and is destroyed after it.
-    let presenter = unsafe { Presenter::from_android_window(p_context, window.ptr(), width, height) }.ok()?;
+    let mut presenter = unsafe { Presenter::from_android_window(p_context, window.ptr(), width, height) }.ok()?;
+    if let Err(error) = presenter.set_options(p_options) {
+      eprintln!("vessel: {error}");
+    }
     Some(Self {
       presenter,
       surface_id: p_surface_id,
@@ -238,6 +303,11 @@ impl GpuTarget for AndroidTarget {
   fn present(&mut self, p_frame: &dyn GpuFrame) -> bool {
     let Some(frame) = p_frame.as_any().downcast_ref::<TextureFrame>() else { return false };
     self.draw(|presenter| presenter.present(frame.texture()).is_ok())
+  }
+
+  fn present_view(&mut self, p_frame: &dyn GpuFrame, p_view: [f32; 4]) -> bool {
+    let Some(frame) = p_frame.as_any().downcast_ref::<TextureFrame>() else { return false };
+    self.draw(|presenter| presenter.try_present_view(frame.texture(), p_view).is_ok())
   }
 
   fn present_pixels(&mut self, p_frame: &Frame) -> bool {

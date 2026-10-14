@@ -1,4 +1,4 @@
-import { personIn, skinMaskOf } from '@/src/lib/analysis';
+import { personIn } from '@/src/lib/analysis';
 import { batch } from '@/src/lib/batch';
 import {
   applyAction,
@@ -37,30 +37,24 @@ import { personSelection } from '@/src/state/person-selection';
 import { controlThumbnails } from '@/src/state/preview';
 import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
 import { type Image as AbraPixels } from '@abra/core/image';
-import { AbraImage, applyEffect, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
+import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { filter, switchMap, tap } from 'rxjs/operators';
 
 // #region: The full-size picture, which is not shown
 
-/** Gap before the full-size edit starts, so a run of quick edits (a slider moved again) only makes the last one. */
-const FULL_REPLAY_DELAY_MS = 150;
-let fullReplayTimer: ReturnType<typeof setTimeout> | undefined;
+/** Whether the edit has changed since the full-size picture (`currentImage`) was made, so it is out of date. */
+let fullReplayPending = false;
 
 /**
  * Makes the edit on the full-size photo. It is not shown: it is `currentImage`, for what needs every pixel. It takes seconds on
- * a large photo and holds the JavaScript thread while it does, so unless it is `forced` it waits for the thumbnails being built.
+ * a large photo and holds the JavaScript thread while it does, so it is only made when something asks for it
+ * (`flushFullReplay`), never behind the user's back while they edit.
  */
-function runFullReplay(forced = false) {
-  fullReplayTimer = undefined;
-  if (!forced && thumbnailBuild) {
-    fullReplayTimer = setTimeout(runFullReplay, FULL_REPLAY_DELAY_MS);
-    return;
-  }
+function runFullReplay() {
+  fullReplayPending = false;
   const base = editBaseImage.value;
-  // A new base was swapped in since the last replay, and the replay of it is on its way and will make this one again. Running
-  // now would do the work for the new photo first, with the edits and the preloads of the old one still in place.
-  if (!base || (!forced && base !== replayedBase)) return;
+  if (!base) return;
   const started = Date.now();
   const next = renderEditStack(base, undefined, true);
   currentImage.value?.uniffiDestroy();
@@ -68,29 +62,17 @@ function runFullReplay(forced = false) {
   if (__DEV__) console.debug('[edit] full-size replay ms (not shown):', Date.now() - started);
 }
 
-function scheduleFullReplay() {
-  if (fullReplayTimer !== undefined) clearTimeout(fullReplayTimer);
-  fullReplayTimer = setTimeout(runFullReplay, FULL_REPLAY_DELAY_MS);
-}
-
 /**
- * Makes the full-size edit now if one is waiting. Whatever changes the full-size photo in place, such as the blemish tool,
- * calls this first, so it works on the photo as it is edited now and not on the one before the last release.
+ * Makes the full-size edit now if the one there is out of date. Whatever needs the full-size photo, such as saving or the
+ * blemish tool, calls this first, so it works on the photo as it is edited now and not on the one before the last change.
  */
 export function flushFullReplay() {
-  if (fullReplayTimer === undefined) return;
-  clearTimeout(fullReplayTimer);
-  runFullReplay(true);
+  if (fullReplayPending) runFullReplay();
 }
 
-function cancelFullReplay() {
-  if (fullReplayTimer !== undefined) clearTimeout(fullReplayTimer);
-  fullReplayTimer = undefined;
-}
-
-/** Lets go of every screen-size picture and stops a waiting full-size edit, when the session ends. */
+/** Lets go of every screen-size picture and forgets a full-size edit that was waiting, when the session ends. */
 export function releaseShownImages() {
-  cancelFullReplay();
+  fullReplayPending = false;
   releasePreloads();
   preloadedBase = null;
   replayedBase = null;
@@ -129,6 +111,8 @@ type Step = {
   value?: AdjustmentValue;
   /** Where in the stack it runs: see `stageOf`. */
   stage: number;
+  /** Whether it only makes the photo remember library effects for the GPU (see `SliderControl.deferred`), so it costs nothing at full size. */
+  deferred: boolean;
   run: (image: AbraImageLike, scale: number) => void;
   /** For a control that has a layer: the layer's sheet, so that the steps next to it go on one canvas. `run` does it alone. */
   sheet?: (image: AbraImageLike, scale: number) => Sheet;
@@ -156,17 +140,21 @@ function appliedSteps(
     const found = findAction(key);
     if (!found) continue;
     const { control, section } = found;
-    if (!control.apply && !control.live && !control.tool) continue;
+    if (!control.apply && !control.tool) continue;
     // The action about to be applied replaces the others in its group, so it is never left out with them.
     if (control !== pending && control.group && excludeGroups?.has(control.group)) continue;
-    steps.push({ key, stage: stageOf(section.key, false), run: (image, scale) => applyAction(control, image, scale) });
+    steps.push({
+      key,
+      stage: stageOf(section.key, false),
+      deferred: !!control.deferred && !control.apply,
+      run: (image, scale) => applyAction(control, image, scale),
+    });
   }
   for (const section of EDIT_SECTIONS) {
     for (const control of leafControls(section.controls)) {
       if (control.kind !== 'slider') continue;
       if (isPersonAdjustment(control.key)) {
-        const effect = control.live;
-        if (!effect && !control.tool && !control.layer) throw new Error(`Person control has no effect definition: ${control.key}`);
+        if (!control.tool && !control.layer) throw new Error(`Person control has no effect definition: ${control.key}`);
         const activeKey = adjustmentKey(control.key, personSelection.value.selectedId);
         const targets = personAdjustmentTargets(recipe.adjustments, control.key);
         // The people with a value of their own, who the layer for everyone leaves out.
@@ -180,6 +168,7 @@ function appliedSteps(
             key: target.key,
             value: target.value,
             stage: stageOf(section.key, !!control.layer),
+            deferred: false,
             sheet: control.layer
               ? (image, scale) =>
                   layerSheet(
@@ -190,10 +179,6 @@ function appliedSteps(
                   )
               : undefined,
             run: (image, scale) => {
-              // A live person effect has one slider; multi-slider person controls use `tool` below.
-              if (effect) {
-                return applyEffect(image, effect(target.value as number), skinMaskOf(target.personId));
-              }
               // A tool is told where the person is, in the pixels of the image it is run on.
               applySlider(control, image, target.value, scale, personOn(image));
             },
@@ -210,6 +195,7 @@ function appliedSteps(
         key: control.key,
         value,
         stage: stageOf(section.key, !!control.layer),
+        deferred: !!control.deferred && !control.layer,
         sheet: control.layer
           ? (image, scale) => layerSheet(control, sliderValues(control, value), sliderContext(control, image, scale))
           : undefined,
@@ -260,7 +246,9 @@ function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
   };
   for (const step of steps) {
     if (step.sheet) {
-      sheets.push(timed(`${step.key} sheet`, () => step.sheet!(image, scale)));
+      const sheet = step.sheet(image, scale);
+      if (sheet.overEarlier) timed('layers', lay);
+      sheets.push(sheet);
       continue;
     }
     timed('layers', lay);
@@ -269,6 +257,18 @@ function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
   timed('layers', lay);
   if (__DEV__) console.debug(`[steps] ${image.width()}px:`, timings.join(', '));
 }
+
+/**
+ * Whether every applied control, other than the slider if it is given, only makes the photo remember effects for the GPU. Then
+ * the edit is made on the full-size photo at no cost, and that is what the editor draws; one control that needs the CPU makes
+ * it a screen-size edit.
+ */
+export const isStackDeferred = (sliderKey?: string, pending?: ActionControl): boolean =>
+  appliedSteps(
+    pending?.group ? new Set([pending.group]) : undefined,
+    sliderKey ? { key: sliderKey } : undefined,
+    pending,
+  ).every(step => step.deferred);
 
 /** Whether any control other than the slider is applied, so a drag of it has to start from the stack rendered without it. */
 export const hasOtherSteps = (sliderKey: string): boolean => appliedSteps(undefined, { key: sliderKey }).length > 0;
@@ -292,10 +292,10 @@ function stepsAroundSlider(sliderKey: string) {
  * shown on top by the live preview. With `beforeOnly`, the steps that come after the slider in the stack (such as makeup over
  * the skin) are left out, and `renderStepsAfterSlider` puts them back over what the drag makes. The caller owns the result.
  */
-export function renderStackWithoutSlider(sliderKey: string, beforeOnly = false): AbraImage | null {
+export function renderStackWithoutSlider(sliderKey: string, beforeOnly = false, full = false): AbraImage | null {
   const base = editBaseImage.value;
   if (!base) return null;
-  const next = shrunkOf('base', base).clone() as AbraImage;
+  const next = (full ? base : shrunkOf('base', base)).clone() as AbraImage;
   runSteps(next, beforeOnly ? stepsAroundSlider(sliderKey).before : appliedSteps(undefined, { key: sliderKey }), base);
   return next;
 }
@@ -311,12 +311,12 @@ export function renderStepsAfterSlider(sliderKey: string, image: AbraImage) {
  * action replaces the others in it), rendered on the CPU. `null` when nothing else is applied, so the preview goes on the
  * untouched edit base. The caller owns the result.
  */
-export function restForAction(control: ActionControl): (() => AbraImage) | null {
+export function restForAction(control: ActionControl, full = false): (() => AbraImage) | null {
   const base = editBaseImage.value;
   if (!base) return null;
   const groups = control.group ? new Set([control.group]) : undefined;
   if (appliedSteps(groups).filter(step => step.key !== control.key).length === 0) return null;
-  return () => renderEditStack(base, groups);
+  return () => renderEditStack(base, groups, full);
 }
 
 const imageIds = new WeakMap<object, number>();
@@ -452,11 +452,18 @@ function replay() {
   replayedBase = base;
 
   const started = Date.now();
-  const next = renderEditStack(base);
+  // When every control only makes the photo remember effects, the edit is made on the full-size photo, which costs nothing and
+  // is what is drawn and saved. Otherwise it is made on a screen-size copy first, and on the full-size photo a moment later.
+  const deferred = isStackDeferred();
+  const next = renderEditStack(base, undefined, deferred);
   // Keeps a held before/after preview correct even if an edit finishes replaying with a finger down.
   setShown(next);
-  if (__DEV__) console.debug('[preview] screen-size replay ms:', Date.now() - started);
-  scheduleFullReplay();
+  if (deferred) {
+    fullReplayPending = false;
+    currentImage.value?.uniffiDestroy();
+    currentImage.next(next.clone() as AbraImage);
+  } else fullReplayPending = true;
+  if (__DEV__) console.debug(`[preview] ${deferred ? 'full-size deferred' : 'screen-size'} replay ms:`, Date.now() - started);
 
   busy.next(false);
   // Let React mount the main preview before starting thumbnail work.
@@ -521,6 +528,5 @@ export function startReplay(): Subscription {
   );
   subscription.add(() => clearTimeout(preloadTimer));
   subscription.add(cancelThumbnailBuild);
-  subscription.add(cancelFullReplay);
   return subscription;
 }

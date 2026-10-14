@@ -1,6 +1,5 @@
 import { type ImageLike } from '@abra/core/image';
-import { type MaskLike } from '@abra/core/mask';
-import { ImagePreview, Message, type AbraImage, type EffectSpec } from '@alakazam/mobile';
+import { ImagePreview, type AbraImage } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
 
 type Open = {
@@ -8,13 +7,15 @@ type Open = {
   /** The size of the photo; only its proportions matter, for laying the view out. */
   width: number;
   height: number;
+  /** The image the preview shares. It is the renderer's own copy, which `showImage` replaces; nobody else's image is changed. */
+  display: AbraImage;
   preview: ImagePreview;
 };
 
 /**
  * A live preview that stays connected to its native view, so showing an effect costs the effect and not a new GPU
- * connection. The preview is a `ImagePreview` that follows an image: this hands it the effects to show (`showEffects`), and Rust
- * runs them and decides when to draw. Make one per place on screen that shows a preview; the
+ * connection. The preview is a `ImagePreview` that shares an image of its own: this puts the images a tool made in it
+ * (`showImage`), and Rust decides when to draw. Make one per place on screen that shows a preview; the
  * screen gives the open `view` to a `VesselView`.
  *
  * `ensure` opens a preview of an image once, and later calls with the same source key reuse it. `hide` takes it off the
@@ -22,7 +23,6 @@ type Open = {
  */
 export class LiveRenderer {
   private open: Open | null = null;
-  private skin: MaskLike | undefined;
   private activityVersion = 0;
 
   /** Changes whenever a new live interaction starts, so an older committed frame cannot hide it. */
@@ -50,14 +50,16 @@ export class LiveRenderer {
     const image = source();
     if (!image) return false;
     try {
+      // The preview shares this copy, so changing what it shows never changes the image it started from.
+      const display = image.clone() as AbraImage;
       this.open = {
         sourceKey,
         width: image.width(),
         height: image.height(),
-        preview: new ImagePreview(image),
+        display,
+        preview: new ImagePreview(display),
       };
       this.view.next(this.open.preview);
-      if (this.skin) this.open.preview.send(Message.Skin.new(this.skin));
       return true;
     } catch (error) {
       console.warn(`[live] could not open a preview:`, error);
@@ -74,33 +76,19 @@ export class LiveRenderer {
   }
 
   /**
-   * Shows `effects` over the image, in order, in place of what was shown. The control that owns the effects defines them,
-   * so a new tool needs no change here or in Rust. Send one on every change of a slider.
-   */
-  showEffects(effects: EffectSpec[]) {
-    this.send(Message.Show.new(effects));
-  }
-
-  /**
-   * Makes the skin effects work on this mask of the skin, or on the skin found by its color when there is none. It is kept for
-   * the previews opened later.
-   */
-  setSkin(mask: MaskLike | undefined) {
-    this.skin = mask;
-    this.open?.preview.send(mask ? Message.Skin.new(mask) : Message.FindSkin.new());
-  }
-
-  /**
-   * Shows an image a tool made in place of the photo, until effects are shown again. The caller keeps the image and should
+   * Shows an image a tool made in place of the photo, until another is shown. The caller keeps the image and should
    * destroy it afterwards: the preview keeps its own copy of what it draws.
    */
   showImage(image: ImageLike) {
-    this.send(Message.ShowImage.new(image));
-  }
-
-  /** Shows the image as it is. */
-  clear() {
-    this.showEffects([]);
+    const open = this.open;
+    if (!open) return;
+    try {
+      open.display.replaceWith(image as AbraImage);
+      open.preview.refresh();
+      this.publish(open);
+    } catch (error) {
+      console.warn(`[live] could not update the preview:`, error);
+    }
   }
 
   /**
@@ -120,6 +108,7 @@ export class LiveRenderer {
     this.view.next(null);
     this.surface.next(null);
     open?.preview.uniffiDestroy();
+    open?.display.uniffiDestroy();
   }
 
   private publish(open: Open) {
@@ -127,17 +116,6 @@ export class LiveRenderer {
     const current = this.surface.value;
     if (current?.width !== open.width || current.height !== open.height) {
       this.surface.next({ width: open.width, height: open.height });
-    }
-  }
-
-  private send(message: Message) {
-    const open = this.open;
-    if (!open) return;
-    try {
-      open.preview.send(message);
-      this.publish(open);
-    } catch (error) {
-      console.warn(`[live] could not update the preview:`, error);
     }
   }
 }

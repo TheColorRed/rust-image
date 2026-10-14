@@ -1,7 +1,7 @@
-import { autoTone, invert } from '@abra/core/adjustments';
-import { sharpen } from '@abra/core/filters';
+import { autoTone, brightness, contrast, grayscale, invert } from '@abra/core/adjustments';
+import { gaussianBlur, sharpen } from '@abra/core/filters';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { AbraImage, applyEffect, EffectSpec, Message, type AbraImageLike } from '@alakazam/mobile';
+import { AbraImage } from '@alakazam/mobile';
 import { useEffect, useRef, useState } from 'react';
 import { Button, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FilePicker, type PickedImage } from '@/src/components/file-picker';
@@ -9,15 +9,15 @@ import { Slider } from '@/src/components/slider';
 import { VesselView } from '@vessel/react-native';
 import { useLiveSession } from '@/src/hooks/useLiveSession';
 
-/** An edit made either with an effect on the photo, or by a tool written against the library on a copy of its pixels. */
-type Operation = { label: string; run?: (image: AbraImageLike) => void; tool?: (photo: ImageLike) => void };
+/** An edit made by a tool written against the library on a copy of the photo's pixels. */
+type Operation = { label: string; tool: (photo: ImageLike) => void };
 
 const OPERATIONS: Operation[] = [
-  { label: 'Grayscale', run: (image) => applyEffect(image, EffectSpec.Grayscale.new(), undefined) },
+  { label: 'Grayscale', tool: (photo) => grayscale().apply(photo) },
   { label: 'Invert', tool: (photo) => invert().apply(photo) },
-  { label: 'Brightness +40', run: (image) => applyEffect(image, EffectSpec.Brightness.new({ amount: 40 }), undefined) },
+  { label: 'Brightness +40', tool: (photo) => brightness(40).apply(photo) },
   { label: 'Auto tone', tool: (photo) => autoTone().apply(photo) },
-  { label: 'Blur 8px', run: (image) => applyEffect(image, EffectSpec.GaussianBlur.new({ radius: 8 }), undefined) },
+  { label: 'Blur 8px', tool: (photo) => gaussianBlur(8).apply(photo) },
   { label: 'Sharpen', tool: (photo) => sharpen().apply(photo) },
 ];
 
@@ -35,8 +35,18 @@ export default function AbraScreen() {
   const imageRef = useRef<AbraImage | null>(null);
   const [revision, setRevision] = useState(0);
   const session = useLiveSession(source ? imageRef.current : null);
-  /** Shows an effect over the preview. */
-  const preview = (effect: EffectSpec) => session.send(Message.Show.new([effect]));
+  /** Shows what a tool makes of the photo over the preview. */
+  const preview = (tool: (photo: ImageLike) => void) => {
+    const image = imageRef.current;
+    if (!image) return;
+    const photo = image.clone();
+    try {
+      tool(photo);
+      session.show(photo as AbraImage);
+    } finally {
+      (photo as AbraPixels).uniffiDestroy();
+    }
+  };
 
   // The JS garbage collector can't see the Rust-side pixels behind a handle, so free them explicitly.
   useEffect(() => () => imageRef.current?.uniffiDestroy(), []);
@@ -60,15 +70,12 @@ export default function AbraScreen() {
     if (!image) return;
     try {
       const t0 = Date.now();
-      if (operation.run) operation.run(image);
-      else if (operation.tool) {
-        const photo = image.clone();
-        try {
-          operation.tool(photo);
-          image.replaceWith(photo);
-        } finally {
-          (photo as AbraPixels).uniffiDestroy();
-        }
+      const photo = image.clone();
+      try {
+        operation.tool(photo);
+        image.replaceWith(photo);
+      } finally {
+        (photo as AbraPixels).uniffiDestroy();
       }
       const t1 = Date.now();
       setRevision((r) => r + 1);
@@ -108,9 +115,9 @@ export default function AbraScreen() {
       {source && (
         <View style={styles.live}>
           {session.error && <Text style={styles.status}>{session.error}</Text>}
-          <Slider label="Brightness" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview(EffectSpec.Brightness.new({ amount: Math.round(v) }))} />
-          <Slider label="Contrast" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview(EffectSpec.Contrast.new({ amount: v }))} />
-          <Slider label="Blur" min={0} max={30} reset triggerType="live" onTrigger={(v) => preview(EffectSpec.GaussianBlur.new({ radius: v }))} />
+          <Slider label="Brightness" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview((photo) => brightness(Math.round(v)).apply(photo))} />
+          <Slider label="Contrast" min={-100} max={100} reset triggerType="live" onTrigger={(v) => preview((photo) => contrast(v).apply(photo))} />
+          <Slider label="Blur" min={0} max={30} reset triggerType="live" onTrigger={(v) => preview((photo) => gaussianBlur(v).apply(photo))} />
         </View>
       )}
       {status && <Text style={styles.status}>{status}</Text>}

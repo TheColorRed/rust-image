@@ -1,16 +1,12 @@
 import { scaleBetween, type ToolContext } from '@/src/lib/edit-sections';
-import { selectedSkinMask } from '@/src/lib/analysis';
 import { previewPixels, shrunkOf } from '@/src/lib/editor-pictures';
 import { LiveRenderer } from '@/src/lib/live-renderer';
-import { people$, skinMask$ } from '@/src/state/analysis';
 import { previewBox, previewBox$ } from '@/src/state/gestures';
-import { personSelection$ } from '@/src/state/person-selection';
 import { liveSurface } from '@/src/state/preview';
 import { editBaseImage, editBaseImage$ } from '@/src/state/session';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { PixelRatio } from 'react-native';
 import { combineLatest, type Subscription } from 'rxjs';
-import { distinctUntilChanged, map } from 'rxjs/operators';
 
 /** The editor photo's live renderer: effects drawn over the committed photo while a control is tapped or dragged. */
 export const editorPreview = new LiveRenderer(liveSurface);
@@ -61,12 +57,6 @@ export function startEditorPreview(): Subscription {
     if (base && box) ensureBase();
     else editorPreview.release();
   });
-  // The skin effects of the preview work on the skin of the selected person, or of everyone.
-  subscription.add(
-    combineLatest([skinMask$, people$, personSelection$.pipe(map(state => state.selectedId), distinctUntilChanged())]).subscribe(() =>
-      editorPreview.setSkin(selectedSkinMask()),
-    ),
-  );
   subscription.add(() => {
     editorPreview.release();
   });

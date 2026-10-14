@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use vessel_api::prelude::*;
 use vessel_macros::Component;
 
+use crate::camera::Camera;
+
 /// How a picture fills the room an [`Image`] has, like CSS `object-fit`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Fit {
@@ -14,6 +16,40 @@ pub enum Fit {
   Cover,
   /// The whole picture is stretched to fill the room, whatever its proportions.
   Stretch,
+}
+
+/// The part of a source a view shows, as a rectangle in the source's own space: `0.0` is the left or top edge and `1.0`
+/// the right or bottom. The default is the whole source. Zoom, crop previews, loupes and split views all just set it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Viewport {
+  /// The left edge.
+  pub x: f32,
+  /// The top edge.
+  pub y: f32,
+  /// How much of the source's width is shown.
+  pub width: f32,
+  /// How much of the source's height is shown.
+  pub height: f32,
+}
+
+impl Default for Viewport {
+  fn default() -> Self {
+    Self { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }
+  }
+}
+
+impl Viewport {
+  /// This rectangle in the pixels of a source `p_width` x `p_height`, as `(x, y, width, height)`. It is kept inside the
+  /// source and at least one pixel in each direction, so it is always something that can be cut out.
+  pub fn in_pixels(&self, p_width: u32, p_height: u32) -> (u32, u32, u32, u32) {
+    let left = (self.x.clamp(0.0, 1.0) * p_width as f32).floor() as u32;
+    let top = (self.y.clamp(0.0, 1.0) * p_height as f32).floor() as u32;
+    let right = ((self.x + self.width).clamp(0.0, 1.0) * p_width as f32).ceil() as u32;
+    let bottom = ((self.y + self.height).clamp(0.0, 1.0) * p_height as f32).ceil() as u32;
+    let left = left.min(p_width.saturating_sub(1));
+    let top = top.min(p_height.saturating_sub(1));
+    (left, top, right.saturating_sub(left).max(1), bottom.saturating_sub(top).max(1))
+  }
 }
 
 /// A picture an [`Image`] can show: pixels, or a picture that was made on the GPU.
@@ -30,7 +66,10 @@ pub enum Picture {
 pub trait Trackable {
   /// The pictures of this, as a stream. `p_size` is the size in pixels the image is drawn at, so the pictures can be made
   /// to fit: it is `(0, 0)` until the image is shown somewhere, and changes when the view does.
-  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture>;
+  ///
+  /// `p_viewport` is the part of the source to show. A new viewport means a new picture. A source that cannot show part
+  /// of itself ignores it and always makes the whole picture.
+  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture>;
 }
 
 struct FittedCacheEntry {
@@ -50,8 +89,8 @@ struct PictureInner {
 }
 
 impl<T: Trackable> Trackable for Arc<T> {
-  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>) -> Subject<Picture> {
-    self.as_ref().pictures(p_size)
+  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture> {
+    self.as_ref().pictures(p_size, p_viewport)
   }
 }
 
@@ -76,6 +115,11 @@ pub struct Image {
   /// Counts the pictures set, so the drawing listener redraws for each one without comparing pixels.
   revision: BehaviorSubject<u64>,
   fit: BehaviorSubject<Fit>,
+  /// The part of the source shown, given to every source this tracks. Drawing does not read it: the sources make a new
+  /// picture when it changes.
+  viewport: BehaviorSubject<Viewport>,
+  /// Moves `viewport` toward where the app last pointed it, a little each frame.
+  camera: Arc<Mutex<Camera>>,
   /// Whether the component currently shows a GPU picture instead of pixels.
   on_gpu: Arc<AtomicBool>,
   /// The streams of pictures this follows, and the listening to them, kept for as long as the image lives.
@@ -116,11 +160,29 @@ impl Image {
       }
     });
 
+    let viewport = BehaviorSubject::new(Viewport::default());
+    let camera = Arc::new(Mutex::new(Camera::new(Viewport::default())));
+    component.subject::<Tick>().subscribe({
+      let (weak, viewport, camera) = (component.downgrade(), viewport.clone(), Arc::clone(&camera));
+      move |tick| {
+        let (next, moving) = {
+          let mut camera = camera.lock().unwrap();
+          (camera.step(tick.0), camera.is_moving())
+        };
+        viewport.next(next);
+        if !moving && let Some(component) = weak.upgrade() {
+          component.set_animating(false);
+        }
+      }
+    });
+
     Self {
       component,
       picture,
       revision,
       fit,
+      viewport,
+      camera,
       on_gpu: Arc::new(AtomicBool::new(false)),
       sources: Arc::default(),
       fitted_cache,
@@ -142,7 +204,7 @@ impl Image {
   /// Follows `p_source`: it is shown at the image's size, and the image follows every picture it makes. Returns the image so
   /// calls can be chained.
   pub fn track(self, p_source: &impl Trackable) -> Self {
-    self.set_source(&p_source.pictures(self.size()));
+    self.set_source(&p_source.pictures(self.size(), &self.viewport));
     self
   }
 
@@ -245,6 +307,29 @@ impl Image {
     }
   }
 
+  /// Sends the view toward `p_viewport`. It glides there over the next frames, at the camera's speed, instead of jumping.
+  pub fn set_viewport(&self, p_viewport: Viewport) {
+    self.camera.lock().unwrap().set_target(p_viewport);
+    self.component.set_animating(true);
+  }
+
+  /// Sends the view toward `p_viewport`, and returns the image so calls can be chained.
+  pub fn with_viewport(self, p_viewport: Viewport) -> Self {
+    self.set_viewport(p_viewport);
+    self
+  }
+
+  /// Shows `p_viewport` at once, with no gliding.
+  pub fn jump_viewport(&self, p_viewport: Viewport) {
+    self.camera.lock().unwrap().jump_to(p_viewport);
+    self.viewport.next(p_viewport);
+  }
+
+  /// The viewport being shown right now, which is on its way to the one last set.
+  pub fn viewport(&self) -> Viewport {
+    self.viewport.value()
+  }
+
   properties! {
     fit: Fit => set_fit, with_fit;
   }
@@ -331,6 +416,63 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+
+  /// Makes a 1x1 picture whose red is the viewport's left edge in percent, so a test can see which viewport it was given.
+  struct ViewportEcho;
+
+  impl Trackable for ViewportEcho {
+    fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture> {
+      p_size.combine_latest(p_viewport).map(|(_, viewport)| {
+        Picture::Pixels(Arc::new(Frame { width: 1, height: 1, pixels: Arc::new(vec![(viewport.x * 100.0) as u8, 0, 0, 255]) }))
+      })
+    }
+  }
+
+  #[test]
+  fn a_tracked_source_gets_the_viewport_and_a_new_one_makes_a_new_picture() {
+    let image = Image::new().track(&ViewportEcho);
+    image.size().next((4, 4));
+    let red = |image: &Image| match image.picture.lock().unwrap().picture.as_ref() {
+      Some(Picture::Pixels(frame)) => frame.pixels[0],
+      _ => panic!("no pixels"),
+    };
+    assert_eq!(red(&image), 0, "the whole source until told otherwise");
+    image.jump_viewport(Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 });
+    assert_eq!(red(&image), 50);
+    image.jump_viewport(Viewport { x: 0.25, y: 0.0, width: 0.5, height: 1.0 });
+    assert_eq!(red(&image), 25);
+  }
+
+  #[test]
+  fn set_viewport_glides_one_tick_at_a_time_and_then_lets_the_engine_sleep() {
+    let image = Image::new().track(&ViewportEcho);
+    image.size().next((4, 4));
+    let target = Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 };
+    assert_eq!(image.component.clone().pacing(), Pacing::OnDemand);
+    image.set_viewport(target);
+    assert_eq!(image.viewport(), Viewport::default(), "nothing moves until a frame is made");
+    assert_eq!(image.component.clone().pacing(), Pacing::Continuous);
+
+    image.component.clone().render(Duration::from_millis(16));
+    let first = image.viewport();
+    assert!(first.x > 0.0 && first.x < 0.5, "one frame moves part of the way: {first:?}");
+    for _ in 0..200 {
+      image.component.clone().render(Duration::from_millis(16));
+    }
+    assert_eq!(image.viewport(), target);
+    assert_eq!(image.component.clone().pacing(), Pacing::OnDemand, "it stops asking for frames once it arrives");
+  }
+
+  #[test]
+  fn the_default_viewport_is_the_whole_source_and_others_stay_inside_it() {
+    assert_eq!(Viewport::default().in_pixels(400, 300), (0, 0, 400, 300));
+    // A half-size region in the middle.
+    assert_eq!(Viewport { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }.in_pixels(400, 300), (100, 75, 200, 150));
+    // A region that touches the right edge and hangs past it is cut at the edge.
+    assert_eq!(Viewport { x: 0.75, y: 0.0, width: 0.5, height: 1.0 }.in_pixels(400, 300), (300, 0, 100, 300));
+    // A tiny or empty region is still one pixel, even outside the source.
+    assert_eq!(Viewport { x: 2.0, y: -1.0, width: 0.0, height: 0.0 }.in_pixels(400, 300), (399, 0, 1, 1));
+  }
 
   #[test]
   fn fitted_background_pixels_are_reused_and_retired_sources_are_released() {
@@ -444,9 +586,9 @@ mod tests {
     assert_eq!(pixel(&render(&image), 0, 0), [255, 0, 0, 255], "the earlier picture stays");
   }
 
-  struct Picture;
+  struct FakeGpuFrame;
 
-  impl GpuFrame for Picture {
+  impl GpuFrame for FakeGpuFrame {
     fn size(&self) -> (u32, u32) {
       (2, 1)
     }
@@ -462,7 +604,7 @@ mod tests {
     let mut source = image.component.clone();
     assert!(source.render_gpu(Duration::ZERO).is_none());
 
-    image.show_gpu(Arc::new(Picture));
+    image.show_gpu(Arc::new(FakeGpuFrame));
     assert!(source.render_gpu(Duration::ZERO).is_some(), "the GPU picture is what is shown");
 
     image.set_pixels(2, 1, red_then_blue());

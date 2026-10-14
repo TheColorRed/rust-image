@@ -6,7 +6,9 @@
 //! previews.
 #![deny(missing_docs)]
 
-pub use gpu_passes::{Frame, GpuContext, LiveRenderer, Presenter, context, present, renderer};
+pub use gpu_passes::{
+  Frame, GpuContext, LiveRenderer, PresentOptions, Presenter, Regions, TileOptions, TiledRenderer, Window, context, present, renderer, tiles,
+};
 
 use abra_core::Settings;
 use abra_core::image::gpu::{GpuPass, GpuProvider, GpuSession, register_gpu_provider};

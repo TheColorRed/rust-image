@@ -9,9 +9,7 @@ uniffi::setup_scaffolding!();
 
 pub mod components;
 mod consts;
-pub mod effect_spec;
 mod image_workers;
-pub mod live_image;
 pub mod models;
 
 /// Errors surfaced to JavaScript as thrown exceptions.

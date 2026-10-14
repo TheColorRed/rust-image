@@ -200,7 +200,7 @@ impl GpuProcessor for LinearGradientEffect {
       uniforms.extend_from_slice(&value.to_le_bytes());
     }
     vec![
-      GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_aux(GpuAux {
+      GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_window().with_aux(GpuAux {
         width: LUT_SIZE,
         height: 1,
         rgba: self.lut.clone(),
@@ -331,6 +331,42 @@ mod tests {
       let effect = LinearGradientEffect::angle(&gradient, angle).with_opacity(opacity);
       let out = renderer.process(&[effect.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?;
       assert_close(&out, &expected(&effect, &gradient, &base));
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn a_gradient_in_a_window_at_another_zoom_is_the_whole_photo_s_gradient_viewed() -> anyhow::Result<()> {
+    use gpu::{TileOptions, TiledRenderer, Window};
+    let context = GpuContext::new_default_blocking()?;
+    let gradient = Gradient::from_to(Color::from_rgba(255, 0, 0, 255), Color::from_rgba(0, 0, 255, 255));
+    let base = base_pixels();
+    let effect = LinearGradientEffect::angle(&gradient, 33.0);
+    let passes = vec![effect.passes(WIDTH, HEIGHT)];
+    let whole = expected(&effect, &gradient, &base);
+    let mut windowed =
+      TiledRenderer::with_options(context, WIDTH, HEIGHT, base.clone().into(), TileOptions::default().with_tile_size(16))?;
+    // The photo in the corner of a window twice its size (zoomed out), the whole photo magnified, and the middle of it magnified,
+    // all with square pixels: each shows the gradient where the photo has it.
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    for (x, y, w, h, out) in [(0.0, 0.0, width * 2.0, height * 2.0, (WIDTH, HEIGHT)), (0.0, 0.0, width, height, (WIDTH * 2, HEIGHT * 2)), (width / 4.0, height / 4.0, width / 2.0, height / 2.0, (WIDTH, HEIGHT))] {
+      windowed.render(&Window { x, y, width: w, height: h, out_width: out.0, out_height: out.1, pad: 0 }, &passes)?;
+      let drawn = windowed.read_pixels()?;
+      let (scale_x, scale_y) = (w / out.0 as f32, h / out.1 as f32);
+      for row in 0..out.1 {
+        for column in 0..out.0 {
+          // The photo's pixel this one shows, and nothing to compare where the window is past the photo.
+          let (at_x, at_y) = (x + (column as f32 + 0.5) * scale_x, y + (row as f32 + 0.5) * scale_y);
+          if at_x >= width || at_y >= height {
+            continue;
+          }
+          let (photo_x, photo_y) = (at_x.floor() as u32, at_y.floor() as u32);
+          let want = &whole[((photo_y * WIDTH + photo_x) * 4) as usize..][..4];
+          let got = &drawn[((row * out.0 + column) * 4) as usize..][..4];
+          // Neighbouring photo pixels differ by a step of the gradient, so allow a few steps.
+          assert!(want.iter().zip(got).all(|(a, b)| a.abs_diff(*b) <= 12), "at {column},{row} of {out:?}: gpu {got:?} vs whole {want:?}");
+        }
+      }
     }
     Ok(())
   }

@@ -41,13 +41,15 @@ function load(name, modules, globals = {}) {
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture() {
-  const f = { images: [], previews: [], warnings: [], requests: [], jobs: [], active: 0, maxActive: 0, manual: false };
+  const f = { images: [], previews: [], warnings: [] };
   const controls = ['warm', 'midnight'].map(key => ({
     key,
     kind: 'action',
     label: key,
     group: 'mood',
-    live: () => [{ key }],
+    tool: photo => {
+      photo.effect = key;
+    },
   }));
   const section = { key: 'moods', previewThumbnails: true, controls };
   class AbraImage {}
@@ -55,6 +57,12 @@ function fixture() {
     const image = Object.assign(new AbraImage(), {
       effect,
       destroyed: 0,
+      width: () => 16,
+      height: () => 16,
+      clone: () => owned(image.effect),
+      replaceWith(other) {
+        image.effect = other.effect;
+      },
       uniffiDestroy() {
         assert.equal(++this.destroyed, 1);
       },
@@ -77,48 +85,14 @@ function fixture() {
       assert.equal(++this.destroyed, 1);
     }
   }
-  const source = {
-    thumbnailSourceAsync(width, height) {
-      f.requests.push([width, height]);
-      const small = owned('base');
-      small.renderThumbnailAsync = effects => {
-        f.active++;
-        f.maxActive = Math.max(f.maxActive, f.active);
-        const effect = effects[0]?.key;
-        const promise = new Promise((resolve, reject) => {
-          const job = {
-            effect,
-            finish: () => resolve(owned(effect)),
-            fail: () => reject(new Error('effect failed')),
-          };
-          f.jobs.push(job);
-          if (!f.manual) job.finish();
-        });
-        return promise.finally(() => {
-          f.active--;
-        });
-      };
-      return Promise.resolve(small);
-    },
-    preview() {
-      throw new Error('pixels must not cross the JS bridge');
-    },
-    rgba() {
-      throw new Error('pixels must not cross the JS bridge');
-    },
-  };
   const bindings = { ThumbnailPreview, AbraImage };
   const nativeImages = load('native-image', { '@alakazam/mobile': bindings });
   const sections = {
     EDIT_SECTIONS: [section],
     leafControls: controls => controls,
-    effectList: effect => (Array.isArray(effect) ? effect : [effect]),
     scaleBetween: () => 1,
     preloadFor: () => undefined,
     clearPreloads() {},
-    applyAction: (control, image) => {
-      image.effect = control.key;
-    },
     findSection: key => (key === 'moods' ? section : { key, previewThumbnails: false, controls: [] }),
   };
   const api = load(
@@ -131,13 +105,14 @@ function fixture() {
     },
     { console: { warn: (...args) => f.warnings.push(args) } },
   );
-  return Object.assign(f, api, { source, section, controls, bindings, sections });
+  const fresh = () => owned('base');
+  return Object.assign(f, api, { fresh, section, controls, bindings, sections });
 }
 
 function build(f, previous = {}) {
   const result = { ...previous };
   const published = [];
-  const job = f.buildControlThumbnails(f.source, f.section, previous, (key, preview) => {
+  const job = f.buildControlThumbnails(f.fresh(), f.section, previous, (key, preview) => {
     result[key] = preview;
     published.push(key);
   });
@@ -148,7 +123,6 @@ test('native thumbnails use density-adjusted dimensions without transferring pix
   const f = fixture();
   const job = build(f);
   assert.equal(await job.done, true);
-  assert.deepEqual(f.requests, [[280, 200]]);
   assert.equal(f.THUMBNAIL_WIDTH, 112);
   assert.equal(f.THUMBNAIL_HEIGHT, 80);
   assert.equal(job.result.warm.effect, 'warm');
@@ -158,29 +132,13 @@ test('native thumbnails use density-adjusted dimensions without transferring pix
   assert.ok(f.images.every(image => image.destroyed === 1));
 });
 
-test('cards publish progressively in completion order with at most two effects in flight', async () => {
-  const f = fixture();
-  f.manual = true;
-  f.controls.push({ key: 'noir', kind: 'action', label: 'Noir', live: () => [{ key: 'noir' }] });
-  const job = build(f);
-  await settle();
-  assert.equal(f.jobs.length, 2);
-  assert.equal(job.published.length, 0);
-  f.jobs[1].finish();
-  await settle();
-  assert.deepEqual(job.published, ['midnight']);
-  assert.equal(f.jobs.length, 3);
-  f.jobs[0].finish();
-  f.jobs[2].finish();
-  assert.equal(await job.done, true);
-  assert.equal(f.maxActive, 2);
-});
-
 test('editing reuses native components', async () => {
   const f = fixture();
-  f.controls[0] = { key: 'warm', kind: 'action', label: 'Rotate', live: () => [{ key: 'rotate' }] };
   const first = build(f);
   await first.done;
+  f.controls[0].tool = photo => {
+    photo.effect = 'rotate';
+  };
   const second = build(f, first.result);
   await second.done;
   assert.equal(second.result.warm, first.result.warm);
@@ -194,56 +152,15 @@ test('failed effects warn, keep their previous card and do not block siblings', 
   const f = fixture();
   const first = build(f);
   await first.done;
-  f.manual = true;
+  f.controls[0].tool = () => {
+    throw new Error('effect failed');
+  };
   const second = build(f, first.result);
-  await settle();
-  f.jobs[2].fail();
-  f.jobs[3].finish();
   assert.equal(await second.done, false);
   assert.equal(second.result.warm.updates, 1);
   assert.equal(second.result.midnight.updates, 2);
   assert.equal(f.warnings.length, 1);
   assert.ok(f.images.every(image => image.destroyed === 1));
-});
-
-test('cancellation discards late results without touching freed components or scheduling more', async () => {
-  const f = fixture();
-  const first = build(f);
-  await first.done;
-  f.manual = true;
-  f.controls.push({ key: 'third', kind: 'tool', label: 'Third' });
-  const second = build(f, first.result);
-  await settle();
-  second.cancel();
-  Object.values(first.result).forEach(preview => preview.uniffiDestroy());
-  f.jobs[2].finish();
-  f.jobs[3].finish();
-  assert.equal(await second.done, false);
-  assert.equal(f.jobs.length, 4);
-  assert.equal(second.published.length, 0);
-  assert.equal(f.warnings.length, 0);
-  assert.ok(f.images.every(image => image.destroyed === 1));
-});
-
-test('cancellation while downscaling releases its source without starting effects', async () => {
-  const f = fixture();
-  let resolve;
-  const source = Object.assign(new f.bindings.AbraImage(), {
-    destroyed: 0,
-    uniffiDestroy() {
-      this.destroyed++;
-    },
-  });
-  f.source.thumbnailSourceAsync = () =>
-    new Promise(done => {
-      resolve = done;
-    });
-  const job = build(f);
-  job.cancel();
-  resolve(source);
-  assert.equal(await job.done, false);
-  assert.equal(source.destroyed, 1);
-  assert.equal(f.jobs.length, 0);
 });
 
 test('replay defers thumbnails, caches exclusive groups and discards retired builds', async () => {
@@ -258,8 +175,8 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   for (const key of Object.keys(edits)) edits[`${key}$`] = edits[key];
   const thumbnails = subject({});
   const previewSourceImage = subject(null);
-  const small = () => ({ ...f.source, copy: small, shrunk: small, uniffiDestroy() {} });
-  const base = { ...f.source, copy: small, shrunk: small };
+  const size = { width: () => 16, height: () => 16 };
+  const base = f.fresh();
   const session = {
     busy: subject(false),
     currentImage: subject(null),
@@ -277,10 +194,23 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       rxjs: require('rxjs'),
       'rxjs/operators': require('rxjs/operators'),
       '@/src/lib/batch': { batch: run => run() },
-      '@/src/lib/edit-sections': f.sections,
+      '@/src/lib/edit-sections': {
+        ...f.sections,
+        applyAction: (control, image) => control.tool(image),
+        applySlider() {},
+        isSliderApplied: () => true,
+        layerSheet: () => undefined,
+        sliderContext: () => ({}),
+        sliderDefault: () => 0,
+        sliderValues: () => ({}),
+      },
       '@/src/lib/editor-history': { recordDraftStep() {}, comparisonImage: () => null },
       '@/src/lib/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
+      '@/src/lib/analysis': { personIn: () => undefined },
+      '@/src/lib/layers': { withLayers: photo => photo },
       '@/src/lib/editor-pictures': loadTs('lib/editor-pictures.ts', {
+        '@abra/core/canvas': { ResizeTarget: { Fit: { new: size => size } } },
+        '@abra/core/transform': { resize: () => ({ apply() {} }) },
         '@/src/state/gestures': { previewBox: subject({ width: 320, height: 200 }) },
         '@/src/state/preview': { previewSourceImage, showingCheckpoint: subject(false) },
         '@/src/state/session': session,
@@ -329,12 +259,11 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   };
   const subscription = replay.startReplay();
   flush();
-  assert.equal(f.requests.length, 0, 'main preview publishes before thumbnails start');
-  assert.ok(previewSourceImage.value, 'the screen-size picture is drawn');
-  assert.equal(session.currentImage.value, null, 'the full-size edit waits until after it');
+  assert.equal(f.previews.length, 0, 'main preview publishes before thumbnails start');
+  assert.ok(previewSourceImage.value, 'the picture is drawn');
+  assert.ok(session.currentImage.value, 'with nothing applied the edit is the full-size photo, which costs nothing to make');
   flush();
   await settle();
-  assert.ok(session.currentImage.value, 'and then the full-size edit is made');
   const first = thumbnails.value;
   edits.appliedActions.next(['warm']);
   await completeReplay();
@@ -344,20 +273,12 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   await completeReplay();
   assert.equal(thumbnails.value.warm, first.warm);
   assert.equal(first.warm.updates, 2);
-  f.manual = true;
-  edits.adjustments.next({ exposure: 2 });
-  await completeReplay();
-  const late = f.jobs.slice(-2);
   edits.activeSectionKey.next('tools');
   await completeReplay();
   assert.equal(Object.keys(thumbnails.value).length, 0);
-  late.forEach(job => job.finish());
-  await settle();
-  assert.equal(Object.keys(thumbnails.value).length, 0, 'late results cannot resurrect retired cards');
   // They are freed after the frame that draws the new set, and not before it.
   await completeReplay();
   assert.ok(f.previews.every(preview => preview.destroyed === 1));
-  f.manual = false;
   edits.activeSectionKey.next('moods');
   await completeReplay();
   assert.notEqual(thumbnails.value.warm, first.warm);
@@ -378,18 +299,23 @@ test('closing an editor during async decoding releases late native images withou
     ['busy', 'currentImage', 'editBaseImage', 'loadError', 'originalImage', 'ready'].map(key => [key, subject(null)]),
   );
   const edits = Object.fromEntries(
-    ['activeSectionKey', 'adjustments', 'appliedActions', 'focusedControlKey'].map(key => [key, subject(null)]),
+    ['activeSectionKey', 'adjustments', 'appliedActions', 'focusedControlKey', 'openGroupKey'].map(key => [key, subject(null)]),
   );
   let resolveDecode;
-  f.bindings.AbraImage.readAsync = () =>
+  const readImageAsync = () =>
     new Promise(resolve => {
       resolveDecode = resolve;
     });
   const nativeImages = load('native-image', { '@alakazam/mobile': f.bindings });
   const api = load('editor-session', {
-    '@alakazam/mobile': { ...f.bindings, personDetectionDownloaded: () => true },
+    '@alakazam/mobile': { ...f.bindings, personDetectionDownloaded: () => true, readImageAsync },
     'react-native': { Alert: { alert() {} }, AppState: { addEventListener: () => ({ remove() {} }) } },
     '@/src/lib/batch': { batch: run => run() },
+    '@abra/core/mask': { TransformAlgorithm: {} },
+    '@/src/state/analysis': { people: subject(null), skinMask: subject(null) },
+    '@/src/lib/analysis': { personIn: () => undefined, clearAnalysis() {} },
+    '@/src/lib/eye-makeup': { makeupMasks: () => undefined },
+    '@/src/lib/editor-preloads': { releasePreloads() {}, clearPreloads() {} },
     '@/src/lib/edit-source': { resolveLocalPhotoPath: async () => 'photo.png', toLocalPath: path => path },
     '@/src/lib/editor-history': { clearTimeline() {}, keepBlemishBase() {} },
     '@/src/lib/editor-preview': { startEditorPreview: () => ({ unsubscribe() {} }) },
@@ -420,7 +346,7 @@ test('closing an editor during async decoding releases late native images withou
     uniffiDestroy() {
       this.destroyed++;
     },
-    copy() {
+    clone() {
       throw new Error('a retired image must never initialize an editor');
     },
   });

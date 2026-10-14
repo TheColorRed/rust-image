@@ -102,6 +102,7 @@ macro_rules! color_background_builder {
 
 mod background;
 mod button;
+mod camera;
 mod container;
 mod image;
 mod label;
@@ -111,7 +112,8 @@ pub use self::{
   background::UiBackground,
   button::{Button, Clicked},
   container::Container,
-  image::{Fit, Image, Picture, Trackable},
+  camera::Camera,
+  image::{Fit, Image, Picture, Trackable, Viewport},
   label::{Label, VerticalAlign},
   slider::{Changed, Slider},
 };

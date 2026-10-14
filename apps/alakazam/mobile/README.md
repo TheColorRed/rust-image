@@ -29,7 +29,7 @@ error explanation rather than only the `AbraError.Ai` variant.
 
 ## Selecting people for skin effects
 
-Open **Beauty > Skin Smooth** or **Beauty > Skin Tan** to show detected people
+Open **Beauty > Skin > Smooth** or **Beauty > Skin > Tan** to show detected people
 and the person-selection controls alongside the effect's slider or color picker.
 Tap a person in the preview to target them, or choose **All people** to apply
 skin effects to everyone. Leaving the skin control hides the selection UI and

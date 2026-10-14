@@ -48,7 +48,7 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <EditorPreview />
-      <EditorToolbar onClose={onClose} />
+      <EditorToolbar photo={photo} onClose={onClose} />
       <EditorPanel />
       <AiModelPrompt />
     </View>

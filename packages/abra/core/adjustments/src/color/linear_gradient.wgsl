@@ -17,6 +17,16 @@ struct Params {
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var<uniform> params: Params;
 @group(0) @binding(3) var lut_tex: texture_2d<f32>;
+// Where this image sits in the photo it is a view of: pixel `p` is the photo's pixel `origin + (p + 0.5) * scale`, in a photo
+// `full` pixels across. For an image that is the whole photo, `origin` is zero and `scale` is one.
+struct Window {
+  origin: vec2<f32>,
+  scale: f32,
+  pad: f32,
+  full: vec2<f32>,
+  pad2: vec2<f32>,
+}
+@group(0) @binding(5) var<uniform> window: Window;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -28,7 +38,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let lut_size = i32(textureDimensions(lut_tex).x);
   let half = (1i << params.shift) >> 1u;
-  let position = params.a * pos.x + params.b * pos.y + params.c;
+  // The photo's pixel this one shows: the pixel itself for an image that is the whole photo.
+  let at = vec2<i32>(floor(window.origin + (vec2<f32>(pos) + 0.5) * window.scale));
+  let position = params.a * at.x + params.b * at.y + params.c;
   let lut_index = clamp((position + half) >> params.shift, 0, lut_size - 1);
   let gradient = vec4<u32>(round(textureLoad(lut_tex, vec2<i32>(lut_index, 0), 0) * 255.0));
   let base = vec4<u32>(round(textureLoad(input_tex, pos, 0) * 255.0));

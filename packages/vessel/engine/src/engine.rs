@@ -4,7 +4,7 @@
 use std::{
   sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
   },
   thread::JoinHandle,
   time::{Duration, Instant},
@@ -19,13 +19,16 @@ use crate::{
 /// Receives the GPU frames a view finishes, with the id of the view.
 type GpuSink = Box<dyn Fn(&str, &Arc<dyn GpuFrame>) + Send>;
 
-/// How long the loop waits between frames while a continuous view is running (about 60 frames a second).
-const FRAME: Duration = Duration::from_millis(16);
+/// How long the loop waits between frames while a continuous view is running (about 60 frames a second), until an app
+/// sets another with [`Engine::set_frame_interval`].
+const DEFAULT_FRAME: Duration = Duration::from_millis(16);
 
 struct Shared {
   views: Mutex<Vec<Box<dyn ErasedView>>>,
   waker: Waker,
   running: AtomicBool,
+  /// The time between frames of a continuous view, in microseconds.
+  frame_micros: AtomicU64,
 }
 
 /// Runs views on its own thread until it is closed or dropped. With only on-demand views it sleeps until a message
@@ -71,6 +74,7 @@ impl Engine {
       views: Mutex::new(Vec::new()),
       waker: Waker::default(),
       running: AtomicBool::new(true),
+      frame_micros: AtomicU64::new(DEFAULT_FRAME.as_micros() as u64),
     });
     let thread = {
       let shared = Arc::clone(&shared);
@@ -80,6 +84,25 @@ impl Engine {
       shared,
       thread: Some(thread),
     }
+  }
+
+  /// Sets the time between frames while a continuous view runs, which is about 16 ms (60 frames a second) until it is set.
+  /// A game on a 120 Hz screen sets 8 ms; an app that is easy on the battery sets more. It takes effect at the next frame.
+  /// A view that is drawn only on demand ignores it.
+  pub fn set_frame_interval(&self, p_interval: Duration) {
+    self.shared.frame_micros.store(p_interval.as_micros().clamp(1, u64::MAX as u128) as u64, Ordering::SeqCst);
+    self.shared.waker.wake();
+  }
+
+  /// Wakes the engine so it looks at its views again at once. A view that only draws when it has changed uses this to say that
+  /// it has, when the change came from somewhere the engine cannot see.
+  pub fn wake(&self) {
+    self.shared.waker.wake();
+  }
+
+  /// The time between frames while a continuous view runs.
+  pub fn frame_interval(&self) -> Duration {
+    Duration::from_micros(self.shared.frame_micros.load(Ordering::SeqCst))
   }
 
   /// Starts running `p_view`. It stays until its subscription is dropped or the engine closes.
@@ -138,8 +161,10 @@ fn run(p_shared: &Shared, p_sink: impl Fn(&str, &Frame), p_gpu_sink: Option<GpuS
       let mut views = p_shared.views.lock().unwrap();
       views.retain(|view| view.is_alive());
       for view in views.iter() {
+        let rendered = view.tick(delta);
+        // Asked after the draw, so a view that the draw left with more to do keeps the engine running.
         continuous |= view.pacing() == Pacing::Continuous;
-        match view.tick(delta) {
+        match rendered {
           Some(Rendered::Pixels(frame)) => p_sink(view.id(), &frame),
           Some(Rendered::Gpu(frame)) => match &p_gpu_sink {
             Some(gpu_sink) => gpu_sink(view.id(), &frame),
@@ -154,7 +179,7 @@ fn run(p_shared: &Shared, p_sink: impl Fn(&str, &Frame), p_gpu_sink: Option<GpuS
         }
       }
     }
-    p_shared.waker.wait(continuous.then_some(FRAME));
+    p_shared.waker.wait(continuous.then(|| Duration::from_micros(p_shared.frame_micros.load(Ordering::SeqCst))));
   }
 }
 
@@ -333,6 +358,23 @@ mod tests {
     for _ in 0..4 {
       rig.frames.recv_timeout(WAIT).unwrap();
     }
+  }
+
+  #[test]
+  fn the_frame_interval_sets_how_often_a_continuous_view_draws() {
+    let rig = rig(Pacing::Continuous);
+    assert_eq!(rig.engine.frame_interval(), DEFAULT_FRAME);
+    let drawn_in = |window: Duration| {
+      while rig.frames.try_recv().is_ok() {}
+      std::thread::sleep(window);
+      rig.frames.try_iter().count()
+    };
+    rig.engine.set_frame_interval(Duration::from_millis(100));
+    let slow = drawn_in(Duration::from_millis(450));
+    rig.engine.set_frame_interval(Duration::from_millis(5));
+    let fast = drawn_in(Duration::from_millis(450));
+    assert!(slow <= 7, "a frame every 100 ms is about 4 in 450 ms, not {slow}");
+    assert!(fast >= slow * 3, "a frame every 5 ms draws far more often: {fast} against {slow}");
   }
 
   #[test]

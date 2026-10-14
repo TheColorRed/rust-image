@@ -73,7 +73,7 @@ impl Output {
       self.no_target = self.target.is_none();
     }
     if let Some(target) = &mut self.target {
-      if target.present(p_frame.as_ref()) {
+      if target.present_view(p_frame.as_ref(), p_frame.view()) {
         self.drawn_any = true;
         return true;
       }

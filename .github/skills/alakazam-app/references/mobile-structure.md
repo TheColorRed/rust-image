@@ -52,10 +52,11 @@ root canvas  (photo-sized, flattened with asImage() into the result)
 ├── base canvas                  the untouched photo
 │   └── photo layer
 ├── skin canvas
+│   ├── even-out layer           the skin blurred into one color, laid with the Color blend so the skin keeps its own light and shade
 │   ├── tan layer                everyone: the adjusted skin, limited to the skin mask
 │   ├── tan:person:2 layer       one person's own tan, limited to that person's skin
 │   ├── tone layer
-│   └── smooth layer
+│   └── smooth layer             Smooth and Texture: the smoothed skin with the photo's fine detail (pores) added back by Linear Light
 └── makeup canvas
     ├── eyeshadow layer          everyone: own blend + opacity, cut down to the eyes, setPosition(x, y)
     ├── eyeshadow:person:2 layer

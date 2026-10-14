@@ -12,7 +12,6 @@ abra-find-person = { workspace = true }
 saphyr = { workspace = true }
 sha2 = { version = "0.11.0" }
 ureq = { version = "3.4.2" }
-pub-sub = { workspace = true }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
 vessel = { workspace = true, features = ["android-surface", "ios-surface"] }
 gpu = { workspace = true, optional = true }
@@ -21,7 +20,6 @@ gpu-passes = { workspace = true, optional = true, features = ["vessel-target"] }
 # Pinned to what the bindings generator (uniffi-bindgen-react-native 0.31.0-6, the newest release) reads. A newer uniffi
 # makes binding generation fail and leaves the generated TypeScript stale. Raise it when a matching generator exists.
 uniffi = { version = "=0.31", features = ["tokio"] }
-base64 = "0.23.1"
 futures = { workspace = true }
 
 [features]

@@ -431,6 +431,18 @@ mod tests {
   }
 
   #[test]
+  fn applying_an_effect_later_gives_the_same_pixels_as_applying_it_now() {
+    // The GPU provider is global, so a test that registers one makes this wait.
+    let _guard = abra::abra_core::image::gpu::GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    abra::abra_core::image::gpu::clear_gpu_provider();
+    let now = pixel(100, 200, 50, 77);
+    brightness(30).apply_on_cpu(now.clone());
+    let later = pixel(100, 200, 50, 77);
+    brightness(30).apply_deferred(later.clone());
+    assert_eq!(later.rgba(), now.rgba());
+  }
+
+  #[test]
   fn an_effect_limited_to_a_mask_or_an_area_changes_only_that_part() {
     let row = || Arc::new(Image::new_from_pixels(2, 1, vec![10, 20, 30, 255, 10, 20, 30, 255], Channels::RGBA));
     let image = row();

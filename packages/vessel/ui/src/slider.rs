@@ -6,11 +6,11 @@ use vessel_macros::Component;
 
 use crate::image::{Fit, fitted};
 
-/// The thickness of the track, in pixels.
+/// The thickness of the track, in pixels, unless set with `track_thickness`.
 const TRACK: u32 = 10;
-/// The size of the thumb, in pixels, or less if the slider is smaller.
+/// The size of the thumb, in pixels, or less if the slider is smaller, unless set with `thumb_size`.
 const THUMB: u32 = 20;
-/// How much an arrow key moves the slider, as a fraction of its range.
+/// How much an arrow key moves the slider, as a fraction of its range, unless set with `key_step`.
 const STEP: f32 = 0.05;
 
 /// Sent on a [`Slider`] with the new value (0 to 1) when the user moves it, by dragging or with the arrow keys. It is not
@@ -18,11 +18,11 @@ const STEP: f32 = 0.05;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Changed(pub f32);
 
-/// The width of the thumb: its picture's width if it has one (never wider than the slider), otherwise the standard size.
-fn thumb_width(p_width: u32, p_height: u32, p_picture: &Option<Arc<Frame>>) -> u32 {
+/// The width of the thumb: its picture's width if it has one (never wider than the slider), otherwise `p_size`.
+fn thumb_width(p_width: u32, p_height: u32, p_size: u32, p_picture: &Option<Arc<Frame>>) -> u32 {
   match p_picture {
     Some(picture) => picture.width.min(p_width).max(1),
-    None => p_height.min(p_width).min(THUMB).max(1),
+    None => p_height.min(p_width).min(p_size).max(1),
   }
 }
 
@@ -40,6 +40,9 @@ pub struct Slider {
   color: BehaviorSubject<Option<[u8; 4]>>,
   track_image: BehaviorSubject<Option<Arc<Frame>>>,
   thumb_image: BehaviorSubject<Option<Arc<Frame>>>,
+  track_thickness: BehaviorSubject<u32>,
+  thumb_size: BehaviorSubject<u32>,
+  key_step: BehaviorSubject<f32>,
 }
 
 impl Slider {
@@ -52,16 +55,21 @@ impl Slider {
     let color = BehaviorSubject::new(None);
     let track_image = BehaviorSubject::new(None::<Arc<Frame>>);
     let thumb_image = BehaviorSubject::new(None::<Arc<Frame>>);
+    let track_thickness = BehaviorSubject::new(TRACK);
+    let thumb_size = BehaviorSubject::new(THUMB);
+    let key_step = BehaviorSubject::new(STEP);
 
     let component = Component::new("slider");
     component.subject::<Canvas>().subscribe({
       let (value, color) = (value.clone(), color.clone());
       let (track_image, thumb_image) = (track_image.clone(), thumb_image.clone());
+      let (track_thickness, thumb_size) = (track_thickness.clone(), thumb_size.clone());
       move |canvas| {
         let (width, height) = (canvas.width(), canvas.height());
         let (track_picture, thumb_picture) = (track_image.value(), thumb_image.value());
+        let track = track_thickness.value().max(2);
         // The thumb is kept inside the slider, so the ends of the track sit under it.
-        let thumb = thumb_width(width, height, &thumb_picture);
+        let thumb = thumb_width(width, height, thumb_size.value(), &thumb_picture);
         let radius = thumb as f32 / 2.0;
         let travel = width as f32 - thumb as f32;
         let center = radius + value.value() * travel;
@@ -88,12 +96,12 @@ impl Slider {
           }
         } else {
           // An empty track with a faint outline, and the filled part just inside it.
-          let track_top = (height as i32 - TRACK as i32) / 2;
-          let rounding = TRACK as f32 / 2.0;
+          let track_top = (height as i32 - track as i32) / 2;
+          let rounding = track as f32 / 2.0;
           let [red, green, blue, _] = theme.border;
-          canvas.fill_rounded_rect(0, track_top, width, TRACK, rounding, theme.track);
-          canvas.fill_rounded_rect(1, track_top + 1, (center as u32).max(1) - 1, TRACK - 2, rounding - 1.0, fill);
-          canvas.stroke_rounded_rect(0, track_top, width, TRACK, rounding, 1.0, [red, green, blue, 110]);
+          canvas.fill_rounded_rect(0, track_top, width, track, rounding, theme.track);
+          canvas.fill_rounded_rect(1, track_top + 1, (center as u32).max(1) - 1, track - 2, rounding - 1.0, fill);
+          canvas.stroke_rounded_rect(0, track_top, width, track, rounding, 1.0, [red, green, blue, 110]);
         }
 
         let left = (center - radius).round() as i32;
@@ -115,11 +123,11 @@ impl Slider {
     // end, so that is the range the position maps to.
     let this = component.downgrade();
     let moved_to = {
-      let (value, thumb_image) = (value.clone(), thumb_image.clone());
+      let (value, thumb_image, thumb_size) = (value.clone(), thumb_image.clone(), thumb_size.clone());
       move |p_x: f32| {
         let Some(slider) = this.upgrade() else { return };
         let (width, height) = slider.size().value();
-        let thumb = thumb_width(width, height, &thumb_image.value()) as f32;
+        let thumb = thumb_width(width, height, thumb_size.value(), &thumb_image.value()) as f32;
         let travel = (width as f32 - thumb).max(1.0);
         let new = ((p_x - thumb / 2.0) / travel).clamp(0.0, 1.0);
         if new != value.value() {
@@ -151,11 +159,12 @@ impl Slider {
 
     let this = component.downgrade();
     component.subject::<KeyEvent>().subscribe({
-      let value = value.clone();
+      let (value, key_step) = (value.clone(), key_step.clone());
       move |event| {
+        let step = key_step.value();
         let step = match (event.pressed, event.key.as_str()) {
-          (true, "ArrowLeft") => -STEP,
-          (true, "ArrowRight") => STEP,
+          (true, "ArrowLeft") => -step,
+          (true, "ArrowRight") => step,
           _ => return,
         };
         let new = (value.value() + step).clamp(0.0, 1.0);
@@ -174,6 +183,9 @@ impl Slider {
       color,
       track_image,
       thumb_image,
+      track_thickness,
+      thumb_size,
+      key_step,
     }
   }
 
@@ -202,6 +214,9 @@ impl Slider {
     color: [u8; 4] => set_color, with_color;
     track_image: Arc<Frame> => set_track_image, with_track_image;
     thumb_image: Arc<Frame> => set_thumb_image, with_thumb_image;
+    track_thickness: u32 => set_track_thickness, with_track_thickness;
+    thumb_size: u32 => set_thumb_size, with_thumb_size;
+    key_step: f32 => set_key_step, with_key_step;
   }
 }
 
@@ -299,6 +314,32 @@ mod tests {
     let end_heard = listen(&end);
     end.next(key("ArrowRight", true));
     assert!(end_heard.lock().unwrap().is_empty(), "already at the end, nothing changed");
+  }
+
+  #[test]
+  fn the_track_thumb_and_key_step_follow_their_settings() {
+    // A bigger step: one press moves a quarter of the range.
+    let slider = sized(0.5).with_key_step(0.25);
+    slider.next(KeyEvent { key: "ArrowRight".to_string(), pressed: true });
+    assert!((slider.value() - 0.75).abs() < 1e-5);
+
+    // A 40 pixel slider with a 30 pixel thumb: the thumb's center runs from x = 15 to x = 105 of 120.
+    let slider = Slider::new(0.0).with_thumb_size(30).with_track_thickness(4);
+    slider.size().next((120, 40));
+    pointer(&slider, 15.0, Some(true));
+    assert!(slider.value() < 0.01, "{}", slider.value());
+    pointer(&slider, 105.0, None);
+    assert!((slider.value() - 1.0).abs() < 0.01, "{}", slider.value());
+    let frame = render(&slider);
+    let theme = Theme::light();
+    // The thumb is 30 tall and the empty track 4: count the rows each lights in its own column.
+    let rows = |x: u32, color: [u8; 4]| (0..40).filter(|row| pixel(&frame, x, *row) == color).count();
+    assert!(rows(105, theme.accent) >= 28, "the thumb is about 30 pixels tall");
+    slider.set_value(1.0);
+    slider.set_thumb_size(10);
+    let frame = render(&slider);
+    let thin = (0..40).filter(|row| pixel(&frame, 112, *row) == theme.accent).count();
+    assert!(thin <= 10, "a smaller thumb: {thin}");
   }
 
   #[test]

@@ -1,8 +1,7 @@
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { AbraImage, renderThumbnailAsync, ThumbnailPreview } from '@alakazam/mobile';
+import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { effectList, leafControls, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
-import { selectedSkinMask } from '@/src/lib/analysis';
+import { leafControls, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
 import { ownedImage } from '@/src/lib/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
@@ -51,13 +50,14 @@ export function buildControlThumbnails(
           let created: ThumbnailPreview | undefined;
           try {
             const effectStarted = Date.now();
-            if (control.thumb) {
-              // The control makes its own thumbnail, on a copy of the thumbnail-size photo that is its own to change.
+            const make = control.thumb ?? (control.kind === 'action' ? control.tool : undefined);
+            if (make) {
+              // The control makes its own thumbnail (its thumb, else its tool), on a copy of the thumbnail-size photo that is its own to change.
               const target = ownedImage(thumbnailSource.clone());
               const photo = target.clone();
               let returned: ImageLike | undefined;
               try {
-                returned = control.thumb(photo, { scale: scaleBetween(photo, full ?? source) }) as ImageLike | undefined;
+                returned = make.call(control, photo, { scale: scaleBetween(photo, full ?? source) }) as ImageLike | undefined;
                 target.replaceWith(returned ?? photo);
                 pixels = target;
               } catch (error) {
@@ -69,11 +69,7 @@ export function buildControlThumbnails(
                 if (returned) (returned as AbraPixels).uniffiDestroy();
               }
             } else {
-              if (control.kind === 'action' && control.apply) {
-                throw new Error(`Thumbnail action "${control.key}" needs a live effect or thumb`);
-              }
-              const effects = control.kind === 'action' && control.live ? effectList(control.live()) : [];
-              pixels = ownedImage(await renderThumbnailAsync(thumbnailSource, effects, selectedSkinMask()));
+              throw new Error(`Thumbnail control "${control.key}" needs a tool or thumb`);
             }
             if (cancelled) return;
             const effectMs = Date.now() - effectStarted;

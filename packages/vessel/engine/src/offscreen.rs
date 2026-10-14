@@ -13,14 +13,30 @@ struct Pending<T> {
   waker: Waker,
 }
 
+/// What an offscreen renderer that watches something outside its own input is told about it.
+struct Tracking {
+  /// A number that is different whenever there is something new to draw.
+  version: Box<dyn Fn() -> u64 + Send + Sync>,
+  /// Whether more is still on its way, so the next frame should be drawn too.
+  is_busy: Box<dyn Fn() -> bool + Send + Sync>,
+}
+
+/// The newest input and the version that was last drawn, for a renderer that draws again when its version changes.
+struct Seen<T> {
+  value: Option<T>,
+  version: Option<u64>,
+}
+
 struct Renderer<T, F> {
   pending: Arc<Mutex<Pending<T>>>,
   render: Mutex<F>,
+  tracking: Option<Tracking>,
+  seen: Mutex<Seen<T>>,
 }
 
 impl<T, F> ErasedView for Renderer<T, F>
 where
-  T: Send + 'static,
+  T: Clone + Send + 'static,
   F: FnMut(&T) -> Option<RenderedFrame> + Send + 'static,
 {
   fn id(&self) -> &str {
@@ -32,7 +48,11 @@ where
   }
 
   fn pacing(&self) -> Pacing {
-    Pacing::OnDemand
+    // A renderer that watches a version keeps the engine running while there is something to draw or more on the way, and lets
+    // it sleep the moment there is not. Anything else is drawn only when its input changes.
+    let Some(tracking) = &self.tracking else { return Pacing::OnDemand };
+    let drawn = self.seen.lock().unwrap().version;
+    if drawn != Some((tracking.version)()) || (tracking.is_busy)() { Pacing::Continuous } else { Pacing::OnDemand }
   }
 
   fn attach(&self, p_waker: Waker) {
@@ -40,7 +60,24 @@ where
   }
 
   fn tick(&self, _p_delta: Duration) -> Option<RenderedFrame> {
-    let value = self.pending.lock().unwrap().value.take()?;
+    let fresh = self.pending.lock().unwrap().value.take();
+    let Some(tracking) = &self.tracking else {
+      return (self.render.lock().unwrap())(&fresh?);
+    };
+    let mut seen = self.seen.lock().unwrap();
+    let mut needed = fresh.is_some();
+    if fresh.is_some() {
+      seen.value = fresh;
+    }
+    let version = (tracking.version)();
+    needed |= seen.version != Some(version) || (tracking.is_busy)();
+    if !needed {
+      return None;
+    }
+    // Nothing can be drawn before the first input. The version is left alone, so it is drawn when the input comes.
+    let value = seen.value.clone()?;
+    seen.version = Some(version);
+    drop(seen);
     (self.render.lock().unwrap())(&value)
   }
 }
@@ -85,6 +122,37 @@ impl Offscreen {
   pub fn new<T: Clone + Send + Sync + 'static>(
     p_source: &impl Observable<T>, p_render: impl FnMut(&T) -> Option<RenderedFrame> + Send + 'static,
   ) -> Self {
+    Self::build(p_source, None, p_render)
+  }
+
+  /// Like [`new`](Self::new), and it also draws again when something outside its input has changed, with no input to say so.
+  ///
+  /// - `p_version`: A number that is different whenever there is something new to draw, such as the version of a picture that
+  ///   is edited somewhere else. It is cheap, since it is asked every frame while the renderer is busy. The renderer draws the
+  ///   newest input again whenever it changes.
+  /// - `p_is_busy`: Whether more is on its way (tiles still being put on the GPU, say), so the next frame is drawn too.
+  ///
+  /// The engine runs frame after frame while there is something to draw or more on the way, and sleeps when there is not, so
+  /// an idle renderer costs nothing. It is woken by input, and by [`wake`](Self::wake) for a change it cannot see.
+  pub fn tracking<T: Clone + Send + Sync + 'static>(
+    p_source: &impl Observable<T>, p_version: impl Fn() -> u64 + Send + Sync + 'static,
+    p_is_busy: impl Fn() -> bool + Send + Sync + 'static, p_render: impl FnMut(&T) -> Option<RenderedFrame> + Send + 'static,
+  ) -> Self {
+    let tracking = Tracking { version: Box::new(p_version), is_busy: Box::new(p_is_busy) };
+    Self::build(p_source, Some(tracking), p_render)
+  }
+
+  /// Wakes the renderer's engine, so a renderer made with [`tracking`](Self::tracking) looks at its version again at once.
+  pub fn wake(&self) {
+    if let Some(engine) = self.inner.engine.lock().unwrap().as_ref() {
+      engine.wake();
+    }
+  }
+
+  fn build<T: Clone + Send + Sync + 'static>(
+    p_source: &impl Observable<T>, p_tracking: Option<Tracking>,
+    p_render: impl FnMut(&T) -> Option<RenderedFrame> + Send + 'static,
+  ) -> Self {
     let pending = Arc::new(Mutex::new(Pending {
       value: None,
       waker: Waker::default(),
@@ -114,6 +182,8 @@ impl Offscreen {
     engine.add_erased(Box::new(Renderer {
       pending,
       render: Mutex::new(p_render),
+      tracking: p_tracking,
+      seen: Mutex::new(Seen { value: None, version: None }),
     }));
     Self {
       inner: Arc::new(Inner {
@@ -318,5 +388,82 @@ mod tests {
     release.send(()).unwrap();
     dropping.join().unwrap();
     result.expect("offscreen teardown blocked on the in-flight render");
+  }
+  /// The frames a renderer has published so far.
+  fn counted(p_output: &Offscreen) -> (Arc<std::sync::atomic::AtomicUsize>, Subscription) {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let subscription = p_output.subscribe({
+      let count = Arc::clone(&count);
+      move |_| {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      }
+    });
+    (count, subscription)
+  }
+
+  fn frames(p_count: &std::sync::atomic::AtomicUsize) -> usize {
+    p_count.load(std::sync::atomic::Ordering::SeqCst)
+  }
+
+  /// Waits until `p_count` reaches `p_frames`, or two seconds pass.
+  fn wait_for(p_count: &std::sync::atomic::AtomicUsize, p_frames: usize) {
+    let started = std::time::Instant::now();
+    while frames(p_count) < p_frames && started.elapsed() < Duration::from_secs(2) {
+      std::thread::sleep(Duration::from_millis(2));
+    }
+  }
+
+  #[test]
+  fn a_tracking_renderer_draws_when_its_version_changes_with_no_input_and_sleeps_when_it_does_not() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let state = BehaviorSubject::new(5u8);
+    let version = Arc::new(AtomicU64::new(1));
+    let output = Offscreen::tracking(&state, { let version = Arc::clone(&version); move || version.load(Ordering::SeqCst) }, || false, |value| frame(*value));
+    let (count, _subscription) = counted(&output);
+    // The first input is drawn, and then nothing is, however long it waits.
+    state.next(5);
+    wait_for(&count, 1);
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(frames(&count), 1, "an idle renderer draws nothing");
+    // A change somewhere else is drawn once, as soon as the engine is woken, from the same input.
+    version.store(2, Ordering::SeqCst);
+    output.wake();
+    wait_for(&count, 2);
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(frames(&count), 2, "one draw for one change, and then it sleeps again");
+  }
+
+  #[test]
+  fn a_tracking_renderer_draws_every_frame_while_it_is_busy_and_stops_when_it_is_not() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let state = BehaviorSubject::new(1u8);
+    let left = Arc::new(AtomicUsize::new(3));
+    let output = Offscreen::tracking(
+      &state,
+      || 1,
+      { let left = Arc::clone(&left); move || left.load(Ordering::SeqCst) > 0 },
+      { let left = Arc::clone(&left); move |value| { left.fetch_sub(1, Ordering::SeqCst); frame(*value) } },
+    );
+    let (count, _subscription) = counted(&output);
+    state.next(1);
+    wait_for(&count, 3);
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(frames(&count), 3, "one frame for each of the three it was busy for, then it stops");
+  }
+
+  #[test]
+  fn a_tracking_renderer_with_no_input_yet_draws_nothing_and_draws_when_the_input_comes() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let state = Subject::new();
+    let version = Arc::new(AtomicU64::new(1));
+    let output = Offscreen::tracking(&state, { let version = Arc::clone(&version); move || version.load(Ordering::SeqCst) }, || false, |value: &u8| frame(*value));
+    let (count, _subscription) = counted(&output);
+    version.store(2, Ordering::SeqCst);
+    output.wake();
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(frames(&count), 0, "there is nothing to draw without an input");
+    state.next(9);
+    wait_for(&count, 1);
+    assert_eq!(frames(&count), 1);
   }
 }

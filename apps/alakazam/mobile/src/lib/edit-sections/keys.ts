@@ -3,9 +3,11 @@
 export const BLEMISH_TOOL_KEY = 'action-blemish';
 export const RED_EYE_TOOL_KEY = 'action-red-eye';
 export const SKIN_SMOOTH_KEY = 'action-skin-smooth';
+export const SKIN_EVEN_OUT_KEY = 'action-skin-even-out';
 export const SKIN_TAN_KEY = 'action-skin-tan';
 export const SKIN_TONE_KEY = 'action-skin-tone';
 export const MAKEUP_GROUP_KEY = 'group-makeup';
+export const SKIN_GROUP_KEY = 'group-skin';
 export const LIPSTICK_KEY = 'slider-lipstick';
 export const EYELINER_KEY = 'slider-eyeliner';
 export const EYESHADOW_KEY = 'slider-eyeshadow';

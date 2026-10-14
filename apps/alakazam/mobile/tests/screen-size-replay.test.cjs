@@ -15,7 +15,7 @@ const babel = require(
  * The editor's replay, loaded with its real logic and stand-ins for the native images and the rest of the editor. An image
  * records how it was made, so a test can tell the full-size photo from the screen-size copy of it.
  */
-function fixture({ box = { width: 320, height: 200 } } = {}) {
+function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
   const subject = value => new BehaviorSubject(value);
   const filename = path.join(__dirname, '..', 'src', 'lib', 'editor-replay.ts');
   const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
@@ -35,14 +35,12 @@ function fixture({ box = { width: 320, height: 200 } } = {}) {
   const image = (name, width = 4000, height = 3000) => {
     const self = {
       name,
-      width: () => width,
-      height: () => height,
+      width: () => self.w,
+      height: () => self.h,
+      w: width,
+      h: height,
       destroyed: 0,
-      copy: () => image(`${name} copy`, width, height),
-      shrunk: (maxWidth, maxHeight) => {
-        sizes.push([maxWidth, maxHeight]);
-        return image(`${name} shrunk to ${maxWidth}x${maxHeight}`, maxWidth, maxHeight);
-      },
+      clone: () => image(`${name} copy`, self.w, self.h),
       uniffiDestroy() {
         self.destroyed++;
       },
@@ -75,6 +73,17 @@ function fixture({ box = { width: 320, height: 200 } } = {}) {
   // screen has two pixels to a point.
   const pixelsBox = subject({ width: box.width / 2, height: box.height / 2 });
   const pictures = loadTs('lib/editor-pictures.ts', {
+    '@abra/core/canvas': { ResizeTarget: { Fit: { new: size => size } } },
+    '@abra/core/transform': {
+      resize: size => ({
+        apply(copy) {
+          sizes.push([size.width, size.height]);
+          copy.name = `${copy.name.replace(/ copy$/, '')} shrunk to ${size.width}x${size.height}`;
+          copy.w = size.width;
+          copy.h = size.height;
+        },
+      }),
+    },
     '@/src/state/gestures': { previewBox: pixelsBox },
     '@/src/state/preview': { previewSourceImage, showingCheckpoint: subject(false) },
     '@/src/state/session': session,
@@ -83,7 +92,7 @@ function fixture({ box = { width: 320, height: 200 } } = {}) {
   const modules = {
     '@/src/lib/batch': { batch: run => run() },
     '@/src/lib/edit-sections': {
-      EDIT_SECTIONS: [{ key: 'section', controls: [{ key: 'size', kind: 'slider', defaultValue: 0 }] }],
+      EDIT_SECTIONS: [{ key: 'section', controls: [{ key: 'size', kind: 'slider', defaultValue: 0, deferred }] }],
       applyAction() {},
       leafControls: controls => controls,
       applySlider: (_control, _image, _value, scale) => scales.push(scale),
@@ -93,20 +102,26 @@ function fixture({ box = { width: 320, height: 200 } } = {}) {
         controls: [{ key: 'size', kind: 'slider', preload() {} }],
       }),
       isSliderApplied: () => true,
+      layerSheet: () => undefined,
+      sliderContext: () => ({}),
+      sliderValues: () => ({}),
       scaleBetween: (image, full) => (full ? Math.min(1, image.width() / full.width()) : 1),
       sliderDefault: () => 0,
     },
     '@/src/lib/editor-preloads': {
       preloadFor: (_control, width, source) => preloads.asked.push([width, source.name]),
       clearPreloads: () => preloads.cleared++,
+      releasePreloads: () => preloads.cleared++,
     },
     '@/src/lib/editor-pictures': pictures,
     '@/src/lib/editor-thumbnails': { buildControlThumbnails() {} },
     '@/src/lib/skin-adjustments': {
-      isSkinAdjustment: () => false,
+      isPersonAdjustment: () => false,
       adjustmentKey: key => key,
-      skinAdjustmentTargets: () => [],
+      personAdjustmentTargets: () => [],
     },
+    '@/src/lib/analysis': { personIn: () => undefined },
+    '@/src/lib/layers': { withLayers: photo => photo },
     '@/src/state/edits': edits,
     '@/src/state/gestures': { previewBox$: previewBoxes },
     '@/src/state/person-selection': { personSelection: subject({}) },
@@ -193,17 +208,33 @@ test('the screen shows a copy of the photo shrunk to the preview, never the full
   subscription.unsubscribe();
 });
 
-test('the full-size edit is made after the screen one, and not drawn', () => {
+test('the full-size edit is made only when something asks for it, and is not drawn', () => {
   const f = fixture();
   const subscription = replayOnce(f);
   const shown = f.previewSourceImage.value;
-  assert.equal(f.session.currentImage.value, null, 'it has not been made yet');
-  assert.equal(f.pending(), 1, 'it is waiting a moment so a run of quick edits only makes the last');
+  assert.equal(f.session.currentImage.value, null, 'it has not been made');
+  assert.equal(f.pending(), 0, 'and nothing is waiting to make it while the user edits');
   f.flush();
+  assert.equal(f.session.currentImage.value, null, 'it is still not made, however long it waits');
+  f.replay.flushFullReplay();
   const full = f.session.currentImage.value;
-  assert.ok(full, 'then it is made');
+  assert.ok(full, 'asked for, it is made');
   assert.deepEqual([full.width(), full.height()], [4000, 3000], 'from the full-size photo');
   assert.equal(f.previewSourceImage.value, shown, 'and the screen still shows the screen-size picture');
+  subscription.unsubscribe();
+});
+
+test('when every control only makes the photo remember effects, the full-size photo is what is drawn', () => {
+  const f = fixture({ deferred: true });
+  const base = f.session.editBaseImage.value;
+  const subscription = replayOnce(f);
+  const shown = f.previewSourceImage.value;
+  assert.deepEqual([shown.width(), shown.height()], [4000, 3000], 'at the full size of the photo');
+  assert.notEqual(shown, base, 'a copy of it, which the edit is made on');
+  assert.deepEqual(f.sizes, [], 'nothing is shrunk');
+  assert.deepEqual(f.scales, [1], 'the edit is told it is the full size');
+  assert.deepEqual([f.session.currentImage.value.width(), f.session.currentImage.value.height()], [4000, 3000]);
+  assert.equal(f.pending(), 0, 'and there is no second, full-size edit to wait for');
   subscription.unsubscribe();
 });
 
@@ -211,32 +242,36 @@ test('each edit is told how much smaller its photo is than the full-size one', (
   const f = fixture();
   const subscription = replayOnce(f);
   assert.deepEqual(f.scales, [320 / 4000], 'the screen-size edit is told the photo was shrunk to 8%');
-  f.flush();
+  f.replay.flushFullReplay();
   assert.deepEqual(f.scales, [320 / 4000, 1], 'and the full-size edit is told it is the full size');
   subscription.unsubscribe();
 });
 
-test('flushing makes the waiting full-size edit at once, and does nothing when none is waiting', () => {
+test('flushing makes the full-size edit when it is out of date, and does nothing when it is current', () => {
   const f = fixture();
   const subscription = replayOnce(f);
   f.replay.flushFullReplay();
-  assert.ok(f.session.currentImage.value, 'made without waiting');
+  assert.ok(f.session.currentImage.value, 'made at once');
   assert.equal(f.pending(), 0, 'and no second one is left waiting');
   const made = f.session.currentImage.value;
   f.replay.flushFullReplay();
-  assert.equal(f.session.currentImage.value, made, 'nothing is waiting, so nothing is made again');
+  assert.equal(f.session.currentImage.value, made, 'it is current, so nothing is made again');
+  f.edits.adjustments.next({ exposure: 1 });
+  f.flush();
+  f.replay.flushFullReplay();
+  assert.notEqual(f.session.currentImage.value, made, 'an edit made it out of date, so it is made again');
   subscription.unsubscribe();
 });
 
 test('an edit replaces the picture on screen and frees the one before it, and the full-size one it replaces', () => {
   const f = fixture();
   const subscription = replayOnce(f);
-  f.flush();
+  f.replay.flushFullReplay();
   const firstShown = f.previewSourceImage.value;
   const firstFull = f.session.currentImage.value;
   f.edits.adjustments.next({ exposure: 1 });
   f.flush();
-  f.flush();
+  f.replay.flushFullReplay();
   assert.notEqual(f.previewSourceImage.value, firstShown);
   assert.equal(firstShown.destroyed, 1, 'the earlier screen picture is freed once');
   assert.notEqual(f.session.currentImage.value, firstFull);
@@ -276,14 +311,14 @@ test('before and after shows the original shrunk to the screen too', () => {
   assert.equal(f.pictures.comparisonImage(), shrunk, 'the same copy every time');
 });
 
-test('ending the session frees every screen-size picture and cancels the waiting full-size edit', () => {
+test('ending the session frees every screen-size picture and forgets the out of date full-size edit', () => {
   const f = fixture();
   const subscription = replayOnce(f);
   const shown = f.previewSourceImage.value;
   const original = f.pictures.comparisonImage();
-  assert.equal(f.pending(), 1);
   f.replay.releaseShownImages();
-  assert.equal(f.pending(), 0, 'the full-size edit never runs');
+  f.replay.flushFullReplay();
+  assert.equal(f.session.currentImage.value, null, 'the full-size edit is never made');
   assert.equal(shown.destroyed, 1);
   assert.equal(original.destroyed, 1);
   assert.equal(f.pictures.shownImage(), null);

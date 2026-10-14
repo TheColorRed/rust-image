@@ -7,6 +7,7 @@ import {
   EYESHADOW_KEY,
   LIPSTICK_KEY,
   RED_EYE_TOOL_KEY,
+  SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
@@ -49,6 +50,7 @@ export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOO
 export const isPersonControlFocused$ = focusedControlKey$.pipe(
   map(
     key =>
+      key === SKIN_EVEN_OUT_KEY ||
       key === SKIN_SMOOTH_KEY ||
       key === SKIN_TAN_KEY ||
       key === SKIN_TONE_KEY ||

@@ -1,7 +1,8 @@
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
+import { Area, rectOrigin } from '@abra/core/geometry';
 import { Falloff, Mask, type MaskLike } from '@abra/core/mask';
-import { shadeGradient } from '@/src/lib/color-bars';
+import { glowGradient, shadeGradient } from '@/src/lib/color-bars';
 import { type ToolContext } from '@/src/lib/edit-sections';
 import { derivedFor } from '@/src/lib/editor-preloads';
 import { belongsTo, owning } from '@/src/lib/faces';
@@ -33,18 +34,19 @@ export const applySculpt = (
   size: number,
   shade: number,
   { preloaded, person, others }: ToolContext,
+  fan = 0,
 ) => {
   if (!preloaded || Array.isArray(preloaded)) return;
   owning(keep => {
-    // The highlighter is a soft white; the contour is the shade picked on the bar, so a tan shade is a light shadow and a dark brown
-    // a deep one.
-    const color = kind === 'highlighter' ? keep(Color.fromHsv(0, 0, 1)) : keep(shadeGradient().colorAt(shade));
+    // Both are the shade picked on a bar: the highlighter's goes from a pearl white through champagne and gold to rose, and the
+    // contour's from a tan, a light shadow, to a dark brown, a deep one.
+    const color = keep((kind === 'highlighter' ? glowGradient() : shadeGradient()).colorAt(shade));
     const regions: MaskLike[] = [];
     for (const key of Object.keys(preloaded)) {
       const [maskKind, box, side] = key.split('|');
       if (maskKind !== 'eye' || !box || !side) continue;
       if (!belongsTo(box, sheet, person, others)) continue;
-      const region = derivedFor(preloaded, `${kind}|${key}`, `${softness.toFixed(3)}|${size.toFixed(3)}`, () =>
+      const region = derivedFor(preloaded, `${kind}|${key}`, `${softness.toFixed(3)}|${size.toFixed(3)}|${fan.toFixed(3)}`, () =>
         owning(own => {
           const bounds = (preloaded[key] as MaskLike).bounds(0);
           if (!bounds) return undefined;
@@ -60,14 +62,18 @@ export const applySculpt = (
           const angle = Math.atan(-outwards * TILT);
 
           const strokes: Stroke[] = [];
+          let trapezoid: number[][] | undefined;
+          // The cheek's stroke, and the way along it that goes in towards the nose and mouth.
+          let cheek: Stroke;
+          let inward = Math.atan2(-outwards * Math.sin(angle), -outwards * Math.cos(angle));
           if (kind === 'highlighter') {
-            strokes.push({
+            cheek = {
               x: centerX + outwards * eyeWidth * 0.7,
               y: eyeBottom + Math.max(drop * 0.18, eyeWidth * 0.3),
               length: eyeWidth * 1.0 * size,
               thickness: eyeWidth * 0.4 * size,
               angle,
-            });
+            };
           } else {
             // The hollow runs from the side of the face, level with the nostrils, in towards the corner of the mouth, stopping short of
             // it. It is placed from the edge of the face the parser found and the corner of the mouth, not from the eye, so it
@@ -79,22 +85,46 @@ export const applySculpt = (
               const innerX = outwards === -1 ? lips.x : lips.x + lips.width;
               const innerY = lips.y + lips.height * 0.4;
               const run = Math.hypot(innerX - outerX, innerY - outerY);
-              strokes.push({
+              inward = Math.atan2(innerY - outerY, innerX - outerX);
+              cheek = {
                 x: outerX + (innerX - outerX) * 0.4,
                 y: outerY + (innerY - outerY) * 0.4,
                 length: run * 0.38 * size,
                 thickness: run * 0.2 * size,
-                angle: Math.atan2(innerY - outerY, innerX - outerX),
-              });
+                angle: inward,
+              };
             } else {
-              strokes.push({
+              cheek = {
                 x: centerX + outwards * eyeWidth * 1.15,
                 y: eyeBottom + drop * 0.55,
                 length: eyeWidth * 1.9 * size,
                 thickness: eyeWidth * 0.55 * size,
                 angle,
-              });
+              };
             }
+          }
+          // Without a fan the cheek is the soft oval. With one it is a single trapezoid from the edge of the face towards the nose or
+          // mouth: as thick as the oval's tip at the outer end, whatever the fan, and up to three times as thick as the stroke at the
+          // inner end. One solid shape, so there is no step where an oval would meet it.
+          if (fan > 0) {
+            const inwardX = Math.cos(inward);
+            const inwardY = Math.sin(inward);
+            const normalX = -inwardY;
+            const normalY = inwardX;
+            const outerWidth = cheek.thickness * 0.5;
+            const innerWidth = cheek.thickness * (1 + fan * 2);
+            const outerX = cheek.x - inwardX * cheek.length;
+            const outerY = cheek.y - inwardY * cheek.length;
+            const innerX = cheek.x + inwardX * cheek.length;
+            const innerY = cheek.y + inwardY * cheek.length;
+            trapezoid = [
+              [outerX + normalX * outerWidth, outerY + normalY * outerWidth],
+              [innerX + normalX * innerWidth, innerY + normalY * innerWidth],
+              [innerX - normalX * innerWidth, innerY - normalY * innerWidth],
+              [outerX - normalX * outerWidth, outerY - normalY * outerWidth],
+            ];
+          } else {
+            strokes.push(cheek);
           }
           // What runs down the middle of the face is drawn once for the person, with the eye on the left of the photo (or the only
           // eye there is).
@@ -143,10 +173,14 @@ export const applySculpt = (
 
           // Made on a crop around the strokes and put back on the photo.
           const reach = (stroke: Stroke) => Math.max(stroke.length, stroke.thickness) * 1.1;
-          const left = Math.max(0, Math.floor(Math.min(...strokes.map(stroke => stroke.x - reach(stroke)))));
-          const top = Math.max(0, Math.floor(Math.min(...strokes.map(stroke => stroke.y - reach(stroke)))));
-          const right = Math.min(sheet.width(), Math.ceil(Math.max(...strokes.map(stroke => stroke.x + reach(stroke)))));
-          const bottom = Math.min(sheet.height(), Math.ceil(Math.max(...strokes.map(stroke => stroke.y + reach(stroke)))));
+          // The trapezoid's edge is softened by a blur, so the crop leaves room for it.
+          const trapezoidFeather = eyeWidth * (0.1 + 0.3 * softness);
+          const margin = trapezoidFeather * 3;
+          const trapezoidPoints = trapezoid ?? [];
+          const left = Math.max(0, Math.floor(Math.min(...strokes.map(stroke => stroke.x - reach(stroke)), ...trapezoidPoints.map(point => point[0] - margin))));
+          const top = Math.max(0, Math.floor(Math.min(...strokes.map(stroke => stroke.y - reach(stroke)), ...trapezoidPoints.map(point => point[1] - margin))));
+          const right = Math.min(sheet.width(), Math.ceil(Math.max(...strokes.map(stroke => stroke.x + reach(stroke)), ...trapezoidPoints.map(point => point[0] + margin))));
+          const bottom = Math.min(sheet.height(), Math.ceil(Math.max(...strokes.map(stroke => stroke.y + reach(stroke)), ...trapezoidPoints.map(point => point[1] + margin))));
           const width = right - left;
           const height = bottom - top;
           if (width < 2 || height < 2) return undefined;
@@ -166,6 +200,14 @@ export const applySculpt = (
             ),
           );
           if (__DEV__) console.debug(`[blobs] ${kind} ${width}x${height}, ${strokes.length} strokes ${(Date.now() - blobsStarted).toFixed(0)} ms`);
+          if (trapezoid) {
+            const area = own(Area.fromPoints(trapezoid.map(point => [point[0] - left, point[1] - top])));
+            const trapezoidMask = own(Mask.empty(width, height));
+            trapezoidMask.drawArea(area, own(Color.fromRgba(255, 255, 255, 255)), rectOrigin(area.bounds()));
+            const trapezoidImage = own(trapezoidMask.toImage());
+            own(gaussianBlur(Math.max(1.5, trapezoidFeather))).apply(trapezoidImage);
+            shape = own(shape.maximum(own(Mask.fromImage(trapezoidImage))));
+          }
           // Only on skin or nose, with a soft edge so it does not stop at a line.
           const skin = preloaded[`skin|${box}`] as MaskLike | undefined;
           if (skin) {

@@ -70,7 +70,7 @@ first row to the configured opacity on the last row. A 40% black endpoint
 retains approximately 60% of the underlying photo's channel values.
 
 Thumbnail generation starts from a card-size copy of the photo that the editor keeps and replays the edits on, followed by
-`await renderThumbnailAsync(source, effects, skinMask)` for each control.
+each control's `thumb` (or its `tool`) on a copy of that photo.
 Pixels stay in native memory throughout. Decoding and thumbnail jobs share
 two native image workers; the editor submits at most two thumbnail effects
 at once, in control order (the initially visible cards first), and publishes

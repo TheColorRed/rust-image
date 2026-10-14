@@ -1,9 +1,13 @@
 ﻿import { tanGradient } from '@/src/lib/color-bars';
 import { owning } from '@/src/lib/faces';
 import { paintSheet } from '@/src/lib/layers';
-import { skinTone } from '@abra/core/beauty';
-import { BlendMode } from '@abra/core/blend';
-import { applyEffect, EffectSpec } from '@alakazam/mobile';
+import { grayscale, invert } from '@abra/core/adjustments';
+import { skinSmooth, skinTone } from '@abra/core/beauty';
+import { blend, BlendMode } from '@abra/core/blend';
+import { ResizeTarget } from '@abra/core/canvas';
+import { gaussianBlur } from '@abra/core/filters';
+import { TransformAlgorithm } from '@abra/core/mask';
+import { resize } from '@abra/core/transform';
 import { applyBlush } from '../blush';
 import { applySculpt } from '../contour';
 import { type EditSection } from '../edit-sections';
@@ -23,6 +27,8 @@ import {
   LIPSTICK_KEY,
   MAKEUP_GROUP_KEY,
   RED_EYE_TOOL_KEY,
+  SKIN_EVEN_OUT_KEY,
+  SKIN_GROUP_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
@@ -127,113 +133,229 @@ const lipSwatches = swatchesOf(lipColors, (hue, saturation, brightness, label) =
 const lipBlend = ([, , , saturation, brightness]: number[]) =>
   brightness < 0.2 ? BlendMode.Multiply : saturation < 0.1 && brightness > 0.9 ? BlendMode.Normal : BlendMode.Color;
 
+/**
+ * How Even Out finds the skin's overall color. The color of the skin changes slowly, so it is worked out on a copy of the skin no
+ * longer than this (in pixels) and scaled back up, which is the same colors for far less work. On that copy each pixel becomes the
+ * average color of the skin within `EVEN_OUT_REACH` pixels of it, counting only the skin: the hair, the eyes, the lips and the
+ * clothes next to it count for nothing, so they cannot dull or tint the skin's color. Past 1 on the slider the reach is multiplied by
+ * the slider's value (as Smooth's blur is).
+ */
+const EVEN_OUT_SIZE = 160;
+const EVEN_OUT_REACH = 16;
+
+/** How fine the detail Texture puts back is, as a fraction of the longest side of the skin's crop. Pores, not blotches. */
+const TEXTURE_SCALE = 0.0025;
+
 export const beauty: EditSection = {
   key: 'section-beauty',
   label: 'Beauty',
   controls: [
     {
-      kind: 'slider',
-      key: SKIN_SMOOTH_KEY,
-      label: 'Skin Smooth',
-      min: 0,
-      // Up to 1 is how much of the smoothing shows; past 1 the smoothing itself gets stronger, up to 3.
-      max: 3,
-      step: 0.1,
-      defaultValue: 0,
-      applyOnSelect: false,
-      // A layer in the skin group: the part of the photo the skin reaches, smoothed, shown only where the skin is.
-      layer: {
-        group: 'skin',
-        blend: BlendMode.Normal,
-        opacity: () => 1,
-        paint: (sheet, [amount]: number[], { skin }) =>
-          owning(keep => {
-            const found = skin?.();
-            if (!found) return;
-            const mask = keep(found);
-            const bounds = mask.bounds(0);
-            if (!bounds) return;
-            const [x, y] = [Math.floor(bounds.x), Math.floor(bounds.y)];
-            const part = {
-              x,
-              y,
-              width: Math.min(sheet.width(), Math.ceil(bounds.x + bounds.width)) - x,
-              height: Math.min(sheet.height(), Math.ceil(bounds.y + bounds.height)) - y,
-            };
-            if (part.width < 1 || part.height < 1) return;
-            const image = sheet.photo.cropped(part.x, part.y, part.width, part.height);
-            const here = keep(mask.cropped(part));
-            applyEffect(image, EffectSpec.SkinSmooth.new({ amount }), here);
-            here.applyToImage(image);
-            sheet.painted = { image, x, y };
-          }),
-      },
-    },
-    {
-      kind: 'slider',
-      key: SKIN_TAN_KEY,
-      label: 'Skin Tan',
-      // Where on the tan scale: none at 0, the darkest at 1.
-      min: 0,
-      max: 1,
-      step: 0.01,
-      defaultValue: 0,
-      applyOnSelect: false,
-      picker: 'skin-tan',
-      preload: makeupMasks,
-      // A layer in the skin group: the color at this place on the tan scale, multiplied over the skin the editor found, except the
-      // lips and the mouth.
-      layer: {
-        group: 'skin',
-        blend: BlendMode.Multiply,
-        opacity: () => 1,
-        paint: (sheet, [offset]: number[], { skin, preloaded }) =>
-          owning(keep => {
-            const found = skin?.();
-            if (!found) return;
-            paintSheet(sheet, [skinWithMouthEased(keep(found), preloaded, keep)], keep(tanGradient().colorAt(offset)));
-          }),
-      },
-    },
-    {
-      kind: 'slider',
-      key: SKIN_TONE_KEY,
-      label: 'Skin Tone',
-      // Negative lightens the original skin; positive darkens it.
-      min: -400,
-      max: 400,
-      step: 1,
-      defaultValue: 0,
-      applyOnSelect: false,
-      preload: makeupMasks,
-      // A layer in the skin group: the part of the photo the skin reaches, lightened or darkened, shown only where the skin is
-      // (the lips and the mouth eased), so it replaces the photo there.
-      layer: {
-        group: 'skin',
-        blend: BlendMode.Normal,
-        opacity: () => 1,
-        paint: (sheet, [amount]: number[], { skin, preloaded }) =>
-          owning(keep => {
-            const found = skin?.();
-            if (!found) return;
-            const mask = keep(skinWithMouthEased(keep(found), preloaded, keep));
-            const bounds = mask.bounds(0);
-            if (!bounds) return;
-            const [x, y] = [Math.floor(bounds.x), Math.floor(bounds.y)];
-            const part = {
-              x,
-              y,
-              width: Math.min(sheet.width(), Math.ceil(bounds.x + bounds.width)) - x,
-              height: Math.min(sheet.height(), Math.ceil(bounds.y + bounds.height)) - y,
-            };
-            if (part.width < 1 || part.height < 1) return;
-            const image = sheet.photo.cropped(part.x, part.y, part.width, part.height);
-            const here = keep(mask.cropped(part));
-            keep(keep(skinTone(amount)).withMask(here)).apply(image);
-            here.applyToImage(image);
-            sheet.painted = { image, x, y };
-          }),
-      },
+      kind: 'group',
+      key: SKIN_GROUP_KEY,
+      label: 'Skin',
+      controls: [
+        {
+          kind: 'slider',
+          key: SKIN_EVEN_OUT_KEY,
+          label: 'Even Out',
+          display: 'tabulated',
+          sliderLabel: ['Even Out', 'Natural'],
+          // Even Out: up to 1 is how much of the evened color shows; past 1 the color is evened over a wider reach, up to 3. Natural:
+          // how much of the photo's own color comes back over the evened color, none at 0 and all of it at 1. Projects saved before it
+          // have none.
+          min: [0, 0],
+          max: [3, 1],
+          step: [0.1, 0.01],
+          defaultValue: [0, 0],
+          applyOnSelect: false,
+          preload: makeupMasks,
+          // A layer in the skin group, under the tan: the skin blurred into one smooth color, given back the photo's own light and shade
+          // (see `paint`), so patches, tan lines and a face that does not match the neck fade while every pore stays.
+          layer: {
+            group: 'skin',
+            blend: BlendMode.Normal,
+            // The natural color is the photo underneath showing through, so it is how much of the layer is taken away.
+            opacity: ([amount, natural]) => Math.min(amount, 1) * (1 - natural),
+            paint: (sheet, [amount]: number[], { skin, preloaded }) =>
+              owning(keep => {
+                const found = skin?.();
+                if (!found) return;
+                // This replaces the color of the skin, so the lips, the eyes and the eyebrows are taken out of it completely.
+                const mask = keep(
+                  skinWithMouthEased(keep(found), preloaded, keep, 1, ['lipstick|', 'mouth|', 'eye|', 'brow|']),
+                );
+                const bounds = mask.bounds(0);
+                if (!bounds) return;
+                const [x, y] = [Math.floor(bounds.x), Math.floor(bounds.y)];
+                const part = {
+                  x,
+                  y,
+                  width: Math.min(sheet.width(), Math.ceil(bounds.x + bounds.width)) - x,
+                  height: Math.min(sheet.height(), Math.ceil(bounds.y + bounds.height)) - y,
+                };
+                if (part.width < 1 || part.height < 1) return;
+                const image = sheet.photo.cropped(part.x, part.y, part.width, part.height);
+                // How light each pixel of the photo is, kept to give back after the color is evened.
+                const light = keep(image.clone());
+                keep(grayscale()).apply(light);
+                const here = keep(mask.cropped(part));
+                const shrink = Math.min(1, EVEN_OUT_SIZE / Math.max(part.width, part.height));
+                const small = {
+                  width: Math.max(1, Math.round(part.width * shrink)),
+                  height: Math.max(1, Math.round(part.height * shrink)),
+                };
+                keep(resize(ResizeTarget.Exact.new(small))).apply(image);
+                // The average color of only the skin: the photo is multiplied by how much each pixel is skin, both are blurred, and the
+                // blurred photo is divided by the blurred skin, which leaves out everything that is not skin.
+                const skinHere = keep(
+                  keep(here.resized(small.width, small.height, TransformAlgorithm.Bilinear)).toImage(),
+                );
+                keep(keep(blend(skinHere)).withMode(BlendMode.Multiply)).apply(image);
+                const reach = EVEN_OUT_REACH * Math.max(1, amount);
+                keep(gaussianBlur(reach)).apply(image);
+                keep(gaussianBlur(reach)).apply(skinHere);
+                keep(keep(blend(skinHere)).withMode(BlendMode.Divide)).apply(image);
+                keep(resize(ResizeTarget.Exact.new({ width: part.width, height: part.height }))).apply(image);
+                // Puts the photo's light back on the evened color. Color blend does this in HSL, where a bright pixel can hold less
+                // color than a dark one, so the bright skin came out pale. This adds the same difference in light to red, green and
+                // blue, which keeps the color's strength: how light the evened color is, turned upside down, laid at half strength
+                // over how light the photo is, is gray plus half their difference, and Linear Light adds twice that to the color.
+                const evened = keep(image.clone());
+                keep(grayscale()).apply(evened);
+                keep(invert()).apply(evened);
+                keep(keep(blend(evened)).withOpacity(0.5)).apply(light);
+                keep(keep(blend(light)).withMode(BlendMode.LinearLight)).apply(image);
+                here.applyToImage(image);
+                sheet.painted = { image, x, y };
+              }),
+          },
+        },
+        {
+          kind: 'slider',
+          key: SKIN_TAN_KEY,
+          label: 'Tan',
+          // Where on the tan scale: none at 0, the darkest at 1.
+          min: 0,
+          max: 1,
+          step: 0.01,
+          defaultValue: 0,
+          applyOnSelect: false,
+          picker: 'skin-tan',
+          preload: makeupMasks,
+          // A layer in the skin group: the color at this place on the tan scale, multiplied over the skin the editor found, except the
+          // lips and the mouth.
+          layer: {
+            group: 'skin',
+            blend: BlendMode.Multiply,
+            opacity: () => 1,
+            paint: (sheet, [offset]: number[], { skin, preloaded }) =>
+              owning(keep => {
+                const found = skin?.();
+                if (!found) return;
+                paintSheet(
+                  sheet,
+                  [skinWithMouthEased(keep(found), preloaded, keep)],
+                  keep(tanGradient().colorAt(offset)),
+                );
+              }),
+          },
+        },
+        {
+          kind: 'slider',
+          key: SKIN_TONE_KEY,
+          label: 'Tone',
+          // Negative lightens the original skin; positive darkens it.
+          min: -400,
+          max: 400,
+          step: 1,
+          defaultValue: 0,
+          applyOnSelect: false,
+          preload: makeupMasks,
+          // A layer in the skin group: the part of the photo the skin reaches, lightened or darkened, shown only where the skin is
+          // (the lips and the mouth eased), so it replaces the photo there.
+          layer: {
+            group: 'skin',
+            overEarlier: true,
+            blend: BlendMode.Normal,
+            opacity: () => 1,
+            paint: (sheet, [amount]: number[], { skin, preloaded }) =>
+              owning(keep => {
+                const found = skin?.();
+                if (!found) return;
+                const mask = keep(skinWithMouthEased(keep(found), preloaded, keep));
+                const bounds = mask.bounds(0);
+                if (!bounds) return;
+                const [x, y] = [Math.floor(bounds.x), Math.floor(bounds.y)];
+                const part = {
+                  x,
+                  y,
+                  width: Math.min(sheet.width(), Math.ceil(bounds.x + bounds.width)) - x,
+                  height: Math.min(sheet.height(), Math.ceil(bounds.y + bounds.height)) - y,
+                };
+                if (part.width < 1 || part.height < 1) return;
+                const image = sheet.photo.cropped(part.x, part.y, part.width, part.height);
+                const here = keep(mask.cropped(part));
+                keep(keep(skinTone(amount)).withMask(here)).apply(image);
+                here.applyToImage(image);
+                sheet.painted = { image, x, y };
+              }),
+          },
+        },
+        {
+          kind: 'slider',
+          key: SKIN_SMOOTH_KEY,
+          label: 'Smooth',
+          display: 'tabulated',
+          sliderLabel: ['Smooth', 'Texture'],
+          // Smooth: up to 1 is how much of the smoothing shows; past 1 the smoothing itself gets stronger, up to 3. Texture: how much
+          // of the skin's fine detail, the pores, is put back over the smoothed skin. Projects saved before it have none.
+          min: [0, 0],
+          max: [3, 1],
+          step: [0.1, 0.01],
+          defaultValue: [0, 1],
+          applyOnSelect: false,
+          // A layer in the skin group: the part of the photo the skin reaches, smoothed, shown only where the skin is.
+          layer: {
+            group: 'skin',
+            overEarlier: true,
+            blend: BlendMode.Normal,
+            opacity: () => 1,
+            paint: (sheet, [amount, texture]: number[], { skin }) =>
+              owning(keep => {
+                const found = skin?.();
+                if (!found) return;
+                const mask = keep(found);
+                const bounds = mask.bounds(0);
+                if (!bounds) return;
+                const [x, y] = [Math.floor(bounds.x), Math.floor(bounds.y)];
+                const part = {
+                  x,
+                  y,
+                  width: Math.min(sheet.width(), Math.ceil(bounds.x + bounds.width)) - x,
+                  height: Math.min(sheet.height(), Math.ceil(bounds.y + bounds.height)) - y,
+                };
+                if (part.width < 1 || part.height < 1) return;
+                const image = sheet.photo.cropped(part.x, part.y, part.width, part.height);
+                const here = keep(mask.cropped(part));
+                keep(keep(skinSmooth(amount)).withMask(here)).apply(image);
+                if (amount > 0 && texture > 0) {
+                  // The fine detail of the photo, as a retoucher's high pass: the photo laid with a slight blur of itself turned
+                  // upside down at half strength, which is gray where the skin is smooth and lighter or darker at a pore. Linear
+                  // Light adds that detail back over the smoothed skin, as much as `texture` says.
+                  const detail = keep(sheet.photo.cropped(part.x, part.y, part.width, part.height));
+                  const soft = keep(sheet.photo.cropped(part.x, part.y, part.width, part.height));
+                  keep(gaussianBlur(Math.max(1, Math.max(part.width, part.height) * TEXTURE_SCALE))).apply(soft);
+                  keep(invert()).apply(soft);
+                  keep(keep(blend(soft)).withOpacity(0.5)).apply(detail);
+                  keep(keep(keep(blend(detail)).withMode(BlendMode.LinearLight)).withOpacity(texture)).apply(image);
+                }
+                here.applyToImage(image);
+                sheet.painted = { image, x, y };
+              }),
+          },
+        },
+      ],
     },
     {
       kind: 'slider',
@@ -428,41 +550,51 @@ export const beauty: EditSection = {
           key: HIGHLIGHTER_KEY,
           label: 'Highlighter',
           display: 'tabulated',
-          sliderLabel: ['Strength', 'Softness', 'Size'],
-          min: [0, 0, 0.5],
-          max: [1, 1, 1.5],
-          step: [0.01, 0.01, 0.01],
-          // Opening the control adds a light glow to the cheekbones, nose, forehead and chin at once.
-          defaultValue: [0.8, 0.7, 1],
+          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Fan'],
+          min: [0, 0, 0, 0.5, 0],
+          max: [1, 1, 1, 1.5, 1],
+          step: [0.01, 0.01, 0.01, 0.01, 0.01],
+          // Opening the control adds a light glow to the cheekbones, nose, forehead and chin at once. Fan swings each cheek's glow in
+          // towards the nose.
+          defaultValue: [0, 0.2, 1, 1, 0],
+          picker: ['glow', undefined, undefined, undefined, undefined],
+          // Tints people ask for by name, each a place on the bar (the bar has a stop for each, evenly spaced).
+          swatches: [
+            { label: 'Pearl', color: 'rgb(255,250,245)', values: [0, undefined, undefined, undefined, undefined] },
+            { label: 'Champagne', color: 'rgb(247,231,206)', values: [0.25, undefined, undefined, undefined, undefined] },
+            { label: 'Gold', color: 'rgb(234,200,120)', values: [0.5, undefined, undefined, undefined, undefined] },
+            { label: 'Peach', color: 'rgb(255,190,150)', values: [0.75, undefined, undefined, undefined, undefined] },
+            { label: 'Rose', color: 'rgb(244,170,180)', values: [1, undefined, undefined, undefined, undefined] },
+          ],
           // The AI finds the face once, when the control opens; dragging only changes how it looks.
           preload: makeupMasks,
           layer: {
             blend: BlendMode.Screen,
-            opacity: ([strength]) => strength,
-            paint: (sheet, [, softness, size]: number[], context) =>
-              applySculpt('highlighter', sheet, softness, size, 0, context),
+            opacity: ([, strength]) => strength,
+            paint: (sheet, [tint, , softness, size, fan = 0]: number[], context) =>
+              applySculpt('highlighter', sheet, softness, size, tint, context, fan),
           },
         },
         {
           kind: 'slider',
           key: CONTOUR_KEY,
           label: 'Contour',
-          // First the shade of the shadow (a bar from a light tan to a dark brown), then how much, how soft it is and how big.
+          // First the shade of the shadow (a bar from a light tan to a dark brown), then how much, how soft it is, how big and how much the hollow fans out towards the mouth.
           display: 'tabulated',
-          sliderLabel: ['Shade', 'Strength', 'Softness', 'Size'],
-          min: [0, 0, 0, 0.5],
-          max: [1, 1, 1, 1.5],
-          step: [0.01, 0.01, 0.01, 0.01],
+          sliderLabel: ['Shade', 'Strength', 'Softness', 'Size', 'Fan'],
+          min: [0, 0, 0, 0.5, 0],
+          max: [1, 1, 1, 1.5, 1],
+          step: [0.01, 0.01, 0.01, 0.01, 0.01],
           // Opening the control adds a soft shade under the cheekbones and beside the nose at once.
-          defaultValue: [0.5, 0.8, 0.8, 1],
-          picker: ['shade', undefined, undefined, undefined],
+          defaultValue: [0.5, 0.2, 1, 1.5, 0],
+          picker: ['shade', undefined, undefined, undefined, undefined],
           // The AI finds the face once, when the control opens; dragging only changes how it looks.
           preload: makeupMasks,
           layer: {
             blend: BlendMode.Multiply,
             opacity: ([, strength]) => strength,
-            paint: (sheet, [shade, , softness, size]: number[], context) =>
-              applySculpt('contour', sheet, softness, size, shade, context),
+            paint: (sheet, [shade, , softness, size, fan = 0]: number[], context) =>
+              applySculpt('contour', sheet, softness, size, shade, context, fan),
           },
         },
       ],
