@@ -421,12 +421,15 @@ mod tests {
   }
 
   #[test]
-  #[should_panic(expected = "background GPU image could not be read back")]
-  fn unreadable_gpu_backgrounds_report_failure() {
-    let image = Image::new();
+  fn unreadable_gpu_backgrounds_draw_nothing_and_do_not_panic() {
+    // A panic here would be with the picture locked, which poisons it for every later frame.
+    let image = Image::new().with_fit(Fit::Stretch);
     image.show_gpu(Arc::new(UnreadableImage));
-    let container = Container::new().with_background(image);
+    let container = Container::new().with_background(&image).with_radius(0);
     container.size().next((1, 1));
-    render(&container);
+    assert_eq!(pixel(&render(&container), 0, 0), [0; 4]);
+    // The picture is still usable afterwards.
+    image.set_pixels(1, 1, BLUE.to_vec());
+    assert_eq!(pixel(&render(&container), 0, 0), BLUE);
   }
 }

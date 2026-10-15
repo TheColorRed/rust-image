@@ -87,6 +87,26 @@ impl GpuContext {
     self.submission_gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
   }
 
+  /// Waits until the GPU has finished everything submitted so far. A wait with no limit reaches the driver as the largest timeout
+  /// there is, which some Android drivers cannot take: they report a timeout at once, so a read-back failed whenever the GPU was
+  /// still busy. A limit they can take, asked again until the work is done, waits the same. The gate is taken for each ask and
+  /// not for all of them, so other threads can still submit while this one waits.
+  pub(crate) fn wait(&self) -> Result<(), wgpu::PollError> {
+    const ASK: std::time::Duration = std::time::Duration::from_millis(100);
+    const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(2);
+    let started = std::time::Instant::now();
+    loop {
+      let asked = {
+        let _guard = self.gate();
+        self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(ASK) })
+      };
+      match asked {
+        Err(wgpu::PollError::Timeout) if started.elapsed() < GIVE_UP => {}
+        other => return other.map(|_| ()),
+      }
+    }
+  }
+
   pub(crate) fn submit(&self, p_command: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
     let _guard = self.gate();
     self.queue.submit(Some(p_command))

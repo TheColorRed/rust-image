@@ -98,7 +98,7 @@ impl Trackable for PreviewSource {
             Arc::new(move |level, left, top, width, height| root.region(level, left, top, width, height))
           };
           let photo = gpu::TiledRenderer::from_regions(context.clone(), photo_width, photo_height, regions, options)
-            .map_err(|error| eprintln!("[preview] the photo could not be put on the GPU: {error}"))
+            .map_err(|error| vessel::surface::log(&format!("[preview] the photo could not be put on the GPU: {error}")))
             .ok()?;
           held.push(OnTheGpu { key, _root: root.clone(), photo });
           if held.len() > PHOTOS_ON_THE_GPU {
@@ -108,13 +108,13 @@ impl Trackable for PreviewSource {
         let photo = &mut held.last_mut()?.photo;
         // An effect that cannot be drawn at this zoom, or a failure, is drawn on the CPU below instead.
         let started = std::time::Instant::now();
-        let view = photo.render(&window, &passes).map_err(|error| eprintln!("[preview] a frame could not be rendered: {error}")).ok()?;
-        let texture = photo.snapshot_texture().ok()?;
+        let view = photo.render(&window, &passes).map_err(|error| vessel::surface::log(&format!("[preview] a frame could not be rendered: {error}"))).ok()?;
+        let texture = photo.snapshot_texture().map_err(|error| vessel::surface::log(&format!("[preview] a frame could not be kept: {error}"))).ok()?;
         // Tiles that did not fit in this frame's time are drawn from blurrier ones now and put on in the frames that follow.
         busy.store(photo.wants_more(), Ordering::SeqCst);
         let took = started.elapsed();
         if took > SLOW_FRAME {
-          eprintln!("[preview] a frame took {} ms with {} tiles on the GPU", took.as_millis(), photo.tiles_loaded());
+          vessel::surface::log(&format!("[preview] a frame took {} ms with {} tiles on the GPU", took.as_millis(), photo.tiles_loaded()));
         }
         Some(RenderedFrame::Gpu(Arc::new(gpu_passes::target::TextureFrame::new(context, texture).with_view(view))))
       });
@@ -352,6 +352,21 @@ mod tests {
     assert_eq!(newest(&surface, |_| true), 100, "an idle view draws nothing by itself");
     view.refresh();
     assert_eq!(newest(&surface, |pixel| pixel == 180), 180, "told to look again, it sees the edit");
+  }
+
+  #[test]
+  fn dropping_the_view_lets_go_of_the_photo_it_shared() {
+    let (view, photo) = view_of(7020);
+    let surface = surface_of(7020);
+    assert_eq!(newest(&surface, |_| true), 100);
+    let weak = Arc::downgrade(&photo);
+    drop(view);
+    drop(photo);
+    let start = Instant::now();
+    while weak.upgrade().is_some() {
+      assert!(start.elapsed() < Duration::from_secs(5), "the photo is still held after the view was dropped");
+      std::thread::sleep(Duration::from_millis(5));
+    }
   }
 
   #[test]

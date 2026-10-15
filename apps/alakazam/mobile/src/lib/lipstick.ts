@@ -37,7 +37,10 @@ export const applyLipstick = (
       // The edge only changes with the softness, so it is made once for it and kept while the other sliders move.
       const softened = derivedFor(preloaded, key, softness.toFixed(3), () =>
         owning(own => {
-          const radius = (lips as MaskLike).bounds(0)!.width * MOST_SOFT_EDGE * softness;
+          // The lips at a small size of the photo (a turned screen) can leave nothing in the mask, and then there is no edge to soften.
+          const bounds = (lips as MaskLike).bounds(0);
+          if (!bounds) return undefined;
+          const radius = bounds.width * MOST_SOFT_EDGE * softness;
           if (radius < 0.5) return undefined;
           const blurred = own((lips as MaskLike).toImage());
           own(gaussianBlur(radius)).apply(blurred);

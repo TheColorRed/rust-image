@@ -130,7 +130,9 @@ export function EditorPreview() {
         box.height / zoom / size.height,
       ];
       baseViewRef.current?.setViewport(...viewport);
-      liveView?.setViewport(...viewport);
+      // The live preview that is open now, not `liveView` from the render: another effect in the same commit may have replaced it
+      // (`ensure`) and let go of that one, and `release` empties `view` before it does.
+      editorPreview.view.value?.setViewport(...viewport);
     });
     return () => subscription.unsubscribe();
   }, [photo, box, baseView, liveView]);

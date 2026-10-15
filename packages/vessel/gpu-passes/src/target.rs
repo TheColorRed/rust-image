@@ -107,12 +107,28 @@ impl GpuFrame for TextureFrame {
     buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
       let _ = sender.send(result);
     });
-    {
-      let _guard = self.context.gate();
-      device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
+    if let Err(error) = self.context.wait() {
+      surface::log(&format!("vessel: a {width}x{height} frame could not be read back, waiting for the GPU failed: {error}"));
+      return None;
     }
-    receiver.recv().ok()?.ok()?;
-    let mapped = buffer.slice(..).get_mapped_range().ok()?;
+    match receiver.recv() {
+      Ok(Ok(())) => {}
+      Ok(Err(error)) => {
+        surface::log(&format!("vessel: a {width}x{height} frame could not be read back, the buffer could not be mapped: {error}"));
+        return None;
+      }
+      Err(_) => {
+        surface::log(&format!("vessel: a {width}x{height} frame could not be read back, the GPU never answered"));
+        return None;
+      }
+    }
+    let mapped = match buffer.slice(..).get_mapped_range() {
+      Ok(mapped) => mapped,
+      Err(error) => {
+        surface::log(&format!("vessel: a {width}x{height} frame could not be read back, the mapped range failed: {error}"));
+        return None;
+      }
+    };
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
     for row in mapped.chunks_exact(padded) {
       pixels.extend_from_slice(&row[..width as usize * 4]);
@@ -263,16 +279,31 @@ impl AndroidTarget {
   pub fn with_options(p_context: &GpuContext, p_surface_id: i32, p_options: &PresentOptions) -> Option<Self> {
     let window = surface::get_as::<AndroidWindow>(p_surface_id)?;
     let (width, height) = {
-      let state = window.state.lock().ok()?;
+      let state = window.lock_state();
       if !state.alive {
         return None;
       }
       (state.width, state.height)
     };
     // SAFETY: the window is held by this target for as long as the presenter, and is destroyed after it.
-    let mut presenter = unsafe { Presenter::from_android_window(p_context, window.ptr(), width, height) }.ok()?;
+    // The driver refuses a window that an earlier surface is still attached to (`ERROR_NATIVE_WINDOW_IN_USE_KHR`), which wgpu
+    // reports as a panic. A view replaced quickly leaves the old surface for a moment, so ask again a few times.
+    let mut presenter = None;
+    for attempt in 0..5 {
+      if attempt > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(40));
+      }
+      let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        Presenter::from_android_window(p_context, window.ptr(), width, height)
+      }));
+      if let Ok(Ok(found)) = made {
+        presenter = Some(found);
+        break;
+      }
+    }
+    let mut presenter = presenter?;
     if let Err(error) = presenter.set_options(p_options) {
-      eprintln!("vessel: {error}");
+      surface::log(&format!("vessel: {error}"));
     }
     Some(Self {
       presenter,
@@ -283,19 +314,24 @@ impl AndroidTarget {
   }
 
   /// Runs `p_draw` on the presenter with the window locked, so the platform cannot destroy the surface mid-frame. Returns
-  /// whether the frame was drawn; `false` means the window is gone or was replaced.
+  /// whether the frame was drawn; `false` means the window is gone or was replaced, or the GPU panicked on it (a failed
+  /// surface reconfigure, say). A panic must not unwind through the window's lock, which the platform needs to report a
+  /// new size, so it is stopped here and the frame is reported as not drawn: the session then draws from the CPU instead.
   fn draw(&mut self, p_draw: impl FnOnce(&mut Presenter) -> bool) -> bool {
     let window = Arc::clone(&self.window);
-    let state = window.state.lock().unwrap();
+    let state = window.lock_state();
     let current = surface::get_as::<AndroidWindow>(self.surface_id).is_some_and(|other| Arc::ptr_eq(&other, &window));
     if !state.alive || !current {
       return false;
     }
-    if self.size != (state.width, state.height) {
-      self.size = (state.width, state.height);
-      self.presenter.resize(state.width, state.height);
-    }
-    p_draw(&mut self.presenter)
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      if self.size != (state.width, state.height) {
+        self.presenter.resize(state.width, state.height);
+        self.size = (state.width, state.height);
+      }
+      p_draw(&mut self.presenter)
+    }))
+    .unwrap_or(false)
   }
 }
 
@@ -337,6 +373,18 @@ mod tests {
     renderer.set_source(2, 2, &[10u8; 16])?;
     renderer.render(&[])?;
     assert_eq!(renderer.read_pixels()?, vec![10u8; 16]);
+    Ok(())
+  }
+
+  #[test]
+  fn waiting_for_the_gpu_finishes_the_work_and_leaves_the_gate_free() -> anyhow::Result<()> {
+    let context = GpuContext::new_default_blocking()?;
+    let mut renderer = LiveRenderer::new(context.clone());
+    renderer.set_source(2, 2, &[10u8; 16])?;
+    renderer.render(&[])?;
+    context.wait()?;
+    // The gate is taken for each ask and let go of, so another thread's submission is never kept out for the whole wait.
+    assert!(context.submission_gate.try_lock().is_ok());
     Ok(())
   }
 

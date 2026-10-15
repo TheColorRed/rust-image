@@ -255,6 +255,28 @@ mod tests {
   }
 
   #[test]
+  fn replacing_the_image_again_and_again_lets_go_of_every_earlier_photo() {
+    // Every edit makes the editor give each card a new image, so a card that kept the earlier ones would grow with each edit.
+    let first = source([200, 0, 0, 255]);
+    let mut photos = vec![Arc::downgrade(&first)];
+    let preview = ThumbnailPreview::new(first, "Warm".into(), 112, 80);
+    preview.size().next((112, 80));
+    for shade in 1..=8u8 {
+      let next = source([200 - shade * 20, 0, 0, 255]);
+      photos.push(Arc::downgrade(&next));
+      preview.set_image(next);
+      preview.component().clone().render(Duration::ZERO);
+    }
+    let start = std::time::Instant::now();
+    let earlier = &photos[..photos.len() - 1];
+    while earlier.iter().any(|photo| photo.upgrade().is_some()) {
+      let held = earlier.iter().filter(|photo| photo.upgrade().is_some()).count();
+      assert!(start.elapsed() < Duration::from_secs(5), "{held} of {} earlier photos are still held", earlier.len());
+      std::thread::sleep(Duration::from_millis(10));
+    }
+  }
+
+  #[test]
   fn gradients_are_present_on_first_frame_for_every_aspect_ratio_and_survive_source_replacement() {
     let white = [200, 200, 200, 255];
     for (width, height) in [(16, 32), (32, 16), (32, 32), (1, 1)] {

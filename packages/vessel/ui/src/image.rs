@@ -278,10 +278,13 @@ impl Image {
         None => return,
         Some(Picture::Pixels(frame)) => Arc::clone(frame),
         Some(Picture::Gpu(frame)) => {
+          // A frame the GPU cannot give back (it may have lost its device) shows no background this time, and is asked again
+          // the next time, instead of panicking with the picture locked.
           if picture.readback.is_none() {
-            picture.readback = Some(Arc::new(frame.read_back().expect("background GPU image could not be read back")));
+            picture.readback = frame.read_back().map(Arc::new);
           }
-          Arc::clone(picture.readback.as_ref().unwrap())
+          let Some(readback) = picture.readback.as_ref() else { return };
+          Arc::clone(readback)
         }
       }
     };

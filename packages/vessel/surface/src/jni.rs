@@ -5,6 +5,12 @@
 
 use std::ffi::c_void;
 
+/// Runs what a native method does, and stops a panic from leaving it. A panic cannot unwind into the JVM, so it would end
+/// the whole app; the panic message is already in the log, and a report that was lost is better than a crash.
+fn guarded(p_call: impl FnOnce()) {
+  let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(p_call));
+}
+
 /// A view's surface became available.
 ///
 /// # Safety
@@ -14,7 +20,9 @@ use std::ffi::c_void;
 pub unsafe extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeSurfaceAvailable(
   p_env: *mut c_void, _p_class: *mut c_void, p_id: i32, p_surface: *mut c_void, p_width: i32, p_height: i32,
 ) {
-  unsafe { crate::register_android_surface(p_id, p_env, p_surface, p_width.max(1) as u32, p_height.max(1) as u32) };
+  guarded(|| unsafe {
+    crate::register_android_surface(p_id, p_env, p_surface, p_width.max(1) as u32, p_height.max(1) as u32)
+  });
 }
 
 /// A view's surface changed size.
@@ -22,7 +30,7 @@ pub unsafe extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeSurfac
 pub extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeSurfaceSizeChanged(
   _p_env: *mut c_void, _p_class: *mut c_void, p_id: i32, p_width: i32, p_height: i32,
 ) {
-  crate::resize(p_id, p_width.max(1) as u32, p_height.max(1) as u32);
+  guarded(|| crate::resize(p_id, p_width.max(1) as u32, p_height.max(1) as u32));
 }
 
 /// A view was touched: `p_action` is 0 for down, 1 for moved and 2 for up or cancelled.
@@ -35,7 +43,7 @@ pub extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeTouch(
     1 => crate::Touch::Moved,
     _ => crate::Touch::Up,
   };
-  crate::touch(p_id, touch, p_x, p_y);
+  guarded(|| crate::touch(p_id, touch, p_x, p_y));
 }
 
 /// A view's surface is gone.
@@ -43,5 +51,5 @@ pub extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeTouch(
 pub extern "system" fn Java_dev_vessel_android_SurfaceBridge_nativeSurfaceDestroyed(
   _p_env: *mut c_void, _p_class: *mut c_void, p_id: i32,
 ) {
-  crate::destroy(p_id);
+  guarded(|| crate::destroy(p_id));
 }

@@ -141,6 +141,15 @@ pub fn events() -> Subject<SurfaceEvent> {
   EVENTS.get_or_init(Subject::persistent).clone()
 }
 
+/// Writes a line to the platform's log: logcat on Android (tag `vessel`), because an Android app's standard error goes nowhere,
+/// and standard error everywhere else.
+pub fn log(p_message: &str) {
+  #[cfg(all(feature = "android-native-window", target_os = "android"))]
+  android::write_log(p_message);
+  #[cfg(not(all(feature = "android-native-window", target_os = "android")))]
+  eprintln!("{p_message}");
+}
+
 /// Registers `p_surface` under `p_id`, retiring any earlier surface under the same id.
 pub fn register_surface(p_id: i32, p_surface: Arc<dyn Surface>) {
   // The registry lock is released before the surface's own lock is taken: drawing takes them in the other order.
