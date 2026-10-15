@@ -20,7 +20,7 @@
 //! // Load image
 //! let image = Image::read("input.jpg")?;
 //! // Load and run super resolution model
-//! let output = SuperResolution::load("MewZoom-V1-2X")?.process(&image);
+//! let output = SuperResolution::load("packages/abra/ai/super-resolution/models/MewZoom-V1-2X.onnx")?.process(&image)?;
 //! // Save output
 //! output.write("output.png", None)?;
 //! ```
@@ -29,59 +29,56 @@
 //!
 //! 1. Place the `.onnx` file in the `models/` directory
 //! 2. Create a `.yml` manifest with the same base name
-//! 3. The model will be automatically discovered
+//! 3. Pass the `.onnx` path to `SuperResolution::load`
 //!
 //! See `models/MewZoom-V1-2X.yml` for an example manifest format.
 
-use abra_ai_core::{discover_models, prelude::*};
+use abra_ai_core::{AiError, ControlParams, ImageAi, ImageAiWithControl, ImageModel, ReportsProgress};
 use abra_core::Image;
+use std::path::Path;
 
 pub mod prelude {
   pub use crate::SuperResolution;
-  pub use abra_ai_core::ControlParams;
-  pub use abra_ai_core::model::*;
+  pub use abra_ai_core::{AiError, ControlParams, ImageAi, ImageAiWithControl, ReportsProgress};
 }
 
+/// An [`ImageModel`] for upscaling and restoring pictures.
 pub struct SuperResolution {
   model: ImageModel,
 }
 
-impl AiModel for SuperResolution {
-  /// Load a model to be used by the AI tool.
-  ///
-  /// # Arguments
-  ///
-  /// - `p_name`: The name of the model to load (e.g., "MewZoom-V1-2X").
-  fn load(p_name: impl AsRef<str>) -> Self {
-    // Find models in the super-resolution package.
-    let models = discover_models("packages/abra/ai/super-resolution/models")
-      .expect("Could not find associated models for Super Resolution");
+impl ImageAi for SuperResolution {
+  type Output = Image;
 
-    // Load the model by name.
-    let model = ImageModel::new(models).load_by_name(&p_name).expect("Failed to load the model for Super Resolution");
-    Self { model }
+  /// Loads a super-resolution model from its `.onnx` file and the `.yml` manifest beside it.
+  ///
+  /// - `p_model_path`: Path to the ONNX model file (e.g. `models/MewZoom-V1-2X.onnx`).
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    Ok(Self {
+      model: ImageModel::load(p_model_path)?,
+    })
   }
-}
 
-impl AiProcessModel for SuperResolution {
   /// Processes an input image and returns the enhanced output image.
   ///
-  /// # Arguments
-  ///
   /// - `p_image`: The input image to be processed.
-  fn process(&self, p_image: &Image) -> Image {
-    self.model.process(p_image).expect("Image processing failed for Super Resolution")
+  fn process(&self, p_image: &Image) -> Result<Image, AiError> {
+    self.model.process(p_image)
   }
 }
 
-impl AiProcessModelWithControl for SuperResolution {
+impl ImageAiWithControl for SuperResolution {
   /// Processes an input image with control parameters and returns the enhanced output image.
   ///
-  /// # Arguments
-  ///
   /// - `p_image`: The input image to be processed.
-  /// - `p_ctrl`: Control parameters.
-  fn process_with_control(&self, p_image: &Image, p_ctrl: &ControlParams) -> Image {
-    self.model.process_with_control(p_image, p_ctrl).expect("Image processing with control failed for Super Resolution")
+  /// - `p_control`: Control parameters.
+  fn process_with_control(&self, p_image: &Image, p_control: &ControlParams) -> Result<Image, AiError> {
+    self.model.process_with_control(p_image, p_control)
+  }
+}
+
+impl ReportsProgress for SuperResolution {
+  fn process_reporting(&self, p_input: &Image, p_progress: &dyn Fn(f32)) -> Result<Image, AiError> {
+    self.model.process_reporting(p_input, p_progress)
   }
 }

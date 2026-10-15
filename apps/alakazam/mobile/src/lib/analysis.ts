@@ -2,9 +2,11 @@ import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { type PersonDetection } from '@alakazam/mobile';
 import { detectSkinAsync } from '@alakazam/mobile';
+import { aiProgress } from '@/src/state/ai-progress';
 import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { adjustments } from '@/src/state/edits';
 import { personSelection } from '@/src/state/person-selection';
+import type { Spot } from '@/src/lib/timeline';
 
 // The masks made from the skin and the people, kept until either changes: making one takes as long as a pass over the photo.
 let made: { skin: MaskLike | null; list: PersonDetection[] | null; full: Map<number | null, MaskLike | undefined>; sized: Map<string, MaskLike> } | undefined;
@@ -101,6 +103,35 @@ export const personAt = (x: number, y: number, width: number, height: number): n
   return found?.id;
 };
 
+/**
+ * The people who are still in the photo after the edits that replace content (see `replacedSpots`): a person with under a quarter
+ * of their body outside the replaced spots has been removed from the picture, so they are no longer there to pick. The people are
+ * found once, in the original, so this is worked out from the edits and nothing is saved. `spots` are in the pixels of a photo
+ * that is `photoWidth` wide.
+ */
+export const peopleNotHealed = (
+  list: PersonDetection[],
+  spots: Spot[],
+  photoWidth: number,
+): PersonDetection[] => {
+  if (spots.length === 0) return list;
+  return list.filter(person => {
+    const width = person.mask.width();
+    const values = new Uint8Array(person.mask.values());
+    const scale = width / photoWidth;
+    let total = 0;
+    let left = 0;
+    for (let index = 0; index < values.length; index++) {
+      if (values[index] <= 127) continue;
+      total++;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      if (!spots.some(spot => (x - spot.x * scale) ** 2 + (y - spot.y * scale) ** 2 <= (spot.radius * scale) ** 2)) left++;
+    }
+    return total === 0 || left >= total * 0.25;
+  });
+};
+
 let detecting: Promise<void> | undefined;
 
 /**
@@ -110,11 +141,19 @@ let detecting: Promise<void> | undefined;
  */
 export const detectSkin = (photo: Parameters<typeof detectSkinAsync>[0]): Promise<void> => {
   if (skinMask.value) return Promise.resolve();
+  aiProgress.next({ ...aiProgress.value, skin: null });
   detecting ??= detectSkinAsync(photo)
     .then(mask => {
+      aiProgress.next({ ...aiProgress.value, skin: 1 });
       (skinMask.value as unknown as AbraPixels | null)?.uniffiDestroy();
       skinMask.next(mask);
       adjustments.next({ ...adjustments.value });
+    })
+    .catch(error => {
+      // A model that could not run (it is not on the device) did no work, so it leaves nothing on the bar.
+      const { skin: _failed, ...others } = aiProgress.value;
+      aiProgress.next(others);
+      throw error;
     })
     .finally(() => {
       detecting = undefined;

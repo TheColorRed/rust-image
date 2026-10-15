@@ -51,6 +51,25 @@ export type PixelChange = Extract<TimelineChange, { type: 'blemish' | 'red-eye' 
 export const changesPixels = (change: TimelineChange): change is PixelChange =>
   change.type === 'blemish' || change.type === 'red-eye' || change.type === 'red-eye-auto';
 
+/** A round part of the photo, in its pixels. A brush stroke is a row of these. */
+export type Spot = { x: number; y: number; radius: number };
+
+/**
+ * Where the first `cursor` steps replaced what was in the photo, so that what was there is gone (a blemish healed, a person
+ * erased). It is what tells the editor that someone it found in the original is no longer in the picture. A step that only
+ * changes how the photo looks (red-eye, color) replaces nothing. A new tool that removes content adds its case here.
+ */
+export function replacedSpots(entries: readonly TimelineEntry[], cursor: number): Spot[] {
+  return entries.slice(0, cursor).flatMap(({ change }) => {
+    switch (change.type) {
+      case 'blemish':
+        return [{ x: change.x, y: change.y, radius: change.radius }];
+      default:
+        return [];
+    }
+  });
+}
+
 /** Index of the last step that changed pixels among the first `cursor` steps, or -1 when the picture is built from the original. */
 export function baseIndexAt(entries: readonly TimelineEntry[], cursor: number): number {
   for (let index = Math.min(cursor, entries.length) - 1; index >= 0; index--) {

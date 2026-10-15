@@ -15,9 +15,11 @@
 use crate::{
   decode::{AiOutput, Decoder},
   error::AiError,
+  image_ai::ImageAi,
   input::InputSpec,
   manifest::Manifest,
   onnx::OnnxSession,
+  progress::ReportsProgress,
 };
 use abra_core::Image;
 use std::path::Path;
@@ -67,13 +69,50 @@ impl AiModel {
   ///
   /// - `p_image`: The picture. Any size; it is fitted to the model's input.
   pub fn run(&self, p_image: &Image) -> Result<AiOutput, AiError> {
+    self.run_reporting(p_image, &|_| {})
+  }
+
+  /// Runs the model on a picture and tells `p_progress` how far along it is.
+  ///
+  /// The model runs in one piece, so progress is by stage, not measured: `0.0` at the start, `0.1` once the picture is
+  /// prepared, `0.9` once the model has run (nearly all the time goes there) and `1.0` once the result is read.
+  pub fn run_reporting(&self, p_image: &Image, p_progress: &dyn Fn(f32)) -> Result<AiOutput, AiError> {
     let (width, height) = p_image.dimensions::<u32>();
     if width == 0 || height == 0 {
       return Err(AiError::invalid_input("Cannot run a model on an empty image"));
     }
+    p_progress(0.0);
     let prepared = self.input.prepare(p_image);
+    p_progress(PREPARED);
     let outputs = self.session.run_multiple(&prepared.data, &prepared.shape)?;
-    self.decoder.decode(&outputs, width, height, &prepared.placement)
+    p_progress(RAN);
+    let output = self.decoder.decode(&outputs, width, height, &prepared.placement)?;
+    p_progress(1.0);
+    Ok(output)
+  }
+}
+
+/// How far along a run is once the picture is prepared. Running the model is nearly all of the time, so it gets nearly all
+/// of the range.
+const PREPARED: f32 = 0.1;
+/// How far along a run is once the model has run.
+const RAN: f32 = 0.9;
+
+impl ImageAi for AiModel {
+  type Output = AiOutput;
+
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    AiModel::load(p_model_path)
+  }
+
+  fn process(&self, p_image: &Image) -> Result<AiOutput, AiError> {
+    self.run(p_image)
+  }
+}
+
+impl ReportsProgress for AiModel {
+  fn process_reporting(&self, p_input: &Image, p_progress: &dyn Fn(f32)) -> Result<AiOutput, AiError> {
+    self.run_reporting(p_input, p_progress)
   }
 }
 

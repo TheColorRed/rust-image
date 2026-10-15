@@ -1,6 +1,6 @@
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
-import { comparisonImage, shownImage } from '@/src/lib/editor-pictures';
-import { editorPreview } from '@/src/lib/editor-preview';
+import { comparisonImage, shownImage } from '@/src/lib/editor/editor-pictures';
+import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import {
   restorePreviewRequested,

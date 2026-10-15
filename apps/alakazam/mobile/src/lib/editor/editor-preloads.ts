@@ -1,8 +1,9 @@
-import { fitted } from '@/src/lib/editor-pictures';
+import { fitted } from '@/src/lib/editor/editor-pictures';
 import type { AbraImage, AbraImageLike } from '@alakazam/mobile';
 import type { Image as AbraPixels } from '@abra/core/image';
 import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
-import type { DataLike, Preloaded, SliderControl } from '@/src/lib/edit-sections';
+import type { DataLike, Preloaded, Preloading, SliderControl } from '@/src/lib/edit-sections';
+import { analysisVersion } from '@/src/state/analysis';
 
 // This module holds native images, so it imports nothing but types from the controls: saving a control or a tool re-runs
 // the controls and everything that imports them, and what is held here must survive that.
@@ -22,6 +23,10 @@ const preloads = new Map<PreloadFunction, Map<number, Preloaded>>();
 const analyses = new Map<PreloadFunction, Preloaded>();
 /** Which preload function a control last used at a width, so Fast Refresh can retire an obsolete function promptly. */
 const controlPreloads = new Map<string, PreloadFunction>();
+/** The background preloads (see `SliderControl.preload`) that have started and not finished, so each is started once for a photo. */
+const running = new Set<PreloadFunction>();
+/** Counts the photos let go of, so a background preload that finishes after its photo is gone frees what it made. */
+let session = 0;
 
 /**
  * The widest photo a preload is run on. The models look at a fixed, small picture whatever the size of the photo (a face is
@@ -101,6 +106,8 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
   let byWidth = preloads.get(preload);
   // What it made for this photo before, or what it was given, is the start of every size.
   const provided = analyses.get(preload);
+  // It ran and made nothing (no face), which is the same at every size.
+  if (provided && values(provided).length === 0) return provided;
   if (provided && !byWidth) {
     preloads.set(preload, (byWidth = new Map([[analysisWidth(provided), provided]])));
   }
@@ -119,24 +126,44 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
     if (__DEV__) console.debug(`[preload] ${control.key} ${width}px from ${otherWidth}px, ms:`, Date.now() - resizeStarted);
   }
 
-  // Not made yet: run it, once, on a photo that is not too large for it.
-  if (!held && source) {
+  // Not made yet: run it, once, on a photo that is not too large for it. One that is running in the background is waited for.
+  if (!held && source && !running.has(preload)) {
     // A copy, shrunk when it is wider than the analysis needs. Both are the tool's to change.
     const photo = fitted(source as AbraImage, ANALYSIS_WIDTH, ANALYSIS_WIDTH * 4) as AbraImageLike;
     const analysedWidth = photo.width();
     const analysisStarted = Date.now();
     try {
       const made = preload(photo);
-      if (__DEV__) console.debug(`[preload] ${control.key} analysed at ${analysedWidth}px, ms:`, Date.now() - analysisStarted);
-      // One image or mask has methods to free it; an object of them does not.
-      let analysis: Preloaded;
-      if (!made) analysis = [];
-      else if (Array.isArray(made)) analysis = made;
-      else if ('uniffiDestroy' in made) analysis = [made as unknown as DataLike];
-      else analysis = made as Record<string, DataLike>;
+      if (made instanceof Promise) {
+        // It runs in the background: the editor goes on without it, and draws again when it is made.
+        running.add(preload);
+        const started = session;
+        made
+          .then(result => {
+            running.delete(preload);
+            // Nothing means it could not run (a missing model), and that is not an answer to keep: it is tried again later.
+            if (!result) return;
+            const analysis = asPreloaded(result);
+            if (started !== session) return free(analysis);
+            provideAnalysis(preload, analysis);
+            analysisVersion.next(analysisVersion.value + 1);
+          })
+          .catch(error => {
+            running.delete(preload);
+            console.warn(`[preload] ${control.key} failed:`, error);
+          });
+        if (__DEV__) console.debug(`[preload] ${control.key} started in the background`);
+        return undefined;
+      }
+      if (__DEV__) {
+        const count = !made ? 0 : Array.isArray(made) ? made.length : 'uniffiDestroy' in made ? 1 : Object.keys(made).length;
+        console.debug(`[preload] ${control.key} analysed at ${analysedWidth}px, ms:`, Date.now() - analysisStarted, 'found:', count);
+      }
+      const analysis = asPreloaded(made);
       if (!byWidth) preloads.set(preload, (byWidth = new Map()));
       byWidth.set(analysedWidth, analysis);
-      if (values(analysis).length > 0) analyses.set(preload, analysis);
+      // A preload that gave nothing back could not run (a missing model), so it is run again later. One that gave an empty set ran.
+      if (made) analyses.set(preload, analysis);
       held = analysis;
       if (analysedWidth !== width) {
         // What was made is held at its own size; the size asked for is a resized copy, or the same thing when it cannot be.
@@ -151,6 +178,14 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
   return held;
 };
 
+/** What a preload gave back, as the set the tools get: an empty one when it gave nothing. */
+const asPreloaded = (made: Preloading): Preloaded => {
+  // One image or mask has methods to free it; an object of them does not.
+  if (!made) return [];
+  if (Array.isArray(made)) return made;
+  return 'uniffiDestroy' in made ? [made as unknown as DataLike] : (made as Record<string, DataLike>);
+};
+
 /** The width of the photo a set of masks was made from. */
 const analysisWidth = (analysis: Preloaded): number => (values(analysis)[0] as unknown as MaskLike).width();
 
@@ -160,11 +195,14 @@ const analysisWidth = (analysis: Preloaded): number => (values(analysis)[0] as u
  */
 export const analysisOf = (preload: PreloadFunction): Preloaded | undefined => analyses.get(preload);
 
-/** Gives `preload` what it would make for the photo (not empty), as if it had run, so it never runs. This takes the masks. */
+/** Gives `preload` what it would make for the photo (an empty set when it found nothing), as if it had run, so it never runs. This takes the masks. */
 export const provideAnalysis = (preload: PreloadFunction, analysis: Preloaded) => {
   const previous = analyses.get(preload);
   if (previous && previous !== analysis) free(previous);
   analyses.set(preload, analysis);
+  // What was held for a size before this is not what it would be now.
+  for (const held of preloads.get(preload)?.values() ?? []) if (held !== previous && held !== analysis) free(held);
+  preloads.delete(preload);
 };
 
 /** Frees every preloaded image made at a size, when the edit base changes. What the preloads made of the photo is kept. */
@@ -177,6 +215,8 @@ export const clearPreloads = () => {
 
 /** Frees every preloaded image and everything the preloads made of the photo, when the photo goes away. */
 export const releasePreloads = () => {
+  session++;
+  running.clear();
   clearPreloads();
   for (const analysis of analyses.values()) free(analysis);
   analyses.clear();

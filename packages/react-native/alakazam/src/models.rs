@@ -29,6 +29,7 @@ use std::{
 };
 
 use abra_body_segmentation::BodySegmentation;
+use abra_body_segmentation::prelude::ImageAi;
 use abra_find_person::PersonSegmenter;
 use saphyr::{LoadableYamlNode, Yaml};
 use sha2::{Digest, Sha256};

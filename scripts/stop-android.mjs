@@ -6,6 +6,7 @@
 //
 // Usage: npm run stop:android
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +14,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
 const androidDir = path.join(root, 'apps', 'alakazam', 'mobile', 'android');
 const scriptPattern = /scripts[\\/](watch|build)-android\.mjs/;
+
+// Keep cleanup usable when Android Studio configured the SDK but platform-tools
+// was not added to the shell PATH.
+function resolveAdb() {
+  const executable = isWindows ? 'adb.exe' : 'adb';
+  for (const sdk of [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT]) {
+    if (!sdk) continue;
+    const candidate = path.join(sdk, 'platform-tools', executable);
+    if (existsSync(candidate)) return candidate;
+  }
+  return executable;
+}
+
+const adbCommand = resolveAdb();
 
 /** Stops a process and everything it started (npm, cargo, Gradle), not only the top process. */
 function kill(p_pid) {
@@ -62,11 +77,11 @@ const gradle = spawnSync(`"${gradlew}" --stop`, { cwd: androidDir, encoding: 'ut
 console.log(gradle.status === 0 ? gradle.stdout.trim().split(/\r?\n/).pop() : 'Could not stop the Gradle daemon (is the Android project present?).');
 
 // 4. adb port forwards, on every device (a plain `adb reverse` fails when more than one is attached).
-const devices = output('adb', ['devices'])
+const devices = output(adbCommand, ['devices'])
   .split(/\r?\n/)
   .slice(1)
   .map((line) => line.split(/\s+/))
   .filter(([, state]) => state === 'device')
   .map(([serial]) => serial);
-for (const serial of devices) spawnSync('adb', ['-s', serial, 'reverse', '--remove-all'], { stdio: 'ignore' });
+for (const serial of devices) spawnSync(adbCommand, ['-s', serial, 'reverse', '--remove-all'], { stdio: 'ignore' });
 console.log(devices.length ? `Removed port forwards on ${devices.length} device(s).` : 'No adb devices connected.');

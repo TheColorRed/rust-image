@@ -1,7 +1,7 @@
 ﻿import { tanGradient } from '@/src/lib/color-bars';
 import { owning } from '@/src/lib/faces';
 import { paintSheet } from '@/src/lib/layers';
-import { grayscale, invert } from '@abra/core/adjustments';
+import { grayscale, invert, saturation } from '@abra/core/adjustments';
 import { skinSmooth, skinTone } from '@abra/core/beauty';
 import { blend, BlendMode } from '@abra/core/blend';
 import { ResizeTarget } from '@abra/core/canvas';
@@ -158,15 +158,14 @@ export const beauty: EditSection = {
         {
           kind: 'slider',
           key: SKIN_EVEN_OUT_KEY,
-          label: 'Even Out',
+          label: 'Even Skin Tone',
           display: 'tabulated',
-          sliderLabel: ['Even Out', 'Natural'],
-          // Even Out: up to 1 is how much of the evened color shows; past 1 the color is evened over a wider reach, up to 3. Natural:
-          // how much of the photo's own color comes back over the evened color, none at 0 and all of it at 1. Projects saved before it
-          // have none.
-          min: [0, 0],
-          max: [3, 1],
-          step: [0.1, 0.01],
+          sliderLabel: ['Even Skin Tone', 'Colorfulness'],
+          // Even Out: up to 1 is how much of the evened color shows; past 1 the color is evened over a wider reach, up to 3.
+          // Vividness adjusts the color after it has been evened, without changing the photo outside the skin mask.
+          min: [0, -100],
+          max: [3, 200],
+          step: [0.1, 1],
           defaultValue: [0, 0],
           applyOnSelect: false,
           preload: makeupMasks,
@@ -175,9 +174,8 @@ export const beauty: EditSection = {
           layer: {
             group: 'skin',
             blend: BlendMode.Normal,
-            // The natural color is the photo underneath showing through, so it is how much of the layer is taken away.
-            opacity: ([amount, natural]) => Math.min(amount, 1) * (1 - natural),
-            paint: (sheet, [amount]: number[], { skin, preloaded }) =>
+            opacity: ([amount]) => Math.min(amount, 1),
+            paint: (sheet, [amount, vividness]: number[], { skin, preloaded }) =>
               owning(keep => {
                 const found = skin?.();
                 if (!found) return;
@@ -226,6 +224,7 @@ export const beauty: EditSection = {
                 keep(invert()).apply(evened);
                 keep(keep(blend(evened)).withOpacity(0.5)).apply(light);
                 keep(keep(blend(light)).withMode(BlendMode.LinearLight)).apply(image);
+                keep(saturation(vividness)).apply(image);
                 here.applyToImage(image);
                 sheet.painted = { image, x, y };
               }),
@@ -264,7 +263,7 @@ export const beauty: EditSection = {
         {
           kind: 'slider',
           key: SKIN_TONE_KEY,
-          label: 'Tone',
+          label: 'Lighten / Darken',
           // Negative lightens the original skin; positive darkens it.
           min: -400,
           max: 400,
@@ -411,7 +410,7 @@ export const beauty: EditSection = {
           key: EYESHADOW_KEY,
           label: 'Eyeshadow',
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Vividness', 'Brightness', 'Fullness'],
+          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
           min: [0, 0, 0, 0, 0.3],
           max: [1, 1, 1, 1, 3],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -429,9 +428,9 @@ export const beauty: EditSection = {
         {
           kind: 'slider',
           key: BROW_BONE_KEY,
-          label: 'Brow Bone',
+          label: 'Brow Highlight',
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Vividness', 'Brightness', 'Fullness'],
+          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
           min: [0, 0, 0, 0, 0.3],
           max: [1, 1, 1, 1, 3],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -449,9 +448,9 @@ export const beauty: EditSection = {
         {
           kind: 'slider',
           key: UNDER_EYE_KEY,
-          label: 'Under Eye',
+          label: 'Concealer',
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Vividness', 'Brightness', 'Fullness'],
+          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
           min: [0, 0, 0, 0, 0.3],
           max: [1, 1, 1, 1, 3],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -472,7 +471,7 @@ export const beauty: EditSection = {
           label: 'Blush',
           // First the color, then how much, how soft it is and how wide, and for a custom color how vivid and bright.
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Vividness', 'Brightness'],
+          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Colorfulness', 'Brightness'],
           min: [0, 0, 0, 0.5, 0, 0],
           max: [1, 1, 1, 1.5, 1, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01],
@@ -502,7 +501,7 @@ export const beauty: EditSection = {
           label: 'Lipstick',
           // First the color (a swatch or the bar), then how much of it, how soft the edge is, and for a custom color how vivid and bright.
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Vividness', 'Brightness'],
+          sliderLabel: ['Color', 'Strength', 'Softness', 'Colorfulness', 'Brightness'],
           min: [0, 0, 0, 0, 0],
           max: [1, 1, 1, 1, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -528,7 +527,7 @@ export const beauty: EditSection = {
           key: LIP_LINER_KEY,
           label: 'Lip Liner',
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Width', 'Vividness', 'Brightness'],
+          sliderLabel: ['Color', 'Strength', 'Width', 'Colorfulness', 'Brightness'],
           min: [0, 0, 0, 0, 0],
           max: [1, 1, 1, 1, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -550,7 +549,7 @@ export const beauty: EditSection = {
           key: HIGHLIGHTER_KEY,
           label: 'Highlighter',
           display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Fan'],
+          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Spread'],
           min: [0, 0, 0, 0.5, 0],
           max: [1, 1, 1, 1.5, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],
@@ -561,7 +560,11 @@ export const beauty: EditSection = {
           // Tints people ask for by name, each a place on the bar (the bar has a stop for each, evenly spaced).
           swatches: [
             { label: 'Pearl', color: 'rgb(255,250,245)', values: [0, undefined, undefined, undefined, undefined] },
-            { label: 'Champagne', color: 'rgb(247,231,206)', values: [0.25, undefined, undefined, undefined, undefined] },
+            {
+              label: 'Champagne',
+              color: 'rgb(247,231,206)',
+              values: [0.25, undefined, undefined, undefined, undefined],
+            },
             { label: 'Gold', color: 'rgb(234,200,120)', values: [0.5, undefined, undefined, undefined, undefined] },
             { label: 'Peach', color: 'rgb(255,190,150)', values: [0.75, undefined, undefined, undefined, undefined] },
             { label: 'Rose', color: 'rgb(244,170,180)', values: [1, undefined, undefined, undefined, undefined] },
@@ -578,10 +581,10 @@ export const beauty: EditSection = {
         {
           kind: 'slider',
           key: CONTOUR_KEY,
-          label: 'Contour',
+          label: 'Face Shaping',
           // First the shade of the shadow (a bar from a light tan to a dark brown), then how much, how soft it is, how big and how much the hollow fans out towards the mouth.
           display: 'tabulated',
-          sliderLabel: ['Shade', 'Strength', 'Softness', 'Size', 'Fan'],
+          sliderLabel: ['Shade', 'Strength', 'Softness', 'Size', 'Spread'],
           min: [0, 0, 0, 0.5, 0],
           max: [1, 1, 1, 1.5, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01],

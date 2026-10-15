@@ -3,6 +3,7 @@ use abra::tools::prelude::AtlasDimension::Fixed;
 use abra::tools::prelude::*;
 use abra::tools::prelude::{skin_smooth, skin_tan, skin_tone};
 use abra_body_segmentation::BodySegmentation;
+use abra_body_segmentation::prelude::ImageAi;
 
 fn main() {
   // Read the original image and prepare for skin effects.

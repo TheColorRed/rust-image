@@ -1,14 +1,17 @@
 import { type Image as AbraPixels } from '@abra/core/image';
 import { findPeopleAsync, personDetectionDownloaded } from '@alakazam/mobile';
+import { aiProgress } from '@/src/state/ai-progress';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { useObservable } from 'react-rx';
 import { combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
-import { detectSkin, personAt } from '@/src/lib/analysis';
+import { detectSkin, peopleNotHealed, personAt } from '@/src/lib/analysis';
+import { timeline } from '@/src/state/history';
+import { replacedSpots } from '@/src/lib/timeline';
 import { findFaceBoxes } from '@/src/lib/faces';
 import { computePreviewImagePoint } from '@/src/lib/preview-coordinates';
-import { editorPreview } from '@/src/lib/editor-preview';
+import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsVersion$ } from '@/src/state/ai-models';
@@ -78,23 +81,42 @@ export function PersonSelectionToolController() {
             error: null,
           });
           // The people were found already when the photo is a saved project, or when the selector was opened before.
-          (people.value ? Promise.resolve(people.value) : findPeopleAsync(image)).then(
+          const finding = people.value ? Promise.resolve(people.value) : findPeopleAsync(image);
+          if (!people.value) {
+            aiProgress.next({ ...aiProgress.value, people: null });
+            finding.then(
+              () => aiProgress.next({ ...aiProgress.value, people: 1 }),
+              () => {
+                // A run that failed did no work, so it leaves nothing on the bar.
+                const { people: _failed, ...others } = aiProgress.value;
+                aiProgress.next(others);
+              },
+            );
+          }
+          finding.then(
             found => {
               if (requestId !== currentRequest || !personSelection.value.focused) {
                 if (found !== people.value) found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
                 return;
               }
               people.next(found);
+              // Someone a tool has removed from the photo is not there to pick any more.
+              const { entries, cursor } = timeline.value;
+              const present = peopleNotHealed(found, replacedSpots(entries, cursor), (originalImage.value ?? image).width());
               personSelection.next({
                 focused: true,
                 loading: false,
-                people: found,
-                selectedId: personSelection.value.selectedId,
+                people: present,
+                selectedId: present.some(person => person.id === personSelection.value.selectedId)
+                  ? personSelection.value.selectedId
+                  : null,
                 error: null,
               });
               // The faces are found after the people are shown, because the face models take a moment.
               setTimeout(() => {
-                if (requestId === currentRequest && personSelection.value.focused) findFaceBoxes(image);
+                if (requestId === currentRequest && personSelection.value.focused) {
+                  findFaceBoxes(image).catch(error => console.warn('[faces] could not find the faces:', errorMessage(error)));
+                }
               }, 0);
             },
             error => {
@@ -157,7 +179,7 @@ export function PersonSelectionToolController() {
         try {
           editorPreview.hide();
           const selectedId = personAt(point.x, point.y, image.width(), image.height());
-          if (selectedId !== undefined) personSelection.next({ ...personSelection.value, selectedId });
+          if (selectedId !== undefined && personSelection.value.people.some(person => person.id === selectedId)) personSelection.next({ ...personSelection.value, selectedId });
         } catch (error) {
           personSelection.next({ ...personSelection.value, error: errorMessage(error) });
         }

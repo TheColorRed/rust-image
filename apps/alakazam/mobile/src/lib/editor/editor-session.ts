@@ -8,23 +8,23 @@ import {
   editsAPerson,
   healBlemish,
   keepBlemishBase,
-} from '@/src/lib/editor-history';
-import { analysisOf, provideAnalysis } from '@/src/lib/editor-preloads';
+} from '@/src/lib/editor/editor-history';
+import { analysisOf, provideAnalysis } from '@/src/lib/editor/editor-preloads';
 import { makeupMasks } from '@/src/lib/eye-makeup';
-import { startEditorPreview } from '@/src/lib/editor-preview';
+import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
   flushFullReplay,
   releaseShownImages,
   renderRecipe,
   startReplay,
-} from '@/src/lib/editor-replay';
-import { showStandIn } from '@/src/lib/editor-pictures';
+} from '@/src/lib/editor/editor-replay';
+import { showStandIn } from '@/src/lib/editor/editor-pictures';
 import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
-import { people, skinMask } from '@/src/state/analysis';
+import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -94,7 +94,8 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
     if (isCancelled()) return (mask as unknown as AbraPixels).uniffiDestroy();
     skinMask.next(mask);
   }
-  if (project.makeupMasks?.length) {
+  // An empty list is saved too: the face models ran and found no face.
+  if (project.makeupMasks) {
     const masks = Object.fromEntries(
       await Promise.all(project.makeupMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
     );
@@ -112,6 +113,8 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
     if (isCancelled()) return found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
     people.next(found);
   }
+  // Saved with the people, in the same pixels. An empty object is an answer too: the models ran and found no face.
+  if (project.faceBoxes) faceBoxes.next(project.faceBoxes);
 }
 
 /** Saves a mask as a gray image. */
@@ -163,6 +166,8 @@ function saveOpenProject() {
     });
   }
   const savedPeople = project.people ?? (people.value ? writePeople(people.value, toLocalPath(project.dir)) : undefined);
+  // Like the people, the faces belong to the original, so they are saved once: the first time they are known.
+  const savedFaceBoxes = project.faceBoxes ?? faceBoxes.value ?? undefined;
   const entriesWithResources = entries.map((entry, index) => {
     if (!changesPixels(entry.change)) return entry;
     const checkpoint = checkpointFor(entry);
@@ -174,8 +179,8 @@ function saveOpenProject() {
   if (
     skinMaskFile === project.skinMaskFile &&
     makeupFiles === project.makeupMasks &&
-    JSON.stringify([entriesWithResources, cursor, savedPeople]) ===
-      JSON.stringify([project.timeline, project.cursor, project.people])
+    JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
+      JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
   )
     return;
 
@@ -205,7 +210,7 @@ function saveOpenProject() {
         rendered?.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, people: savedPeople };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, people: savedPeople, faceBoxes: savedFaceBoxes };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {

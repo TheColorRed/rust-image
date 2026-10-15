@@ -7,6 +7,7 @@
 //! Keep the constants and the mixer in step with `lipstick.ts`.
 
 use abra_core::{Channels, Image, ImageExt, Rect, Transform};
+use abra_face_parsing::prelude::ImageAi;
 use abra_face_parsing::{FaceParser, FaceRegion};
 use tools::{Tool, atlas_with};
 

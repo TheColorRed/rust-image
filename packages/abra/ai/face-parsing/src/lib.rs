@@ -4,7 +4,7 @@
 //! related regions. Use the returned [`FaceSegmentation`] to create a mask for any one feature.
 //! It is [`AiModel`] with the model's manifest built in.
 
-use abra_ai_core::{AiError, AiModel, AiOutput, LabelMap};
+use abra_ai_core::{AiError, AiModel, AiOutput, ImageAi, LabelMap, ReportsProgress};
 use abra_core::Image;
 pub use mask::Mask;
 use std::path::Path;
@@ -61,12 +61,14 @@ pub struct FaceParser {
 
 pub mod prelude {
   pub use crate::{FaceParser, FaceRegion, FaceSegmentation, Mask};
-  pub use abra_ai_core::AiError;
+  pub use abra_ai_core::{AiError, ImageAi, ReportsProgress};
 }
 
-impl FaceParser {
+impl ImageAi for FaceParser {
+  type Output = FaceSegmentation;
+
   /// Loads a 19-class BiSeNet face-parsing ONNX model from `p_model_path`.
-  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
     Ok(Self {
       model: AiModel::load_with_manifest(p_model_path, MANIFEST)?,
     })
@@ -76,8 +78,14 @@ impl FaceParser {
   ///
   /// The parser is trained for a close face crop. Calling it on a full photograph is supported but
   /// produces the best result only when the face occupies most of the input.
-  pub fn process(&self, p_face: &Image) -> Result<FaceSegmentation, AiError> {
-    match self.model.run(p_face)? {
+  fn process(&self, p_face: &Image) -> Result<FaceSegmentation, AiError> {
+    self.process_reporting(p_face, &|_| {})
+  }
+}
+
+impl ReportsProgress for FaceParser {
+  fn process_reporting(&self, p_face: &Image, p_progress: &dyn Fn(f32)) -> Result<FaceSegmentation, AiError> {
+    match self.model.run_reporting(p_face, p_progress)? {
       AiOutput::Labels(labels) => Ok(FaceSegmentation { labels }),
       _ => Err(AiError::inference_failed("The face-parsing model did not return labels")),
     }

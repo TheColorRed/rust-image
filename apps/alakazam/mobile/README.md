@@ -11,16 +11,22 @@ npm ci
 npm run start:android
 ```
 
-In another terminal, build and deploy to a connected Android device:
+In another terminal, build and deploy to every connected authorized Android device:
 
 ```sh
-npm run deploy:android
+npm run dev:android
+```
+
+To deploy to one device only, pass its ADB serial:
+
+```sh
+npm run dev:android -- --device <serial>
 ```
 
 For a standalone release with the bundled ONNX runtime and JavaScript:
 
 ```sh
-npm run deploy:android -- --release --targets arm64-v8a
+npm run dev:android -- --release --targets arm64-v8a
 ```
 
 Rebuild the native app after AI dependencies change; an older APK will not gain

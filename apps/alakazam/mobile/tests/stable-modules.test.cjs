@@ -12,13 +12,13 @@ const src = path.join(__dirname, '..', 'src');
 const reRun = [
   /^@\/src\/lib\/edit-sections$/,
   /^@\/src\/lib\/edit-sections\/(?!keys$)/,
-  /^@\/src\/lib\/editor-(replay|history|session|live)$/,
+  /^@\/src\/lib\/editor\/editor-(replay|history|session|live)$/,
   /^@\/src\/effects\//,
 ];
 const stable = [
   ...fs.readdirSync(path.join(src, 'state')).map(name => `state/${name}`),
-  'lib/editor-pictures.ts',
-  'lib/editor-preloads.ts',
+  'lib/editor/editor-pictures.ts',
+  'lib/editor/editor-preloads.ts',
   'lib/edit-sections/keys.ts',
 ];
 

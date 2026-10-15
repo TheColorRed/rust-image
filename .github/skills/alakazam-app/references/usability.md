@@ -12,7 +12,7 @@ Use the plain word a person would use for what they see, not the word from the i
 
 | Library or trade word | Name in the app |
 | --- | --- |
-| Saturation | Vividness |
+| Saturation | Colorfulness |
 | Value / lightness (HSV) | Brightness |
 | Opacity / blend amount | Strength |
 | Feather / blur of a mask edge | Softness |

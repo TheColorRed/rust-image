@@ -1,5 +1,3 @@
-import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
-import { Alert } from 'react-native';
 import { batch } from '@/src/lib/batch';
 import { removeBlemish } from '@/src/lib/blemish';
 import {
@@ -9,11 +7,11 @@ import {
   type AdjustmentValue,
   type SliderControl,
 } from '@/src/lib/edit-sections';
-import { renderRecipe } from '@/src/lib/editor-replay';
+import { renderRecipe } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
 import type { ProjectRecipe } from '@/src/lib/project-store';
-import { adjustmentKey } from '@/src/lib/skin-adjustments';
 import { applyRedEyeStep } from '@/src/lib/red-eye';
+import { adjustmentKey } from '@/src/lib/skin-adjustments';
 import {
   baseIndexAt,
   emptyTimeline,
@@ -24,11 +22,13 @@ import {
   type TimelineChange,
   type TimelineEntry,
 } from '@/src/lib/timeline';
-import { personSelection } from '@/src/state/person-selection';
 import { adjustments, appliedActions, focusedControlKey, historyVersion } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
+import { personSelection } from '@/src/state/person-selection';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { currentImage, editBaseImage, originalImage, replayHidden } from '@/src/state/session';
+import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
+import { Alert } from 'react-native';
 
 /**
  * The picture each blemish step left, by step: the base that the edits after it are rendered on. Kept for as long as the
@@ -149,13 +149,14 @@ function commitSlider(control: SliderControl, value: AdjustmentValue) {
 
 /** A slider's effect was turned off: it has no value again, so it is not part of the stack. Does nothing if it was already off. */
 function removeSlider(control: SliderControl) {
-  // A look put on everyone is stored under the plain key, so it is still the one to remove when a person is picked afterwards.
+  // A look put on everyone is stored under the plain key and one for a person under theirs, and both can be there at once.
+  // Both go, or the one left behind keeps the control showing as applied.
   const personKey = adjustmentKey(control.key, personSelection.value.selectedId);
   const key = adjustments.value[personKey] === undefined ? control.key : personKey;
   if (adjustments.value[key] === undefined) return;
   replayHidden.next(!!(control.tool || control.layer));
   lastGroup = null;
-  const { [key]: _removed, ...rest } = adjustments.value;
+  const { [key]: _removed, [control.key]: _everyone, ...rest } = adjustments.value;
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));
   adjustments.next(rest);
 }

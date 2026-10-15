@@ -41,7 +41,9 @@ pub use adjustments::{
   gradient_map, grayscale, highlights_shadows, hue, invert, photo_filter, posterize, reduce_opacity, saturation,
   threshold, vibrance,
 };
-pub use ai::{AiModel, AiOutput, AiOutputKind, Instance, LabelMap};
+pub use ai::{
+  AiListening, AiModel, AiOutput, AiOutputKind, ImageModel, Instance, LabelMap, Listening, ProgressListener,
+};
 pub use beauty::{SkinSmooth, SkinTan, SkinTone, skin_smooth, skin_tan, skin_tone};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};
 pub use canvas::{

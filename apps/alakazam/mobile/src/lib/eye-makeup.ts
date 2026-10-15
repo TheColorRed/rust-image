@@ -4,9 +4,9 @@ import { rectOrigin } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/edit-sections';
-import { derivedFor } from '@/src/lib/editor-preloads';
+import { derivedFor } from '@/src/lib/editor/editor-preloads';
 import { paintSheet, type Painting } from '@/src/lib/layers';
-import { FACE_MODELS, belongsTo, boxKey, findFaces, model, owning } from '@/src/lib/faces';
+import { FACE_MODELS, belongsTo, boxKey, findFacesAsync, model, owning } from '@/src/lib/faces';
 
 const LIPS = ['upper lip', 'lower lip'];
 
@@ -246,32 +246,46 @@ const regionAt = (
  * Runs face analysis once and keeps what every region of the Makeup group is made from: the lips, and the eye and eyebrow of each
  * side, named `lipstick|person`, `skin|person`, `nose|person`, `eye|person|side` and `brow|person|side` (the person is the box around them, as fractions of the photo: see `boxKey`). The regions
  * themselves are made when the color is applied, because their size is a slider.
+ *
+ * The models run in the background, so this gives back a promise and the editor keeps going meanwhile: a control that needs the masks
+ * paints without them until they are made, and the editor draws again when they are. The photo is copied before anything is awaited,
+ * because the editor frees the one it passed as soon as this returns.
  */
-export const makeupMasks = (photo: ImageLike): Record<string, MaskLike> | undefined => {
+export const makeupMasks = async (photo: ImageLike): Promise<Record<string, MaskLike> | undefined> => {
   if (FACE_MODELS.some(role => !model(role))) return undefined;
+  const mine = photo.clone();
   const made: Record<string, MaskLike> = {};
-  owning(keep => {
-    for (const { body, labels, zoom } of findFaces(photo, keep)) {
-      const box = boxKey(body, photo);
-      const place = (mask: MaskLike) => mask.placed(photo.width(), photo.height(), rectOrigin(zoom));
-      const lips = keep(labels.maskNamed(LIPS));
-      if (lips.bounds(0)) made[`lipstick|${box}`] = place(lips);
-      const mouth = keep(labels.maskNamed(['mouth']));
-      if (mouth.bounds(0)) made[`mouth|${box}`] = place(mouth);
-      const skin = keep(labels.maskNamed(['skin']));
-      if (skin.bounds(0)) made[`skin|${box}`] = place(skin);
-      const nose = keep(labels.maskNamed(['nose']));
-      if (nose.bounds(0)) made[`nose|${box}`] = place(nose);
-      for (const side of ['left', 'right'] as const) {
-        const eye = keep(labels.maskNamed([`${side} eye`]));
-        if (!eye.bounds(0)) continue;
-        made[`eye|${box}|${side}`] = place(eye);
-        const brow = keep(labels.maskNamed([`${side} eyebrow`]));
-        if (brow.bounds(0)) made[`brow|${box}|${side}`] = place(brow);
+  try {
+    await owning(async keep => {
+      for await (const { body, labels, zoom } of findFacesAsync(mine, keep)) {
+        const box = boxKey(body, mine);
+        const place = (mask: MaskLike) => mask.placed(mine.width(), mine.height(), rectOrigin(zoom));
+        const lips = keep(labels.maskNamed(LIPS));
+        if (lips.bounds(0)) made[`lipstick|${box}`] = place(lips);
+        const mouth = keep(labels.maskNamed(['mouth']));
+        if (mouth.bounds(0)) made[`mouth|${box}`] = place(mouth);
+        const skin = keep(labels.maskNamed(['skin']));
+        if (skin.bounds(0)) made[`skin|${box}`] = place(skin);
+        const nose = keep(labels.maskNamed(['nose']));
+        if (nose.bounds(0)) made[`nose|${box}`] = place(nose);
+        for (const side of ['left', 'right'] as const) {
+          const eye = keep(labels.maskNamed([`${side} eye`]));
+          if (!eye.bounds(0)) continue;
+          made[`eye|${box}|${side}`] = place(eye);
+          const brow = keep(labels.maskNamed([`${side} eyebrow`]));
+          if (brow.bounds(0)) made[`brow|${box}|${side}`] = place(brow);
+        }
       }
-    }
-  });
-  return Object.keys(made).length > 0 ? made : undefined;
+    });
+  } catch (error) {
+    // A model that failed part of the way leaves nothing behind.
+    Object.values(made).forEach(mask => (mask as unknown as { uniffiDestroy(): void }).uniffiDestroy());
+    throw error;
+  } finally {
+    (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+  }
+  // No masks is still an answer (no face was found), so it is kept and saved and the models are not run for this photo again.
+  return made;
 };
 
 /**

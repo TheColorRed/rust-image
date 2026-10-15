@@ -8,7 +8,7 @@ export const cleanup: EditSection = {
     {
       kind: 'slider',
       key: 'action-median',
-      label: 'Median',
+      label: 'Smooth Noise',
       min: 0,
       max: 8,
       step: 1,
@@ -20,7 +20,7 @@ export const cleanup: EditSection = {
     {
       kind: 'action',
       key: 'action-despeckle',
-      label: 'Despeckle',
+      label: 'Remove Dust',
       deferred: true,
       tool: photo => despeckle(1, 13).applyDeferred(photo),
     },

@@ -2,7 +2,7 @@
 //!
 //! [`PersonSegmenter`] is [`AiModel`] with the model's manifest built in, so a caller only needs the `.onnx` file.
 
-use abra_ai_core::{AiError, AiModel, AiOutput, Bounds, Instance};
+use abra_ai_core::{AiError, AiModel, AiOutput, Bounds, ImageAi, Instance, ReportsProgress};
 use abra_core::Image;
 pub use mask::Mask;
 use std::path::Path;
@@ -71,23 +71,31 @@ pub struct PersonSegmenter {
 
 pub mod prelude {
   pub use crate::{PersonBounds, PersonInstance, PersonSegmenter, person_at};
-  pub use abra_ai_core::AiError;
+  pub use abra_ai_core::{AiError, ImageAi, ReportsProgress};
   pub use mask::Mask;
 }
 
-impl PersonSegmenter {
+impl ImageAi for PersonSegmenter {
+  type Output = Vec<PersonInstance>;
+
   /// Loads a YOLO26n-seg ONNX model from `p_model_path`.
   ///
   /// The caller decides where the model lives. It must have this model's input and output layout.
-  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
     Ok(Self {
       model: AiModel::load_with_manifest(p_model_path, MANIFEST)?,
     })
   }
 
   /// Finds people in `p_image`, returning source-sized instance masks.
-  pub fn process(&self, p_image: &Image) -> Result<Vec<PersonInstance>, AiError> {
-    match self.model.run(p_image)? {
+  fn process(&self, p_image: &Image) -> Result<Vec<PersonInstance>, AiError> {
+    self.process_reporting(p_image, &|_| {})
+  }
+}
+
+impl ReportsProgress for PersonSegmenter {
+  fn process_reporting(&self, p_image: &Image, p_progress: &dyn Fn(f32)) -> Result<Vec<PersonInstance>, AiError> {
+    match self.model.run_reporting(p_image, p_progress)? {
       AiOutput::Instances(people) => Ok(
         people
           .into_iter()

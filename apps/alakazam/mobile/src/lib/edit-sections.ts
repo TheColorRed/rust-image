@@ -1,9 +1,9 @@
 import { skinMaskSized } from '@/src/lib/analysis';
-import { preloadFor } from '@/src/lib/editor-preloads';
+import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { withLayers, type Painting, type Sheet } from '@/src/lib/layers';
 import { type BlendMode } from '@abra/core/blend';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
-import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
+import { type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
 import { adjustments } from './edit-sections/adjustments';
 import { beauty } from './edit-sections/beauty';
@@ -83,6 +83,9 @@ export type AdjustmentValue = number | number[];
 
 export type DataLike = ImageLike | MaskLike;
 
+/** What a `preload` can give back, before it is `Preloaded`: one image or mask, several, or nothing. */
+export type Preloading = void | DataLike | DataLike[] | Record<string, DataLike>;
+
 /**
  * A control whose value is applied once the user releases the slider.
  *
@@ -146,8 +149,12 @@ export type SliderControl<T = unknown> = {
    * @param photo The image to preload the effect on.
    * @returns An image or mask, an array of them, an object with a name for each (`{ highlightMask, shadowMask }`), or nothing.
    * They are handed to `tool` as `context.preloaded` in the same shape, and freed by the editor.
+   *
+   * A preload that is slow (an AI model) returns a promise and does its work in the background: the editor goes on, `tool` gets no
+   * `preloaded` until the promise is done, and the editor draws again then. It must copy `photo` before it awaits, because the editor
+   * frees `photo` when the function returns.
    */
-  preload?: (photo: ImageLike) => void | DataLike | DataLike[] | Record<string, DataLike>;
+  preload?: (photo: ImageLike) => Preloading | Promise<Preloading>;
   /**
    * A tool written against the Abra library (`@abra/core`). It gets an image that is its own to change: it can change it in
    * place and return nothing, which makes the changed image the result, or return a new image, which is then the result and
@@ -331,7 +338,12 @@ export const sliderContext = (
 });
 
 /** The sheet a control with a `layer` paints, for these slider values. `name` is the layer's name: the control's key, or its key for one person. */
-export const layerSheet = (control: SliderControl, values: number[], context: ToolContext, name = control.key): Sheet => {
+export const layerSheet = (
+  control: SliderControl,
+  values: number[],
+  context: ToolContext,
+  name = control.key,
+): Sheet => {
   const { layer } = control;
   if (!layer) throw new Error(`The control "${control.key}" has no layer to paint`);
   return {

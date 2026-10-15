@@ -13,6 +13,10 @@ export const skinMask$ = skinMask.asObservable();
 export const people = new BehaviorSubject<PersonDetection[] | null>(null);
 export const people$ = people.asObservable();
 
+/** Counts what a background analysis has made (see `preload` of a control), so the editor draws again when it changes. */
+export const analysisVersion = new BehaviorSubject(0);
+export const analysisVersion$ = analysisVersion.asObservable();
+
 /**
  * The square around each person's face, by the person's id, in the pixels of the photo the people were found in, or null until the
  * face models have run. A person whose face was not found has none.

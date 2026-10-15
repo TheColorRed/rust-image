@@ -21,9 +21,10 @@ const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
 const loaded = { exports: {} };
 // The sections and the native packages are not needed to read a control's settings, so they load as empty modules.
 // The cache of what a control preloads is a module of its own, and is loaded as it is.
-const preloads = loadTs('lib/editor-preloads.ts', { '@/src/lib/editor-pictures': { fitted: source => Object.assign(source.clone(), { width: () => source.width() }) }, '@abra/core/mask': { TransformAlgorithm: {} } });
+const analysisState = { analysisVersion: { value: 0, next(value) { this.value = value; } } };
+const preloads = loadTs('lib/editor/editor-preloads.ts', { '@/src/lib/editor/editor-pictures': { fitted: source => Object.assign(source.clone(), { width: () => source.width() }) }, '@abra/core/mask': { TransformAlgorithm: {} }, '@/src/state/analysis': analysisState });
 const stubbed = specifier =>
-  specifier === '@/src/lib/editor-preloads'
+  specifier === '@/src/lib/editor/editor-preloads'
     ? preloads
     : specifier.startsWith('.') || specifier.startsWith('@')
       ? {}
@@ -228,6 +229,49 @@ test('a preload runs once for a photo width, its result reaches the tool, and cl
   releasePreloads();
   assert.equal(mask.destroyed, 2);
   assert.equal(preloadFor(control, 320), undefined, 'and nothing is left');
+});
+
+test('a preload that returns a promise runs in the background, once, and the editor is told when it is made', async () => {
+  releasePreloads();
+  const mask = { destroyed: 0, width: () => 320, uniffiDestroy() { this.destroyed++; } };
+  let runs = 0;
+  let finish;
+  const control = single({ preload: () => (runs++, new Promise(resolve => (finish = resolve))) });
+  const { image } = fakeImage();
+  image.width = () => 320;
+  const before = analysisState.analysisVersion.value;
+  assert.equal(preloadFor(control, 320, image), undefined, 'nothing to use yet, and nothing waits for it');
+  assert.equal(preloadFor(control, 320, image), undefined, 'asking again meanwhile');
+  assert.equal(runs, 1, 'does not start it again while it runs');
+  finish({ a: mask });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(analysisState.analysisVersion.value, before + 1, 'the editor is told to draw again');
+  assert.deepEqual(preloadFor(control, 320, image), { a: mask }, 'and then the tool gets it');
+  assert.equal(runs, 1, 'without running again');
+  releasePreloads();
+  assert.equal(mask.destroyed, 1, 'and it is freed with the photo');
+});
+
+test('a background preload that could not run is not kept as an answer, and one that finishes after its photo is gone is freed', async () => {
+  releasePreloads();
+  const { image } = fakeImage();
+  image.width = () => 320;
+  let runs = 0;
+  const missing = single({ preload: () => (runs++, Promise.resolve(undefined)) });
+  preloadFor(missing, 320, image);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(preloadFor(missing, 320, image), undefined);
+  assert.equal(runs, 2, 'nothing was kept, so it is tried again');
+
+  const mask = { destroyed: 0, uniffiDestroy() { this.destroyed++; } };
+  let finish;
+  const late = single({ preload: () => new Promise(resolve => (finish = resolve)) });
+  preloadFor(late, 320, image);
+  releasePreloads();
+  finish({ a: mask });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(mask.destroyed, 1, 'what it made is freed');
+  assert.equal(preloadFor(late, 320), undefined, 'and not kept for the next photo');
 });
 
 test('controls sharing a preload function share one result at the same photo width', () => {

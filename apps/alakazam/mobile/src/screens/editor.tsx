@@ -1,9 +1,10 @@
 import { AiModelPrompt } from '@/src/components/editor/ai-model-prompt';
+import { AiProgressBar } from '@/src/components/editor/ai-progress-bar';
 import { EditorPanel } from '@/src/components/editor/editor-panel';
 import { EditorPreview } from '@/src/components/editor/editor-preview';
 import { EditorToolbar } from '@/src/components/editor/editor-toolbar';
 import { type EditablePhoto } from '@/src/lib/edit-source';
-import { openEditorSession } from '@/src/lib/editor-session';
+import { openEditorSession } from '@/src/lib/editor/editor-session';
 import { useTheme } from '@/src/lib/theme';
 import { closeRequested } from '@/src/state/commands';
 import { bottomInset, topInset } from '@/src/state/preview';
@@ -49,6 +50,7 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <EditorPreview />
       <EditorToolbar photo={photo} onClose={onClose} />
+      <AiProgressBar />
       <EditorPanel />
       <AiModelPrompt />
     </View>

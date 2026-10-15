@@ -47,6 +47,11 @@ export interface Project {
   makeupMasks?: { name: string; file: string }[];
   /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
   people?: SavedPersonDetection[];
+  /**
+   * The square around each person's face, by the person's id, in the pixels the people were found in. Opening the project loads them
+   * instead of running the face models. An empty object means the models ran and found no face.
+   */
+  faceBoxes?: Record<number, { x: number; y: number; width: number; height: number }>;
   /** Every step, in the order it was performed, including ones that were undone and can be redone. */
   timeline: TimelineEntry[];
   /** How many steps of `timeline` are applied: where undo had got to when the project was closed. */

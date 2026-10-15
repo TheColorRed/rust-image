@@ -4,7 +4,8 @@ import { timeline$ } from '@/src/state/history';
 import { previewSize$ } from '@/src/state/preview';
 import { type EditablePhoto } from '@/src/lib/edit-source';
 import { editBaseImage$, originalImage$ } from '@/src/state/session';
-import { useMemo } from 'react';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 
@@ -24,6 +25,9 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
   const editBase = useObservable(editBaseImage$, null);
   const drawn = useObservable(previewSize$, null);
   const edits = useObservable(timeline$, { entries: [], cursor: 0 }).cursor;
+  const [copied, setCopied] = useState(false);
+  // The notice is for the last tap, so it is gone when the dialog is opened again.
+  useEffect(() => setCopied(false), [visible]);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -78,6 +82,8 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
     const list: [string, string][] = [];
     if (name) list.push(['File', decodeURIComponent(name)]);
     if (extension) list.push(['Format', extension]);
+    // The project's folder name on the phone, so a developer can find its files.
+    if (__DEV__ && photo.project) list.push(['Project ID', photo.project.id]);
     if (size) {
       const divisor = greatestCommonDivisor(size.width, size.height);
       const shape = size.width === size.height ? 'Square' : size.width > size.height ? 'Landscape' : 'Portrait';
@@ -108,10 +114,18 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
           <Text style={styles.title}>Photo information</Text>
           {rows.length === 0 ? <Text style={styles.label}>Nothing is known about this photo yet.</Text> : null}
           {rows.map(([label, value]) => (
-            <View key={label} style={styles.row}>
+            <Pressable
+              key={label}
+              disabled={label !== 'Project ID'}
+              onPress={() => {
+                Clipboard.setString(value);
+                setCopied(true);
+              }}
+              style={styles.row}
+            >
               <Text style={styles.label}>{label}</Text>
-              <Text style={styles.value}>{value}</Text>
-            </View>
+              <Text style={styles.value}>{label === 'Project ID' && copied ? 'Copied to clipboard' : value}</Text>
+            </Pressable>
           ))}
           <View style={styles.buttons}>
             <Pressable accessibilityRole="button" onPress={onClose} style={styles.button}>

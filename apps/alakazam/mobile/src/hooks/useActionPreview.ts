@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { ensureBase, editorPreview, showTool } from '@/src/lib/editor-preview';
-import { isStackDeferred, restForAction } from '@/src/lib/editor-replay';
+import { ensureBase, editorPreview, showTool } from '@/src/lib/editor/editor-preview';
+import { isStackDeferred, restForAction } from '@/src/lib/editor/editor-replay';
 import { actionPreviewRequested$ } from '@/src/state/commands';
 import { editBaseImage } from '@/src/state/session';
 

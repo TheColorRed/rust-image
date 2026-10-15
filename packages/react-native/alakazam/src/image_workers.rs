@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use abra::prelude::{Image as CoreImage, ImageExt};
-use abra_uniffi::{Image, Mask};
+use abra_body_segmentation::prelude::ImageAi;
+use abra_uniffi::{AiModel, AiOutput, Image, Mask};
 
 use crate::{AbraError, models};
 
@@ -106,6 +107,16 @@ pub async fn find_people_async(image: Arc<Image>) -> Result<Vec<PersonDetection>
         confidence: person.confidence as f64, mask: Arc::new(Mask::from_core(person.mask.clone())),
       }
     }).collect())
+  }).await
+}
+
+/// Runs an AI model on a picture on a worker thread, so the app keeps drawing while it runs. The same as `AiModel.run`.
+#[uniffi::export]
+pub async fn run_ai_model_async(model: Arc<AiModel>, image: Arc<Image>) -> Result<Arc<AiOutput>, AbraError> {
+  let pixels = image.core();
+  run(move || {
+    let output = model.core().run(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    Ok(Arc::new(AiOutput::from_core(output)))
   }).await
 }
 

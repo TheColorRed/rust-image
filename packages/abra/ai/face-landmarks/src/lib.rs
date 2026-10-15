@@ -5,7 +5,7 @@
 //! can use the detector appropriate for their workflow, then pass its square face crop here.
 //! It is [`AiModel`] with the model's manifest built in.
 
-use abra_ai_core::{AiError, AiModel, AiOutput};
+use abra_ai_core::{AiError, AiModel, AiOutput, ImageAi, ReportsProgress};
 pub use abra_ai_core::{Landmark as FaceLandmark, Landmarks as FaceLandmarks};
 use abra_core::Image;
 use std::path::Path;
@@ -19,12 +19,14 @@ pub struct FaceLandmarker {
 
 pub mod prelude {
   pub use crate::{FaceLandmark, FaceLandmarker, FaceLandmarks};
-  pub use abra_ai_core::AiError;
+  pub use abra_ai_core::{AiError, ImageAi, ReportsProgress};
 }
 
-impl FaceLandmarker {
+impl ImageAi for FaceLandmarker {
+  type Output = FaceLandmarks;
+
   /// Loads a 478-point MediaPipe Face Landmarker ONNX model from `p_model_path`.
-  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
     Ok(Self {
       model: AiModel::load_with_manifest(p_model_path, MANIFEST)?,
     })
@@ -34,12 +36,18 @@ impl FaceLandmarker {
   ///
   /// Crop the face with a little surrounding area before calling this method. The model uses the
   /// crop's coordinate system, so the returned points are easy to map back to the original photo.
-  pub fn process(&self, p_face: &Image) -> Result<FaceLandmarks, AiError> {
+  fn process(&self, p_face: &Image) -> Result<FaceLandmarks, AiError> {
+    self.process_reporting(p_face, &|_| {})
+  }
+}
+
+impl ReportsProgress for FaceLandmarker {
+  fn process_reporting(&self, p_face: &Image, p_progress: &dyn Fn(f32)) -> Result<FaceLandmarks, AiError> {
     let (width, height) = p_face.dimensions::<u32>();
     if width != height {
       return Err(AiError::invalid_input("Face Landmarker requires a square face crop"));
     }
-    match self.model.run(p_face)? {
+    match self.model.run_reporting(p_face, p_progress)? {
       AiOutput::Landmarks(landmarks) => Ok(landmarks),
       _ => Err(AiError::inference_failed("The landmark model did not return landmarks")),
     }

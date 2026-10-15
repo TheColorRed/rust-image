@@ -5,11 +5,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import { computePreviewImagePoint, type PreviewPoint } from '@/src/lib/preview-coordinates';
 import { removeBlemish } from '@/src/lib/blemish';
-import { commitBlemish } from '@/src/lib/editor-history';
+import { commitBlemish } from '@/src/lib/editor/editor-history';
 import { blemishApplyRequested$ } from '@/src/state/commands';
 import { isBlemishToolFocused, isBlemishToolFocused$, wasBlemishToolFocused } from '@/src/state/edits';
 import { historyReady } from '@/src/state/project-session';
-import { flushFullReplay } from '@/src/lib/editor-replay';
+import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { currentImage } from '@/src/state/session';
 import {
   previewBox,

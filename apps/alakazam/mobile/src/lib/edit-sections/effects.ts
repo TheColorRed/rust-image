@@ -10,7 +10,7 @@ export const effects: EditSection = {
     {
       kind: 'action',
       key: 'action-grayscale',
-      label: 'Grayscale',
+      label: 'Black & White',
       deferred: true,
       thumb: photo => grayscale().apply(photo),
       tool: photo => grayscale().applyDeferred(photo),
@@ -18,7 +18,7 @@ export const effects: EditSection = {
     {
       kind: 'action',
       key: 'action-invert',
-      label: 'Invert',
+      label: 'Flip Colors',
       deferred: true,
       thumb: photo => invert().apply(photo),
       tool: photo => invert().applyDeferred(photo),
@@ -26,21 +26,21 @@ export const effects: EditSection = {
     {
       kind: 'action',
       key: 'action-auto-tone',
-      label: 'Auto Tone',
+      label: 'Auto Fix',
       tool: photo => autoTone().apply(photo),
       thumb: photo => autoTone().apply(photo),
     },
     {
       kind: 'action',
       key: 'action-auto-color',
-      label: 'Auto Color',
+      label: 'Auto Colors',
       tool: photo => autoColor().apply(photo),
       thumb: photo => autoColor().apply(photo),
     },
     {
       kind: 'slider',
       key: 'action-threshold',
-      label: 'Threshold',
+      label: 'Black & White Only',
       max: 255,
       defaultValue: 128,
       deferred: true,
@@ -50,7 +50,7 @@ export const effects: EditSection = {
     {
       kind: 'slider',
       key: 'action-vignette',
-      label: 'Vignette',
+      label: 'Dark Corners',
       applyOnSelect: false,
       tool: (photo, [value]) => vignette(photo, value / 100),
       thumb: photo => vignette(photo, 1),
@@ -58,7 +58,7 @@ export const effects: EditSection = {
     {
       kind: 'slider',
       key: 'action-posterize',
-      label: 'Posterize',
+      label: 'Flat Colors',
       max: 10,
       defaultValue: 5,
       deferred: true,

@@ -16,10 +16,10 @@ import {
   type ActionControl,
   type EditSection,
 } from '@/src/lib/edit-sections';
-import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor-pictures';
+import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor/editor-pictures';
 import { withLayers, type Sheet } from '@/src/lib/layers';
-import { clearPreloads, preloadFor, releasePreloads } from '@/src/lib/editor-preloads';
-import { buildControlThumbnails, thumbnailPixels } from '@/src/lib/editor-thumbnails';
+import { clearPreloads, preloadFor, releasePreloads } from '@/src/lib/editor/editor-preloads';
+import { buildControlThumbnails, thumbnailPixels } from '@/src/lib/editor/editor-thumbnails';
 import { type ProjectRecipe } from '@/src/lib/project-store';
 import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import {
@@ -32,6 +32,7 @@ import {
   focusedControlKey,
   focusedControlKey$,
 } from '@/src/state/edits';
+import { analysisVersion$ } from '@/src/state/analysis';
 import { previewBox$ } from '@/src/state/gestures';
 import { personSelection } from '@/src/state/person-selection';
 import { controlThumbnails } from '@/src/state/preview';
@@ -333,17 +334,21 @@ let replayedBase: AbraImage | null = null;
 let preloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Makes what the focused control preloads, from the screen-size photo, if it has a `preload` and has not made it for this photo.
- * A control is preloaded when it is clicked and not before, so nothing is made for the controls that are never used.
+ * Makes what the controls of the open section preload, from the screen-size photo, for each that has a `preload` and has not made it
+ * for this photo. A section is preloaded when it is opened and not before, so nothing is made for sections that are never used. A
+ * slow preload (the face models of Beauty) runs in the background, and the edit is drawn again when it is made.
  */
-function preloadFocused() {
+function preloadSection() {
   const base = editBaseImage.value;
-  const control = leafControls(findSection(activeSectionKey.value).controls).find(item => item.key === focusedControlKey.value);
-  if (!base || control?.kind !== 'slider' || !control.preload) return;
+  if (!base) return;
+  const controls = leafControls(findSection(activeSectionKey.value).controls).flatMap(control =>
+    control.kind === 'slider' && control.preload ? [control] : [],
+  );
+  if (controls.length === 0) return;
   if (preloadedBase && preloadedBase !== base) clearPreloads();
   preloadedBase = base;
   const shrunk = shrunkOf('base', base);
-  preloadFor(control, shrunk.width(), shrunk);
+  for (const control of controls) preloadFor(control, shrunk.width(), shrunk);
 }
 
 let thumbnailBuild: ReturnType<typeof buildControlThumbnails> | undefined;
@@ -472,7 +477,7 @@ function replay() {
     thumbnailTimer = setTimeout(() => {
       thumbnailTimer = undefined;
       try {
-        preloadFocused();
+        preloadSection();
         sectionThumbnails(findSection(activeSectionKey.value), base);
       } catch (error) {
         console.warn('[edit] preparing thumbnail edit stack threw:', error);
@@ -490,7 +495,7 @@ function replay() {
  * separate timer after the main preview's update; async native results publish progressively.
  */
 export function startReplay(): Subscription {
-  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$])
+  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$])
     .pipe(
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
       tap(() => {
@@ -523,7 +528,7 @@ export function startReplay(): Subscription {
   subscription.add(
     focusedControlKey$.subscribe(() => {
       clearTimeout(preloadTimer);
-      preloadTimer = setTimeout(preloadFocused, 0);
+      preloadTimer = setTimeout(preloadSection, 0);
     }),
   );
   subscription.add(() => clearTimeout(preloadTimer));

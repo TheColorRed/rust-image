@@ -16,7 +16,7 @@ use crate::levels::{
 ///
 /// Each color moves away from (or toward) the pixel's average by an amount that depends on how far its strongest
 /// channel is from that average. `vibrance.wgsl` does the same math.
-fn apply_vibrance(p_image: &mut Image, p_vibrance: f32, p_saturation_factor: Option<i32>) {
+fn apply_vibrance(p_image: &mut Image, p_vibrance: f32, p_saturation_factor: Option<i64>) {
   let (width, height) = p_image.dimensions::<i32>();
   let src = p_image.rgba();
   let mut out = vec![0u8; (width * height * 4) as usize];
@@ -95,6 +95,7 @@ impl GpuProcessor for Vibrance {
       // `saturation.wgsl` takes the factor in 256ths;
       // a factor of 0 would be fully gray, so no saturation adds no pass.
       let factor = factor_in_256ths(self.saturation_amount());
+      let factor = i32::try_from(factor).expect("vibrance limits its saturation factor to the shader's i32 range");
       passes.push(GpuPass::new(include_str!("./saturation.wgsl"), factor.to_le_bytes().to_vec()));
     }
     passes

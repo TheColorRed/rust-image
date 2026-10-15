@@ -8,7 +8,7 @@ export const blur: EditSection = {
     {
       kind: 'slider',
       key: 'action-gaussian-blur',
-      label: 'Gaussian',
+      label: 'Blur',
       min: 0,
       max: 40,
       step: 1,
@@ -20,7 +20,7 @@ export const blur: EditSection = {
     {
       kind: 'slider',
       key: 'action-box-blur',
-      label: 'Box',
+      label: 'Blur (Sharp Edges)',
       min: 0,
       max: 40,
       step: 1,

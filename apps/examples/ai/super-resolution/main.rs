@@ -9,7 +9,10 @@ fn main() {
   // let (width, height) = image.dimensions::<u32>();
 
   // Process with default control params
-  let output = SuperResolution::load("SCUNet-GAN").process(&image);
+  let output = SuperResolution::load("packages/abra/ai/super-resolution/models/SCUNet-GAN.onnx")
+    .expect("Failed to load the model")
+    .process(&image)
+    .expect("Failed to process the image");
 
   // resize(&mut output, width, height, None);
   // color::auto_color().apply(&mut output);

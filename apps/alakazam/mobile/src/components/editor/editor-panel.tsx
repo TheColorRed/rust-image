@@ -37,9 +37,9 @@ import {
   sliderSpecs,
   sliderValues,
 } from '@/src/lib/edit-sections';
-import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor-history';
-import { editorPreview } from '@/src/lib/editor-preview';
-import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor-thumbnails';
+import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor/editor-history';
+import { editorPreview } from '@/src/lib/editor/editor-preview';
+import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor/editor-thumbnails';
 import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
 import { useTheme } from '@/src/lib/theme';
 import {

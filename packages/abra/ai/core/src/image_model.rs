@@ -46,8 +46,10 @@
 //! ```
 
 use crate::error::AiError;
+use crate::image_ai::{ImageAi, ImageAiWithControl};
 use crate::manifest::Manifest;
 use crate::onnx::OnnxSession;
+use crate::progress::{Listening, ReportsProgress};
 use crate::tensor::image_to_nchw;
 use crate::tiled::{TileAccumulator, TileConfig, generate_tiles};
 use abra_core::Image;
@@ -260,19 +262,6 @@ impl ImageModel {
       available_models: p_available_models.into().unwrap_or_default(),
     }
   }
-  /// Loads an image model from an ONNX file.
-  ///
-  /// This automatically looks for a `.yml` manifest file with the same
-  /// base name to load the model specification.
-  ///
-  /// # Arguments
-  ///
-  /// - `p_path`: Path to the ONNX model file.
-  pub fn load(&self, p_path: impl AsRef<Path>) -> Result<Self, AiError> {
-    let path = p_path.as_ref();
-    let spec = ModelSpec::load(path)?;
-    Self::from_spec(spec)
-  }
   /// Loads an image model from an ONNX file by name.
   ///
   /// Searches the default models directory for a model with the given name.
@@ -343,22 +332,12 @@ impl ImageModel {
     self.spec.as_ref().expect("Model spec is not loaded").default_control()
   }
 
-  /// Processes an image.
-  ///
-  /// If the model has control input, uses the default control values.
-  pub fn process(&self, p_input: &Image) -> Result<Image, AiError> {
-    let control = self.spec.as_ref().expect("Model spec is not loaded").default_control();
-    self.process_tiles(p_input, control.as_ref())
-  }
-
-  /// Processes an image with custom control parameters.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if:
-  /// - The model doesn't support control input
-  /// - The control parameter count doesn't match the model's expectations
-  pub fn process_with_control(&self, p_input: &Image, p_control: &ControlParams) -> Result<Image, AiError> {
+  fn process_with_control_reporting(
+    &self,
+    p_input: &Image,
+    p_control: &ControlParams,
+    p_progress: &dyn Fn(f32),
+  ) -> Result<Image, AiError> {
     if !self.spec.as_ref().expect("Model spec is not loaded").has_control() {
       return Err(AiError::inference_failed(format!(
         "Model '{}' does not support control parameters",
@@ -376,11 +355,16 @@ impl ImageModel {
       )));
     }
 
-    self.process_tiles(p_input, Some(p_control))
+    self.process_tiles(p_input, Some(p_control), p_progress)
   }
 
   /// Internal method to process image in tiles.
-  fn process_tiles(&self, p_input: &Image, p_control: Option<&ControlParams>) -> Result<Image, AiError> {
+  fn process_tiles(
+    &self,
+    p_input: &Image,
+    p_control: Option<&ControlParams>,
+    p_progress: &dyn Fn(f32),
+  ) -> Result<Image, AiError> {
     let start = Instant::now();
     let (orig_w, orig_h) = p_input.dimensions::<u32>();
     let scale = self.spec.as_ref().expect("Model spec is not loaded").scale_factor;
@@ -407,11 +391,9 @@ impl ImageModel {
 
     let mut accumulator = TileAccumulator::new(out_w, out_h);
 
-    for tile_info in &tiles {
-      if tile_info.index % 10 == 0 || tile_info.index == tile_info.total - 1 {
-        println!("  Tile {}/{}", tile_info.index + 1, tile_info.total);
-      }
+    p_progress(0.0);
 
+    for tile_info in &tiles {
       // Crop tile from input
       let mut tile_image = p_input.clone();
       crop(tile_info.x, tile_info.y, tile_info.width, tile_info.height).apply(&mut tile_image);
@@ -445,11 +427,58 @@ impl ImageModel {
       let out_y = (tile_info.y as f32 * scale) as u32;
 
       accumulator.accumulate(out_x, out_y, out_tile_w, out_tile_h, &out_data);
+
+      p_progress((tile_info.index + 1) as f32 / tile_info.total as f32);
     }
 
     println!("Complete in {:?}", start.elapsed());
 
     Ok(accumulator.finalize())
+  }
+}
+
+impl ImageAi for ImageModel {
+  type Output = Image;
+
+  /// Loads an image model from an ONNX file.
+  ///
+  /// This automatically looks for a `.yml` manifest file with the same base name to load the model specification.
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+    Self::from_spec(ModelSpec::load(p_model_path)?)
+  }
+
+  /// Processes an image.
+  ///
+  /// If the model has control input, uses the default control values.
+  fn process(&self, p_image: &Image) -> Result<Image, AiError> {
+    self.process_reporting(p_image, &|_| {})
+  }
+}
+
+impl ImageAiWithControl for ImageModel {
+  /// Processes an image with custom control parameters.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if:
+  /// - The model doesn't support control input
+  /// - The control parameter count doesn't match the model's expectations
+  fn process_with_control(&self, p_image: &Image, p_control: &ControlParams) -> Result<Image, AiError> {
+    self.process_with_control_reporting(p_image, p_control, &|_| {})
+  }
+}
+
+impl ReportsProgress for ImageModel {
+  fn process_reporting(&self, p_input: &Image, p_progress: &dyn Fn(f32)) -> Result<Image, AiError> {
+    let control = self.spec.as_ref().expect("Model spec is not loaded").default_control();
+    self.process_tiles(p_input, control.as_ref(), p_progress)
+  }
+}
+
+impl Listening<'_, ImageModel> {
+  /// Processes an image like [`ImageModel::process_with_control`], telling the listener how far along it is.
+  pub fn process_with_control(&self, p_input: &Image, p_control: &ControlParams) -> Result<Image, AiError> {
+    self.model.process_with_control_reporting(p_input, p_control, &*self.listener)
   }
 }
 

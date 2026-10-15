@@ -1,8 +1,8 @@
 // Builds and deploys the Android app in one go:
-//   1. picks the target device (the only one connected, or the one named with --device),
+//   1. finds every connected device (or the one named with --device),
 //   2. builds libalakazam_mobile.so and regenerates the TypeScript bindings (packages/react-native/alakazam),
-//   3. installs the app on the device with Gradle,
-//   4. forwards Metro to the device and launches the app.
+//   3. installs the app on each device with Gradle,
+//   4. forwards Metro to each device and launches the app.
 //
 // Debug builds load their JavaScript from Metro, so it is started if nothing answers on port 8081: in its own terminal
 // window on Windows, in the background (output in metro.log) elsewhere. It starts first so it warms up while Rust
@@ -11,9 +11,9 @@
 //
 // Gradle is run directly because `react-native run-android` fails to find gradlew.bat on this setup.
 //
-// Usage: npm run deploy:android [-- --release] [-- --no-launch] [-- --no-metro] [-- --device <serial>]
+// Usage: npm run dev:android [-- --release] [-- --no-launch] [-- --no-metro] [-- --device <serial>]
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, existsSync, openSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,10 +31,27 @@ const appId = release ? 'com.alakazam.mobile' : 'com.alakazam.mobile.debug';
 const metroUrl = 'http://127.0.0.1:8081/status';
 const startedAt = Date.now();
 
+// Android Studio sets one of these SDK variables, but does not necessarily add
+// platform-tools to PATH. Resolve adb here so the debug-only Metro reverse
+// tunnel works from a regular terminal as well.
+function resolveAdb() {
+  const executable = isWindows ? 'adb.exe' : 'adb';
+  for (const sdk of [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT]) {
+    if (!sdk) continue;
+    const candidate = path.join(sdk, 'platform-tools', executable);
+    if (existsSync(candidate)) return candidate;
+  }
+  return executable;
+}
+
+const adbCommand = resolveAdb();
+
 function fail(p_message) {
   console.error(`\ndeploy-android: ${p_message}`);
   process.exit(1);
 }
+
+if (deviceArgIndex >= 0 && !requestedDevice) fail('--device requires an ADB serial.');
 
 function run(p_label, p_command, p_args, p_cwd, p_env) {
   console.log(`\n==> ${p_label}`);
@@ -45,8 +62,8 @@ function run(p_label, p_command, p_args, p_cwd, p_env) {
 }
 
 function adb(p_args) {
-  const result = spawnSync('adb', p_args, { encoding: 'utf8', shell: false });
-  if (result.error) fail(`could not run adb (${result.error.message}). Is the Android platform-tools folder on PATH?`);
+  const result = spawnSync(adbCommand, p_args, { encoding: 'utf8', shell: false });
+  if (result.error) fail(`could not run adb (${result.error.message}). Set ANDROID_HOME or add Android platform-tools to PATH.`);
   return result.stdout.trim();
 }
 
@@ -56,7 +73,8 @@ const metroIsRunning = () =>
     () => false,
   );
 
-// 1. Pick the device. Gradle and adb both target it, so a second phone or tablet never gets in the way.
+// 1. Pick the devices. --device remains useful when only one phone or tablet
+// should receive a build; otherwise deploy to every authorized connection.
 const attached = adb(['devices'])
   .split(/\r?\n/)
   .slice(1)
@@ -65,13 +83,8 @@ const attached = adb(['devices'])
   .map(([serial]) => serial);
 if (attached.length === 0) fail('no device is connected (or it is unauthorized/offline). Check `adb devices`.');
 if (requestedDevice && !attached.includes(requestedDevice)) fail(`device "${requestedDevice}" is not connected. Connected:\n  ${attached.join('\n  ')}`);
-if (!requestedDevice && attached.length > 1) {
-  const named = attached.map((serial) => `  ${serial}  (${adb(['-s', serial, 'shell', 'getprop', 'ro.product.model'])})`);
-  fail(`more than one device is connected; choose one with --device <serial>:\n${named.join('\n')}`);
-}
-const device = requestedDevice ?? attached[0];
-const adbArgs = (p_args) => ['-s', device, ...p_args];
-console.log(`deploy-android: ${release ? 'release' : 'debug'} build for ${device}`);
+const devices = requestedDevice ? [requestedDevice] : attached;
+console.log(`deploy-android: ${release ? 'release' : 'debug'} build for ${devices.join(', ')}`);
 
 // 2. Start Metro (debug only) so it warms up while Rust compiles.
 let metroWasRunning = true;
@@ -100,10 +113,13 @@ run(
   root,
 );
 
-// 4. Install with Gradle; ANDROID_SERIAL tells it which device.
+// 4. Install with Gradle. Reusing the Gradle build means later device installs
+// are incremental, while ANDROID_SERIAL keeps each install unambiguous.
 const androidDir = path.join(root, 'apps', 'alakazam', 'mobile', 'android');
 const gradlew = isWindows ? `"${path.join(androidDir, 'gradlew.bat')}"` : path.join(androidDir, 'gradlew');
-run('Install the app with Gradle', gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+for (const device of devices) {
+  run(`Install the app with Gradle (${device})`, gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+}
 
 // 5. Wait for Metro, forward it to the device and launch.
 if (startMetro) {
@@ -116,12 +132,16 @@ if (startMetro) {
     }
     if (!ready) fail('Metro did not start within 60 seconds. Check the Metro terminal window (or metro.log).');
   }
-  run('Forward Metro to the device', 'adb', adbArgs(['reverse', 'tcp:8081', 'tcp:8081']), root);
+  for (const device of devices) {
+    run(`Forward Metro to ${device}`, adbCommand, ['-s', device, 'reverse', 'tcp:8081', 'tcp:8081'], root);
+  }
 }
 
 if (launch) {
   // Installing over a running app leaves its old process on screen (black, with the old native library). Stop it so the launch starts fresh.
-  run('Stop the running app', 'adb', adbArgs(['shell', 'am', 'force-stop', appId]), root);
-  run('Launch the app', 'adb', adbArgs(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1']), root);
+  for (const device of devices) {
+    run(`Stop the running app (${device})`, adbCommand, ['-s', device, 'shell', 'am', 'force-stop', appId], root);
+    run(`Launch the app (${device})`, adbCommand, ['-s', device, 'shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], root);
+  }
 }
 console.log(`\ndeploy-android: done in ${((Date.now() - startedAt) / 1000).toFixed(0)}s.`);

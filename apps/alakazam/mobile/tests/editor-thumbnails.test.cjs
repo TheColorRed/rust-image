@@ -96,7 +96,7 @@ function fixture() {
     findSection: key => (key === 'moods' ? section : { key, previewThumbnails: false, controls: [] }),
   };
   const api = load(
-    'editor-thumbnails',
+    'editor/editor-thumbnails',
     {
       '@alakazam/mobile': bindings,
       'react-native': { PixelRatio: { get: () => 2.5 } },
@@ -188,7 +188,7 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
   const timers = new Map();
   let id = 0;
   const replay = load(
-    'editor-replay',
+    'editor/editor-replay',
     {
       '@alakazam/mobile': f.bindings,
       rxjs: require('rxjs'),
@@ -204,11 +204,11 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
         sliderDefault: () => 0,
         sliderValues: () => ({}),
       },
-      '@/src/lib/editor-history': { recordDraftStep() {}, comparisonImage: () => null },
-      '@/src/lib/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
+      '@/src/lib/editor/editor-history': { recordDraftStep() {}, comparisonImage: () => null },
+      '@/src/lib/editor/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
       '@/src/lib/analysis': { personIn: () => undefined },
       '@/src/lib/layers': { withLayers: photo => photo },
-      '@/src/lib/editor-pictures': loadTs('lib/editor-pictures.ts', {
+      '@/src/lib/editor/editor-pictures': loadTs('lib/editor/editor-pictures.ts', {
         '@abra/core/canvas': { ResizeTarget: { Fit: { new: size => size } } },
         '@abra/core/transform': { resize: () => ({ apply() {} }) },
         '@/src/state/gestures': { previewBox: subject({ width: 320, height: 200 }) },
@@ -218,8 +218,9 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       }),
       '@/src/lib/skin-adjustments': {},
       '@/src/state/person-selection': { personSelection: subject(null) },
-      '@/src/lib/editor-thumbnails': f,
+      '@/src/lib/editor/editor-thumbnails': f,
       '@/src/state/edits': edits,
+      '@/src/state/analysis': { analysisVersion$: subject(0) },
       '@/src/state/gestures': { previewBox$: subject({ width: 320, height: 200 }) },
       '@/src/state/preview': {
         controlThumbnails: thumbnails,
@@ -307,7 +308,7 @@ test('closing an editor during async decoding releases late native images withou
       resolveDecode = resolve;
     });
   const nativeImages = load('native-image', { '@alakazam/mobile': f.bindings });
-  const api = load('editor-session', {
+  const api = load('editor/editor-session', {
     '@alakazam/mobile': { ...f.bindings, personDetectionDownloaded: () => true, readImageAsync },
     'react-native': { Alert: { alert() {} }, AppState: { addEventListener: () => ({ remove() {} }) } },
     '@/src/lib/batch': { batch: run => run() },
@@ -315,17 +316,17 @@ test('closing an editor during async decoding releases late native images withou
     '@/src/state/analysis': { people: subject(null), skinMask: subject(null) },
     '@/src/lib/analysis': { personIn: () => undefined, clearAnalysis() {} },
     '@/src/lib/eye-makeup': { makeupMasks: () => undefined },
-    '@/src/lib/editor-preloads': { releasePreloads() {}, clearPreloads() {} },
+    '@/src/lib/editor/editor-preloads': { releasePreloads() {}, clearPreloads() {} },
     '@/src/lib/edit-source': { resolveLocalPhotoPath: async () => 'photo.png', toLocalPath: path => path },
-    '@/src/lib/editor-history': { clearTimeline() {}, keepBlemishBase() {} },
-    '@/src/lib/editor-preview': { startEditorPreview: () => ({ unsubscribe() {} }) },
-    '@/src/lib/editor-replay': {
+    '@/src/lib/editor/editor-history': { clearTimeline() {}, keepBlemishBase() {} },
+    '@/src/lib/editor/editor-preview': { startEditorPreview: () => ({ unsubscribe() {} }) },
+    '@/src/lib/editor/editor-replay': {
       startReplay: () => ({ unsubscribe() {} }),
       clearControlThumbnails() {},
       renderRecipe() {},
       releaseShownImages() {},
     },
-    '@/src/lib/editor-pictures': { showStandIn() {} },
+    '@/src/lib/editor/editor-pictures': { showStandIn() {} },
     '@/src/lib/error-message': { errorMessage: String },
     '@/src/lib/native-image': nativeImages,
     '@/src/lib/project-store': { projectImageUri: () => '' },

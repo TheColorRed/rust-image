@@ -5,7 +5,7 @@
 //! skin classes into an Abra [`Mask`]. It is [`AiModel`] with the model's manifest built in, so a caller only needs
 //! the `.onnx` file; the manifest says how the model is fed and read.
 
-use abra_ai_core::{AiError, AiModel, AiOutput};
+use abra_ai_core::{AiError, AiModel, AiOutput, ImageAi, ReportsProgress};
 use abra_core::Image;
 pub use mask::Mask;
 use std::path::Path;
@@ -19,14 +19,16 @@ pub struct BodySegmentation {
 
 pub mod prelude {
   pub use crate::{BodySegmentation, Mask};
-  pub use abra_ai_core::AiError;
+  pub use abra_ai_core::{AiError, ImageAi, ReportsProgress};
 }
 
-impl BodySegmentation {
+impl ImageAi for BodySegmentation {
+  type Output = Mask;
+
   /// Loads a MediaPipe Selfie Multiclass ONNX model from `p_model_path`.
   ///
   /// The caller decides where the model lives. It must have this model's input and output layout.
-  pub fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
+  fn load(p_model_path: impl AsRef<Path>) -> Result<Self, AiError> {
     Ok(Self {
       model: AiModel::load_with_manifest(p_model_path, MANIFEST)?,
     })
@@ -37,8 +39,14 @@ impl BodySegmentation {
   /// The model is designed for selfie-like images and internally processes a
   /// stretched 256x256 RGB image. The returned mask is resized to the input
   /// image dimensions.
-  pub fn process(&self, p_image: &Image) -> Result<Mask, AiError> {
-    match self.model.run(p_image)? {
+  fn process(&self, p_image: &Image) -> Result<Mask, AiError> {
+    self.process_reporting(p_image, &|_| {})
+  }
+}
+
+impl ReportsProgress for BodySegmentation {
+  fn process_reporting(&self, p_image: &Image, p_progress: &dyn Fn(f32)) -> Result<Mask, AiError> {
+    match self.model.run_reporting(p_image, p_progress)? {
       AiOutput::Mask(mask) => Ok(mask),
       _ => Err(AiError::inference_failed("The skin model did not return a mask")),
     }

@@ -1,5 +1,5 @@
 import { scaleBetween, type ToolContext } from '@/src/lib/edit-sections';
-import { previewPixels, shrunkOf } from '@/src/lib/editor-pictures';
+import { previewPixels, shrunkOf } from '@/src/lib/editor/editor-pictures';
 import { LiveRenderer } from '@/src/lib/live-renderer';
 import { previewBox, previewBox$ } from '@/src/state/gestures';
 import { liveSurface } from '@/src/state/preview';

@@ -15,9 +15,9 @@ const babel = require(
  * The editor's replay, loaded with its real logic and stand-ins for the native images and the rest of the editor. An image
  * records how it was made, so a test can tell the full-size photo from the screen-size copy of it.
  */
-function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
+function fixture({ box = { width: 320, height: 200 }, deferred = false, preloaded = true } = {}) {
   const subject = value => new BehaviorSubject(value);
-  const filename = path.join(__dirname, '..', 'src', 'lib', 'editor-replay.ts');
+  const filename = path.join(__dirname, '..', 'src', 'lib', 'editor', 'editor-replay.ts');
   const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
     filename,
     babelrc: false,
@@ -72,7 +72,7 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
   // The screen-size pictures are a module of their own, and are loaded as they are. The preview box is in points and the
   // screen has two pixels to a point.
   const pixelsBox = subject({ width: box.width / 2, height: box.height / 2 });
-  const pictures = loadTs('lib/editor-pictures.ts', {
+  const pictures = loadTs('lib/editor/editor-pictures.ts', {
     '@abra/core/canvas': { ResizeTarget: { Fit: { new: size => size } } },
     '@abra/core/transform': {
       resize: size => ({
@@ -99,7 +99,7 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
       findSection: key => ({
         key,
         previewThumbnails: false,
-        controls: [{ key: 'size', kind: 'slider', preload() {} }],
+        controls: [{ key: 'size', kind: 'slider', ...(preloaded ? { preload() {} } : {}) }],
       }),
       isSliderApplied: () => true,
       layerSheet: () => undefined,
@@ -108,13 +108,13 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
       scaleBetween: (image, full) => (full ? Math.min(1, image.width() / full.width()) : 1),
       sliderDefault: () => 0,
     },
-    '@/src/lib/editor-preloads': {
+    '@/src/lib/editor/editor-preloads': {
       preloadFor: (_control, width, source) => preloads.asked.push([width, source.name]),
       clearPreloads: () => preloads.cleared++,
       releasePreloads: () => preloads.cleared++,
     },
-    '@/src/lib/editor-pictures': pictures,
-    '@/src/lib/editor-thumbnails': { buildControlThumbnails() {} },
+    '@/src/lib/editor/editor-pictures': pictures,
+    '@/src/lib/editor/editor-thumbnails': { buildControlThumbnails() {} },
     '@/src/lib/skin-adjustments': {
       isPersonAdjustment: () => false,
       adjustmentKey: key => key,
@@ -123,6 +123,7 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false } = {}) {
     '@/src/lib/analysis': { personIn: () => undefined },
     '@/src/lib/layers': { withLayers: photo => photo },
     '@/src/state/edits': edits,
+    '@/src/state/analysis': { analysisVersion$: subject(0) },
     '@/src/state/gestures': { previewBox$: previewBoxes },
     '@/src/state/person-selection': { personSelection: subject({}) },
     '@/src/state/preview': { controlThumbnails: subject({}) },
@@ -225,7 +226,7 @@ test('the full-size edit is made only when something asks for it, and is not dra
 });
 
 test('when every control only makes the photo remember effects, the full-size photo is what is drawn', () => {
-  const f = fixture({ deferred: true });
+  const f = fixture({ deferred: true, preloaded: false });
   const base = f.session.editBaseImage.value;
   const subscription = replayOnce(f);
   const shown = f.previewSourceImage.value;
@@ -325,14 +326,15 @@ test('ending the session frees every screen-size picture and forgets the out of 
   subscription.unsubscribe();
 });
 
-test('a control is preloaded when it is clicked, from the screen-size photo, and not before; ending the session clears them', () => {
+test('the controls of the open section are preloaded from the screen-size photo; ending the session clears them', () => {
   const f = fixture();
   const subscription = replayOnce(f);
   f.flush();
-  assert.deepEqual(f.preloads.asked, [], 'loading the photo and opening the tab preloads nothing');
-  f.edits.focusedControlKey.next('size');
-  f.flush();
-  assert.deepEqual(f.preloads.asked, [[320, 'base shrunk to 320x200']]);
+  assert.ok(f.preloads.asked.length > 0, 'opening the section preloads what its controls need');
+  assert.ok(
+    f.preloads.asked.every(([width, photo]) => width === 320 && photo === 'base shrunk to 320x200'),
+    'from the screen-size photo',
+  );
   assert.equal(f.preloads.cleared, 0, 'the same photo keeps them');
   f.replay.releaseShownImages();
   assert.equal(f.preloads.cleared, 1, 'the end of the session clears them');

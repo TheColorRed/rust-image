@@ -9,7 +9,7 @@ export const detail: EditSection = {
     {
       kind: 'action',
       key: 'action-smooth',
-      label: 'Smooth',
+      label: 'Soften',
       deferred: true,
       tool: photo => smooth().applyDeferred(photo),
       thumb: photo => smooth().apply(photo),

@@ -9,15 +9,16 @@
 //! asking for another kind fails with `AiError`.
 //!
 //! The library's `Mask` is handed out as the bindings' `Mask` handle, so `Instance` and `LabelMap`, which hold masks,
-//! are handles too. The library's `ImageModel` (image to image, such as super resolution) and the pieces under
-//! `AiModel` (`OnnxSession`, tiling, tensors) are not here.
+//! are handles too. The library's `ImageModel` (image to image, such as super resolution) is here too, with its `on`
+//! listener: `model.on({ update: (progress) => .. }).process(image)`. The pieces under `AiModel` and `ImageModel`
+//! (`OnnxSession`, tiling, tensors) are not here.
 
 use std::sync::Arc;
 
 use abra::abra_core::PointF;
 use abra_ai_core::{
-  AiError, AiModel as Model, AiOutput as Output, Bounds, Instance as FoundInstance, LabelMap as Labels, Landmark,
-  Landmarks,
+  AiError, AiModel as Model, AiOutput as Output, Bounds, ControlParams, ImageAi, ImageAiWithControl,
+  ImageModel as ImgModel, Instance as FoundInstance, LabelMap as Labels, Landmark, Landmarks, ReportsProgress,
 };
 
 use crate::{Image, Mask};
@@ -175,6 +176,11 @@ impl LabelMap {
 pub struct AiOutput(Output);
 
 impl AiOutput {
+  /// A handle for a result of the library.
+  pub fn from_core(output: Output) -> Self {
+    Self(output)
+  }
+
   fn wrong_kind(&self, wanted: &str) -> AiError {
     AiError::invalid_input(format!("The model returned {:?}, not {wanted}", self.kind()))
   }
@@ -229,6 +235,13 @@ impl AiOutput {
 #[derive(uniffi::Object)]
 pub struct AiModel(Model);
 
+impl AiModel {
+  /// The model of the library that this holds.
+  pub fn core(&self) -> &Model {
+    &self.0
+  }
+}
+
 #[uniffi::export]
 impl AiModel {
   /// Loads a model and the `.yml` manifest beside it (the same path with a `.yml` extension).
@@ -267,6 +280,108 @@ impl AiModel {
   /// Runs the model on a picture of any size.
   pub fn run(&self, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
     Ok(Arc::new(AiOutput(self.0.run(&image.core())?)))
+  }
+
+  /// Listens to the progress of what the returned handle runs. The model runs in one piece, so progress is by stage.
+  pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<AiListening> {
+    Arc::new(AiListening { model: self, listener })
+  }
+}
+
+/// An AI model with a listener for the progress of what it runs, from `AiModel.on`.
+#[derive(uniffi::Object)]
+pub struct AiListening {
+  model: Arc<AiModel>,
+  listener: Arc<dyn ProgressListener>,
+}
+
+#[uniffi::export]
+impl AiListening {
+  /// Runs the model like `AiModel.run`, telling the listener how far along it is.
+  pub fn process(&self, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
+    let listener = &self.listener;
+    let output = self.model.0.on(|progress| listener.update(progress)).process(&image.core())?;
+    Ok(Arc::new(AiOutput(output)))
+  }
+}
+
+/// Hears how far along a run is. uniffi has no bare closures, so the closure of the library's `ImageModel::on` is this
+/// one-method interface here.
+#[uniffi::export(with_foreign)]
+pub trait ProgressListener: Send + Sync {
+  /// Called with a value from `0` to `1`: `0` when the run starts, then the share finished, ending on `1`.
+  fn update(&self, progress: f32);
+}
+
+/// An image-to-image model, such as super resolution, loaded from its `.onnx` file and the manifest beside it.
+#[derive(uniffi::Object)]
+pub struct ImageModel(ImgModel);
+
+#[uniffi::export]
+impl ImageModel {
+  /// Loads a model and the `.yml` manifest beside it (the same path with a `.yml` extension).
+  #[uniffi::constructor]
+  pub fn load(onnx_path: String) -> Result<Self, AiError> {
+    Ok(Self(ImgModel::load(onnx_path)?))
+  }
+
+  /// The name of the model.
+  pub fn name(&self) -> String {
+    self.0.name().to_string()
+  }
+
+  /// How many times larger the output is than the input.
+  pub fn scale_factor(&self) -> f32 {
+    self.0.scale_factor()
+  }
+
+  /// Whether the model takes control values.
+  pub fn has_control(&self) -> bool {
+    self.0.has_control()
+  }
+
+  /// Processes a picture, using the default control values when the model takes them.
+  pub fn process(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+    Ok(Arc::new(Image::from_core(self.0.process(&image.core())?)))
+  }
+
+  /// Processes a picture with control values, one for each of the model's controls.
+  pub fn process_with_control(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+    let output = self.0.process_with_control(&image.core(), &ControlParams::new(&control))?;
+    Ok(Arc::new(Image::from_core(output)))
+  }
+
+  /// Listens to the progress of what the returned handle processes.
+  pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<Listening> {
+    Arc::new(Listening { model: self, listener })
+  }
+}
+
+/// A model with a listener for the progress of what it processes, from `ImageModel.on`.
+#[derive(uniffi::Object)]
+pub struct Listening {
+  model: Arc<ImageModel>,
+  listener: Arc<dyn ProgressListener>,
+}
+
+#[uniffi::export]
+impl Listening {
+  /// Processes a picture like `ImageModel.process`, telling the listener how far along it is.
+  pub fn process(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+    let listener = &self.listener;
+    let output = self.model.0.on(|progress| listener.update(progress)).process(&image.core())?;
+    Ok(Arc::new(Image::from_core(output)))
+  }
+
+  /// Processes a picture like `ImageModel.process_with_control`, telling the listener how far along it is.
+  pub fn process_with_control(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+    let listener = &self.listener;
+    let output = self
+      .model
+      .0
+      .on(|progress| listener.update(progress))
+      .process_with_control(&image.core(), &ControlParams::new(&control))?;
+    Ok(Arc::new(Image::from_core(output)))
   }
 }
 
@@ -313,6 +428,36 @@ mod tests {
         "{folder}: asking for the wrong kind fails"
       );
     }
+  }
+
+  struct Recorder(std::sync::Mutex<Vec<f32>>);
+
+  impl ProgressListener for Recorder {
+    fn update(&self, progress: f32) {
+      self.0.lock().unwrap().push(progress);
+    }
+  }
+
+  #[test]
+  fn a_listener_hears_progress_from_zero_to_one_through_the_bridge() {
+    let Some(path) = bundled("super-resolution", "MewZoom-V1-2X.onnx") else { return };
+    let recorder = Arc::new(Recorder(Default::default()));
+    let output = Arc::new(ImageModel::load(path).unwrap()).on(recorder.clone()).process(photo(64)).unwrap();
+    assert_eq!(output.core().dimensions::<u32>(), (128, 128));
+    let heard = recorder.0.lock().unwrap();
+    assert_eq!(heard.first(), Some(&0.0));
+    assert_eq!(heard.last(), Some(&1.0));
+    assert!(heard.windows(2).all(|pair| pair[0] <= pair[1]), "progress only goes forward: {heard:?}");
+  }
+
+  #[test]
+  fn an_ai_model_reports_its_stages_through_the_bridge() {
+    let Some(path) = bundled("body-segmentation", "selfie_multiclass_256x256.onnx") else { return };
+    let recorder = Arc::new(Recorder(Default::default()));
+    let model = Arc::new(AiModel::load(path).unwrap());
+    let output = model.on(recorder.clone()).process(photo(64)).unwrap();
+    assert_eq!(output.kind(), AiOutputKind::Mask);
+    assert_eq!(*recorder.0.lock().unwrap(), vec![0.0, 0.1, 0.9, 1.0]);
   }
 
   #[test]

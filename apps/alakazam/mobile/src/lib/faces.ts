@@ -1,8 +1,9 @@
 import { AiModel } from '@abra/core';
 import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTranslated, type Rect } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
-import { aiModelPath } from '@alakazam/mobile';
+import { aiModelPath, runAiModelAsync } from '@alakazam/mobile';
 import { personIn } from '@/src/lib/analysis';
+import { aiProgress } from '@/src/state/ai-progress';
 import { faceBoxes, people } from '@/src/state/analysis';
 
 export const PERSON_DETECTION = 'person-detection';
@@ -51,14 +52,23 @@ export const inside = (box: Rect, frame: Rect, side = MIN_CROP_SIDE): Rect | und
   return part.width >= side && part.height >= side ? part : undefined;
 };
 
-/** Runs `work`, then frees everything it kept, as the editor does for its images. Whatever the library hands back is kept. */
+/**
+ * Runs `work`, then frees everything it kept, as the editor does for its images. Whatever the library hands back is kept. When
+ * `work` is async, what it kept is freed once it is done.
+ */
 export function owning<T>(work: (keep: <V>(value: V) => V) => T): T {
   const owned: unknown[] = [];
+  const free = () => owned.forEach((value) => (value as { uniffiDestroy(): void }).uniffiDestroy());
+  let result: T;
   try {
-    return work((value) => (owned.push(value), value));
-  } finally {
-    owned.forEach((value) => (value as { uniffiDestroy(): void }).uniffiDestroy());
+    result = work((value) => (owned.push(value), value));
+  } catch (error) {
+    free();
+    throw error;
   }
+  if (result instanceof Promise) return result.finally(free) as T;
+  free();
+  return result;
 }
 
 /** One face the models found: what the face parser labeled in a crop around it, and where that crop is on the photo. */
@@ -124,6 +134,65 @@ export function* findFaces(photo: ImageLike, keep: <V>(value: V) => V): Generato
 }
 
 /**
+ * `findFaces` with every model run on a worker thread, so the app keeps drawing and answering touches while it looks. The steps are
+ * the same, so a change to how a face is found goes in both.
+ */
+export async function* findFacesAsync(photo: ImageLike, keep: <V>(value: V) => V): AsyncGenerator<FoundFace> {
+  const people = model(PERSON_DETECTION);
+  const parser = model(FACE_PARSING);
+  const landmarker = model(FACE_LANDMARKS);
+  if (!people || !parser || !landmarker) return;
+  const run = async (loaded: NonNullable<typeof people>, image: ImageLike) =>
+    keep(await runAiModelAsync(loaded, image as Parameters<typeof runAiModelAsync>[1]));
+
+  // The bar under the photo: moving while the people are found, then how many of them have been looked at.
+  aiProgress.next({ ...aiProgress.value, faces: null });
+  let failed = false;
+  try {
+    const frame = rectNew({ x: 0, y: 0 }, { width: photo.width(), height: photo.height() });
+    const found = (await run(people, photo)).instances();
+    for (const [index, person] of found.entries()) {
+      aiProgress.next({ ...aiProgress.value, faces: index / found.length });
+      const body = keep(person).bounds();
+
+      for (const fraction of HEAD_SQUARES) {
+        const side = body.height * fraction;
+        const head = inside(
+          rectNew({ x: body.x + body.width / 2 - side / 2, y: body.y - side * HEAD_RISE }, { width: side, height: side }),
+          frame,
+        );
+        if (!head) continue;
+
+        const seen = keep(keep(keep(await run(parser, keep(photo.cropped(head.x, head.y, head.width, head.height)))).labels()).maskNamed(EYES)).bounds(0);
+        if (!seen) continue;
+
+        const zoom = inside(rectScaled(rectSquared(rectTranslated(seen, head.x, head.y)), EYES_TO_CROP, EYES_TO_CROP), frame);
+        if (!zoom) continue;
+        const labels = keep((await run(parser, keep(photo.cropped(zoom.x, zoom.y, zoom.width, zoom.height)))).labels());
+        const features = keep(labels.maskNamed(FACE_FEATURES)).bounds(0);
+        const face =
+          features && inside(rectTranslated(rectScaled(rectSquared(features), FACE_GROWTH, FACE_GROWTH), zoom.x, zoom.y), frame);
+        if (!face) continue;
+
+        const faceImage = keep(photo.cropped(face.x, face.y, face.width, face.height));
+        const landmarks = (await run(landmarker, faceImage)).landmarks();
+        if (landmarks.presence < MIN_FACE_PRESENCE) continue;
+
+        yield { body, labels, zoom, face, faceImage, landmarks };
+        break;
+      }
+    }
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    // A search that failed did no work to count, so it leaves nothing on the bar.
+    const { faces: _earlier, ...others } = aiProgress.value;
+    aiProgress.next(failed ? others : { ...aiProgress.value, faces: 1 });
+  }
+}
+
+/**
  * Names a face by the box around its person, as fractions of the photo, so that the name is the same at every size of the photo
  * and the masks made for one size can be resized for another.
  */
@@ -132,52 +201,71 @@ export const boxKey = (body: Rect, photo: ImageLike): string =>
     .map(fraction => fraction.toFixed(5))
     .join(',');
 
+let findingFaceBoxes: Promise<void> | undefined;
+
 /**
- * Finds the face of each person in `photo` with the face models, unless that has been done, and keeps its square in `faceBoxes`, in
- * the pixels the people were found in. Each face goes to the person whose box has the face's person's middle in it. Does nothing
- * until the people are known, and a model that is missing leaves `faceBoxes` empty.
+ * Finds the face of each person in `photo` with the face models, in the background, unless that has been done (it is saved with the
+ * project, so it is found once per photo), and keeps its square in `faceBoxes`, in the pixels the people were found in. Each face goes
+ * to the person whose box has the face's person's middle in it. Does nothing until the people are known. A model that is missing
+ * leaves `faceBoxes` unset, so it is found when the models are there; no face found at all is kept, as an empty set.
  */
-export const findFaceBoxes = (photo: ImageLike) => {
+export const findFaceBoxes = (photo: ImageLike): Promise<void> => {
   const found = people.value;
-  if (!found || faceBoxes.value) return;
-  const boxes: Record<number, Rect> = {};
-  owning(keep => {
-    for (const { body, face: crop, landmarks } of findFaces(photo, keep)) {
-      // The landmarks cover the whole face, so the box around them is the face even when it is turned or tilted. The landmark
-      // model draws its mesh inside the crop it is given, so a crop cut too tight gives a mesh that is too small: look again in a
-      // crop made around the first mesh, and keep the second look when the landmark model accepts it.
-      const bounds = (mesh: typeof landmarks, area: Rect) => {
-        const xs = mesh.landmarks.map(landmark => landmark.point.x);
-        const ys = mesh.landmarks.map(landmark => landmark.point.y);
-        return {
-          x: area.x + (Math.min(...xs) + Math.max(...xs)) / 2,
-          y: area.y + (Math.min(...ys) + Math.max(...ys)) / 2,
-          side: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
-        };
-      };
-      let { x, y, side } = bounds(landmarks, crop);
-      const wider = inside(
-        rectNew({ x: x - side, y: y - side }, { width: side * 2, height: side * 2 }),
-        rectNew({ x: 0, y: 0 }, { width: photo.width(), height: photo.height() }),
-      );
-      const landmarker = model(FACE_LANDMARKS);
-      if (wider && landmarker) {
-        const again = keep(landmarker.run(keep(photo.cropped(wider.x, wider.y, wider.width, wider.height)))).landmarks();
-        if (again.presence >= MIN_FACE_PRESENCE) ({ x, y, side } = bounds(again, wider));
-      }
-      side *= OUTLINE_GROWTH;
-      const face = { x: x - side / 2, y: y - side / 2 - side * OUTLINE_RISE, width: side, height: side };
-      const middle = { x: body.x + body.width / 2, y: body.y + body.height / 2 };
-      const owner = found.find(person => {
-        const area = personIn(photo.width(), person.id)!;
-        return middle.x >= area.x && middle.x <= area.x + area.width && middle.y >= area.y && middle.y <= area.y + area.height;
+  if (!found || faceBoxes.value || FACE_MODELS.some(role => !model(role))) return Promise.resolve();
+  // Opening a person control again while it is still looking does not start a second search.
+  findingFaceBoxes ??= (async () => {
+    // The editor frees its own copy of the photo when the session ends, which can be before the models are done.
+    const mine = photo.clone();
+    const boxes: Record<number, Rect> = {};
+    const started = Date.now();
+    try {
+      await owning(async keep => {
+        for await (const { body, face: crop, landmarks } of findFacesAsync(mine, keep)) {
+          // The landmarks cover the whole face, so the box around them is the face even when it is turned or tilted. The landmark
+          // model draws its mesh inside the crop it is given, so a crop cut too tight gives a mesh that is too small: look again in a
+          // crop made around the first mesh, and keep the second look when the landmark model accepts it.
+          const bounds = (mesh: typeof landmarks, area: Rect) => {
+            const xs = mesh.landmarks.map(landmark => landmark.point.x);
+            const ys = mesh.landmarks.map(landmark => landmark.point.y);
+            return {
+              x: area.x + (Math.min(...xs) + Math.max(...xs)) / 2,
+              y: area.y + (Math.min(...ys) + Math.max(...ys)) / 2,
+              side: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
+            };
+          };
+          let { x, y, side } = bounds(landmarks, crop);
+          const wider = inside(
+            rectNew({ x: x - side, y: y - side }, { width: side * 2, height: side * 2 }),
+            rectNew({ x: 0, y: 0 }, { width: mine.width(), height: mine.height() }),
+          );
+          const landmarker = model(FACE_LANDMARKS);
+          if (wider && landmarker) {
+            const again = keep(
+              await runAiModelAsync(landmarker, keep(mine.cropped(wider.x, wider.y, wider.width, wider.height)) as Parameters<typeof runAiModelAsync>[1]),
+            ).landmarks();
+            if (again.presence >= MIN_FACE_PRESENCE) ({ x, y, side } = bounds(again, wider));
+          }
+          side *= OUTLINE_GROWTH;
+          const face = { x: x - side / 2, y: y - side / 2 - side * OUTLINE_RISE, width: side, height: side };
+          const middle = { x: body.x + body.width / 2, y: body.y + body.height / 2 };
+          const owner = found.find(person => {
+            const area = personIn(mine.width(), person.id)!;
+            return middle.x >= area.x && middle.x <= area.x + area.width && middle.y >= area.y && middle.y <= area.y + area.height;
+          });
+          if (!owner || boxes[owner.id]) continue;
+          const scale = owner.mask.width() / mine.width();
+          boxes[owner.id] = { x: face.x * scale, y: face.y * scale, width: face.width * scale, height: face.height * scale };
+        }
       });
-      if (!owner || boxes[owner.id]) continue;
-      const scale = owner.mask.width() / photo.width();
-      boxes[owner.id] = { x: face.x * scale, y: face.y * scale, width: face.width * scale, height: face.height * scale };
+      if (__DEV__) console.debug('[faces] face boxes found in the background, ms:', Date.now() - started, 'faces:', Object.keys(boxes).length);
+      // The photo may have been closed while the models ran, and then what they found is for a photo that is gone.
+      if (people.value === found) faceBoxes.next(boxes);
+    } finally {
+      (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+      findingFaceBoxes = undefined;
     }
-  });
-  faceBoxes.next(boxes);
+  })();
+  return findingFaceBoxes;
 };
 
 /**
