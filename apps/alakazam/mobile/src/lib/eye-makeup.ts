@@ -248,14 +248,14 @@ const regionAt = (
  * Which set of masks `makeupMasks` makes. A project saves the masks it made and opens with those, so a project saved with an older set
  * (before the hair was one of them) has the models run once more, and saves the new set. Raise it when `makeupMasks` makes a new kind.
  */
-export const MAKEUP_MASKS_VERSION = 3;
+export const MAKEUP_MASKS_VERSION = 4;
 
 /**
  * The skin model read for its hair class instead of its skin classes. It is the same `.onnx` file, so it needs no download of its own:
  * only the manifest differs (`mask_classes` is the hair, class 1). The model looks at the whole photo, so it finds hair far from the face.
  */
-const HAIR_MANIFEST = `name: selfie_multiclass_256x256_hair
-description: Hair of the six-class selfie segmentation
+const selfieManifest = (name: string, classes: number[]) => `name: selfie_multiclass_256x256_${name}
+description: The ${name} of the six-class selfie segmentation
 decoder: semantic-mask
 params:
   input_size: 256
@@ -263,11 +263,19 @@ params:
   input_fit: stretch
   output_layout: nhwc
   class_count: 6
-  mask_classes: [1]
+  mask_classes: [${classes.join(', ')}]
 classes: [background, hair, body skin, face skin, clothes, others]
 `;
 
-let hairSegmenter: ReturnType<typeof AiModel.load> | undefined;
+/**
+ * What is found in the whole photo with the model: the hair (class 1), and the skin of the face and body (classes 2 and 3), so the
+ * hair can be kept off the skin. Each is the same file read with a different manifest, so the hair is `hair|all` and the skin `bodyskin|all`.
+ */
+const WHOLE_PHOTO = [
+  { key: 'hair|all', manifest: selfieManifest('hair', [1]) },
+  { key: 'bodyskin|all', manifest: selfieManifest('skin', [2, 3]) },
+];
+const wholePhotoModels = new Map<string, ReturnType<typeof AiModel.load>>();
 
 /**
  * Runs face analysis once and keeps what every region of the Makeup group is made from: the lips, and the eye and eyebrow of each
@@ -303,13 +311,16 @@ export const makeupMasks = async (photo: ImageLike): Promise<Record<string, Mask
           if (brow.bounds(0)) made[`brow|${box}|${side}`] = place(brow);
         }
       }
-      // The hair is found in the whole photo, once, and not for each face.
-      hairSegmenter ??= AiModel.loadWithManifest(aiModelPath(SKIN_SEGMENTATION), HAIR_MANIFEST);
-      const found = keep(await runAiModelAsync(hairSegmenter, mine as Parameters<typeof runAiModelAsync>[1]));
-      // Kept in `made`, so it is not freed with the rest; one with no hair in it is.
-      const hair = found.mask();
-      if (hair.bounds(0)) made['hair|all'] = hair;
-      else (hair as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+      // The hair and the skin are found in the whole photo, once each, and not for each face.
+      for (const { key, manifest } of WHOLE_PHOTO) {
+        let segmenter = wholePhotoModels.get(key);
+        if (!segmenter) wholePhotoModels.set(key, (segmenter = AiModel.loadWithManifest(aiModelPath(SKIN_SEGMENTATION), manifest)));
+        const found = keep(await runAiModelAsync(segmenter, mine as Parameters<typeof runAiModelAsync>[1]));
+        // Kept in `made`, so it is not freed with the rest; one with nothing in it is.
+        const segment = found.mask();
+        if (segment.bounds(0)) made[key] = segment;
+        else (segment as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+      }
     });
   } catch (error) {
     // A model that failed part of the way leaves nothing behind.

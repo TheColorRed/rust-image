@@ -12,7 +12,7 @@ import { applyBlush } from '../blush';
 import { applySculpt } from '../contour';
 import { type EditSection } from '../edit-sections';
 import { applyEyeMakeup, makeupMasks, skinWithMouthEased } from '../eye-makeup';
-import { applyHairColor } from '../hair-color';
+import { applyHairColor, HAIR_MIDDLE, HAIR_REACH } from '../hair-color';
 import { applyLipLiner } from '../lip-liner';
 import { applyLipstick } from '../lipstick';
 import { applyTeethWhitening } from '../teeth';
@@ -117,12 +117,12 @@ const hairColors = [
 ];
 
 /**
- * Where Lighten / Darken goes for a hair color (-1 to 1): the color's own brightness, since the hair is made as light as the color is. The
- * numbers match `MIDDLE` and `REACH` in `hair-color.ts`: the slider's 0 is a brightness of 0.5, and each 1 is 0.45 more or less.
+ * Where Lighten / Darken goes for a hair color (-1 to 1): the color's own brightness (HSV value), since the middle color of the hair is
+ * the swatch's color. The slider's scale is the one `applyHairColor` reads.
  */
 const hairLightness = (color: string) => {
   const [r, g, b] = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16));
-  return Math.max(-1, Math.min(1, ((0.299 * r + 0.587 * g + 0.114 * b) / 255 - 0.5) / 0.45));
+  return Math.max(-1, Math.min(1, (Math.max(r, g, b) / 255 - HAIR_MIDDLE) / HAIR_REACH));
 };
 
 /**
