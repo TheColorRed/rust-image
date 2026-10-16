@@ -97,27 +97,33 @@ const faceColors = [
   { label: 'Smoky', color: '#55515A' },
 ];
 
-/**
- * The natural hair colors, each once. `shift` is how much lighter (up to 1) or darker (down to -1) than the photo's hair that color
- * should come out, since the hair's own light and shade are kept and a dark color alone would leave blond hair blond.
- */
+/** The natural hair colors, each once. How light the hair ends up is worked out from the color itself (see `hairLightness`). */
 const hairColors = [
-  { label: 'Black', color: '#1C1C1C', shift: -1 },
-  { label: 'Dark brown', color: '#3B2418', shift: -0.7 },
-  { label: 'Brown', color: '#5A3825', shift: -0.4 },
-  { label: 'Chestnut', color: '#7A4A2B', shift: -0.2 },
-  { label: 'Light brown', color: '#8E6A45', shift: 0.1 },
-  { label: 'Auburn', color: '#8B3A1E', shift: -0.3 },
-  { label: 'Ginger', color: '#B5532A', shift: 0 },
-  { label: 'Copper', color: '#C06A3B', shift: 0.1 },
-  { label: 'Dark blond', color: '#A8814F', shift: 0.25 },
-  { label: 'Strawberry blond', color: '#D9A06B', shift: 0.35 },
-  { label: 'Blond', color: '#E0C080', shift: 0.5 },
-  { label: 'Platinum', color: '#EFE6C8', shift: 0.8 },
-  { label: 'Gray', color: '#9A9A9A', shift: 0.2 },
-  { label: 'Silver', color: '#C9C9CC', shift: 0.5 },
-  { label: 'White', color: '#F4F4F4', shift: 0.9 },
+  { label: 'Black', color: '#1C1C1C' },
+  { label: 'Dark brown', color: '#3B2418' },
+  { label: 'Brown', color: '#5A3825' },
+  { label: 'Chestnut', color: '#7A4A2B' },
+  { label: 'Light brown', color: '#8E6A45' },
+  { label: 'Auburn', color: '#8B3A1E' },
+  { label: 'Ginger', color: '#B5532A' },
+  { label: 'Copper', color: '#C06A3B' },
+  { label: 'Dark blond', color: '#A8814F' },
+  { label: 'Strawberry blond', color: '#D9A06B' },
+  { label: 'Blond', color: '#E0C080' },
+  { label: 'Platinum', color: '#EFE6C8' },
+  { label: 'Gray', color: '#9A9A9A' },
+  { label: 'Silver', color: '#C9C9CC' },
+  { label: 'White', color: '#F4F4F4' },
 ];
+
+/**
+ * Where Lighten / Darken goes for a hair color (-1 to 1): the color's own brightness, since the hair is made as light as the color is. The
+ * numbers match `MIDDLE` and `REACH` in `hair-color.ts`: the slider's 0 is a brightness of 0.5, and each 1 is 0.45 more or less.
+ */
+const hairLightness = (color: string) => {
+  const [r, g, b] = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16));
+  return Math.max(-1, Math.min(1, ((0.299 * r + 0.587 * g + 0.114 * b) / 255 - 0.5) / 0.45));
+};
 
 /**
  * Makes a control's swatches from a list of colors. `values` lays the color out the way the control's sliders do, from the
@@ -643,14 +649,14 @@ export const beauty: EditSection = {
           max: [1, 1, 1, 1],
           step: [0.01, 0.01, 0.01, 0.01],
           // Opening the control gives the hair a natural chestnut at once, so there is something to change.
-          defaultValue: [1 - 22 / 360, 1, 0.65, -0.2],
+          defaultValue: [1 - 22 / 360, 1, 0.65, hairLightness('#7A4A2B')],
           picker: ['hue', undefined, undefined, undefined],
-          // The natural colors; each also sets how light or dark the hair comes out.
+          // The natural colors; each also sets how light the hair comes out, from its own color.
           swatches: swatchesOf(hairColors, (hue, saturation, _brightness, label) => [
             hue,
             1,
             saturation,
-            hairColors.find(each => each.label === label)!.shift,
+            hairLightness(hairColors.find(each => each.label === label)!.color),
           ]),
           // The AI finds the hair once, when the control opens; dragging only changes how it looks.
           preload: makeupMasks,
