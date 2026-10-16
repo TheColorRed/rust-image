@@ -126,6 +126,18 @@ guided(&photo, 8, 0.0001).apply(&mut mask_image);
 
 On the GPU it keeps its numbers in 32-bit float textures (16 bytes a pixel, two of them), so use a picture of the mask no larger than it needs to be. To grow or shrink a mask picture on the GPU, see [Grow and shrink](../filters/morphology).
 
+## Pull out thin parts against a background
+
+`Mask::from_color_mix` makes a mask of how much of each pixel is a foreground color rather than a background color, taking the pixel's color as a mix of the two. It is for thin parts such as hair, fur or smoke, where the pixels at the edge are part foreground and part background and a mask found by a model leaves them out or gets them wrong:
+
+```rust
+// `foreground` and `background` are pictures the size of the photo: the color the foreground has near each pixel and the color the
+// background has there. `rough` is a mask to use where the two colors are too alike to tell (and where they are less than 0.1 apart).
+let fine = Mask::from_color_mix(&photo, &foreground, &background, &rough, 0.1);
+```
+
+A pixel exactly the foreground color is `255`, exactly the background color is `0`, and halfway between is half. The two colors can differ at every pixel, so they are made from the sure foreground and the sure background of a rough mask: shrink the mask for the sure foreground and grow it (and invert it) for the sure background (`eroded` and `dilated`), keep only the photo's color inside each, and blur them outwards so they fill in under the uncertain band at the edge. The pictures must all be the same size, or it panics.
+
 ## Helpers
 
 `mask_value_to_alpha` maps a mask value directly to alpha. `rgba_to_gray` calculates grayscale using the ITU-R BT.601 approximation and ignores input alpha:
@@ -150,5 +162,6 @@ let gray = rgba_to_gray(&[255, 0, 0, 255]);
 | `apply_mask_to_pixels_rgba(pixels, mask)` | Apply mask bytes to an RGBA buffer.             |
 | `rgba_to_gray(rgba)`                      | Convert one RGBA pixel to grayscale.            |
 | `dilated(radius)` / `eroded(radius)`      | Move the edge of a mask out or in.              |
+| `from_color_mix(photo, fg, bg, fallback, least)` | The share of a foreground color in each pixel. |
 | `guided_filter(mask, photo, radius, eps)` | Make a mask follow the edges of a photo (color, CPU). |
 | `guided(photo, radius, eps)`              | The same by brightness, as an effect on the CPU or GPU. |

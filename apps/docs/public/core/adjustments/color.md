@@ -112,6 +112,22 @@ color::gradient_map(Gradient::rainbow().reverse()).apply(&mut image);
 
 Gradient maps replace RGB channels with sampled gradient colors. See [Gradient](../color/gradient) for custom stops and direction behavior.
 
+## Selective color
+
+`selective_color` changes the colors in one range of a picture without touching the others, as the cyan, magenta, yellow and black inks of a print. There are nine ranges: `Reds`, `Yellows`, `Greens`, `Cyans`, `Blues`, `Magentas`, which are the colors, and `Whites`, `Neutrals` and `Blacks`, which are the light, middle and dark tones whatever their color.
+
+```rust
+use abra::adjustments::prelude::color::{ColorRange, SelectiveMethod, selective_color};
+
+// Warm the middle tones and lighten the darkest parts, leaving every color range alone.
+selective_color()
+  .with_range(ColorRange::Neutrals, 0.0, 0.0, 0.3, -0.2)
+  .with_range(ColorRange::Blacks, 0.0, 0.0, 0.0, -0.4)
+  .apply(&mut image);
+```
+
+Each range is given a change of `[cyan, magenta, yellow, black]`: positive adds ink (darker, more of that color) and negative takes it away. Inks are worked out as in a print: the black ink is the darkest part of the pixel, and the cyan, magenta and yellow are what is left of each once the black is taken out, so a dark pixel has only a little of the three and changing its cyan changes only that little, while a black change lightens or darkens all of it. By default a change is a share of the ink a pixel already has (`SelectiveMethod::Relative`), so a pixel with none of that ink is not changed; `with_method(SelectiveMethod::Absolute)` adds a fixed amount instead. A pixel belongs to several ranges at once and each range's change is scaled by how much it belongs: the primary it is most of (by `max - mid`), the secondary it is least of (by `mid - min`), the whites by `min`, the blacks by `1 - max`, and the neutrals by how near both `max` and `min` are to half. The alpha is left alone, and the GPU version can differ from the CPU by one level.
+
 ## API summary
 
 | API                                     | Purpose                                            |
@@ -124,3 +140,4 @@ Gradient maps replace RGB channels with sampled gradient colors. See [Gradient](
 | `auto_tone().apply(image)`              | Stretch per-channel tonal ranges.                  |
 | `auto_color().apply(image)`              | Stretch levels and neutralize midtone color casts. |
 | `gradient_map(gradient).apply(image)`   | Map luminance to gradient colors.                  |
+| `selective_color().with_range(..)`      | Change the inks of one range of colors or tones.   |

@@ -215,6 +215,101 @@ impl Exposure {
   }
 }
 
+/// A levels adjustment: remaps the tones of the image by where its darkest and lightest tones are, how bright its middle is and the range
+/// they are put in. Made by [`levels`].
+#[derive(uniffi::Object)]
+pub struct Levels(levels::Levels);
+
+/// A levels adjustment of an input range, on the scale of a byte (0 to 255): anything at or below `input_black` becomes the darkest tone
+/// and anything at or above `input_white` the lightest. The midtone gamma is 1 and the output range 0 to 255 until they are set.
+#[uniffi::export]
+pub fn levels(input_black: f32, input_white: f32) -> Arc<Levels> {
+  Arc::new(Levels(levels::levels(input_black, input_white)))
+}
+
+#[uniffi::export]
+impl Levels {
+  /// The midtone gamma. 1 leaves the middle where it is; above 1 makes it brighter and below 1 darker. Defaults to 1.
+  pub fn with_gamma(&self, gamma: f32) -> Arc<Levels> {
+    Arc::new(Levels(self.0.clone().with_gamma(gamma)))
+  }
+
+  /// The range the result is put in, 0 to 255: the value the darkest tone becomes and the value the lightest becomes.
+  pub fn with_output(&self, black: f32, white: f32) -> Arc<Levels> {
+    Arc::new(Levels(self.0.clone().with_output(black, white)))
+  }
+}
+
+/// The parts of the colors of a picture that [`SelectiveColor`] can change on their own.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum ColorRange {
+  Reds,
+  Yellows,
+  Greens,
+  Cyans,
+  Blues,
+  Magentas,
+  Whites,
+  Neutrals,
+  Blacks,
+}
+
+impl From<ColorRange> for color::ColorRange {
+  fn from(range: ColorRange) -> Self {
+    match range {
+      ColorRange::Reds => color::ColorRange::Reds,
+      ColorRange::Yellows => color::ColorRange::Yellows,
+      ColorRange::Greens => color::ColorRange::Greens,
+      ColorRange::Cyans => color::ColorRange::Cyans,
+      ColorRange::Blues => color::ColorRange::Blues,
+      ColorRange::Magentas => color::ColorRange::Magentas,
+      ColorRange::Whites => color::ColorRange::Whites,
+      ColorRange::Neutrals => color::ColorRange::Neutrals,
+      ColorRange::Blacks => color::ColorRange::Blacks,
+    }
+  }
+}
+
+/// Whether the changes of a [`SelectiveColor`] are shares of the ink a pixel has or fixed amounts.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum SelectiveMethod {
+  Relative,
+  Absolute,
+}
+
+impl From<SelectiveMethod> for color::SelectiveMethod {
+  fn from(method: SelectiveMethod) -> Self {
+    match method {
+      SelectiveMethod::Relative => color::SelectiveMethod::Relative,
+      SelectiveMethod::Absolute => color::SelectiveMethod::Absolute,
+    }
+  }
+}
+
+/// Changes the colors in one range of a picture without touching the others, as the cyan, magenta, yellow and black inks of a print.
+/// Made by [`selective_color`].
+#[derive(uniffi::Object)]
+pub struct SelectiveColor(color::SelectiveColor);
+
+/// A selective color adjustment that changes nothing until ranges are set with `with_range`.
+#[uniffi::export]
+pub fn selective_color() -> Arc<SelectiveColor> {
+  Arc::new(SelectiveColor(color::selective_color()))
+}
+
+#[uniffi::export]
+impl SelectiveColor {
+  /// How much cyan, magenta, yellow and black one range gains (positive) or loses (negative). `1` and `-1` are the most a slider gives.
+  pub fn with_range(&self, range: ColorRange, cyan: f32, magenta: f32, yellow: f32, black: f32) -> Arc<SelectiveColor> {
+    Arc::new(SelectiveColor(self.0.clone().with_range(range.into(), cyan, magenta, yellow, black)))
+  }
+
+  /// Whether the changes are shares of the ink a pixel has (relative, the default) or fixed amounts (absolute).
+  pub fn with_method(&self, method: SelectiveMethod) -> Arc<SelectiveColor> {
+    Arc::new(SelectiveColor(self.0.clone().with_method(method.into())))
+  }
+}
+
 /// Rotates the hues of the image. Made by [`hue`].
 #[derive(uniffi::Object)]
 pub struct Hue(levels::Hue);
@@ -404,6 +499,8 @@ effect_methods!(
   Brightness,
   Contrast,
   Exposure,
+  Levels,
+  SelectiveColor,
   HighlightsShadows,
   Hue,
   Saturation,
@@ -708,6 +805,32 @@ mod tests {
         handle_and_library(
           |i| vibrance(40.0).with_saturation(10.0).apply_on_cpu(i),
           |e| levels::vibrance(40.0).with_saturation(10.0).apply_on_cpu(e),
+        ),
+      ),
+      (
+        "levels",
+        handle_and_library(
+          |i| levels(20.0, 230.0).with_gamma(1.6).with_output(10.0, 245.0).apply_on_cpu(i),
+          |e| levels::levels(20.0, 230.0).with_gamma(1.6).with_output(10.0, 245.0).apply_on_cpu(e),
+        ),
+      ),
+      (
+        "selective_color",
+        handle_and_library(
+          |i| {
+            selective_color()
+              .with_method(SelectiveMethod::Absolute)
+              .with_range(ColorRange::Neutrals, 0.1, 0.0, 0.3, -0.3)
+              .with_range(ColorRange::Reds, 0.0, -0.2, 0.2, 0.0)
+              .apply_on_cpu(i)
+          },
+          |e| {
+            color::selective_color()
+              .with_method(color::SelectiveMethod::Absolute)
+              .with_range(color::ColorRange::Neutrals, 0.1, 0.0, 0.3, -0.3)
+              .with_range(color::ColorRange::Reds, 0.0, -0.2, 0.2, 0.0)
+              .apply_on_cpu(e)
+          },
         ),
       ),
       (

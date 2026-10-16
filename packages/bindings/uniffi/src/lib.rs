@@ -35,11 +35,11 @@ pub use abra::canvas::prelude::{
   AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
 };
 pub use adjustments::{
-  AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, Contrast, Exposure, FilterType, GradientMap, Grayscale,
-  HighlightsShadows, Hue, Invert, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment, Posterize,
-  Saturation, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
-  gradient_map, grayscale, highlights_shadows, hue, invert, photo_filter, posterize, reduce_opacity, saturation,
-  threshold, vibrance,
+  AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, Exposure, FilterType, GradientMap,
+  Grayscale, HighlightsShadows, Hue, Invert, Levels, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment,
+  Posterize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
+  gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, reduce_opacity, saturation,
+  selective_color, threshold, vibrance,
 };
 pub use ai::{
   AiListening, AiModel, AiOutput, AiOutputKind, ImageModel, Instance, LabelMap, Listening, ProgressListener,

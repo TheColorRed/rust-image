@@ -197,6 +197,63 @@ impl Mask {
     Mask::from_values(width, height, values)
   }
 
+  /// Creates a mask of how much of each pixel of an image is a foreground color rather than a background color, taking each pixel's
+  /// color as a mix of the two: a pixel exactly the foreground color is `255`, one exactly the background color is `0`, and one halfway
+  /// between them is half. It is the share of the foreground in the pixel, from where its color falls on the line from the background
+  /// color to the foreground color. Use it to pull out thin parts (hair, fur, smoke) against a background of another color, where the
+  /// pixels at the edge are a mix of both, or to take a color out of a picture.
+  ///
+  /// The two colors can be different for every pixel, so each is a picture: the color the foreground has near that pixel and the color
+  /// the background has there (made, for example, by blurring the sure foreground and the sure background outwards, which fills in
+  /// both under the edge). Where the two colors are too alike for the pixel's color to say which it is, the fallback mask decides.
+  ///
+  /// Panics when the pictures are not all the same size.
+  /// - `p_image`: The image to look at. Only the color is used.
+  /// - `p_foreground`: The foreground color at each pixel.
+  /// - `p_background`: The background color at each pixel.
+  /// - `p_fallback`: The mask used where the colors cannot tell. It is scaled to the image if it is another size.
+  /// - `p_least_difference`: How far apart the two colors have to be, as a distance with each channel from `0` to `1`, for the
+  ///   pixel's color to decide fully. Closer than that the fallback counts for more, down to nothing decided at no distance. `0` always
+  ///   decides.
+  pub fn from_color_mix(
+    p_image: &Image, p_foreground: &Image, p_background: &Image, p_fallback: &Mask, p_least_difference: f32,
+  ) -> Mask {
+    let (width, height) = p_image.dimensions::<u32>();
+    assert!(
+      p_foreground.dimensions::<u32>() == (width, height) && p_background.dimensions::<u32>() == (width, height),
+      "the image, the foreground colors and the background colors must be the same size"
+    );
+    let resized;
+    let fallback = if p_fallback.dimensions::<u32>() == (width, height) {
+      p_fallback.values()
+    } else {
+      resized = p_fallback.resized(width, height, TransformAlgorithm::Bilinear);
+      resized.values()
+    };
+    let values = p_image
+      .rgba()
+      .par_chunks_exact(4)
+      .zip(p_foreground.rgba().par_chunks_exact(4))
+      .zip(p_background.rgba().par_chunks_exact(4))
+      .zip(fallback.par_iter())
+      .map(|(((pixel, foreground), background), fallback)| {
+        let channel = |p_color: &[u8], p_at: usize| p_color[p_at] as f32 / 255.0;
+        let (mut along, mut apart) = (0.0f32, 0.0f32);
+        for at in 0..3 {
+          let difference = channel(foreground, at) - channel(background, at);
+          along += (channel(pixel, at) - channel(background, at)) * difference;
+          apart += difference * difference;
+        }
+        let share = if apart > 0.0 { (along / apart).clamp(0.0, 1.0) } else { 0.0 };
+        let decided = if p_least_difference > 0.0 { (apart.sqrt() / p_least_difference).clamp(0.0, 1.0) } else { 1.0 };
+        let decided = if apart > 0.0 { decided } else { 0.0 };
+        let mixed = decided * share + (1.0 - decided) * (*fallback as f32 / 255.0);
+        (mixed * 255.0).round().clamp(0.0, 255.0) as u8
+      })
+      .collect();
+    Mask::from_values(width, height, values)
+  }
+
   /// The mask as a gray RGBA image, for drawing or saving.
   pub fn to_image(&self) -> Image {
     self.plane.to_image()
@@ -610,6 +667,53 @@ fn transposed(p_values: &[u8], p_width: usize, p_height: usize) -> Vec<u8> {
 mod tests {
   use super::*;
   use abra_core::{Area, Color, Image};
+
+  /// A row of `p_colors` as an image.
+  fn row_of(p_colors: &[(u8, u8, u8)]) -> Image {
+    let pixels: Vec<u8> = p_colors.iter().flat_map(|(r, g, b)| [*r, *g, *b, 255]).collect();
+    Image::new_from_pixels(p_colors.len() as u32, 1, pixels, abra_core::Channels::RGBA)
+  }
+
+  #[test]
+  fn a_color_mix_is_the_share_of_the_foreground_in_each_pixel() {
+    let foreground = row_of(&[(200, 100, 0); 5]);
+    let background = row_of(&[(0, 0, 0); 5]);
+    // Pure background, a quarter, half, three quarters and pure foreground.
+    let image = row_of(&[(0, 0, 0), (50, 25, 0), (100, 50, 0), (150, 75, 0), (200, 100, 0)]);
+    let mask = Mask::from_color_mix(&image, &foreground, &background, &Mask::from_values(5, 1, vec![0; 5]), 0.0);
+    let found = mask.values();
+    assert_eq!((found[0], found[4]), (0, 255));
+    assert!((found[2] as i32 - 128).abs() <= 1 && (found[1] as i32 - 64).abs() <= 1 && (found[3] as i32 - 191).abs() <= 1, "{found:?}");
+  }
+
+  #[test]
+  fn a_color_beyond_either_end_is_held_to_zero_or_full() {
+    let foreground = row_of(&[(100, 100, 100); 2]);
+    let background = row_of(&[(50, 50, 50); 2]);
+    let image = row_of(&[(10, 10, 10), (250, 250, 250)]);
+    let mask = Mask::from_color_mix(&image, &foreground, &background, &Mask::empty(2, 1), 0.0);
+    assert_eq!(mask.values(), &[0, 255]);
+  }
+
+  #[test]
+  fn where_the_colors_are_alike_the_fallback_decides() {
+    // The same color for the foreground and the background: the pixel cannot say which it is.
+    let same = row_of(&[(90, 90, 90), (90, 90, 90)]);
+    let mask = Mask::from_color_mix(&same, &same, &same, &Mask::from_values(2, 1, vec![40, 220]), 0.2);
+    assert_eq!(mask.values(), &[40, 220]);
+    // Colors only a little apart: the pixel decides partly. The difference is 0.1 over a least of 0.2, so half the decision is its own.
+    let foreground = row_of(&[(128, 128, 128)]);
+    let background = row_of(&[(102, 102, 102)]);
+    let pixel = row_of(&[(128, 128, 128)]);
+    let partly = Mask::from_color_mix(&pixel, &foreground, &background, &Mask::from_values(1, 1, vec![0]), 0.35);
+    assert!(partly.values()[0] > 100 && partly.values()[0] < 255, "{:?}", partly.values());
+  }
+
+  #[test]
+  #[should_panic(expected = "must be the same size")]
+  fn a_color_mix_of_pictures_of_different_sizes_panics() {
+    let _ = Mask::from_color_mix(&row_of(&[(1, 1, 1)]), &row_of(&[(1, 1, 1), (1, 1, 1)]), &row_of(&[(1, 1, 1)]), &Mask::empty(1, 1), 0.0);
+  }
 
   #[test]
   fn dilating_grows_a_region_by_the_radius() {

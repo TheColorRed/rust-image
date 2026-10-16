@@ -107,6 +107,24 @@ impl Mask {
     ))
   }
 
+  /// A mask of how much of each pixel of `image` is a foreground color rather than a background color, taking each pixel's color as a
+  /// mix of the two: `255` for exactly the foreground color, `0` for exactly the background color and half for halfway. The two colors are
+  /// pictures, one color for each pixel, the same size as `image`; a picture of another size panics. Where they are closer together than
+  /// `least_difference` (a distance with each channel from 0 to 1) the pixel's color cannot decide, and `fallback` counts for more, down to
+  /// deciding nothing at no distance. Use it to pull out thin parts such as hair against a background of another color.
+  #[uniffi::constructor]
+  pub fn from_color_mix(
+    image: Arc<Image>, foreground: Arc<Image>, background: Arc<Image>, fallback: Arc<Mask>, least_difference: f32,
+  ) -> Self {
+    Self::from_core(library::Mask::from_color_mix(
+      &image.core(),
+      &foreground.core(),
+      &background.core(),
+      &fallback.core(),
+      least_difference,
+    ))
+  }
+
   /// The width of the mask in pixels.
   pub fn width(&self) -> u32 {
     self.0.read().unwrap().width()
@@ -310,6 +328,18 @@ mod tests {
     let image = Arc::new(Image::new_from_pixels(2, 1, pixels, abra::abra_core::Channels::RGBA));
     let red = Arc::new(Color(abra::abra_core::Color::red()));
     assert_eq!(Mask::from_color_range(image, red, 20.0, 0.4, 0.3, 0.0).values(), vec![255, 0]);
+  }
+
+  #[test]
+  fn a_color_mix_mask_is_made_through_the_bridge() {
+    let picture = |colors: &[u8]| Arc::new(Image::new_from_pixels(colors.len() as u32 / 4, 1, colors.to_vec(), abra::abra_core::Channels::RGBA));
+    let image = picture(&[0, 0, 0, 255, 100, 100, 100, 255, 200, 200, 200, 255]);
+    let foreground = picture(&[200, 200, 200, 255, 200, 200, 200, 255, 200, 200, 200, 255]);
+    let background = picture(&[0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
+    let mask = Mask::from_color_mix(image, foreground, background, Arc::new(Mask::from_values(3, 1, vec![0; 3])), 0.0);
+    let values = mask.values();
+    assert_eq!((values[0], values[2]), (0, 255));
+    assert!((values[1] as i32 - 128).abs() <= 1);
   }
 
   #[test]

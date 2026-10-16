@@ -9,6 +9,7 @@ mod multiply;
 mod opacity;
 mod posterize;
 mod radial_gradient;
+mod selective_color;
 mod threshold;
 
 pub use auto_color::{AutoColor, auto_color};
@@ -22,6 +23,7 @@ pub use multiply::{ColorMultiply, color_multiply};
 pub use opacity::{Opacity, reduce_opacity};
 pub use posterize::{Posterize, posterize};
 pub use radial_gradient::{radial_gradient, radial_gradient_deferred};
+pub use selective_color::{ColorRange, SelectiveColor, SelectiveMethod, selective_color};
 pub use threshold::{Threshold, threshold};
 
 #[cfg(test)]

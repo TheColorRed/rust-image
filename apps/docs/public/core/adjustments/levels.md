@@ -100,6 +100,20 @@ highlightsShadows(40, 35)
   .apply(image);
 ```
 
+## Levels
+
+`levels` remaps the tones of an image by where its darkest and lightest tones are said to be, how bright its middle is, and the range they are put in. Every value is on the scale of a byte, `0` to `255`:
+
+```rust
+// Anything at or below 20 becomes black and anything at or above 230 becomes white; the middle is made brighter.
+levels::levels(20.0, 230.0).with_gamma(1.6).apply(&mut image);
+
+// The same, with the result kept between 10 and 245 so it never reaches pure black or white.
+levels::levels(20.0, 230.0).with_gamma(1.6).with_output(10.0, 245.0).apply(&mut image);
+```
+
+A value becomes `output_black + ((value - input_black) / (input_white - input_black)) ^ (1 / gamma) * (output_white - output_black)`, with the part in brackets held to `0..=1`. Pulling `input_black` up darkens the shadows, pulling `input_white` down brightens the highlights, and a gamma above `1` brightens the midtones. Gamma defaults to `1` and the output range to `0..=255`. Each of the red, green and blue channels is mapped on its own and the alpha is left alone. The GPU version is a lookup table made from the CPU code, so both give the same pixels.
+
 ## Exposure
 
 `exposure` takes the exposure in stops. Offset and gamma correction are optional:
@@ -186,6 +200,7 @@ Available presets include:
 | `contrast(amount).apply(image)`                        | Adjust contrast around midpoint gray.                |
 | `highlights_shadows(highlights, shadows).apply(image)` | Adjust bright and dark tones while preserving color. |
 | `exposure(stops).with_offset(..).with_gamma(..)`       | Adjust exposure, offset, and gamma.                  |
+| `levels(black, white).with_gamma(..).with_output(..)`  | Remap tones by input points, midtone gamma and range. |
 | `saturation(amount).apply(image)`                      | Increase or decrease saturation.                     |
 | `vibrance(amount).with_saturation(..)`                 | Enhance color selectively and adjust saturation.     |
 | `hue(amount).apply(image)`                             | Reserved for hue rotation; currently a no-op.        |
