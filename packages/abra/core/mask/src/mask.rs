@@ -321,6 +321,43 @@ impl Mask {
     self.combined(p_other, u8::min)
   }
 
+  /// This mask grown: each pixel takes the strongest value within `p_radius` pixels of it, so the edge of a region moves out
+  /// by that many pixels. Use it to cover a little beyond what a model found, or to keep an effect from stopping short of an
+  /// edge. The window is a square, and the edges of the mask are not eaten: pixels past them are ignored.
+  /// - `p_radius`: How many pixels the edge moves out. `0` gives the same mask.
+  pub fn dilated(&self, p_radius: u32) -> Mask {
+    self.windowed(p_radius, true)
+  }
+
+  /// This mask shrunk: each pixel takes the weakest value within `p_radius` pixels of it, so the edge of a region moves in
+  /// by that many pixels. Use it to pull a mask in off a background it leaks onto. The window is a square, and the edges of
+  /// the mask are not eaten: pixels past them are ignored.
+  /// - `p_radius`: How many pixels the edge moves in. `0` gives the same mask.
+  pub fn eroded(&self, p_radius: u32) -> Mask {
+    self.windowed(p_radius, false)
+  }
+
+  /// The strongest (`p_strongest`) or weakest value in the square window of `p_radius` pixels around each pixel, done as one
+  /// pass along the rows and one along the columns.
+  fn windowed(&self, p_radius: u32, p_strongest: bool) -> Mask {
+    let (width, height) = (self.width() as usize, self.height() as usize);
+    if p_radius == 0 || width == 0 || height == 0 {
+      return self.clone();
+    }
+    let radius = p_radius as usize;
+    let along_rows = |p_values: &[u8], p_width: usize| {
+      let mut out = vec![0u8; p_values.len()];
+      out.par_chunks_mut(p_width).zip(p_values.par_chunks(p_width)).for_each(|(row_out, row)| {
+        window_extreme(row, radius, p_strongest, row_out);
+      });
+      out
+    };
+    let across = along_rows(self.values(), width);
+    let flipped = transposed(&across, width, height);
+    let down = along_rows(&flipped, height);
+    Mask::from_values(self.width(), self.height(), transposed(&down, height, width))
+  }
+
   /// Joins the values of two masks pixel by pixel. The result is the size of this mask. A mask of another size is
   /// scaled to it with a bilinear resize first, and a mask with no pixels counts as `0` everywhere.
   fn combined(&self, p_other: &Mask, p_join: impl Fn(u8, u8) -> u8) -> Mask {
@@ -536,10 +573,86 @@ fn apply_mask_to_rgba_pixels(p_pixels: &mut [u8], p_mask: &[u8], p_px_count: usi
   }
 }
 
+/// For each position of `p_line`, the strongest (`p_strongest`) or weakest value within `p_radius` positions either way
+/// (fewer at the ends), written to `p_out`. One pass, with a queue of the positions that could still be the answer.
+fn window_extreme(p_line: &[u8], p_radius: usize, p_strongest: bool, p_out: &mut [u8]) {
+  let beats = |p_new: u8, p_old: u8| if p_strongest { p_new >= p_old } else { p_new <= p_old };
+  let mut queue = std::collections::VecDeque::new();
+  for i in 0..p_line.len() + p_radius {
+    if i < p_line.len() {
+      while queue.back().is_some_and(|&back| beats(p_line[i], p_line[back])) {
+        queue.pop_back();
+      }
+      queue.push_back(i);
+    }
+    if i >= p_radius {
+      let at = i - p_radius;
+      while queue.front().is_some_and(|&front| front + p_radius < at) {
+        queue.pop_front();
+      }
+      p_out[at] = p_line[*queue.front().expect("the window always holds the position itself")];
+    }
+  }
+}
+
+/// `p_values`, which is `p_width` wide and `p_height` tall, turned so rows become columns.
+fn transposed(p_values: &[u8], p_width: usize, p_height: usize) -> Vec<u8> {
+  let mut out = vec![0u8; p_values.len()];
+  for y in 0..p_height {
+    for x in 0..p_width {
+      out[x * p_height + y] = p_values[y * p_width + x];
+    }
+  }
+  out
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
   use abra_core::{Area, Color, Image};
+
+  #[test]
+  fn dilating_grows_a_region_by_the_radius() {
+    let mut values = vec![0u8; 25];
+    values[12] = 255;
+    let grown = Mask::from_values(5, 5, values).dilated(1);
+    let lit: Vec<usize> = (0..25).filter(|&i| grown.values()[i] == 255).collect();
+    assert_eq!(lit, vec![6, 7, 8, 11, 12, 13, 16, 17, 18]);
+  }
+
+  #[test]
+  fn eroding_shrinks_a_region_by_the_radius() {
+    let mut values = vec![0u8; 49];
+    for y in 1..6 {
+      for x in 1..6 {
+        values[y * 7 + x] = 255;
+      }
+    }
+    let shrunk = Mask::from_values(7, 7, values).eroded(1);
+    assert_eq!((shrunk.get(1, 1), shrunk.get(2, 2), shrunk.get(3, 3), shrunk.get(5, 5)), (Some(0), Some(255), Some(255), Some(0)));
+  }
+
+  #[test]
+  fn eroding_does_not_eat_the_edges_of_the_mask() {
+    let full = Mask::from_values(4, 3, vec![255; 12]);
+    assert_eq!(full.eroded(2).values(), full.values());
+  }
+
+  #[test]
+  fn a_radius_of_zero_changes_nothing() {
+    let mask = Mask::from_values(3, 1, vec![10, 200, 30]);
+    assert_eq!(mask.dilated(0).values(), mask.values());
+    assert_eq!(mask.eroded(0).values(), mask.values());
+  }
+
+  #[test]
+  fn dilating_and_eroding_work_on_a_wide_radius_and_a_tall_mask() {
+    let mut values = vec![0u8; 3 * 20];
+    values[10 * 3 + 1] = 200;
+    let grown = Mask::from_values(3, 20, values).dilated(5);
+    let lit: Vec<usize> = (0..20).filter(|&y| grown.values()[y * 3 + 1] == 200).collect();
+    assert_eq!(lit, (5..=15).collect::<Vec<_>>());
+  }
 
   #[test]
   fn a_gaussian_blob_is_full_in_the_middle_and_fades_out() {

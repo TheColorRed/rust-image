@@ -9,8 +9,8 @@ import {
   healBlemish,
   keepBlemishBase,
 } from '@/src/lib/editor/editor-history';
-import { analysisOf, provideAnalysis } from '@/src/lib/editor/editor-preloads';
-import { makeupMasks } from '@/src/lib/eye-makeup';
+import { analysisOf, forgetAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
+import { MAKEUP_MASKS_VERSION, makeupMasks } from '@/src/lib/eye-makeup';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
@@ -24,7 +24,7 @@ import { errorMessage } from '@/src/lib/error-message';
 import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
-import { faceBoxes, people, skinMask } from '@/src/state/analysis';
+import { analysisVersion, faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -95,7 +95,8 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
     skinMask.next(mask);
   }
   // An empty list is saved too: the face models ran and found no face.
-  if (project.makeupMasks) {
+  // A set saved before the hair was one of the masks is not used: the models run once more, and the new set is saved.
+  if (project.makeupMasks && project.makeupMasksVersion === MAKEUP_MASKS_VERSION) {
     const masks = Object.fromEntries(
       await Promise.all(project.makeupMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
     );
@@ -115,6 +116,17 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
   }
   // Saved with the people, in the same pixels. An empty object is an answer too: the models ran and found no face.
   if (project.faceBoxes) faceBoxes.next(project.faceBoxes);
+}
+
+/**
+ * Finds the faces' masks again, in case the first time went wrong: what was found is thrown away, the editor draws again without it,
+ * which starts the models, and the new masks are saved over the old ones when the project is saved.
+ */
+export function rescanFaceMasks() {
+  forgetAnalysis(makeupMasks);
+  const project = openProject.value;
+  if (project) openProject.next({ ...project, makeupMasks: undefined, makeupMasksVersion: undefined });
+  analysisVersion.next(analysisVersion.value + 1);
 }
 
 /** Saves a mask as a gray image. */
@@ -158,8 +170,10 @@ function saveOpenProject() {
   // Like the skin mask, the people belong to the original, so they are saved once: the first time the photo has them.
   // So are the masks the face models made, so the project opens without running them.
   let makeupFiles = project.makeupMasks;
+  let makeupVersion = project.makeupMasksVersion;
   const faces = analysisOf(makeupMasks);
-  if (!makeupFiles && faces && !Array.isArray(faces)) {
+  if ((!makeupFiles || makeupVersion !== MAKEUP_MASKS_VERSION) && faces && !Array.isArray(faces)) {
+    makeupVersion = MAKEUP_MASKS_VERSION;
     makeupFiles = Object.entries(faces).map(([name, mask], index) => {
       writeMask(mask as MaskLike, toLocalPath(`${project.dir}/makeup-${index}.webp`));
       return { name, file: `makeup-${index}.webp` };
@@ -179,6 +193,7 @@ function saveOpenProject() {
   if (
     skinMaskFile === project.skinMaskFile &&
     makeupFiles === project.makeupMasks &&
+    makeupVersion === project.makeupMasksVersion &&
     JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
       JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
   )
@@ -210,7 +225,7 @@ function saveOpenProject() {
         rendered?.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, people: savedPeople, faceBoxes: savedFaceBoxes };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, makeupMasksVersion: makeupVersion, people: savedPeople, faceBoxes: savedFaceBoxes };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {

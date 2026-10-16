@@ -1,4 +1,7 @@
-use abra_core::Image;
+use abra_core::{
+  Image,
+  image::gpu::{GpuPass, GpuProcessor},
+};
 use options::{Effect, Options};
 use rayon::prelude::*;
 
@@ -19,6 +22,12 @@ pub struct Posterize {
   options: Options,
 }
 
+impl GpuProcessor for Posterize {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![GpuPass::new(include_str!("./posterize.wgsl"), (self.levels.max(2) as u32).to_le_bytes().to_vec())]
+  }
+}
+
 impl Effect for Posterize {
   fn options(&self) -> &Options {
     &self.options
@@ -34,6 +43,10 @@ impl Effect for Posterize {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_posterize(p_image, self.levels);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 
   /// It changes each pixel on its own, so for a picture of any size it is the same.

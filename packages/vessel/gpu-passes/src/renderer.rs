@@ -18,6 +18,13 @@ struct Target {
 
 impl Target {
   fn new(p_ctx: &GpuContext, p_label: &str, p_width: u32, p_height: u32, p_usage: wgpu::TextureUsages) -> Target {
+    Target::new_in(p_ctx, p_label, p_width, p_height, p_usage, FORMAT)
+  }
+
+  fn new_in(
+    p_ctx: &GpuContext, p_label: &str, p_width: u32, p_height: u32, p_usage: wgpu::TextureUsages,
+    p_format: wgpu::TextureFormat,
+  ) -> Target {
     let texture = p_ctx.device.create_texture(&wgpu::TextureDescriptor {
       label: Some(p_label),
       size: wgpu::Extent3d {
@@ -28,7 +35,7 @@ impl Target {
       mip_level_count: 1,
       sample_count: 1,
       dimension: wgpu::TextureDimension::D2,
-      format: FORMAT,
+      format: p_format,
       usage: p_usage,
       view_formats: &[],
     });
@@ -66,6 +73,15 @@ pub(crate) struct PipelineKey {
   aux: bool,
   base: bool,
   window: bool,
+  float_out: bool,
+}
+
+/// The format of the working texture a shader writes to its output at binding 1: `rgba32float` when the shader declares it
+/// (`texture_storage_2d<rgba32float, write>`), and `rgba8unorm` otherwise. A pass that writes `rgba32float` keeps real numbers
+/// (sums, means, variances) that 8 bits cannot hold, for a later pass to read. The shader says what it writes, so a pass needs
+/// nothing more to ask for it.
+fn writes_float(p_pass: &GpuPass) -> bool {
+  p_pass.shader.contains("texture_storage_2d<rgba32float")
 }
 
 impl PipelineKey {
@@ -76,6 +92,7 @@ impl PipelineKey {
       aux: p_pass.aux.is_some(),
       base: p_pass.base,
       window: p_pass.window,
+      float_out: writes_float(p_pass),
     }
   }
 }
@@ -155,6 +172,8 @@ pub struct LiveRenderer {
   ctx: GpuContext,
   source: Option<(Target, u32, u32)>,
   work: Option<[Target; 2]>,
+  /// The working textures of the passes that write `rgba32float` (see `writes_float`), made when a chain has one.
+  float_work: Option<[Target; 2]>,
   /// A copy of the image an effect started from, for passes that combine the effect's result with its input.
   base: Option<Target>,
   uniforms: Vec<Option<UniformSlot>>,
@@ -176,6 +195,7 @@ impl LiveRenderer {
       ctx: p_ctx,
       source: None,
       work: None,
+      float_work: None,
       base: None,
       uniforms: Vec::new(),
       aux: Vec::new(),
@@ -250,6 +270,7 @@ impl LiveRenderer {
     ]);
     let base_usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
     self.base = Some(Target::new(&self.ctx, "live::base", p_width, p_height, base_usage));
+    self.float_work = None;
   }
 
   /// The source texture at `p_width` x `p_height`, for something other than an upload to draw the image into. The next
@@ -292,12 +313,28 @@ impl LiveRenderer {
       }
     }
 
+    // A pass that writes `rgba32float` hands its numbers to the pass after it, so a chain cannot end on one, and a pass that wants the
+    // effect's input image (`base`, which is 8-bit) cannot come straight after one.
+    let floats: Vec<bool> = passes.iter().map(|(pass, _)| writes_float(pass)).collect();
+    if floats.last() == Some(&true) {
+      return Err(anyhow!("a chain of passes must end with a pass that writes rgba8unorm, not rgba32float"));
+    }
+    if passes.iter().enumerate().any(|(ordinal, (pass, snapshot))| (*snapshot || pass.base) && ordinal > 0 && floats[ordinal - 1]) {
+      return Err(anyhow!("a pass that reads the effect's input image cannot follow a pass that writes rgba32float"));
+    }
+    if floats.contains(&true) && self.float_work.is_none() {
+      let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING;
+      let make = |label: &str| Target::new_in(&self.ctx, label, width, height, usage, wgpu::TextureFormat::Rgba32Float);
+      self.float_work = Some([make("live::float_a"), make("live::float_b")]);
+    }
+
     for (ordinal, (pass, _)) in passes.iter().enumerate() {
       self.ensure_pipeline(pass);
       self.write_uniforms(ordinal, pass);
       self.write_aux(ordinal, pass);
     }
 
+    let float_work = &self.float_work;
     let (Some((source, _, _)), Some(work), Some(base)) = (&self.source, &self.work, &self.base) else {
       return Err(anyhow!("set_source must be called before render"));
     };
@@ -306,12 +343,20 @@ impl LiveRenderer {
     });
     for (ordinal, (pass, snapshot)) in passes.iter().enumerate() {
       let pipeline = self.pipeline(&PipelineKey::of(pass))?;
+      let previous = (ordinal + 1) % 2;
       let (input_texture, input) = if ordinal == 0 {
         (&source.texture, &source.view)
+      } else if floats[ordinal - 1] {
+        let held = &float_work.as_ref().expect("made for the chain")[previous];
+        (&held.texture, &held.view)
       } else {
-        (&work[(ordinal - 1) % 2].texture, &work[(ordinal - 1) % 2].view)
+        (&work[previous].texture, &work[previous].view)
       };
-      let output = &work[ordinal % 2].view;
+      let output = if floats[ordinal] {
+        &float_work.as_ref().expect("made for the chain")[ordinal % 2].view
+      } else {
+        &work[ordinal % 2].view
+      };
 
       if *snapshot {
         encoder.copy_texture_to_texture(
@@ -646,7 +691,7 @@ impl LiveRenderer {
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::StorageTexture {
           access: wgpu::StorageTextureAccess::WriteOnly,
-          format: FORMAT,
+          format: if key.float_out { wgpu::TextureFormat::Rgba32Float } else { FORMAT },
           view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
@@ -799,5 +844,78 @@ impl GpuSession for LiveRenderer {
 
   fn read_pixels(&mut self) -> std::result::Result<Vec<u8>, String> {
     LiveRenderer::read_pixels(self).map_err(|e| e.to_string())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Writes the red channel times 1000 (far past what 8 bits hold) as `rgba32float`.
+  const SCALE_UP: &str = "
+    @group(0) @binding(0) var input_tex: texture_2d<f32>;
+    @group(0) @binding(1) var output_tex: texture_storage_2d<rgba32float, write>;
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let dims = vec2<i32>(textureDimensions(input_tex));
+      let pos = vec2<i32>(gid.xy);
+      if (pos.x >= dims.x || pos.y >= dims.y) { return; }
+      textureStore(output_tex, pos, vec4<f32>(textureLoad(input_tex, pos, 0).r * 1000.0 + 0.25, 0.0, 0.0, 1.0));
+    }";
+
+  /// Reads those numbers back and writes them divided by 1000 as an ordinary 8-bit pixel.
+  const SCALE_DOWN: &str = "
+    @group(0) @binding(0) var input_tex: texture_2d<f32>;
+    @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let dims = vec2<i32>(textureDimensions(input_tex));
+      let pos = vec2<i32>(gid.xy);
+      if (pos.x >= dims.x || pos.y >= dims.y) { return; }
+      let value = (textureLoad(input_tex, pos, 0).r - 0.25) / 1000.0;
+      textureStore(output_tex, pos, vec4<f32>(value, value, value, 1.0));
+    }";
+
+  fn ramp(p_width: u32, p_height: u32) -> Vec<u8> {
+    (0..p_width * p_height).flat_map(|i| [(i * 7 % 256) as u8, 0, 0, 255]).collect()
+  }
+
+  #[test]
+  fn a_pass_that_writes_rgba32float_hands_numbers_8_bits_cannot_hold_to_the_next_pass() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let (width, height) = (19u32, 11u32);
+    let pixels = ramp(width, height);
+    let chain = vec![vec![GpuPass::new(SCALE_UP, Vec::new()), GpuPass::new(SCALE_DOWN, Vec::new())]];
+    let out = renderer.process(&chain, width, height, &pixels)?;
+    for (index, (got, put)) in out.chunks_exact(4).zip(pixels.chunks_exact(4)).enumerate() {
+      assert!(got[0].abs_diff(put[0]) <= 1, "pixel {index}: {} came back as {}", put[0], got[0]);
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn a_chain_cannot_end_on_a_pass_that_writes_rgba32float() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let result = renderer.process(&[vec![GpuPass::new(SCALE_UP, Vec::new())]], 8, 8, &ramp(8, 8));
+    assert!(result.is_err());
+    Ok(())
+  }
+
+  #[test]
+  fn float_passes_do_not_change_a_chain_that_has_none() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels = ramp(8, 8);
+    // The same shader as a plain 8-bit pass: the chain is exactly what it was before float passes existed.
+    let copy = "
+      @group(0) @binding(0) var input_tex: texture_2d<f32>;
+      @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+      @compute @workgroup_size(8, 8)
+      fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+        let pos = vec2<i32>(gid.xy);
+        textureStore(output_tex, pos, textureLoad(input_tex, pos, 0));
+      }";
+    assert_eq!(renderer.process(&[vec![GpuPass::new(copy, Vec::new())]], 8, 8, &pixels)?, pixels);
+    assert!(renderer.float_work.is_none());
+    Ok(())
   }
 }

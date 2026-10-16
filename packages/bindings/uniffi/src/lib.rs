@@ -52,10 +52,10 @@ pub use canvas::{
 };
 pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
 pub use filters::{
-  Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, LensBlur, Median,
-  MotionBlur, Noise, Pinch, Ripple, Sharpen, Smooth, Sobel, SurfaceBlur, blur, box_blur, despeckle, focus_blur,
-  gaussian_blur, glowing_edges, lens_blur, median, motion_blur, noise, pinch, ripple, sharpen, smooth, sobel,
-  sobel_magnitude, surface_blur,
+  Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, Guided, LensBlur, Median,
+  MotionBlur, Morphology, Noise, Pinch, Ripple, Sharpen, Smooth, Sobel, SurfaceBlur, blur, box_blur, despeckle,
+  dilate, erode, focus_blur, gaussian_blur, glowing_edges, guided, guided_filter, lens_blur, median, motion_blur, noise, pinch,
+  ripple, sharpen, smooth, sobel, sobel_magnitude, surface_blur,
 };
 pub use geometry::{
   Area, AreaStroke, Homography, LineSegment, Path, PathStroke, Shape, aspect_ratio_meet, aspect_ratio_new,

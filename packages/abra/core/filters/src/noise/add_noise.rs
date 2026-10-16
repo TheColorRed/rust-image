@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 #[derive(Clone, Copy, Debug)]
 /// Noise distribution modes for post-blur dithering
@@ -59,6 +60,21 @@ pub struct Noise {
   options: Options,
 }
 
+impl GpuProcessor for Noise {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    let distribution = match self.distribution {
+      NoiseDistribution::Uniform => 0u32,
+      NoiseDistribution::Gaussian => 1,
+    };
+    let mut uniforms = Vec::with_capacity(16);
+    uniforms.extend_from_slice(&self.amount.to_le_bytes());
+    uniforms.extend_from_slice(&distribution.to_le_bytes());
+    uniforms.extend_from_slice(&0u32.to_le_bytes());
+    uniforms.extend_from_slice(&0u32.to_le_bytes());
+    vec![GpuPass::new(include_str!("./add_noise.wgsl"), uniforms).with_pixel_exact()]
+  }
+}
+
 impl Effect for Noise {
   fn options(&self) -> &Options {
     &self.options
@@ -73,6 +89,10 @@ impl Effect for Noise {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_add_noise(p_image, self.amount, self.distribution);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 

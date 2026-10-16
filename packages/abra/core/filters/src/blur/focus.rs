@@ -1,6 +1,7 @@
 use crate::common::*;
 
 use crate::blur::{GaussianBlur, LensBlur, gaussian_blur};
+use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor, ready_gpu_provider};
 use abra_core::GrayPlane;
 use mask::Mask;
 use options::Effect;
@@ -176,6 +177,28 @@ pub struct FocusBlur {
   options: Options,
 }
 
+impl GpuProcessor for FocusBlur {
+  /// Blur first, then mix the result back into the original through the generated focus mask.
+  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
+    let mut passes = match &self.blur {
+      BlurType::Gaussian(blur) => blur.passes(p_width, p_height),
+      BlurType::Lens(blur) => blur.gpu_processor().map(|gpu| gpu.passes(p_width, p_height)).unwrap_or_default(),
+    };
+    if passes.is_empty() {
+      return passes;
+    }
+    let values = self.focus_mask(p_width, p_height, None).values().to_vec();
+    let rgba: std::sync::Arc<[u8]> = values.iter().flat_map(|&value| [value, value, value, 255]).collect::<Vec<_>>().into();
+    passes.push(
+      GpuPass::new(include_str!("./focus.wgsl"), Vec::new())
+        .with_aux(GpuAux { width: p_width, height: p_height, rgba })
+        .with_base()
+        .with_pixel_exact(),
+    );
+    passes
+  }
+}
+
 impl FocusBlur {
   /// Sets where the focus area sits and how its edge fades. Defaults to [`FocusGeometry::default`].
   pub fn with_geometry(mut self, p_geometry: FocusGeometry) -> Self {
@@ -224,8 +247,21 @@ impl Effect for FocusBlur {
     &mut self.options
   }
 
+  fn positional(&self) -> bool {
+    // The focus geometry is relative to the entire image, not an area crop.
+    true
+  }
+
   fn cpu_processor(&self, p_image: &mut Image) {
     self.apply_to_image(p_image);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    match &self.blur {
+      BlurType::Gaussian(_) => Some(self),
+      BlurType::Lens(blur) if blur.gpu_processor().is_some() => Some(self),
+      BlurType::Lens(_) => None,
+    }
   }
 
   /// This effect builds its own mask from its options, so it handles them itself.
@@ -236,6 +272,10 @@ impl Effect for FocusBlur {
   fn apply_to_image<'a>(&self, p_image: impl Into<ImageRef<'a>>) {
     let mut image_ref: ImageRef = p_image.into();
     let image = &mut image_ref as &mut Image;
+    let hardware = self.options.as_ref().and_then(|options| options.hardware().copied()).unwrap_or_default();
+    if self.gpu_processor().is_some() && ready_gpu_provider(hardware).is_some() && self.apply_on_gpu(image).is_ok() {
+      return;
+    }
     let (width, height) = image.dimensions::<u32>();
 
     let user_options = self.options.as_ref();

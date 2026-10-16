@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 use crate::kernel::apply_kernel;
 
@@ -17,6 +18,13 @@ fn apply_sharpen(p_image: &mut Image) {
 pub struct Sharpen {
   options: Options,
 }
+
+impl GpuProcessor for Sharpen {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    vec![GpuPass::new(include_str!("./sharpen.wgsl"), Vec::new()).with_pixel_exact()]
+  }
+}
+
 impl Effect for Sharpen {
   fn options(&self) -> &Options {
     &self.options
@@ -31,6 +39,10 @@ impl Effect for Sharpen {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_sharpen(p_image);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 
   /// A kernel of one pixel on each side: at a smaller picture it is the same kernel, as wide as a pixel of that picture.

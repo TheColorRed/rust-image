@@ -6,6 +6,7 @@ import {
   EYELINER_KEY,
   EYESHADOW_KEY,
   LIPSTICK_KEY,
+  HAIR_COLOR_KEY,
   RED_EYE_TOOL_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
@@ -63,7 +64,8 @@ export const isPersonControlFocused$ = focusedControlKey$.pipe(
       key === LIP_LINER_KEY ||
       key === HIGHLIGHTER_KEY ||
       key === CONTOUR_KEY ||
-      key === TEETH_WHITENING_KEY,
+      key === TEETH_WHITENING_KEY ||
+      key === HAIR_COLOR_KEY,
   ),
   distinctUntilChanged(),
 );

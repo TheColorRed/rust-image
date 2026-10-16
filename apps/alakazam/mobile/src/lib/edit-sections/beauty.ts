@@ -12,6 +12,7 @@ import { applyBlush } from '../blush';
 import { applySculpt } from '../contour';
 import { type EditSection } from '../edit-sections';
 import { applyEyeMakeup, makeupMasks, skinWithMouthEased } from '../eye-makeup';
+import { applyHairColor } from '../hair-color';
 import { applyLipLiner } from '../lip-liner';
 import { applyLipstick } from '../lipstick';
 import { applyTeethWhitening } from '../teeth';
@@ -22,6 +23,8 @@ import {
   CONTOUR_KEY,
   EYELINER_KEY,
   EYESHADOW_KEY,
+  HAIR_COLOR_KEY,
+  HAIR_GROUP_KEY,
   HIGHLIGHTER_KEY,
   LIP_LINER_KEY,
   LIPSTICK_KEY,
@@ -92,6 +95,28 @@ const faceColors = [
   { label: 'Bronze', color: '#A66B3F' },
   { label: 'Bronze glow', color: '#AA754D' },
   { label: 'Smoky', color: '#55515A' },
+];
+
+/**
+ * The natural hair colors, each once. `shift` is how much lighter (up to 1) or darker (down to -1) than the photo's hair that color
+ * should come out, since the hair's own light and shade are kept and a dark color alone would leave blond hair blond.
+ */
+const hairColors = [
+  { label: 'Black', color: '#1C1C1C', shift: -1 },
+  { label: 'Dark brown', color: '#3B2418', shift: -0.7 },
+  { label: 'Brown', color: '#5A3825', shift: -0.4 },
+  { label: 'Chestnut', color: '#7A4A2B', shift: -0.2 },
+  { label: 'Light brown', color: '#8E6A45', shift: 0.1 },
+  { label: 'Auburn', color: '#8B3A1E', shift: -0.3 },
+  { label: 'Ginger', color: '#B5532A', shift: 0 },
+  { label: 'Copper', color: '#C06A3B', shift: 0.1 },
+  { label: 'Dark blond', color: '#A8814F', shift: 0.25 },
+  { label: 'Strawberry blond', color: '#D9A06B', shift: 0.35 },
+  { label: 'Blond', color: '#E0C080', shift: 0.5 },
+  { label: 'Platinum', color: '#EFE6C8', shift: 0.8 },
+  { label: 'Gray', color: '#9A9A9A', shift: 0.2 },
+  { label: 'Silver', color: '#C9C9CC', shift: 0.5 },
+  { label: 'White', color: '#F4F4F4', shift: 0.9 },
 ];
 
 /**
@@ -598,6 +623,42 @@ export const beauty: EditSection = {
             opacity: ([, strength]) => strength,
             paint: (sheet, [shade, , softness, size, fan = 0]: number[], context) =>
               applySculpt('contour', sheet, softness, size, shade, context, fan),
+          },
+        },
+      ],
+    },
+    {
+      kind: 'group',
+      key: HAIR_GROUP_KEY,
+      label: 'Hair',
+      controls: [
+        {
+          kind: 'slider',
+          key: HAIR_COLOR_KEY,
+          label: 'Hair Color',
+          // First the color (a swatch or the bar), then how much of it, and how colorful and how light or dark the hair comes out.
+          display: 'tabulated',
+          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Lighten / Darken'],
+          min: [0, 0, 0, -1],
+          max: [1, 1, 1, 1],
+          step: [0.01, 0.01, 0.01, 0.01],
+          // Opening the control gives the hair a natural chestnut at once, so there is something to change.
+          defaultValue: [1 - 22 / 360, 1, 0.65, -0.2],
+          picker: ['hue', undefined, undefined, undefined],
+          // The natural colors; each also sets how light or dark the hair comes out.
+          swatches: swatchesOf(hairColors, (hue, saturation, _brightness, label) => [
+            hue,
+            1,
+            saturation,
+            hairColors.find(each => each.label === label)!.shift,
+          ]),
+          // The AI finds the hair once, when the control opens; dragging only changes how it looks.
+          preload: makeupMasks,
+          layer: {
+            blend: BlendMode.Normal,
+            opacity: ([, strength]) => strength,
+            paint: (sheet, [hue, , saturation, shift]: number[], context) =>
+              applyHairColor(sheet, hue, saturation, shift, context),
           },
         },
       ],

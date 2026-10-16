@@ -45,6 +45,8 @@ export interface Project {
    * the project loads them instead of running the models. Left out until the models have found a face.
    */
   makeupMasks?: { name: string; file: string }[];
+  /** Which set of masks `makeupMasks` holds (see `MAKEUP_MASKS_VERSION`). Projects saved before it have none, and are made again once. */
+  makeupMasksVersion?: number;
   /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
   people?: SavedPersonDetection[];
   /**

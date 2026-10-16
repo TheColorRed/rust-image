@@ -205,6 +205,19 @@ export const provideAnalysis = (preload: PreloadFunction, analysis: Preloaded) =
   preloads.delete(preload);
 };
 
+/**
+ * Forgets what `preload` made for the photo, so it runs again the next time a control needs it. It does nothing while the preload is
+ * still running, and the caller must have checked that the preload can run (its models are installed), or what it made is lost for good.
+ */
+export const forgetAnalysis = (preload: PreloadFunction) => {
+  if (running.has(preload)) return;
+  const previous = analyses.get(preload);
+  if (previous) free(previous);
+  analyses.delete(preload);
+  for (const held of preloads.get(preload)?.values() ?? []) if (held !== previous) free(held);
+  preloads.delete(preload);
+};
+
 /** Frees every preloaded image made at a size, when the edit base changes. What the preloads made of the photo is kept. */
 export const clearPreloads = () => {
   const kept = new Set(analyses.values());

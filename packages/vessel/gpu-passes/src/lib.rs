@@ -49,6 +49,11 @@ pub struct GpuAux {
 /// 3 = `texture_2d<f32>` (only when `aux` is set), 4 = `texture_2d<f32>` (only when `base` is set), with an
 /// `@workgroup_size(8, 8)` entry point named `main`, and 5 = uniform (only when `window` is set).
 ///
+/// A pass whose shader declares its output as `texture_storage_2d<rgba32float, write>` instead keeps real numbers in a 32-bit float
+/// texture for the pass after it to read (sums, means, variances that 8 bits cannot hold), with nothing to set on the pass: the renderer
+/// reads the format from the shader. Such a pass cannot be the last of a chain, which must end in an 8-bit pass, and a pass that reads
+/// `base` cannot follow one. A float texture is four times the size of an 8-bit one.
+///
 /// A pass that sets `window` also gets, at binding 5, where the image it is run on sits in the photo it is a view of:
 /// `struct Window { origin: vec2<f32>, scale: f32, scale_y: f32, full: vec2<f32>, pad2: vec2<f32> }`. A pixel `p` of the image
 /// is the photo's pixel `origin + (p + 0.5) * scale`, in a photo `full` pixels across. (`scale_y` is the same as `scale`

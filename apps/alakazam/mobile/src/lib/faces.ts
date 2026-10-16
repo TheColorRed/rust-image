@@ -11,6 +11,10 @@ export const FACE_PARSING = 'face-parsing';
 export const FACE_LANDMARKS = 'face-landmarks';
 /** The AI models that finding a face needs, by role. */
 export const FACE_MODELS = [PERSON_DETECTION, FACE_PARSING, FACE_LANDMARKS] as const;
+/** The skin model's role. It also finds the hair, over the whole photo and not only near a face. */
+export const SKIN_SEGMENTATION = 'skin-segmentation';
+/** The AI models the makeup controls need, by role: the face models, and the one that finds the hair. */
+export const MAKEUP_MODELS = [...FACE_MODELS, SKIN_SEGMENTATION] as const;
 
 /** The face-parsing classes that only a face has. Skin is left out: a body has plenty of it. */
 const FACE_FEATURES = ['left eyebrow', 'right eyebrow', 'left eye', 'right eye', 'nose', 'mouth', 'upper lip', 'lower lip'];

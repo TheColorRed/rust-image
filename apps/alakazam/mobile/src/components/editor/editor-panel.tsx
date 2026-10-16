@@ -6,7 +6,8 @@ import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red
 import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
 import { GLOW_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
 import { missingModels } from '@/src/lib/ai-model-availability';
-import { FACE_MODELS } from '@/src/lib/faces';
+import { rescanFaceMasks } from '@/src/lib/editor/editor-session';
+import { MAKEUP_MODELS } from '@/src/lib/faces';
 import { aiModelsRequested } from '@/src/state/ai-models';
 import {
   CONTOUR_KEY,
@@ -16,6 +17,7 @@ import {
   BROW_BONE_KEY,
   EYELINER_KEY,
   EYESHADOW_KEY,
+  HAIR_COLOR_KEY,
   LIPSTICK_KEY,
   UNDER_EYE_KEY,
 } from '@/src/lib/edit-sections/keys';
@@ -77,7 +79,7 @@ import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/
 import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
 import { replayHidden } from '@/src/state/session';
 import { VesselView } from '@vessel/react-native';
-import { ChevronLeft, Redo2, RotateCcw, Undo2, X } from 'lucide-react-native';
+import { ChevronLeft, Redo2, RotateCcw, ScanFace, Undo2, X } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
@@ -146,13 +148,14 @@ export function EditorPanel() {
             LIP_LINER_KEY,
             HIGHLIGHTER_KEY,
             CONTOUR_KEY,
+            HAIR_COLOR_KEY,
           ].includes(control.key) &&
-          missingModels(FACE_MODELS).length > 0
+          missingModels(MAKEUP_MODELS).length > 0
         ) {
           // Finding the lips needs the face models; opening the slider without them would do nothing.
           aiModelsRequested.next({
             title: 'Lipstick',
-            roles: FACE_MODELS,
+            roles: MAKEUP_MODELS,
             onReady: () => selectControlRequested.next(control),
           });
         } else {
@@ -334,6 +337,23 @@ function SliderEditor() {
 
   const everyone = isPersonControlFocused ? <PersonEveryoneButton /> : null;
 
+  // Finds the faces, lips, eyes and hair again, for when the first time found them wrong. Needs the models, as the first time did.
+  const rescan = control.preload ? (
+    <Pressable
+      onPress={() => {
+        if (missingModels(MAKEUP_MODELS).length > 0) {
+          aiModelsRequested.next({ title: control.label, roles: MAKEUP_MODELS, onReady: rescanFaceMasks });
+        } else rescanFaceMasks();
+      }}
+      hitSlop={8}
+      style={styles.backChip}
+      accessibilityRole="button"
+      accessibilityLabel="Find the face again"
+    >
+      <ScanFace color={colors.textPrimary} size={16} />
+    </Pressable>
+  ) : null;
+
   // The bar that picks this control's slider, when it has one in place of the plain slider.
   const barKindAt = (index: number) => {
     const picker = Array.isArray(control.picker) ? control.picker[index] : control.picker;
@@ -356,12 +376,13 @@ function SliderEditor() {
             {back}
             <View style={styles.sliderHeaderSpacer} />
             {everyone}
+            {rescan}
             {isMultiSlider(control) && resetAll}
             {close}
           </View>
         )}
         {tabulated && (
-          <View style={styles.sliderPills}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sliderPills}>
             {specs.map((spec, index) => (
               <Pressable
                 key={index}
@@ -379,7 +400,7 @@ function SliderEditor() {
                 )}
               </Pressable>
             ))}
-          </View>
+          </ScrollView>
         )}
         {specs.map((spec, index) =>
           tabulated && index !== openSlider ? null : barKindAt(index) ? (
@@ -443,6 +464,7 @@ function SliderEditor() {
                 !isMultiSlider(control) && index === 0 ? (
                   <>
                     {everyone}
+                    {rescan}
                     {close}
                   </>
                 ) : undefined

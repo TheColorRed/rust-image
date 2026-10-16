@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use abra::abra_core::Image as CoreImage;
 use abra::filters::prelude::{
-  blur, distort, edges, noise, sharpen as sharpen_module, smooth as smooth_module, sobel as sobel_module,
+  blur, distort, edges, morphology, noise, sharpen as sharpen_module, smooth as smooth_module, sobel as sobel_module,
 };
 // The enums are redeclared below for uniffi, which needs the library's own type in scope under its own name.
 use blur::{ApertureShape, FocusShape};
@@ -19,7 +19,7 @@ use distort::{RippleShape, RippleSize};
 use noise::NoiseDistribution;
 use sobel_module::SobelDirection;
 
-use crate::Image;
+use crate::{Image, Mask};
 use crate::effect::effect_methods;
 
 // The shape of the focus area of a focus blur.
@@ -389,6 +389,46 @@ pub fn smooth() -> Arc<Smooth> {
   Arc::new(Smooth(smooth_module::smooth()))
 }
 
+/// Grows or shrinks the bright parts of an image. Made by [`dilate`] and [`erode`].
+#[derive(uniffi::Object)]
+pub struct Morphology(morphology::Morphology);
+
+/// Grows each bright part of an image by this many pixels, each color channel on its own. The alpha is left as it was.
+#[uniffi::export]
+pub fn dilate(radius: u32) -> Arc<Morphology> {
+  Arc::new(Morphology(morphology::dilate(radius)))
+}
+
+/// Shrinks each bright part of an image by this many pixels, each color channel on its own. The alpha is left as it was.
+#[uniffi::export]
+pub fn erode(radius: u32) -> Arc<Morphology> {
+  Arc::new(Morphology(morphology::erode(radius)))
+}
+
+/// Makes a picture of a mask follow the edges of a photo, on the CPU or the GPU. Made by [`guided`].
+#[derive(uniffi::Object)]
+pub struct Guided(smooth_module::Guided);
+
+/// A guided filter for a picture of a mask (white where it reaches) that makes it follow the edges of the brightness of `guide`.
+/// `radius` is how far in pixels it looks and `epsilon` how strong an edge has to be (brightness counted from 0 to 1): `0.0001`
+/// follows faint edges, `0.01` only strong ones. The result is an opaque gray picture. On the GPU it keeps its numbers in 32-bit
+/// float textures, so use a picture no larger than it needs to be.
+#[uniffi::export]
+pub fn guided(guide: Arc<Image>, radius: u32, epsilon: f32) -> Arc<Guided> {
+  let guide: CoreImage = guide.core();
+  Arc::new(Guided(smooth_module::guided(&guide, radius, epsilon)))
+}
+
+/// A mask made to follow the edges of a photo: where the photo has a real edge the mask changes there, and where the photo is
+/// flat the mask is smoothed. The result is the size of the photo; a mask of another size is first scaled to it. `radius` is how far
+/// in pixels the filter looks, and `epsilon` how strong an edge has to be (colors counted from 0 to 1) before the mask follows it:
+/// `0.0001` follows faint edges, `0.01` only strong ones.
+#[uniffi::export]
+pub fn guided_filter(mask: Arc<Mask>, guide: Arc<Image>, radius: u32, epsilon: f32) -> Arc<Mask> {
+  let guide: CoreImage = guide.core();
+  Arc::new(Mask::from_core(smooth_module::guided_filter(&mask.core(), &guide, radius, epsilon)))
+}
+
 /// Applies the Sobel kernel. Made by [`sobel`].
 #[derive(uniffi::Object)]
 pub struct Sobel(sobel_module::Sobel);
@@ -423,6 +463,8 @@ effect_methods!(
   Sharpen,
   Smooth,
   Sobel,
+  Morphology,
+  Guided,
 );
 
 #[cfg(test)]
@@ -579,6 +621,18 @@ mod tests {
         handle_and_library(|i| despeckle(1.0, 10.0).apply_on_cpu(i), |e| noise::despeckle(1.0, 10.0).apply_on_cpu(e)),
       ),
       ("median", handle_and_library(|i| median(1.0).apply_on_cpu(i), |e| noise::median(1.0).apply_on_cpu(e))),
+      ("dilate", handle_and_library(|i| dilate(2).apply_on_cpu(i), |e| morphology::dilate(2).apply_on_cpu(e))),
+      ("erode", handle_and_library(|i| erode(2).apply_on_cpu(i), |e| morphology::erode(2).apply_on_cpu(e))),
+      (
+        "guided",
+        handle_and_library(
+          |i| guided(new_image(), 2, 0.001).apply_on_cpu(i),
+          |e| {
+            let guide = CoreImage::new_from_pixels(WIDTH, HEIGHT, picture(), Channels::RGBA);
+            smooth_module::guided(&guide, 2, 0.001).apply_on_cpu(e)
+          },
+        ),
+      ),
       ("sharpen", handle_and_library(|i| sharpen().apply_on_cpu(i), |e| sharpen_module::sharpen().apply_on_cpu(e))),
       ("smooth", handle_and_library(|i| smooth().apply_on_cpu(i), |e| smooth_module::smooth().apply_on_cpu(e))),
       (
@@ -626,6 +680,15 @@ mod tests {
   #[should_panic(expected = "this operation has no GPU version")]
   fn a_filter_without_a_shader_cannot_be_applied_on_the_gpu() {
     sharpen().apply_on_gpu(new_image());
+  }
+
+  #[test]
+  fn the_guided_filter_is_the_librarys() {
+    let library = CoreImage::new_from_pixels(WIDTH, HEIGHT, picture(), Channels::RGBA);
+    let values: Vec<u8> = (0..WIDTH * HEIGHT).map(|i| if i % WIDTH < WIDTH / 2 { 0 } else { 255 }).collect();
+    let made = guided_filter(Arc::new(Mask::from_values(WIDTH, HEIGHT, values.clone())), new_image(), 3, 0.001);
+    let expected = smooth_module::guided_filter(&abra::mask::prelude::Mask::from_values(WIDTH, HEIGHT, values), &library, 3, 0.001);
+    assert_eq!(made.values(), expected.values());
   }
 
   #[test]

@@ -17,6 +17,7 @@ The current filter implementation includes these modules:
 | Blur    | Soften detail with blur kernels and specialized blur effects.  |
 | Distort | Transform or displace image coordinates.                       |
 | Edges   | Detect or emphasize image edges.                               |
+| Morphology | Grow or shrink the bright parts of an image.                |
 | Noise   | Add or process image noise.                                    |
 | Sharpen | Increase local detail and edge definition.                     |
 | Smooth  | Reduce local variation while preserving the overall image.     |
@@ -29,6 +30,7 @@ The current filter implementation includes these modules:
 | -------------------- | -------------------------------------------------------------- |
 | [Blur](./blur)       | Gaussian, box, motion, surface, focus, lens, and general blur. |
 | [Distort](./distort) | Pinch and ripple displacement effects.                         |
+| [Grow and shrink](./morphology) | Dilate and erode, on the CPU or the GPU.                  |
 | [Noise](./noise)     | Noise generation, median filtering, and despeckling.           |
 | [Detail](./detail)   | Sharpening, smoothing, and skin smoothing.                     |
 | [Edges](./edges)     | Glowing edges and Sobel horizontal/vertical operators.         |

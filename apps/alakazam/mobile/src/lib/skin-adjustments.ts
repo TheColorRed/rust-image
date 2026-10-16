@@ -4,6 +4,7 @@ import {
   EYELINER_KEY,
   EYESHADOW_KEY,
   LIPSTICK_KEY,
+  HAIR_COLOR_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
@@ -32,7 +33,8 @@ export function isPersonAdjustment(key: string): boolean {
       key === LIP_LINER_KEY ||
       key === HIGHLIGHTER_KEY ||
       key === CONTOUR_KEY ||
-      key === TEETH_WHITENING_KEY
+      key === TEETH_WHITENING_KEY ||
+      key === HAIR_COLOR_KEY
   );
 }
 

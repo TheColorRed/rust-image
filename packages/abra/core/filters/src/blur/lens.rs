@@ -1,5 +1,6 @@
 use crate::common::*;
 use abra_core::IntoNumber;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 use crate::noise::NoiseDistribution;
 
@@ -230,6 +231,26 @@ pub struct LensBlur {
   options: Options,
 }
 
+impl GpuProcessor for LensBlur {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    if self.settings.iris.radius == 0 {
+      return Vec::new();
+    }
+    let iris = self.settings.iris;
+    let specular = self.settings.specular;
+    let mut uniforms = Vec::with_capacity(32);
+    uniforms.extend_from_slice(&iris.radius.to_le_bytes());
+    uniforms.extend_from_slice(&iris.shape.blades().to_le_bytes());
+    uniforms.extend_from_slice(&self.settings.samples.max(1).to_le_bytes());
+    uniforms.extend_from_slice(&u32::from(specular.is_some()).to_le_bytes());
+    uniforms.extend_from_slice(&iris.blade_curvature.to_le_bytes());
+    uniforms.extend_from_slice(&iris.rotation.to_le_bytes());
+    uniforms.extend_from_slice(&specular.map_or(1.0, |value| value.brightness).to_le_bytes());
+    uniforms.extend_from_slice(&specular.map_or(1.0, |value| value.threshold).to_le_bytes());
+    vec![GpuPass::new(include_str!("./lens.wgsl"), uniforms).with_pixel_exact().with_reach(self.padding() as f32)]
+  }
+}
+
 impl LensBlur {
   /// Sets the aperture shape, which shapes the bokeh. Defaults to [`ApertureShape::Hexagon`].
   pub fn with_shape(mut self, p_shape: ApertureShape) -> Self {
@@ -291,6 +312,11 @@ impl Effect for LensBlur {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_lens_blur(p_image, self.settings);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    // Noise is a separate CPU effect after the aperture sampling, so it cannot be represented by this one GPU pass.
+    self.settings.noise.is_none().then_some(self)
   }
 }
 

@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 /// Applies a directional motion blur to an image.
 /// - `image`: target image buffer
@@ -104,6 +105,20 @@ pub struct MotionBlur {
   options: Options,
 }
 
+impl GpuProcessor for MotionBlur {
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    if self.distance == 0 {
+      return Vec::new();
+    }
+    let mut uniforms = Vec::with_capacity(16);
+    uniforms.extend_from_slice(&self.angle_degrees.to_radians().to_le_bytes());
+    uniforms.extend_from_slice(&self.distance.to_le_bytes());
+    uniforms.extend_from_slice(&0u32.to_le_bytes());
+    uniforms.extend_from_slice(&0u32.to_le_bytes());
+    vec![GpuPass::new(include_str!("./motion.wgsl"), uniforms).with_pixel_exact().with_reach(self.padding() as f32)]
+  }
+}
+
 impl Effect for MotionBlur {
   fn options(&self) -> &Options {
     &self.options
@@ -121,6 +136,10 @@ impl Effect for MotionBlur {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_motion_blur(p_image, self.angle_degrees, self.distance);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 }
 

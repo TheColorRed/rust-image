@@ -11,7 +11,9 @@
 //
 // Gradle is run directly because `react-native run-android` fails to find gradlew.bat on this setup.
 //
-// Usage: npm run dev:android [-- --release] [-- --no-launch] [-- --no-metro] [-- --device <serial>]
+// --metro-only skips the build, install and launch: it only starts Metro and forwards it to the devices.
+//
+// Usage: npm run dev:android [-- --release] [-- --no-launch] [-- --no-metro] [-- --metro-only] [-- --device <serial>]
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
 import path from 'node:path';
@@ -21,11 +23,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
 const args = process.argv.slice(2);
 const release = args.includes('--release');
-const launch = !args.includes('--no-launch');
+const metroOnly = args.includes('--metro-only');
+const launch = !args.includes('--no-launch') && !metroOnly;
 const startMetro = !release && !args.includes('--no-metro');
 const deviceArgIndex = args.findIndex((arg) => arg === '--device' || arg.startsWith('--device='));
 const requestedDevice = deviceArgIndex < 0 ? undefined : args[deviceArgIndex] === '--device' ? args[deviceArgIndex + 1] : args[deviceArgIndex].slice('--device='.length);
-const ownFlags = new Set(['--release', '--no-launch', '--no-metro']);
+const ownFlags = new Set(['--release', '--no-launch', '--no-metro', '--metro-only']);
 const forwardedArgs = args.filter((arg, index) => !ownFlags.has(arg) && !arg.startsWith('--device') && args[index - 1] !== '--device');
 const appId = release ? 'com.alakazam.mobile' : 'com.alakazam.mobile.debug';
 const metroUrl = 'http://127.0.0.1:8081/status';
@@ -105,20 +108,22 @@ if (startMetro) {
   }
 }
 
-// 3. Rust libraries and TypeScript bindings.
-run(
-  'Build Rust libraries and bindings',
-  'npm',
-  ['run', release ? 'build:android:release' : 'build:android', '-w', 'packages/react-native/alakazam', '--', ...forwardedArgs],
-  root,
-);
+if (!metroOnly) {
+  // 3. Rust libraries and TypeScript bindings.
+  run(
+    'Build Rust libraries and bindings',
+    'npm',
+    ['run', release ? 'build:android:release' : 'build:android', '-w', 'packages/react-native/alakazam', '--', ...(forwardedArgs.some((arg) => arg.startsWith('--targets')) ? [] : ['--targets', 'arm64-v8a']), ...forwardedArgs],
+    root,
+  );
 
-// 4. Install with Gradle. Reusing the Gradle build means later device installs
-// are incremental, while ANDROID_SERIAL keeps each install unambiguous.
-const androidDir = path.join(root, 'apps', 'alakazam', 'mobile', 'android');
-const gradlew = isWindows ? `"${path.join(androidDir, 'gradlew.bat')}"` : path.join(androidDir, 'gradlew');
-for (const device of devices) {
-  run(`Install the app with Gradle (${device})`, gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+  // 4. Install with Gradle. Reusing the Gradle build means later device installs
+  // are incremental, while ANDROID_SERIAL keeps each install unambiguous.
+  const androidDir = path.join(root, 'apps', 'alakazam', 'mobile', 'android');
+  const gradlew = isWindows ? `"${path.join(androidDir, 'gradlew.bat')}"` : path.join(androidDir, 'gradlew');
+  for (const device of devices) {
+    run(`Install the app with Gradle (${device})`, gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+  }
 }
 
 // 5. Wait for Metro, forward it to the device and launch.

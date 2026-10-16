@@ -6,7 +6,9 @@ import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
 import { paintSheet, type Painting } from '@/src/lib/layers';
-import { FACE_MODELS, belongsTo, boxKey, findFacesAsync, model, owning } from '@/src/lib/faces';
+import { AiModel } from '@abra/core';
+import { aiModelPath, runAiModelAsync } from '@alakazam/mobile';
+import { MAKEUP_MODELS, SKIN_SEGMENTATION, belongsTo, boxKey, findFacesAsync, model, owning } from '@/src/lib/faces';
 
 const LIPS = ['upper lip', 'lower lip'];
 
@@ -243,8 +245,33 @@ const regionAt = (
 };
 
 /**
+ * Which set of masks `makeupMasks` makes. A project saves the masks it made and opens with those, so a project saved with an older set
+ * (before the hair was one of them) has the models run once more, and saves the new set. Raise it when `makeupMasks` makes a new kind.
+ */
+export const MAKEUP_MASKS_VERSION = 3;
+
+/**
+ * The skin model read for its hair class instead of its skin classes. It is the same `.onnx` file, so it needs no download of its own:
+ * only the manifest differs (`mask_classes` is the hair, class 1). The model looks at the whole photo, so it finds hair far from the face.
+ */
+const HAIR_MANIFEST = `name: selfie_multiclass_256x256_hair
+description: Hair of the six-class selfie segmentation
+decoder: semantic-mask
+params:
+  input_size: 256
+  input_layout: nhwc
+  input_fit: stretch
+  output_layout: nhwc
+  class_count: 6
+  mask_classes: [1]
+classes: [background, hair, body skin, face skin, clothes, others]
+`;
+
+let hairSegmenter: ReturnType<typeof AiModel.load> | undefined;
+
+/**
  * Runs face analysis once and keeps what every region of the Makeup group is made from: the lips, and the eye and eyebrow of each
- * side, named `lipstick|person`, `skin|person`, `nose|person`, `eye|person|side` and `brow|person|side` (the person is the box around them, as fractions of the photo: see `boxKey`). The regions
+ * side, named `lipstick|person`, `skin|person`, `nose|person`, `eye|person|side` and `brow|person|side` (the person is the box around them, as fractions of the photo: see `boxKey`), and the hair of the whole photo, `hair|all`. The regions
  * themselves are made when the color is applied, because their size is a slider.
  *
  * The models run in the background, so this gives back a promise and the editor keeps going meanwhile: a control that needs the masks
@@ -252,7 +279,7 @@ const regionAt = (
  * because the editor frees the one it passed as soon as this returns.
  */
 export const makeupMasks = async (photo: ImageLike): Promise<Record<string, MaskLike> | undefined> => {
-  if (FACE_MODELS.some(role => !model(role))) return undefined;
+  if (MAKEUP_MODELS.some(role => !model(role))) return undefined;
   const mine = photo.clone();
   const made: Record<string, MaskLike> = {};
   try {
@@ -276,6 +303,13 @@ export const makeupMasks = async (photo: ImageLike): Promise<Record<string, Mask
           if (brow.bounds(0)) made[`brow|${box}|${side}`] = place(brow);
         }
       }
+      // The hair is found in the whole photo, once, and not for each face.
+      hairSegmenter ??= AiModel.loadWithManifest(aiModelPath(SKIN_SEGMENTATION), HAIR_MANIFEST);
+      const found = keep(await runAiModelAsync(hairSegmenter, mine as Parameters<typeof runAiModelAsync>[1]));
+      // Kept in `made`, so it is not freed with the rest; one with no hair in it is.
+      const hair = found.mask();
+      if (hair.bounds(0)) made['hair|all'] = hair;
+      else (hair as unknown as { uniffiDestroy(): void }).uniffiDestroy();
     });
   } catch (error) {
     // A model that failed part of the way leaves nothing behind.

@@ -164,6 +164,18 @@ impl Mask {
     Arc::new(Self::from_core(self.0.read().unwrap().inverted()))
   }
 
+  /// A copy of the mask grown: each pixel takes the strongest value within `radius` pixels of it, so the edge of a region
+  /// moves out that far. The window is a square and the edges of the mask are not eaten.
+  pub fn dilated(&self, radius: u32) -> Arc<Mask> {
+    Arc::new(Self::from_core(self.0.read().unwrap().dilated(radius)))
+  }
+
+  /// A copy of the mask shrunk: each pixel takes the weakest value within `radius` pixels of it, so the edge of a region
+  /// moves in that far. The window is a square and the edges of the mask are not eaten.
+  pub fn eroded(&self, radius: u32) -> Arc<Mask> {
+    Arc::new(Self::from_core(self.0.read().unwrap().eroded(radius)))
+  }
+
   /// The two masks added, up to `255`. The result is the size of this mask; a mask of another size is scaled to it.
   pub fn added(&self, other: Arc<Mask>) -> Arc<Mask> {
     Arc::new(Self::from_core(self.0.read().unwrap().added(&other.core())))
@@ -231,6 +243,13 @@ pub fn apply_mask_to_pixels_rgba(mut pixels: Vec<u8>, mask: Vec<u8>) -> Vec<u8> 
 mod tests {
   use super::*;
   use crate::Color;
+
+  #[test]
+  fn a_mask_grows_and_shrinks_as_the_librarys_does() {
+    let mask = Mask::from_values(5, 1, vec![0, 0, 255, 0, 0]);
+    assert_eq!(mask.dilated(1).values(), vec![0, 255, 255, 255, 0]);
+    assert_eq!(mask.dilated(1).eroded(1).values(), vec![0, 0, 255, 0, 0]);
+  }
 
   #[test]
   fn a_mask_reads_back_what_it_was_made_from() {

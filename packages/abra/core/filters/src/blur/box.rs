@@ -1,4 +1,5 @@
 use crate::common::*;
+use abra_core::image::gpu::{GpuPass, GpuProcessor};
 
 fn apply_box_blur(p_image: &mut Image, p_radius: u32) {
   if p_radius == 0 {
@@ -98,6 +99,20 @@ pub struct BoxBlur {
   options: Options,
 }
 
+impl GpuProcessor for BoxBlur {
+  /// The horizontal and vertical box passes use integer sums and division, exactly as the CPU path does.
+  fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
+    if self.radius == 0 {
+      return Vec::new();
+    }
+    let pass = |direction| {
+      let uniforms: Vec<u8> = [self.radius, direction, 0, 0].iter().flat_map(|value| value.to_le_bytes()).collect();
+      GpuPass::new(include_str!("./box.wgsl"), uniforms).with_window().with_reach(self.radius as f32)
+    };
+    vec![pass(0), pass(1)]
+  }
+}
+
 impl Effect for BoxBlur {
   fn options(&self) -> &Options {
     &self.options
@@ -113,6 +128,10 @@ impl Effect for BoxBlur {
 
   fn cpu_processor(&self, p_image: &mut Image) {
     apply_box_blur(p_image, self.radius);
+  }
+
+  fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
   }
 
   /// The same effect for a picture halved `p_level` times: the radius is half as long for each halving.

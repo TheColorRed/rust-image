@@ -95,6 +95,37 @@ color::grayscale().with_options(options).apply(&mut image);
 
 This keeps the source image's alpha behavior separate from the operation's per-pixel strength.
 
+## Grow, shrink and refine a mask
+
+`dilated` grows a mask and `eroded` shrinks it: each pixel takes the strongest (or weakest) value within a number of pixels, so the edge of a region moves out or in by that many pixels. The window is a square, and the edges of the mask are not eaten.
+
+```rust
+let wider = mask.dilated(3);
+let tighter = mask.eroded(3);
+```
+
+A mask found by a model is rough, because the model looked at a small copy of the photo. `guided_filter` makes it follow the edges of the photo itself: where the photo has a real edge the mask changes there, and where the photo is flat the mask is smoothed. The result is the size of the photo, so a mask found on a small copy can be refined at full size.
+
+```rust
+use abra::filters::prelude::smooth::guided_filter;
+
+// Look 8 pixels around each pixel; follow edges as faint as 0.0001 (colors count from 0 to 1).
+let refined = guided_filter(&mask, &photo, 8, 0.0001);
+```
+
+A radius of a few pixels fixes an edge that is a few pixels off, and a larger `epsilon` (`0.01`) follows only strong edges. It smooths and places an edge, but it does not sharpen a very blurry one.
+
+`guided_filter` counts all three colors of the photo and runs on the CPU. For a picture of a mask that should be refined on the GPU, use the `guided` effect, which looks at the photo's brightness only and gives the same pixels on the CPU and the GPU:
+
+```rust
+use abra::filters::prelude::smooth::guided;
+
+// `mask_image` is a picture of the mask (white where it reaches); the red channel is read.
+guided(&photo, 8, 0.0001).apply(&mut mask_image);
+```
+
+On the GPU it keeps its numbers in 32-bit float textures (16 bytes a pixel, two of them), so use a picture of the mask no larger than it needs to be. To grow or shrink a mask picture on the GPU, see [Grow and shrink](../filters/morphology).
+
 ## Helpers
 
 `mask_value_to_alpha` maps a mask value directly to alpha. `rgba_to_gray` calculates grayscale using the ITU-R BT.601 approximation and ignores input alpha:
@@ -118,3 +149,6 @@ let gray = rgba_to_gray(&[255, 0, 0, 255]);
 | `apply_mask_to_image(image, bytes)`       | Apply grayscale or RGBA mask bytes to an image. |
 | `apply_mask_to_pixels_rgba(pixels, mask)` | Apply mask bytes to an RGBA buffer.             |
 | `rgba_to_gray(rgba)`                      | Convert one RGBA pixel to grayscale.            |
+| `dilated(radius)` / `eroded(radius)`      | Move the edge of a mask out or in.              |
+| `guided_filter(mask, photo, radius, eps)` | Make a mask follow the edges of a photo (color, CPU). |
+| `guided(photo, radius, eps)`              | The same by brightness, as an effect on the CPU or GPU. |
