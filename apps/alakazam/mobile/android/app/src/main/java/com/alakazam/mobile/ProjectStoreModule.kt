@@ -25,11 +25,22 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
   companion object {
     const val NAME = "ProjectStore"
     private const val PROJECT_FILE = "project.json"
+    private const val PRESETS_FILE = "presets.json"
   }
 
   override fun getName() = NAME
 
   private val root get() = File(context.filesDir, "projects")
+  private val presetsFile get() = File(File(context.filesDir, "presets"), PRESETS_FILE)
+
+  /** Writes a shared file atomically, just as project.json is written. */
+  private fun writePresetsFile(json: String) {
+    val folder = presetsFile.parentFile ?: throw IOException("Could not find the presets folder")
+    if (!folder.exists() && !folder.mkdirs()) throw IOException("Could not create the presets folder")
+    val temporary = File(folder, "$PRESETS_FILE.tmp")
+    FileOutputStream(temporary).use { it.write(json.toByteArray()) }
+    if (!temporary.renameTo(presetsFile)) throw IOException("Could not save $PRESETS_FILE")
+  }
 
   /** The folder for a project id. Ids are generated here, so anything with a path separator is refused. */
   private fun folderOf(id: String): File {
@@ -124,6 +135,28 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
       promise.resolve(folderOf(id).deleteRecursively())
     } catch (error: Exception) {
       promise.reject("PROJECT_DELETE_FAILED", "Could not delete the project", error)
+    }
+  }
+
+  /** The user's reusable, non-destructive edit recipes. They are global, not part of a photo project. */
+  @ReactMethod
+  fun listPresets(promise: Promise) {
+    try {
+      promise.resolve(if (presetsFile.isFile) presetsFile.readText() else "[]")
+    } catch (error: Exception) {
+      promise.reject("PRESET_LIST_FAILED", "Could not list presets", error)
+    }
+  }
+
+  @ReactMethod
+  fun writePresets(json: String, promise: Promise) {
+    try {
+      // Refuse corrupt data before replacing the good file.
+      JSONArray(json)
+      writePresetsFile(json)
+      promise.resolve(null)
+    } catch (error: Exception) {
+      promise.reject("PRESET_WRITE_FAILED", "Could not save presets", error)
     }
   }
 }

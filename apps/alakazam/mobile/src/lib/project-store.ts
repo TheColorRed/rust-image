@@ -47,6 +47,9 @@ export interface Project {
   makeupMasks?: { name: string; file: string }[];
   /** Which set of masks `makeupMasks` holds (see `MAKEUP_MASKS_VERSION`). Projects saved before it have none, and are made again once. */
   makeupMasksVersion?: number;
+  /** The masks the hair analysis made (see `hairMasks`), saved like `makeupMasks`, and the set they are (`HAIR_MASKS_VERSION`). */
+  hairMasks?: { name: string; file: string }[];
+  hairMasksVersion?: number;
   /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
   people?: SavedPersonDetection[];
   /**

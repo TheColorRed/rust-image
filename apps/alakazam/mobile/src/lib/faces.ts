@@ -13,8 +13,12 @@ export const FACE_LANDMARKS = 'face-landmarks';
 export const FACE_MODELS = [PERSON_DETECTION, FACE_PARSING, FACE_LANDMARKS] as const;
 /** The skin model's role. It also finds the hair, over the whole photo and not only near a face. */
 export const SKIN_SEGMENTATION = 'skin-segmentation';
-/** The AI models the makeup controls need, by role: the face models, and the one that finds the hair. */
-export const MAKEUP_MODELS = [...FACE_MODELS, SKIN_SEGMENTATION] as const;
+/** The edge refinement model's role (ViTMatte). It is not needed: with it the hair's edge is decided by it, without it by color. */
+export const EDGE_REFINEMENT = 'edge-refinement-small';
+/** The AI models the makeup controls need, by role: the face models. */
+export const MAKEUP_MODELS = FACE_MODELS;
+/** The AI model the hair controls need, by role: the one that finds the hair. The edge refinement model is not needed. */
+export const HAIR_MODELS = [SKIN_SEGMENTATION] as const;
 
 /** The face-parsing classes that only a face has. Skin is left out: a body has plenty of it. */
 const FACE_FEATURES = ['left eyebrow', 'right eyebrow', 'left eye', 'right eye', 'nose', 'mouth', 'upper lip', 'lower lip'];
@@ -48,6 +52,15 @@ export const model = (role: string): ReturnType<typeof AiModel.load> | undefined
   } catch {
     return undefined;
   }
+};
+
+/**
+ * Frees a model by its role, and with it the memory it holds (a large model keeps gigabytes of working memory after a run). It is loaded
+ * again by `model` the next time it is wanted.
+ */
+export const unloadModel = (role: string): void => {
+  (models[role] as unknown as { uniffiDestroy(): void } | undefined)?.uniffiDestroy();
+  delete models[role];
 };
 
 /** The part of `box` that is on whole pixels inside `frame`, or nothing when it is smaller than `side` across. */

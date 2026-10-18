@@ -38,4 +38,30 @@ pub fn main() {
   painter.stroke_with_brush(&path, &stroke_brush);
 
   image.write("assets/out/brush.png", None).expect("Failed to save image");
+
+  // A finger-drawn loop: a wobbly, unevenly sampled circle like touch events give. Each point is smoothed by curving through the
+  // midpoints between neighbors, then stroked with brushes of different widths and softness.
+  let mut loops = Image::read("assets/cat.png").expect("Failed to load image");
+  let (width, height): (u32, u32) = loops.dimensions();
+  let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+  let radius = cx.min(cy) * 0.55;
+  let touches: Vec<(f32, f32)> = (0..=60)
+    .map(|i| {
+      let t = i as f32 / 60.0 * std::f32::consts::TAU * 1.04;
+      let wobble = 1.0 + 0.06 * (t * 3.0).sin() + 0.03 * (t * 7.0).cos();
+      (cx + radius * wobble * t.cos(), cy + radius * wobble * t.sin())
+    })
+    .collect();
+  let mut loop_path = Path::new();
+  loop_path.move_to(touches[0]);
+  for pair in touches.windows(2) {
+    let mid = ((pair[0].0 + pair[1].0) / 2.0, (pair[0].1 + pair[1].1) / 2.0);
+    loop_path.quad_to(pair[0], mid);
+  }
+  let white = Color::white();
+  let red = Color::red();
+  let mut painter = Painter::new(&mut loops);
+  painter.stroke_with_brush(&loop_path, &Brush::new().with_size(24).with_color(&red).with_hardness(0.0).with_opacity(0.5));
+  painter.stroke_with_brush(&loop_path, &Brush::new().with_size(6).with_color(&white).with_hardness(1.0));
+  loops.write("assets/out/brush-loop.png", None).expect("Failed to save image");
 }

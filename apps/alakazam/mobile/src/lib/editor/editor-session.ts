@@ -1,4 +1,7 @@
+import { registerAiAnalysis } from '@/src/lib/ai-analyses';
 import { clearAnalysis } from '@/src/lib/analysis';
+import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/keys';
+import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/faces';
 import { batch } from '@/src/lib/batch';
 import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/edit-source';
 import {
@@ -10,7 +13,7 @@ import {
   keepBlemishBase,
 } from '@/src/lib/editor/editor-history';
 import { analysisOf, forgetAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
-import { MAKEUP_MASKS_VERSION, makeupMasks } from '@/src/lib/eye-makeup';
+import { HAIR_MASKS_VERSION, MAKEUP_MASKS_VERSION, hairMasks, makeupMasks } from '@/src/lib/eye-makeup';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
@@ -25,6 +28,7 @@ import { ownedImage } from '@/src/lib/native-image';
 import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
 import { analysisVersion, faceBoxes, people, skinMask } from '@/src/state/analysis';
+import { aiModelsVersion } from '@/src/state/ai-models';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -103,6 +107,13 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
     if (isCancelled()) return Object.values(masks).forEach(mask => (mask as unknown as AbraPixels).uniffiDestroy());
     provideAnalysis(makeupMasks, masks);
   }
+  if (project.hairMasks && project.hairMasksVersion === HAIR_MASKS_VERSION) {
+    const masks = Object.fromEntries(
+      await Promise.all(project.hairMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
+    );
+    if (isCancelled()) return Object.values(masks).forEach(mask => (mask as unknown as AbraPixels).uniffiDestroy());
+    provideAnalysis(hairMasks, masks);
+  }
   if (project.people) {
     const found = await Promise.all(
       project.people.map(async person => ({
@@ -128,6 +139,47 @@ export function rescanFaceMasks() {
   if (project) openProject.next({ ...project, makeupMasks: undefined, makeupMasksVersion: undefined });
   analysisVersion.next(analysisVersion.value + 1);
 }
+
+/** Finds the hair again, in case the first time went wrong, like `rescanFaceMasks`. */
+export function rescanHair() {
+  forgetAnalysis(hairMasks);
+  const project = openProject.value;
+  if (project) openProject.next({ ...project, hairMasks: undefined, hairMasksVersion: undefined });
+  analysisVersion.next(analysisVersion.value + 1);
+}
+
+/**
+ * Finds the skin and the people again, in case the first time went wrong: what was found is thrown away along with what the project
+ * saved of it, and the person selector, which runs when a control that uses them is open, finds them again. The selector's own list is
+ * emptied first, because it holds the masks that are freed here.
+ */
+export function rescanPeople() {
+  const project = openProject.value;
+  if (project) openProject.next({ ...project, skinMaskFile: undefined, people: undefined, faceBoxes: undefined });
+  personSelection.next({ ...personSelection.value, people: [], selectedId: null, loading: true });
+  clearAnalysis();
+  analysisVersion.next(analysisVersion.value + 1);
+  aiModelsVersion.next(aiModelsVersion.value + 1);
+}
+
+registerAiAnalysis('makeup', {
+  roles: MAKEUP_MODELS,
+  required: MAKEUP_MODELS,
+  usedBy: control => control.preload === makeupMasks,
+  regenerate: rescanFaceMasks,
+});
+registerAiAnalysis('hair', {
+  roles: [...HAIR_MODELS, EDGE_REFINEMENT],
+  required: HAIR_MODELS,
+  usedBy: control => control.preload === hairMasks,
+  regenerate: rescanHair,
+});
+registerAiAnalysis('people', {
+  roles: [SKIN_SEGMENTATION, PERSON_DETECTION],
+  required: [SKIN_SEGMENTATION, PERSON_DETECTION],
+  usedBy: control => [SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY].includes(control.key),
+  regenerate: rescanPeople,
+});
 
 /** Saves a mask as a gray image. */
 function writeMask(mask: MaskLike, file: string) {
@@ -179,6 +231,16 @@ function saveOpenProject() {
       return { name, file: `makeup-${index}.webp` };
     });
   }
+  let hairFiles = project.hairMasks;
+  let hairVersion = project.hairMasksVersion;
+  const hair = analysisOf(hairMasks);
+  if ((!hairFiles || hairVersion !== HAIR_MASKS_VERSION) && hair && !Array.isArray(hair)) {
+    hairVersion = HAIR_MASKS_VERSION;
+    hairFiles = Object.entries(hair).map(([name, mask], index) => {
+      writeMask(mask as MaskLike, toLocalPath(`${project.dir}/hair-${index}.webp`));
+      return { name, file: `hair-${index}.webp` };
+    });
+  }
   const savedPeople = project.people ?? (people.value ? writePeople(people.value, toLocalPath(project.dir)) : undefined);
   // Like the people, the faces belong to the original, so they are saved once: the first time they are known.
   const savedFaceBoxes = project.faceBoxes ?? faceBoxes.value ?? undefined;
@@ -194,6 +256,8 @@ function saveOpenProject() {
     skinMaskFile === project.skinMaskFile &&
     makeupFiles === project.makeupMasks &&
     makeupVersion === project.makeupMasksVersion &&
+    hairFiles === project.hairMasks &&
+    hairVersion === project.hairMasksVersion &&
     JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
       JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
   )
@@ -225,7 +289,7 @@ function saveOpenProject() {
         rendered?.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, makeupMasksVersion: makeupVersion, people: savedPeople, faceBoxes: savedFaceBoxes };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, makeupMasksVersion: makeupVersion, hairMasks: hairFiles, hairMasksVersion: hairVersion, people: savedPeople, faceBoxes: savedFaceBoxes };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {

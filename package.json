@@ -1,7 +1,7 @@
 {
   "name": "image-editor",
   "scripts": {
-    "postinstall": "node ./scripts/install-nasm.mjs",
+    "postinstall": "patch-package && node ./scripts/install-nasm.mjs",
     "start": "npm run start -w apps/alakazam/desktop",
     "start:android": "npm run start -w apps/alakazam/mobile",
     "android": "npm run android -w apps/alakazam/mobile",
@@ -23,7 +23,8 @@
   "devDependencies": {
     "anser": "^2.3.5",
     "error-stack-parser": "^2.1.4",
-    "html-entities": "^2.6.0"
+    "html-entities": "^2.6.0",
+    "patch-package": "^8.0.1"
   },
   "overrides": {
     "react-native": "0.87.1"

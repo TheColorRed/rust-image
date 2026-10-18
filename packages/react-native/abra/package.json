@@ -14,6 +14,7 @@
     "./blend": "./entries/blend.ts",
     "./canvas": "./entries/canvas.ts",
     "./color": "./entries/color.ts",
+    "./drawing": "./entries/drawing.ts",
     "./filters": "./entries/filters.ts",
     "./geometry": "./entries/geometry.ts",
     "./gradient": "./entries/gradient.ts",

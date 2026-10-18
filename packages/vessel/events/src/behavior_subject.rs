@@ -86,6 +86,11 @@ impl<T: 'static> BehaviorSubject<T> {
     current.value.clone()
   }
 
+  /// A number that names this subject: the same for every clone of it, and different from every other subject that is alive.
+  pub fn id(&self) -> usize {
+    Arc::as_ptr(&self.current) as usize
+  }
+
   /// The current value, without telling anything that is tracking reads.
   pub fn peek(&self) -> T
   where

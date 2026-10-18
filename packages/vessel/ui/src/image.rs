@@ -38,6 +38,19 @@ impl Default for Viewport {
   }
 }
 
+/// A viewport is blended the way a camera moves: the size eases in log space, so a zoom feels even, and the center moves in a
+/// line.
+impl Animatable for Viewport {
+  fn lerp(p_from: &Self, p_to: &Self, p_share: f32) -> Self {
+    let width = p_from.width * (p_to.width / p_from.width).powf(p_share);
+    let height = p_from.height * (p_to.height / p_from.height).powf(p_share);
+    let from_center = (p_from.x + p_from.width / 2.0, p_from.y + p_from.height / 2.0);
+    let to_center = (p_to.x + p_to.width / 2.0, p_to.y + p_to.height / 2.0);
+    let center = <(f32, f32)>::lerp(&from_center, &to_center, p_share);
+    Viewport { x: center.0 - width / 2.0, y: center.1 - height / 2.0, width, height }
+  }
+}
+
 impl Viewport {
   /// This rectangle in the pixels of a source `p_width` x `p_height`, as `(x, y, width, height)`. It is kept inside the
   /// source and at least one pixel in each direction, so it is always something that can be cut out.
@@ -69,7 +82,12 @@ pub trait Trackable {
   ///
   /// `p_viewport` is the part of the source to show. A new viewport means a new picture. A source that cannot show part
   /// of itself ignores it and always makes the whole picture.
-  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture>;
+  ///
+  /// `p_rotation` is how far the picture is turned clockwise about the middle of the viewport, in radians, and a new
+  /// rotation means a new picture. A source that cannot turn ignores it and makes the picture upright.
+  fn pictures(
+    &self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>, p_rotation: &BehaviorSubject<f32>,
+  ) -> Subject<Picture>;
 }
 
 struct FittedCacheEntry {
@@ -89,8 +107,10 @@ struct PictureInner {
 }
 
 impl<T: Trackable> Trackable for Arc<T> {
-  fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture> {
-    self.as_ref().pictures(p_size, p_viewport)
+  fn pictures(
+    &self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>, p_rotation: &BehaviorSubject<f32>,
+  ) -> Subject<Picture> {
+    self.as_ref().pictures(p_size, p_viewport, p_rotation)
   }
 }
 
@@ -118,6 +138,9 @@ pub struct Image {
   /// The part of the source shown, given to every source this tracks. Drawing does not read it: the sources make a new
   /// picture when it changes.
   viewport: BehaviorSubject<Viewport>,
+  /// How far the picture is turned clockwise about the middle of the viewport, in radians, given to every source this tracks. A
+  /// property like any other, so [`Component::animate`] turns it.
+  rotation: BehaviorSubject<f32>,
   /// Moves `viewport` toward where the app last pointed it, a little each frame.
   camera: Arc<Mutex<Camera>>,
   /// Whether the component currently shows a GPU picture instead of pixels.
@@ -161,6 +184,7 @@ impl Image {
     });
 
     let viewport = BehaviorSubject::new(Viewport::default());
+    let rotation = BehaviorSubject::new(0.0f32);
     let camera = Arc::new(Mutex::new(Camera::new(Viewport::default())));
     component.subject::<Tick>().subscribe({
       let (weak, viewport, camera) = (component.downgrade(), viewport.clone(), Arc::clone(&camera));
@@ -182,6 +206,7 @@ impl Image {
       revision,
       fit,
       viewport,
+      rotation,
       camera,
       on_gpu: Arc::new(AtomicBool::new(false)),
       sources: Arc::default(),
@@ -204,7 +229,7 @@ impl Image {
   /// Follows `p_source`: it is shown at the image's size, and the image follows every picture it makes. Returns the image so
   /// calls can be chained.
   pub fn track(self, p_source: &impl Trackable) -> Self {
-    self.set_source(&p_source.pictures(self.size(), &self.viewport));
+    self.set_source(&p_source.pictures(self.size(), &self.viewport, &self.rotation));
     self
   }
 
@@ -312,8 +337,23 @@ impl Image {
 
   /// Sends the view toward `p_viewport`. It glides there over the next frames, at the camera's speed, instead of jumping.
   pub fn set_viewport(&self, p_viewport: Viewport) {
-    self.camera.lock().unwrap().set_target(p_viewport);
+    self.component.stop_animating(&self.viewport);
+    {
+      // It glides from where the view is now, which a tween or a jump may have moved since the camera last did.
+      let mut camera = self.camera.lock().unwrap();
+      camera.jump_to(self.viewport.peek());
+      camera.set_target(p_viewport);
+    }
     self.component.set_animating(true);
+  }
+
+  /// Moves the view to `p_viewport` in the time and with the easing of `p_options`, from wherever it is now. A frame is made for
+  /// every engine tick on the way, so it keeps its time on a slow device. This is [`Component::animate`] on the viewport, which
+  /// is how anything else that has a value is moved too.
+  pub fn tween_viewport(&self, p_viewport: Viewport, p_options: TweenOptions) {
+    self.component.set_animating(false);
+    self.camera.lock().unwrap().jump_to(p_viewport);
+    self.component.animate(&self.viewport, p_viewport, p_options);
   }
 
   /// Sends the view toward `p_viewport`, and returns the image so calls can be chained.
@@ -324,6 +364,7 @@ impl Image {
 
   /// Shows `p_viewport` at once, with no gliding.
   pub fn jump_viewport(&self, p_viewport: Viewport) {
+    self.component.stop_animating(&self.viewport);
     self.camera.lock().unwrap().jump_to(p_viewport);
     self.viewport.next(p_viewport);
   }
@@ -331,6 +372,29 @@ impl Image {
   /// The viewport being shown right now, which is on its way to the one last set.
   pub fn viewport(&self) -> Viewport {
     self.viewport.value()
+  }
+
+  /// Turns the picture to `p_radians` clockwise at once, about the middle of the viewport. 0 is upright.
+  pub fn set_rotation(&self, p_radians: f32) {
+    self.component.stop_animating(&self.rotation);
+    self.rotation.next(p_radians);
+  }
+
+  /// Turns the picture to `p_radians` in the time and with the easing of `p_options`, from wherever it is now. It is
+  /// [`Component::animate`] on the rotation, so it runs together with a viewport move and neither cancels the other.
+  pub fn tween_rotation(&self, p_radians: f32, p_options: TweenOptions) {
+    self.component.animate(&self.rotation, p_radians, p_options);
+  }
+
+  /// Turns the picture to `p_radians`, and returns the image so calls can be chained.
+  pub fn with_rotation(self, p_radians: f32) -> Self {
+    self.set_rotation(p_radians);
+    self
+  }
+
+  /// How far the picture is turned right now, in radians.
+  pub fn rotation(&self) -> f32 {
+    self.rotation.value()
   }
 
   properties! {
@@ -424,7 +488,7 @@ mod tests {
   struct ViewportEcho;
 
   impl Trackable for ViewportEcho {
-    fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>) -> Subject<Picture> {
+    fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, p_viewport: &BehaviorSubject<Viewport>, _p_rotation: &BehaviorSubject<f32>) -> Subject<Picture> {
       p_size.combine_latest(p_viewport).map(|(_, viewport)| {
         Picture::Pixels(Arc::new(Frame { width: 1, height: 1, pixels: Arc::new(vec![(viewport.x * 100.0) as u8, 0, 0, 255]) }))
       })
@@ -464,6 +528,27 @@ mod tests {
     }
     assert_eq!(image.viewport(), target);
     assert_eq!(image.component.clone().pacing(), Pacing::OnDemand, "it stops asking for frames once it arrives");
+  }
+
+  #[test]
+  fn a_rotation_tween_runs_beside_a_viewport_tween_and_neither_cancels_the_other() {
+    let image = Image::new().track(&ViewportEcho);
+    image.size().next((4, 4));
+    let target = Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 };
+    let options = TweenOptions::default().with_duration(Duration::from_millis(100)).with_easing(vessel_api::Easing::Linear);
+    image.tween_viewport(target, options);
+    image.tween_rotation(std::f32::consts::FRAC_PI_2, options);
+    assert_eq!(image.rotation(), 0.0, "nothing moves until a frame is made");
+    // The first frame is the engine waking and does not count; after it half the time is half the way, for both.
+    image.component.clone().render(Duration::from_millis(500));
+    image.component.clone().render(Duration::from_millis(50));
+    assert!((image.rotation() - std::f32::consts::FRAC_PI_4).abs() < 1e-4, "{}", image.rotation());
+    assert!(image.viewport().x > 0.0 && image.viewport().x < 0.5);
+    image.component.clone().render(Duration::from_millis(60));
+    assert_eq!((image.rotation(), image.viewport()), (std::f32::consts::FRAC_PI_2, target));
+    assert_eq!(image.component.clone().pacing(), Pacing::OnDemand);
+    image.set_rotation(0.0);
+    assert_eq!(image.rotation(), 0.0);
   }
 
   #[test]

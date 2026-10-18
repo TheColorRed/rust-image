@@ -120,6 +120,19 @@ pub async fn run_ai_model_async(model: Arc<AiModel>, image: Arc<Image>) -> Resul
   }).await
 }
 
+/// Runs an AI model that takes a guide mask (a matting model and its trimap) on a worker thread. The same as `AiModel.run_guided`.
+#[uniffi::export]
+pub async fn run_ai_model_guided_async(
+  model: Arc<AiModel>, image: Arc<Image>, guide: Arc<Mask>,
+) -> Result<Arc<AiOutput>, AbraError> {
+  let (pixels, guide) = (image.core(), guide.core());
+  run(move || {
+    let output =
+      model.core().run_guided(&pixels, Some(&guide), &|_| {}).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    Ok(Arc::new(AiOutput::from_core(output)))
+  }).await
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

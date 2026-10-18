@@ -6,9 +6,10 @@ import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red
 import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
 import { GLOW_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
 import { missingModels } from '@/src/lib/ai-model-availability';
-import { rescanFaceMasks } from '@/src/lib/editor/editor-session';
-import { MAKEUP_MODELS } from '@/src/lib/faces';
-import { aiModelsRequested } from '@/src/state/ai-models';
+import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai-analyses';
+import { HAIR_MODELS, MAKEUP_MODELS } from '@/src/lib/faces';
+import { aiModelList, aiModelList$, aiModelsRequested } from '@/src/state/ai-models';
+import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import {
   CONTOUR_KEY,
   HIGHLIGHTER_KEY,
@@ -150,12 +151,12 @@ export function EditorPanel() {
             CONTOUR_KEY,
             HAIR_COLOR_KEY,
           ].includes(control.key) &&
-          missingModels(MAKEUP_MODELS).length > 0
+          missingModels(control.key === HAIR_COLOR_KEY ? HAIR_MODELS : MAKEUP_MODELS).length > 0
         ) {
-          // Finding the lips needs the face models; opening the slider without them would do nothing.
+          // Finding the lips needs the face models, and the hair the hair model; opening the slider without them would do nothing.
           aiModelsRequested.next({
-            title: 'Lipstick',
-            roles: MAKEUP_MODELS,
+            title: control.key === HAIR_COLOR_KEY ? 'Hair color' : 'Lipstick',
+            roles: control.key === HAIR_COLOR_KEY ? HAIR_MODELS : MAKEUP_MODELS,
             onReady: () => selectControlRequested.next(control),
           });
         } else {
@@ -192,7 +193,10 @@ export function EditorPanel() {
   }, []);
 
   return (
-    <View style={[styles.panel, { paddingBottom: bottomInset + 12 }]}>
+    <View
+      style={[styles.panel, { paddingBottom: bottomInset + 12 }]}
+      onLayout={event => __DEV__ && console.debug('[panel] height', event.nativeEvent.layout.height, 'bottom inset', bottomInset)}
+    >
       <BlemishToolController />
       <RedEyeToolController />
       <PersonSelectionToolController />
@@ -223,6 +227,7 @@ export function EditorPanel() {
         </Pressable>
       </View>
       <View
+        onLayout={event => __DEV__ && console.debug('[panel] controls height', event.nativeEvent.layout.height)}
         style={[
           styles.controls,
           focusedControl?.kind === 'slider'
@@ -269,6 +274,9 @@ function SliderEditor() {
   const selection = useObservable(personSelection$, personSelection.value);
   const isPersonControlFocused = useObservable(isPersonControlFocused$, false);
   const historyVersion = useObservable(historyVersion$, historyVersionState.value);
+  // The AI is working while the bar under the photo shows, and finding the faces again then would only start the work over.
+  const aiWorking = Object.keys(useObservable(aiProgress$, aiProgress.value)).length > 0;
+  const catalog = useObservable(aiModelList$, aiModelList.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onLiveChange = useSliderPreview(control?.kind === 'slider' ? control : undefined);
@@ -337,17 +345,32 @@ function SliderEditor() {
 
   const everyone = isPersonControlFocused ? <PersonEveryoneButton /> : null;
 
-  // Finds the faces, lips, eyes and hair again, for when the first time found them wrong. Needs the models, as the first time did.
-  const rescan = control.preload ? (
+  // Finds again what the control's models found, for when the first time went wrong, redoing only what this control uses. The
+  // analyses a control uses say which models they have (see `ai-analyses`), and the button is there when one of those models gives
+  // masks (the catalog's `kind`), so a model added to the catalog needs nothing here. Until the catalog has been read, it is there.
+  const analyses = analysesUsedBy(control);
+  const givesMasks =
+    analyses.length > 0 &&
+    (catalog.length === 0 ||
+      catalog.some(
+        model =>
+          analyses.some(analysis => analysis.roles.includes(model.id)) && model.kinds.some(kind => MASK_KINDS.includes(kind)),
+      ));
+  const rescan = givesMasks ? (
     <Pressable
+      disabled={aiWorking}
       onPress={() => {
-        if (missingModels(MAKEUP_MODELS).length > 0) {
-          aiModelsRequested.next({ title: control.label, roles: MAKEUP_MODELS, onReady: rescanFaceMasks });
-        } else rescanFaceMasks();
+        if (aiWorking) return;
+        const regenerate = () => analyses.forEach(analysis => analysis.regenerate());
+        const required = [...new Set(analyses.flatMap(analysis => analysis.required))];
+        if (missingModels(required).length > 0) {
+          aiModelsRequested.next({ title: control.label, roles: required, onReady: regenerate });
+        } else regenerate();
       }}
       hitSlop={8}
-      style={styles.backChip}
+      style={[styles.backChip, aiWorking && { opacity: 0.4 }]}
       accessibilityRole="button"
+      accessibilityState={{ disabled: aiWorking }}
       accessibilityLabel="Find the face again"
     >
       <ScanFace color={colors.textPrimary} size={16} />

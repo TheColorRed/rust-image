@@ -49,6 +49,9 @@ pub struct InputSpec {
   pub mean: [f32; 3],
   /// Each channel is divided by this after the mean is subtracted.
   pub standard_deviation: [f32; 3],
+  /// Whether the model takes a guide, such as a trimap, as a fourth channel after the three colors. The guide is a [`Mask`]
+  /// given with the picture, scaled to `0..=1` and not normalized. Where the picture is padded, the guide is `0`.
+  pub guide: bool,
 }
 
 /// Where a picture sits inside the model's input.
@@ -114,7 +117,8 @@ impl InputSpec {
   /// Reads the input description from a manifest's params. `input_size` (or `input_width` and `input_height`) is
   /// required. The rest are `input_layout` (`nchw`, the default, or `nhwc`), `input_fit` (`stretch`, the default, or
   /// `letterbox`), `input_pad` (the letterbox gray from `0` to `1`, default `0.5`), `input_mean` and
-  /// `input_standard_deviation` (three numbers each; default `0` and `1`).
+  /// `input_standard_deviation` (three numbers each; default `0` and `1`), and `input_guide` (`1` when the model takes a
+  /// guide mask as a fourth channel; default `0`).
   pub fn from_manifest(p_manifest: &Manifest) -> Result<Self, AiError> {
     let size = p_manifest.number("input_size");
     let dimension = |key: &str| {
@@ -147,19 +151,34 @@ impl InputSpec {
       fit,
       mean: triple("input_mean", 0.0)?,
       standard_deviation: triple("input_standard_deviation", 1.0)?,
+      guide: p_manifest.number("input_guide").is_some_and(|value| value != 0.0),
     })
+  }
+
+  /// The number of channels the model takes: the three colors, and the guide when there is one.
+  pub fn channels(&self) -> usize {
+    3 + self.guide as usize
   }
 
   /// The tensor shape the model takes.
   pub fn shape(&self) -> Vec<usize> {
     match self.layout {
-      Layout::Nchw => vec![1, 3, self.height as usize, self.width as usize],
-      Layout::Nhwc => vec![1, self.height as usize, self.width as usize, 3],
+      Layout::Nchw => vec![1, self.channels(), self.height as usize, self.width as usize],
+      Layout::Nhwc => vec![1, self.height as usize, self.width as usize, self.channels()],
     }
   }
 
   /// Builds the tensor for a picture.
   pub fn prepare(&self, p_image: &Image) -> Prepared {
+    self.prepare_guided(p_image, None)
+  }
+
+  /// Builds the tensor for a picture and, when the model takes one, its guide. The guide is fitted to the model's input the
+  /// same way as the picture, so it should have the picture's proportions.
+  ///
+  /// - `p_guide`: The guide mask, such as a trimap; it is scaled to the size of the picture. Ignored when the model takes no
+  ///   guide, and read as all `0` when the model takes one and none is given.
+  pub fn prepare_guided(&self, p_image: &Image, p_guide: Option<&Mask>) -> Prepared {
     let (width, height) = p_image.dimensions::<u32>();
     let placement = Placement::new(self.width, self.height, width, height, self.fit);
     let mut resized = p_image.clone();
@@ -168,18 +187,26 @@ impl InputSpec {
       TransformAlgorithm::Bilinear,
     );
     let source = resized.rgba();
+    let guide = self
+      .guide
+      .then(|| {
+        p_guide
+          .map(|guide| guide.resized(placement.resized_width, placement.resized_height, TransformAlgorithm::Bilinear))
+      })
+      .flatten();
 
     let normalize = |value: f32, channel: usize| (value - self.mean[channel]) / self.standard_deviation[channel];
     let plane = self.width as usize * self.height as usize;
+    let channels = self.channels();
     let mut data = match self.fit {
-      Fit::Stretch => vec![0.0; plane * 3],
+      Fit::Stretch => vec![0.0; plane * channels],
       Fit::Letterbox { pad } => {
-        let mut data = vec![0.0; plane * 3];
+        let mut data = vec![0.0; plane * channels];
         for channel in 0..3 {
           let value = normalize(pad, channel);
           match self.layout {
             Layout::Nchw => data[channel * plane..(channel + 1) * plane].fill(value),
-            Layout::Nhwc => data.iter_mut().skip(channel).step_by(3).for_each(|slot| *slot = value),
+            Layout::Nhwc => data.iter_mut().skip(channel).step_by(channels).for_each(|slot| *slot = value),
           }
         }
         data
@@ -193,7 +220,14 @@ impl InputSpec {
           let value = normalize(pixel[channel] as f32 / 255.0, channel);
           match self.layout {
             Layout::Nchw => data[channel * plane + index] = value,
-            Layout::Nhwc => data[index * 3 + channel] = value,
+            Layout::Nhwc => data[index * channels + channel] = value,
+          }
+        }
+        if let Some(guide) = &guide {
+          let value = guide.values()[y * placement.resized_width as usize + x] as f32 / 255.0;
+          match self.layout {
+            Layout::Nchw => data[3 * plane + index] = value,
+            Layout::Nhwc => data[index * channels + 3] = value,
           }
         }
       }
@@ -218,6 +252,7 @@ mod tests {
       fit: p_fit,
       mean: [0.0; 3],
       standard_deviation: [1.0; 3],
+      guide: false,
     }
   }
 
@@ -255,6 +290,23 @@ mod tests {
     let prepared = input.prepare(&image);
     assert_eq!(prepared.data[0], 0.0, "the pad is the mean, so it normalizes to zero");
     assert!((prepared.data[prepared.placement.pad_y as usize * 4] - 2.0).abs() < 1e-5, "(1 - 0.5) / 0.25");
+  }
+
+  #[test]
+  fn a_guide_is_the_fourth_channel_and_zero_in_the_padding() {
+    let mut input = spec(Fit::Letterbox { pad: 0.5 }, Layout::Nchw);
+    input.guide = true;
+    let image = Image::new_from_color(4, 2, abra_core::Color::from_rgb(255, 255, 255));
+    let guide = Mask::from_values(4, 2, vec![255; 8]);
+    let prepared = input.prepare_guided(&image, Some(&guide));
+    assert_eq!(prepared.shape, [1, 4, 4, 4]);
+    let plane = &prepared.data[3 * 16..];
+    assert_eq!(plane.iter().filter(|value| **value == 1.0).count(), 8, "the guide covers the picture");
+    assert_eq!(plane.iter().filter(|value| **value == 0.0).count(), 8, "and is zero in the padding");
+    assert_eq!(input.prepare(&image).data[3 * 16..], [0.0; 16], "no guide given is all zero");
+    let mut hwc = input.clone();
+    hwc.layout = Layout::Nhwc;
+    assert_eq!(hwc.prepare_guided(&image, Some(&guide)).shape, [1, 4, 4, 4]);
   }
 
   #[test]

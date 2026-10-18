@@ -282,6 +282,12 @@ impl AiModel {
     Ok(Arc::new(AiOutput(self.0.run(&image.core())?)))
   }
 
+  /// Runs a model that takes a guide mask with the picture, such as a matting model and its trimap. The guide has the
+  /// picture's proportions. Fails for a model that takes no guide, and `run` fails for one that needs it.
+  pub fn run_guided(&self, image: Arc<Image>, guide: Arc<Mask>) -> Result<Arc<AiOutput>, AiError> {
+    Ok(Arc::new(AiOutput(self.0.run_guided(&image.core(), Some(&guide.core()), &|_| {})?)))
+  }
+
   /// Listens to the progress of what the returned handle runs. The model runs in one piece, so progress is by stage.
   pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<AiListening> {
     Arc::new(AiListening { model: self, listener })

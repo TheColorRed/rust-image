@@ -1,5 +1,6 @@
 pub mod color_bar_picker;
 pub mod image_preview;
+pub mod gizmos;
 pub mod thumbnail_preview;
 
 use vessel::prelude::Frame;

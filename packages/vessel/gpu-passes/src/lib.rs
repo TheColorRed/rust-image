@@ -17,6 +17,8 @@ pub mod present;
 #[cfg(feature = "runtime")]
 pub mod renderer;
 #[cfg(feature = "runtime")]
+pub mod strokes;
+#[cfg(feature = "runtime")]
 pub mod tiles;
 #[cfg(feature = "vessel-target")]
 pub mod target;
@@ -27,6 +29,8 @@ pub use context::GpuContext;
 pub use present::{PresentOptions, Presenter};
 #[cfg(feature = "runtime")]
 pub use renderer::{Frame, LiveRenderer};
+#[cfg(feature = "runtime")]
+pub use strokes::{StrokeCanvas, StrokeStyle};
 #[cfg(feature = "runtime")]
 pub use tiles::{Regions, TileOptions, TiledRenderer, Window};
 
@@ -56,7 +60,9 @@ pub struct GpuAux {
 ///
 /// A pass that sets `window` also gets, at binding 5, where the image it is run on sits in the photo it is a view of:
 /// `struct Window { origin: vec2<f32>, scale: f32, scale_y: f32, full: vec2<f32>, pad2: vec2<f32> }`. A pixel `p` of the image
-/// is the photo's pixel `origin + (p + 0.5) * scale`, in a photo `full` pixels across. (`scale_y` is the same as `scale`
+/// is the photo's pixel `origin + (p + 0.5) * scale`, in a photo `full` pixels across. (`pad2` holds the cosine and sine of
+/// a turn of the picture; a turned picture is never given to a pass that asks for the window, so these two are only for the
+/// renderer's own passes.) (`scale_y` is the same as `scale`
 /// unless the picture is stretched, and a pass that asks for the window is only given a picture that is not.) For an image that is the whole
 /// photo, `origin` is zero and `scale` is one. A pass whose result depends on where a pixel is in the photo (a gradient,
 /// a vignette) or on a distance in photo pixels (a blur radius) reads it, so it is the same however the photo is zoomed.

@@ -1,5 +1,42 @@
 import { BehaviorSubject } from 'rxjs';
 
+/** One AI model in the catalog (`catalog.yml`, read by `lib/ai-model-catalog`), and whether it is on this device. */
+export type AiModelListing = {
+  /** What the model is used for; names it on this device. */
+  id: string;
+  /** Name shown to people. */
+  title: string;
+  /** What the model does. */
+  description: string;
+  /** `false` keeps the model out of the list until it is downloaded. */
+  enabled: boolean;
+  /** What the model finds (`people`, `face`, `edges`...), from the catalog's `categories.subject`. */
+  subjects: string[];
+  /** What the model gives back and how it works (`mask`, `instances`, `labels`, `landmarks`, `guided`...), from `categories.kind`. */
+  kinds: string[];
+  /** What the app tells the native side to download, and to look for on this device. */
+  file: {
+    role: string;
+    url: string;
+    sha256: string;
+    manifestUrl: string | undefined;
+    manifestSha256: string | undefined;
+  };
+  /** Size of the file to download in bytes, from the server. 0 when it did not say. */
+  downloadSizeBytes: number;
+  /** Whether the model, and its manifest, are on this device. */
+  downloaded: boolean;
+  /** Size of the downloaded file in bytes, or 0 when it is not downloaded. */
+  sizeBytes: number;
+};
+
+/**
+ * The AI models from the last catalog read, kept here so the storage screen shows them as soon as it opens and then
+ * refreshes them. Empty until the catalog has been read once in this run of the app.
+ */
+export const aiModelList = new BehaviorSubject<AiModelListing[]>([]);
+export const aiModelList$ = aiModelList.asObservable();
+
 /** Bumped after AI models are downloaded, so anything waiting on them can try again. */
 export const aiModelsVersion = new BehaviorSubject(0);
 export const aiModelsVersion$ = aiModelsVersion.asObservable();

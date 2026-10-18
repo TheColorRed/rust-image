@@ -1,0 +1,11 @@
+diff --git a/node_modules/@ubjs/react-native/cpp/shim.cpp b/node_modules/@ubjs/react-native/cpp/shim.cpp
+--- a/node_modules/@ubjs/react-native/cpp/shim.cpp
++++ b/node_modules/@ubjs/react-native/cpp/shim.cpp
+@@ -454,7 +454,6 @@
+     // JSI reserves the right to finalize a host object on any thread, so the
+     // thread is checked and not merely asserted: the shim ships with NDEBUG.
+     const bool onJsThread = std::this_thread::get_id() == jsThreadId_;
+-    assert(onJsThread && "uniffi player root finalized off the JS thread");
+     for (const auto &info : modules_) {
+       // Per module, because one that fails must not strand the rest still
+       // armed — and because a destructor that throws terminates.

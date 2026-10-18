@@ -22,6 +22,7 @@ use crate::{
   progress::ReportsProgress,
 };
 use abra_core::Image;
+use mask::Mask;
 use std::path::Path;
 
 /// An ONNX model together with how to feed it and how to read what it returns.
@@ -77,12 +78,30 @@ impl AiModel {
   /// The model runs in one piece, so progress is by stage, not measured: `0.0` at the start, `0.1` once the picture is
   /// prepared, `0.9` once the model has run (nearly all the time goes there) and `1.0` once the result is read.
   pub fn run_reporting(&self, p_image: &Image, p_progress: &dyn Fn(f32)) -> Result<AiOutput, AiError> {
+    self.run_guided(p_image, None, p_progress)
+  }
+
+  /// Runs a model that takes a guide mask with the picture, such as a matting model and its trimap (a manifest with
+  /// `input_guide`). Progress is reported as in [`AiModel::run_reporting`].
+  ///
+  /// - `p_image`: The picture. Any size; it is fitted to the model's input.
+  /// - `p_guide`: The guide, which has the picture's proportions; it is scaled to the picture and fitted with it.
+  pub fn run_guided(
+    &self, p_image: &Image, p_guide: Option<&Mask>, p_progress: &dyn Fn(f32),
+  ) -> Result<AiOutput, AiError> {
+    if self.input.guide != p_guide.is_some() {
+      return Err(AiError::invalid_input(if self.input.guide {
+        "This model needs a guide mask with the picture"
+      } else {
+        "This model takes no guide mask"
+      }));
+    }
     let (width, height) = p_image.dimensions::<u32>();
     if width == 0 || height == 0 {
       return Err(AiError::invalid_input("Cannot run a model on an empty image"));
     }
     p_progress(0.0);
-    let prepared = self.input.prepare(p_image);
+    let prepared = self.input.prepare_guided(p_image, p_guide);
     p_progress(PREPARED);
     let outputs = self.session.run_multiple(&prepared.data, &prepared.shape)?;
     p_progress(RAN);

@@ -112,11 +112,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "abra-matting"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
+]
+
+[[package]]
 name = "abra-super-resolution"
 version = "1.0.0"
 dependencies = [
  "abra-ai-core",
  "abra-core",
+]
+
+[[package]]
+name = "abra-trimap-matting"
+version = "1.0.0"
+dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
 ]
 
 [[package]]
@@ -201,7 +219,6 @@ dependencies = [
  "futures",
  "gpu",
  "gpu-passes",
- "saphyr",
  "sha2",
  "uniffi",
  "ureq",
@@ -672,6 +689,7 @@ name = "brush-test"
 version = "1.0.0"
 dependencies = [
  "abra",
+ "gpu",
 ]
 
 [[package]]

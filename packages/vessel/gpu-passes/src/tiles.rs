@@ -23,7 +23,8 @@ struct Window {
   scale: f32,
   scale_y: f32,
   full: vec2<f32>,
-  pad2: vec2<f32>,
+  // The cosine and sine of the picture's turn.
+  turn: vec2<f32>,
 }
 @group(0) @binding(0) var input_tex: texture_2d<f32>;
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
@@ -37,7 +38,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let at = vec2<i32>(gid.xy);
-  let photo = window.origin + (vec2<f32>(gid.xy) + 0.5) * vec2<f32>(window.scale, window.scale_y);
+  let steps = (vec2<f32>(gid.xy) + 0.5) * vec2<f32>(window.scale, window.scale_y);
+  let photo = window.origin + vec2<f32>(window.turn.x * steps.x + window.turn.y * steps.y, -window.turn.y * steps.x + window.turn.x * steps.y);
   let inside = all(photo >= vec2<f32>(0.0)) && all(photo < window.full);
   textureStore(output_tex, at, select(outside, textureLoad(input_tex, at, 0), inside));
 }
@@ -166,6 +168,8 @@ struct Quad {
   rect: vec4<f32>,
   // The same corners in the tile's texture: left, top, right, bottom.
   uv: vec4<f32>,
+  // The picture's turn: cosine, sine, and its width and height in pixels. The corners are turned about its middle.
+  turn: vec4<f32>,
 };
 
 @group(0) @binding(0) var tile: texture_2d<f32>;
@@ -185,7 +189,12 @@ fn vs(@builtin(vertex_index) index: u32) -> VsOut {
   );
   let corner = corners[index];
   var out: VsOut;
-  out.position = vec4<f32>(mix(quad.rect.x, quad.rect.z, corner.x), mix(quad.rect.y, quad.rect.w, corner.y), 0.0, 1.0);
+  let flat_clip = vec2<f32>(mix(quad.rect.x, quad.rect.z, corner.x), mix(quad.rect.y, quad.rect.w, corner.y));
+  // Clip space to pixels about the middle (y down), turned clockwise, and back.
+  let size = quad.turn.zw;
+  let offset = vec2<f32>(flat_clip.x * 0.5 * size.x, -flat_clip.y * 0.5 * size.y);
+  let turned = vec2<f32>(quad.turn.x * offset.x - quad.turn.y * offset.y, quad.turn.y * offset.x + quad.turn.x * offset.y);
+  out.position = vec4<f32>(turned.x * 2.0 / size.x, -turned.y * 2.0 / size.y, 0.0, 1.0);
   out.uv = vec2<f32>(mix(quad.uv.x, quad.uv.z, corner.x), mix(quad.uv.y, quad.uv.w, corner.y));
   return out;
 }
@@ -214,6 +223,12 @@ pub struct Window {
   /// Extra pixels drawn all the way round, so an effect that looks at its neighbours has them at the edge of the picture.
   /// They are not part of the view; see [`TiledRenderer::render`].
   pub pad: u32,
+  /// How far the photo is turned clockwise on the picture, in radians, about the middle of the window. 0 is upright. The
+  /// window's `x`, `y`, `width` and `height` are the rectangle of the photo that is in the middle of the picture before it
+  /// is turned, so a turn never changes which part of the photo is centered, only how it sits. A pass that asks for
+  /// [`GpuPass::window`] needs the photo's own pixel positions, which a turned picture does not have in a straight line, so
+  /// a turned window is an error for one.
+  pub angle: f32,
 }
 
 /// What gives a [`TiledRenderer`] the pixels of its tiles: a function that returns a rectangle of the photo at a level.
@@ -391,7 +406,7 @@ impl TileCache {
           ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: true,
-            min_binding_size: NonZeroU64::new(32),
+            min_binding_size: NonZeroU64::new(48),
           },
           count: None,
         },
@@ -486,7 +501,7 @@ impl TileCache {
           resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &self.quads,
             offset: 0,
-            size: NonZeroU64::new(32),
+            size: NonZeroU64::new(48),
           }),
         },
       ],
@@ -506,6 +521,12 @@ impl TileCache {
     let scale_y = p_window.height / p_window.out_height as f32;
     // The photo's pixel at the top left of the picture drawn, padding included.
     let origin = (p_window.x - pad * scale_x, p_window.y - pad * scale_y);
+    // A turned picture reaches over more of the photo than its own size: the tiles needed are those under the box that holds it.
+    let (turn_cos, turn_sin) = (p_window.angle.cos(), p_window.angle.sin());
+    let half = (p_size.0 as f32 * scale_x / 2.0, p_size.1 as f32 * scale_y / 2.0);
+    let middle_of_photo = (origin.0 + half.0, origin.1 + half.1);
+    let half_box = (turn_cos.abs() * half.0 + turn_sin.abs() * half.1, turn_sin.abs() * half.0 + turn_cos.abs() * half.1);
+    let box_origin = (middle_of_photo.0 - half_box.0, middle_of_photo.1 - half_box.1);
     // The level whose pixels are the nearest to a screen pixel without being smaller, so a view is never sharper than it
     // needs to be and a smooth lookup never skips over pixels.
     let level = ((scale_x.min(scale_y).max(1.0).log2() + self.options.level_bias).floor().max(0.0) as usize).min(self.pyramid.count - 1);
@@ -514,13 +535,13 @@ impl TileCache {
     let tile = self.options.tile_size;
     let max_drawn = self.options.max_drawn;
 
-    let reach = |from: f32, extent: u32, per_pixel: f32, limit: u32| -> std::ops::Range<u32> {
+    let reach = |from: f32, span: f32, limit: u32| -> std::ops::Range<u32> {
       let first = (from / step).floor().max(0.0) as u32 / tile;
-      let last = (((from + extent as f32 * per_pixel) / step).ceil().max(0.0) as u32).min(limit);
+      let last = (((from + span) / step).ceil().max(0.0) as u32).min(limit);
       first..last.div_ceil(tile).max(first)
     };
-    let columns = reach(origin.0, p_size.0, scale_x, level_width);
-    let rows = reach(origin.1, p_size.1, scale_y, level_height);
+    let columns = reach(box_origin.0, half_box.0 * 2.0, level_width);
+    let rows = reach(box_origin.1, half_box.1 * 2.0, level_height);
 
     // The tiles the window needs, the middle ones first, so a frame that cannot put them all on the GPU does the middle.
     let middle = ((columns.start + columns.end) as f32 / 2.0, (rows.start + rows.end) as f32 / 2.0);
@@ -589,7 +610,7 @@ impl TileCache {
     let drawn: Vec<(usize, u32, u32)> = stand_ins.into_iter().chain(drawn).collect();
     let mut quads = Vec::with_capacity(drawn.len() * QUAD_STRIDE as usize);
     for &key in &drawn {
-      quads.extend_from_slice(&self.quad(key, origin, (scale_x, scale_y), p_size));
+      quads.extend_from_slice(&self.quad(key, origin, (scale_x, scale_y), p_size, (turn_cos, turn_sin)));
       if let Some(found) = self.tiles.get_mut(&key) {
         found.last_drawn = self.frame;
       }
@@ -636,7 +657,9 @@ impl TileCache {
 
   /// Where `p_tile` goes on a picture of `p_size` pixels that starts at `p_origin` in the photo's pixels, and which part of
   /// the tile's texture goes there, as the bytes of one quad's uniform.
-  fn quad(&self, p_tile: (usize, u32, u32), p_origin: (f32, f32), p_scale: (f32, f32), p_size: (u32, u32)) -> Vec<u8> {
+  fn quad(
+    &self, p_tile: (usize, u32, u32), p_origin: (f32, f32), p_scale: (f32, f32), p_size: (u32, u32), p_turn: (f32, f32),
+  ) -> Vec<u8> {
     let (level, tile_x, tile_y) = p_tile;
     let step = (1u64 << level) as f32;
     let tile = self.options.tile_size;
@@ -650,7 +673,20 @@ impl TileCache {
     let side = (tile + 2) as f32;
     let to_u = |level_x: u32| (level_x as f32 - left as f32 + 1.0) / side;
     let to_v = |level_y: u32| (level_y as f32 - top as f32 + 1.0) / side;
-    let quad = [clip_x(left as f32), clip_y(top as f32), clip_x(right as f32), clip_y(bottom as f32), to_u(left), to_v(top), to_u(right), to_v(bottom)];
+    let quad = [
+      clip_x(left as f32),
+      clip_y(top as f32),
+      clip_x(right as f32),
+      clip_y(bottom as f32),
+      to_u(left),
+      to_v(top),
+      to_u(right),
+      to_v(bottom),
+      p_turn.0,
+      p_turn.1,
+      p_size.0 as f32,
+      p_size.1 as f32,
+    ];
     let mut bytes = quad.map(f32::to_ne_bytes).concat();
     bytes.resize(QUAD_STRIDE as usize, 0);
     bytes
@@ -753,6 +789,9 @@ impl TiledRenderer {
     {
       return Err(anyhow!("an effect here needs square pixels, and this window is stretched ({scale} by {scale_y})"));
     }
+    if p_window.angle != 0.0 && p_effects.iter().flatten().any(|pass| pass.window) {
+      return Err(anyhow!("an effect here needs the photo's own pixel positions, and this window is turned"));
+    }
     if (scale - 1.0).abs() > 1e-3 && p_effects.iter().flatten().any(|pass| pass.pixel_exact && !pass.window) {
       return Err(anyhow!("an effect here is only right at the photo's own size, and this window is at {scale}x"));
     }
@@ -764,22 +803,20 @@ impl TiledRenderer {
     let target = self.renderer.source_view(size.0, size.1);
     self.cache.draw(&window, &target, size);
     let (full_width, full_height) = self.size();
-    self.renderer.set_window([
-      window.x - pad as f32 * scale,
-      window.y - pad as f32 * scale_y,
-      scale,
-      scale_y,
-      full_width as f32,
-      full_height as f32,
-      0.0,
-      0.0,
-    ]);
+    let (turn_cos, turn_sin) = (window.angle.cos(), window.angle.sin());
+    // The photo's pixel at the picture's middle, and from it where the picture's top left is once the turn is undone:
+    // the photo's pixel at picture pixel `p` is `origin + turn(p * scale)`.
+    let middle = (window.x + window.width / 2.0, window.y + window.height / 2.0);
+    let half = (size.0 as f32 * scale / 2.0, size.1 as f32 * scale_y / 2.0);
+    let origin = (middle.0 - (turn_cos * half.0 + turn_sin * half.1), middle.1 - (-turn_sin * half.0 + turn_cos * half.1));
+    self.renderer.set_window([origin.0, origin.1, scale, scale_y, full_width as f32, full_height as f32, turn_cos, turn_sin]);
     let (full_width, full_height) = (full_width as f32, full_height as f32);
-    let origin = (window.x - pad as f32 * scale, window.y - pad as f32 * scale_y);
-    let reaches_past = origin.0 < 0.0
-      || origin.1 < 0.0
-      || origin.0 + size.0 as f32 * scale > full_width
-      || origin.1 + size.1 as f32 * scale_y > full_height;
+    // The box that holds the turned picture, in the photo's pixels.
+    let half_box = (turn_cos.abs() * half.0 + turn_sin.abs() * half.1, turn_sin.abs() * half.0 + turn_cos.abs() * half.1);
+    let reaches_past = middle.0 - half_box.0 < 0.0
+      || middle.1 - half_box.1 < 0.0
+      || middle.0 + half_box.0 > full_width
+      || middle.1 + half_box.1 > full_height;
     if reaches_past {
       let mut with_outside = p_effects.to_vec();
       let color: Vec<u8> = self.cache.options.outside.iter().flat_map(|value| value.to_ne_bytes()).collect();
@@ -931,7 +968,7 @@ mod tests {
   }
 
   fn window(p_x: f32, p_y: f32, p_width: f32, p_height: f32, p_out: (u32, u32), p_pad: u32) -> Window {
-    Window { x: p_x, y: p_y, width: p_width, height: p_height, out_width: p_out.0, out_height: p_out.1, pad: p_pad }
+    Window { x: p_x, y: p_y, width: p_width, height: p_height, out_width: p_out.0, out_height: p_out.1, pad: p_pad, angle: 0.0 }
   }
 
   #[test]
@@ -993,6 +1030,46 @@ mod tests {
     assert_eq!(&pixels[..4], &[0, 0, 0, 0], "outside the photo is clear");
     let inside = (60 * 200 + 150) * 4;
     assert_eq!(pixels[inside + 3], 255, "inside the photo is drawn");
+  }
+
+  #[test]
+  fn a_turned_window_shows_the_photo_turned_clockwise_about_its_middle() {
+    let mut photo = photo(64);
+    // A quarter turn: the 200 x 120 photo fills a 120 x 200 picture. The window is centered on the photo's middle (100, 60).
+    let view = Window { angle: std::f32::consts::FRAC_PI_2, ..window(40.0, -40.0, 120.0, 200.0, (120, 200), 0) };
+    photo.render(&view, &[]).unwrap();
+    let pixels = photo.read_pixels().unwrap();
+    let mut worst = 0.0f32;
+    for out_y in 0..200usize {
+      for out_x in 0..120usize {
+        // Clockwise: the photo's left edge ends up on top, so a step right in the picture is a step up in the photo.
+        let want = expected(100.0 + (out_y as f32 + 0.5 - 100.0), 60.0 - (out_x as f32 + 0.5 - 60.0));
+        let at = (out_y * 120 + out_x) * 4;
+        worst = worst.max((pixels[at] as f32 - want[0]).abs()).max((pixels[at + 1] as f32 - want[1]).abs());
+      }
+    }
+    assert!(worst <= 3.0, "the turned ramp is off by {worst}");
+  }
+
+  #[test]
+  fn a_turned_window_loads_the_tiles_under_the_box_that_holds_it_and_is_clear_past_the_photo() {
+    let mut photo = photo(64);
+    // An eighth of a turn, with the picture as big as the photo: its corners reach past the photo's edges.
+    let view = Window { angle: std::f32::consts::FRAC_PI_4, ..window(0.0, 0.0, 200.0, 120.0, (200, 120), 0) };
+    photo.render(&view, &[]).unwrap();
+    let pixels = photo.read_pixels().unwrap();
+    assert_eq!(&pixels[..4], &[0, 0, 0, 0], "the corner of a turned picture is past the photo, so it is clear");
+    let middle = (60 * 200 + 100) * 4;
+    assert_eq!(pixels[middle + 3], 255, "the middle is the photo");
+    assert_eq!(photo.tiles_loaded(), 8, "all four by two tiles are under it");
+  }
+
+  #[test]
+  fn an_effect_that_needs_the_photos_pixel_positions_is_not_drawn_on_a_turned_window() {
+    let mut photo = photo(64);
+    let view = Window { angle: 0.3, ..window(0.0, 0.0, 200.0, 120.0, (200, 120), 0) };
+    let positional = vec![GpuPass::new("@compute @workgroup_size(8, 8) fn main() {}", Vec::new()).with_window()];
+    assert!(photo.render(&view, &[positional]).is_err());
   }
 
   #[test]

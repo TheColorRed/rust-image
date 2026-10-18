@@ -8,7 +8,7 @@ import { openEditorSession } from '@/src/lib/editor/editor-session';
 import { useTheme } from '@/src/lib/theme';
 import { closeRequested } from '@/src/state/commands';
 import { bottomInset, topInset } from '@/src/state/preview';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { BackHandler, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,9 +41,14 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
     return () => subscription.remove();
   }, []);
 
+  // The bottom inset (the system's gesture area) can be reported as 0 and as its real size by turns while the phone is busy, and
+  // the panel pads itself by it, so the preview above it changed size each time and was drawn again at each size. The editor keeps
+  // the largest it has seen while it is open: the panel may keep a little extra room if the area really goes away.
+  const largestBottom = useRef(0);
   useEffect(() => {
+    largestBottom.current = Math.max(largestBottom.current, insets.bottom);
     topInset.next(insets.top);
-    bottomInset.next(insets.bottom);
+    bottomInset.next(largestBottom.current);
   }, [insets.top, insets.bottom]);
 
   return (

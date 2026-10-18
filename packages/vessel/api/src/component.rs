@@ -1,7 +1,7 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -12,6 +12,7 @@ use crate::layout::Edges;
 use crate::layout::{Align, Container, Direction, Display, Hints, Justify, Length, Rect, Track, Units, layout};
 use crate::theme::Background;
 use crate::theme::ThemePatch;
+use crate::tween::{Animatable, Tween, TweenOptions};
 use crate::{Canvas, Face, Font, GpuPicture, KeyEvent, PointerEvent, Quit, TextAlign, Theme};
 
 /// Sent on a component's `subject::<Tick>()` before each frame while it is animating (see `Component::set_animating`). It
@@ -84,12 +85,68 @@ struct Inner {
   routing: AtomicBool,
   /// True while the component moves by itself and needs a frame on every tick.
   animating: AtomicBool,
+  /// The tweens running now, each moving one property of this component (see [`Component::animate`]).
+  tweens: Mutex<Vec<Box<dyn RunningTween>>>,
+  /// True while the tweens are being moved, when they are out of the list. A tween stopped then is named in `stopping` instead.
+  stepping: AtomicBool,
+  stopping: Mutex<Vec<usize>>,
+}
+
+/// Something a component steps on every frame until it arrives: a tween moving one property (with the property's type hidden, so
+/// a component can run tweens of any kind together), or a sequence of them.
+pub(crate) trait RunningTween: Send {
+  /// Names what it moves, so a new one with the same name replaces it.
+  fn property(&self) -> usize;
+  /// Moves on by `p_delta`. Returns whether it has arrived.
+  fn step(&mut self, p_delta: Duration) -> bool;
+  /// Whether it is held where it is. A paused one keeps its progress, and does not ask the engine for frames.
+  fn paused(&self) -> bool {
+    false
+  }
+}
+
+struct Running<T: Animatable> {
+  property: BehaviorSubject<T>,
+  tween: Tween<T>,
+  /// Counts down by one when this tween ends, however it ends (it arrived, was replaced or stopped), so a sequence waiting on
+  /// a group of tweens knows when they are all done.
+  pending: Option<Arc<AtomicUsize>>,
+  /// Holds the tween where it is while it is `true`: the pause of the sequence this tween belongs to.
+  hold: Option<BehaviorSubject<bool>>,
+}
+
+impl<T: Animatable> RunningTween for Running<T> {
+  fn property(&self) -> usize {
+    self.property.id()
+  }
+
+  fn step(&mut self, p_delta: Duration) -> bool {
+    if self.paused() {
+      return false;
+    }
+    self.property.next(self.tween.step(p_delta));
+    self.tween.is_finished()
+  }
+
+  fn paused(&self) -> bool {
+    self.hold.as_ref().is_some_and(|hold| hold.peek())
+  }
+}
+
+impl<T: Animatable> Drop for Running<T> {
+  fn drop(&mut self) {
+    if let Some(pending) = &self.pending {
+      pending.fetch_sub(1, Ordering::SeqCst);
+    }
+  }
 }
 
 impl Inner {
   /// Whether this component or anything inside it asked for a frame every tick.
   fn is_animating(&self) -> bool {
-    self.animating.load(Ordering::SeqCst) || self.children.lock().unwrap().iter().any(|slot| slot.component.inner.is_animating())
+    self.animating.load(Ordering::SeqCst)
+      || self.tweens.lock().unwrap().iter().any(|tween| !tween.paused())
+      || self.children.lock().unwrap().iter().any(|slot| slot.component.inner.is_animating())
   }
 
   fn wake(&self) {
@@ -259,6 +316,9 @@ impl Component {
         pointer: Mutex::new((0.0, 0.0)),
         routing: AtomicBool::new(false),
         animating: AtomicBool::new(false),
+        tweens: Mutex::new(Vec::new()),
+        stepping: AtomicBool::new(false),
+        stopping: Mutex::new(Vec::new()),
       }),
     };
     // A new size is a reason to draw again.
@@ -283,8 +343,77 @@ impl Component {
     }
   }
 
-  /// Sends [`Tick`] to this component if it is animating, and to every descendant.
+  /// Moves `p_property` from where it is now to `p_target` over the next frames, as `p_options` says. The component asks the
+  /// engine for a frame on every tick until it arrives, then lets it sleep, so the caller never counts time. Any `BehaviorSubject`
+  /// works: a color, an opacity, a position, a camera. Starting a tween of a property that is already moving replaces the move
+  /// from wherever the property is.
+  pub fn animate<T: Animatable>(&self, p_property: &BehaviorSubject<T>, p_target: T, p_options: TweenOptions) {
+    self.start_tween(p_property, p_target, p_options, None);
+  }
+
+  /// Starts a tween that belongs to a sequence: `p_link` is the count it takes one off when it ends, for the sequence to wait
+  /// on, and the pause that holds it.
+  pub(crate) fn start_tween<T: Animatable>(
+    &self,
+    p_property: &BehaviorSubject<T>,
+    p_target: T,
+    p_options: TweenOptions,
+    p_link: Option<(Arc<AtomicUsize>, BehaviorSubject<bool>)>,
+  ) {
+    let tween = Tween::new(p_property.peek(), p_target, p_options);
+    let (pending, hold) = p_link.unzip();
+    self.start_running(Box::new(Running { property: p_property.clone(), tween, pending, hold }));
+  }
+
+  /// Asks the engine for frames again, after something that was paused is running.
+  pub(crate) fn wake_animations(&self) {
+    self.inner.changed_self();
+  }
+
+  /// Runs `p_running` from the next frame, in place of anything with the same name.
+  pub(crate) fn start_running(&self, p_running: Box<dyn RunningTween>) {
+    {
+      let mut tweens = self.inner.tweens.lock().unwrap();
+      tweens.retain(|running| running.property() != p_running.property());
+      tweens.push(p_running);
+    }
+    self.inner.changed_self();
+  }
+
+  /// Stops the tween moving `p_property`, if there is one, leaving the property where it got to.
+  pub fn stop_animating<T: Animatable>(&self, p_property: &BehaviorSubject<T>) {
+    self.stop_property(p_property.id());
+  }
+
+  /// Stops whatever runs under the name `p_property` (see [`BehaviorSubject::id`]).
+  pub(crate) fn stop_property(&self, p_property: usize) {
+    self.inner.tweens.lock().unwrap().retain(|running| running.property() != p_property);
+    if self.inner.stepping.load(Ordering::SeqCst) {
+      self.inner.stopping.lock().unwrap().push(p_property);
+    }
+  }
+
+  /// Moves every running tween on by `p_delta`, and drops those that have arrived.
+  fn step_tweens(&self, p_delta: Duration) {
+    // Taken out of the list while they move: setting a property can run a listener that starts or stops a tween.
+    let mut running = std::mem::take(&mut *self.inner.tweens.lock().unwrap());
+    self.inner.stepping.store(true, Ordering::SeqCst);
+    // One that an earlier one in the list stopped during this pass (a sequence stopping its step) does not move again.
+    running.retain_mut(|tween| !self.inner.stopping.lock().unwrap().contains(&tween.property()) && !tween.step(p_delta));
+    self.inner.stepping.store(false, Ordering::SeqCst);
+    self.inner.stopping.lock().unwrap().clear();
+    let mut tweens = self.inner.tweens.lock().unwrap();
+    let started = std::mem::take(&mut *tweens);
+    running.retain(|old| !started.iter().any(|new| new.property() == old.property()));
+    running.extend(started);
+    *tweens = running;
+  }
+
+  /// Sends [`Tick`] to this component if it is animating, and to every descendant. Its tweens move first.
   fn send_tick(&self, p_delta: Duration) {
+    if !self.inner.tweens.lock().unwrap().is_empty() {
+      self.step_tweens(p_delta);
+    }
     if self.inner.animating.load(Ordering::SeqCst) {
       self.events::<Tick>().next(Tick(p_delta));
     }
@@ -1371,6 +1500,38 @@ mod tests {
 
     child.set_animating(false);
     assert_eq!(parent.clone().pacing(), Pacing::OnDemand);
+  }
+
+  #[test]
+  fn animate_moves_any_property_over_the_frames_and_then_lets_the_engine_sleep() {
+    let component = Component::new("fader").with_size(2, 2);
+    let opacity = BehaviorSubject::new(0.0f32);
+    let tint = BehaviorSubject::new([0u8, 0, 0, 255]);
+    let linear = TweenOptions::default().with_duration(Duration::from_millis(100)).with_easing(crate::Easing::Linear);
+    assert_eq!(component.clone().pacing(), Pacing::OnDemand);
+
+    component.animate(&opacity, 1.0, linear);
+    component.animate(&tint, [200, 100, 0, 255], linear);
+    assert_eq!(component.clone().pacing(), Pacing::Continuous, "a tween keeps the engine ticking");
+
+    // The first frame covers the time the engine slept and does not count.
+    component.clone().render(Duration::from_secs(3));
+    assert_eq!(opacity.peek(), 0.0);
+    component.clone().render(Duration::from_millis(50));
+    assert_eq!((opacity.peek(), tint.peek()), (0.5, [100, 50, 0, 255]), "properties of different types move together");
+
+    // Starting again from the middle replaces the move instead of adding a second one.
+    component.animate(&opacity, 0.0, linear);
+    component.clone().render(Duration::from_millis(16));
+    component.clone().render(Duration::from_millis(100));
+    assert_eq!(opacity.peek(), 0.0);
+    assert_eq!(tint.peek(), [200, 100, 0, 255]);
+    assert_eq!(component.clone().pacing(), Pacing::OnDemand, "nothing moves, so the engine sleeps");
+
+    component.animate(&opacity, 1.0, linear);
+    component.stop_animating(&opacity);
+    assert_eq!(component.clone().pacing(), Pacing::OnDemand);
+    assert_eq!(opacity.peek(), 0.0);
   }
 
   #[test]

@@ -4,8 +4,13 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-abra = { workspace = true }
+abra = { workspace = true, features = ["gpu"] }
+gpu = { workspace = true }
 
 [[bin]]
 name = "brush-test"
 path = "main.rs"
+
+[[bin]]
+name = "live-stroke-test"
+path = "live.rs"

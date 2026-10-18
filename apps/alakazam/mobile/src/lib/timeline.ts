@@ -10,6 +10,8 @@ export type TimelineChange =
   | { type: 'red-eye'; x: number; y: number }
   /** Red-eye fixed on every face the models found. */
   | { type: 'red-eye-auto' }
+  /** A reusable, non-destructive recipe was merged into the current edit. */
+  | { type: 'preset'; id: string }
   /** Edits made while a project was still loading, merged into its saved edits as one step. */
   | { type: 'pending' };
 

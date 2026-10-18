@@ -10,6 +10,7 @@ import {
 import { renderRecipe } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
 import type { ProjectRecipe } from '@/src/lib/project-store';
+import { type EditPreset } from '@/src/lib/presets';
 import { applyRedEyeStep } from '@/src/lib/red-eye';
 import { adjustmentKey } from '@/src/lib/skin-adjustments';
 import {
@@ -159,6 +160,41 @@ function removeSlider(control: SliderControl) {
   const { [key]: _removed, [control.key]: _everyone, ...rest } = adjustments.value;
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));
   adjustments.next(rest);
+}
+
+/** Applies the checked parts of a preset as one undoable change, preserving every unchecked existing edit. */
+export function applyPreset(preset: EditPreset, selectedKeys = new Set([...Object.keys(preset.adjustments), ...preset.appliedActions])) {
+  const keys = selectedKeys;
+  const nextAdjustments = {
+    ...Object.fromEntries(Object.entries(adjustments.value).filter(([key]) => !keys.has(key))),
+    ...Object.fromEntries(Object.entries(preset.adjustments).filter(([key]) => keys.has(key))),
+  };
+  const selectedActions = preset.appliedActions.filter(key => keys.has(key));
+  const groups = new Set(selectedActions.flatMap(key => {
+    for (const section of EDIT_SECTIONS) {
+      const control = leafControls(section.controls).find(item => item.kind === 'action' && item.key === key);
+      if (control?.kind === 'action' && control.group) return [control.group];
+    }
+    return [];
+  }));
+  const nextActions = [
+    ...appliedActions.value.filter(key => {
+      if (keys.has(key)) return false;
+      for (const section of EDIT_SECTIONS) {
+        const control = leafControls(section.controls).find(item => item.kind === 'action' && item.key === key);
+        if (control?.kind === 'action' && control.group && groups.has(control.group)) return false;
+      }
+      return true;
+    }),
+    ...selectedActions,
+  ];
+  replayHidden.next(true);
+  lastGroup = null;
+  recordEdit({ type: 'preset', id: preset.id }, { adjustments: nextAdjustments, appliedActions: nextActions });
+  batch(() => {
+    adjustments.next(nextAdjustments);
+    appliedActions.next(nextActions);
+  });
 }
 
 /**

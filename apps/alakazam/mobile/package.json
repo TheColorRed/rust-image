@@ -25,7 +25,8 @@
     "react-native-safe-area-context": "^5.10.0",
     "react-native-svg": "^15.15.5",
     "react-rx": "^7.0.1",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@babel/core": "^8.0.6",

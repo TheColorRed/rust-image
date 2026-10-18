@@ -36,6 +36,7 @@ mod brush {
   pub mod brush;
 }
 mod fill;
+mod live_stroke;
 mod performance;
 
 pub use brush::brush::Brush;
@@ -48,4 +49,5 @@ pub use core::sampling::SampleGrid;
 pub use core::sdf::{draw_area_fill, draw_area_stroke, draw_ellipse_stroke};
 pub use core::shader::{Shader, shader_from_fill, shader_from_fill_with_path};
 pub use fill::*;
+pub use live_stroke::{MAX_STROKE_POINTS, StrokeLook, stroke_overlay, stroke_overlay_deferred};
 pub use performance::DrawingAlgorithm;

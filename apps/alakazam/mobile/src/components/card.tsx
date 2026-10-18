@@ -27,7 +27,18 @@ export function CardContent({ children }: { children?: ReactNode }) {
   return <View style={styles.content}>{children}</View>;
 }
 
-export function CardHeader({ icon: Icon, title, subtitle }: { icon?: LucideIcon; title?: string; subtitle?: string }) {
+export function CardHeader({
+  icon: Icon,
+  title,
+  subtitle,
+  action,
+}: {
+  icon?: LucideIcon;
+  title?: string;
+  subtitle?: string;
+  /** Shown at the end of the header, such as a button. */
+  action?: ReactNode;
+}) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
@@ -48,7 +59,7 @@ export function CardHeader({ icon: Icon, title, subtitle }: { icon?: LucideIcon;
     [colors],
   );
 
-  const hasHeader = Icon != null || title != null || subtitle != null;
+  const hasHeader = Icon != null || title != null || subtitle != null || action != null;
   if (!hasHeader) return null;
 
   return (
@@ -64,6 +75,7 @@ export function CardHeader({ icon: Icon, title, subtitle }: { icon?: LucideIcon;
           {subtitle != null && <Text style={styles.subtitle}>{subtitle}</Text>}
         </View>
       )}
+      {action}
     </View>
   );
 }

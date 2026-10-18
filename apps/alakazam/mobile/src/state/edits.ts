@@ -48,6 +48,23 @@ export const isBlemishToolFocused$ = focusedControlKey$.pipe(
   distinctUntilChanged(),
 );
 export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOOL_KEY;
+/** Controls whose work is confined to a face, so opening them can bring that face closer. */
+export const isFaceControlFocused$ = focusedControlKey$.pipe(
+  map(
+    key =>
+      key === LIPSTICK_KEY ||
+      key === EYELINER_KEY ||
+      key === EYESHADOW_KEY ||
+      key === BROW_BONE_KEY ||
+      key === UNDER_EYE_KEY ||
+      key === BLUSH_KEY ||
+      key === LIP_LINER_KEY ||
+      key === HIGHLIGHTER_KEY ||
+      key === CONTOUR_KEY ||
+      key === TEETH_WHITENING_KEY,
+  ),
+  distinctUntilChanged(),
+);
 export const isPersonControlFocused$ = focusedControlKey$.pipe(
   map(
     key =>

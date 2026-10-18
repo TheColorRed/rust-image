@@ -89,7 +89,10 @@ export function AiProgressBar() {
   return (
     <View
       style={styles.track}
-      onLayout={event => setWidth(event.nativeEvent.layout.width)}
+      onLayout={event => {
+        if (__DEV__) console.debug('[bar] layout', event.nativeEvent.layout.width, 'x', event.nativeEvent.layout.height);
+        setWidth(event.nativeEvent.layout.width);
+      }}
       accessibilityRole="progressbar"
       accessibilityLabel="AI is working"
       accessibilityValue={running ? { min: 0, max: 100, now: Math.round(progress * 100) } : undefined}

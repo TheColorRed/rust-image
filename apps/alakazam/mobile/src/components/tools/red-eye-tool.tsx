@@ -13,7 +13,7 @@ import { useTheme, type ThemeColors } from '@/src/lib/theme';
 import { aiModelsRequested } from '@/src/state/ai-models';
 import { redEyeAutoRequested$ } from '@/src/state/commands';
 import { isRedEyeToolFocused } from '@/src/state/edits';
-import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
+import { previewBox, previewPressed$, previewRotationValue, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
 import { historyReady } from '@/src/state/project-session';
 import { busy, currentImage } from '@/src/state/session';
 
@@ -108,6 +108,7 @@ export function RedEyeToolController() {
           previewScaleValue.value,
           previewTranslateValue.value,
           event,
+          previewRotationValue.value,
         );
         if (!point) return;
         fix({ type: 'red-eye', ...point }, 'No red-eye found there. Tap closer to the red pupil, or pinch to zoom in and tap again.');

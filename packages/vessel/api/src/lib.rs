@@ -31,8 +31,10 @@ mod layout;
 mod mount;
 #[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]
 mod session;
+mod sequence;
 mod shapes;
 mod theme;
+mod tween;
 
 #[cfg(all(feature = "desktop-window", not(any(target_os = "android", target_os = "ios"))))]
 pub use self::app::{RunError, run};
@@ -48,7 +50,9 @@ pub use self::{
   gpu::GpuPicture,
   input::{KeyEvent, PointerButton, PointerEvent, Quit},
   layout::{Align, Direction, Display, Edges, Justify, Rect, Track, Units},
+  sequence::{Animation, PlayOptions, Playback, Step},
   theme::{Background, Theme, ThemePatch},
+  tween::{Animatable, Easing, Tween, TweenOptions},
 };
 
 /// What an app usually needs, in one import: this crate's types, the engine's, and the `pub-sub` traits that `subscribe`
@@ -57,9 +61,9 @@ pub mod prelude {
   #[cfg(all(feature = "desktop-window", not(any(target_os = "android", target_os = "ios"))))]
   pub use crate::run;
   pub use crate::{
-    Align, App, AppFrame, AppOptions, Background, Canvas, Component, Direction, Display, Edges, Face, Font, GpuPicture,
-    Justify, KeyEvent, PointerButton, PointerEvent, Quit, Renderable, TextAlign, Theme, ThemePatch, Tick, Track, Units,
-    WeakComponent,
+    Align, Animatable, Animation, App, AppFrame, AppOptions, Background, Canvas, Component, Direction, Display, Easing, Edges,
+    Face, Font, GpuPicture, Justify, KeyEvent, PlayOptions, Playback, PointerButton, PointerEvent, Quit, Renderable, Step, TextAlign,
+    Theme, ThemePatch, Tick, Track, Tween, TweenOptions, Units, WeakComponent,
   };
   #[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]
   pub use crate::{Drawn, Session, mount, unmount};

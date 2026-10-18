@@ -11,7 +11,7 @@ import { resize } from '@abra/core/transform';
 import { applyBlush } from '../blush';
 import { applySculpt } from '../contour';
 import { type EditSection } from '../edit-sections';
-import { applyEyeMakeup, makeupMasks, skinWithMouthEased } from '../eye-makeup';
+import { applyEyeMakeup, hairMasks, makeupMasks, skinWithMouthEased } from '../eye-makeup';
 import { applyHairColor, HAIR_MIDDLE, HAIR_REACH } from '../hair-color';
 import { applyLipLiner } from '../lip-liner';
 import { applyLipstick } from '../lipstick';
@@ -504,10 +504,10 @@ export const beauty: EditSection = {
           display: 'tabulated',
           sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Colorfulness', 'Brightness'],
           min: [0, 0, 0, 0.5, 0, 0],
-          max: [1, 1, 1, 1.5, 1, 1],
+          max: [1, 1, 1, 3, 1, 1],
           step: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01],
           // Opening the control puts a soft pink on the cheeks at once, so there is something to change.
-          defaultValue: [1 - 350 / 360, 0.8, 0.8, 1, 0.8, 0.8],
+          defaultValue: [1 - 350 / 360, 0.4, 1, 2, 0.8, 0.8],
           picker: ['hue', undefined, undefined, undefined, undefined, undefined],
           swatches: swatchesOf(faceColors, (hue, saturation, brightness) => [
             hue,
@@ -659,7 +659,7 @@ export const beauty: EditSection = {
             hairLightness(hairColors.find(each => each.label === label)!.color),
           ]),
           // The AI finds the hair once, when the control opens; dragging only changes how it looks.
-          preload: makeupMasks,
+          preload: hairMasks,
           layer: {
             blend: BlendMode.Normal,
             opacity: ([, strength]) => strength,

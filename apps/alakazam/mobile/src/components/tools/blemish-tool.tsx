@@ -1,9 +1,14 @@
 import type { AbraImageLike } from '@alakazam/mobile';
 import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useObservable } from 'react-rx';
+import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Color } from '@abra/core/color';
+import { Brush } from '@abra/core/drawing';
+import { Area } from '@abra/core/geometry';
+import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
-import { computePreviewImagePoint, type PreviewPoint } from '@/src/lib/preview-coordinates';
+import { computePreviewImagePoint, unrotatePreviewPoint, type PreviewPoint } from '@/src/lib/preview-coordinates';
 import { removeBlemish } from '@/src/lib/blemish';
 import { commitBlemish } from '@/src/lib/editor/editor-history';
 import { blemishApplyRequested$ } from '@/src/state/commands';
@@ -13,7 +18,9 @@ import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { currentImage } from '@/src/state/session';
 import {
   previewBox,
+  previewBox$,
   previewPressed$,
+  previewRotationValue,
   previewScaleValue,
   previewTranslateValue,
   springPreview,
@@ -25,18 +32,42 @@ import {
  * pinch-zooming the image underneath is how the user controls how much of the photo they cover. */
 export const BLEMISH_INNER_RADIUS = 26;
 export const BLEMISH_OUTER_RADIUS = 42;
+/** How thick the reticle's rings are, in dp. */
+const RETICLE_LINE = 2;
 
 /** Renders the two-ring reticle. Fixed on screen — position it outside whatever transformed view
  * carries the pinch-zoom, so it marks a constant spot while the image moves underneath it. */
 export function BlemishReticle() {
   const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <View style={styles.reticle} pointerEvents="none">
-      <View style={[styles.ring, styles.ringOuter]} />
-      <View style={[styles.ring, styles.ringInner]} />
-    </View>
-  );
+  // The photo is zoomed and turned about the middle of the preview box, which can be taller than what is visible (a control
+  // opening a taller panel covers the bottom of it), so the reticle marks that middle and not the middle of what is visible.
+  const box = useObservable(previewBox$, previewBox.value);
+  const gizmos = useObservable(editorGizmos$, editorGizmos.value);
+  // The library draws the two rings on the gizmos view over the photo. Their sizes are in the view's pixels, and each ring's edge
+  // runs along its radius, as the border of a view of that size does.
+  useEffect(() => {
+    if (!gizmos || !box) return;
+    const density = PixelRatio.get();
+    const center = { x: (box.width * density) / 2, y: (box.height * density) / 2 };
+    const width = Math.round(RETICLE_LINE * density);
+    const outer = new Brush().withColor(Color.white()).withSize(width).withHardness(1).withOpacity(0.5) as Brush;
+    const inner = new Brush().withColor(Color.fromHexString(colors.accent)).withSize(width).withHardness(1) as Brush;
+    const rings = [
+      ['blemish-outer', BLEMISH_OUTER_RADIUS, outer],
+      ['blemish-inner', BLEMISH_INNER_RADIUS, inner],
+    ] as const;
+    for (const [name, radius, brush] of rings) {
+      const area = Area.circle(center, radius * density - width / 2) as Area;
+      gizmos.setOutline(name, area, brush);
+      area.uniffiDestroy();
+    }
+    outer.uniffiDestroy();
+    inner.uniffiDestroy();
+    return () => {
+      for (const [name] of rings) gizmos.remove(name);
+    };
+  }, [gizmos, box, colors.accent]);
+  return null;
 }
 
 export interface BlemishControlsProps {
@@ -96,7 +127,15 @@ export function BlemishToolController() {
         lastTap = { time: now, x: pageX, y: pageY };
         if (!last || now - last.time > 300 || Math.hypot(pageX - last.x, pageY - last.y) > 40) return;
         lastTap = null;
-        springPreview(computeCenteringTranslate({ x, y }, box, previewScaleValue.value));
+        // The tap is on the screen, where the photo is turned; the pan is in the photo's own axes.
+        springPreview(
+          computeCenteringTranslate(
+            unrotatePreviewPoint({ x, y }, box, previewRotationValue.value),
+            box,
+            previewScaleValue.value,
+            previewTranslateValue.value,
+          ),
+        );
       }),
 
       // Blemish mode permits overscroll so an edge can reach the fixed reticle. Restore the ordinary
@@ -157,14 +196,15 @@ export function computeBlemishTarget(
  * - `point`: the tapped spot, in previewBox-local coordinates.
  * - `box`: the preview's on-screen size.
  * - `scale`: the pinch-zoom's current scale (unchanged by this — only pans, doesn't zoom).
+ * - `translate`: the pan now, since the tapped spot is where the photo is now and not where it started.
  */
-export function computeCenteringTranslate(point: PreviewPoint, box: PreviewBox, scale: number): PreviewPoint {
+export function computeCenteringTranslate(point: PreviewPoint, box: PreviewBox, scale: number, translate: PreviewPoint): PreviewPoint {
   // Match the gesture's overscroll range so a double tap can center a blemish
   // all the way at an image edge.
   const maxTranslateX = (scale * box.width) / 2;
   const maxTranslateY = (scale * box.height) / 2;
-  const rawX = -scale * (point.x - box.width / 2);
-  const rawY = -scale * (point.y - box.height / 2);
+  const rawX = translate.x - (point.x - box.width / 2);
+  const rawY = translate.y - (point.y - box.height / 2);
   return {
     x: Math.min(maxTranslateX, Math.max(-maxTranslateX, rawX)),
     y: Math.min(maxTranslateY, Math.max(-maxTranslateY, rawY)),
@@ -173,23 +213,6 @@ export function computeCenteringTranslate(point: PreviewPoint, box: PreviewBox, 
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    reticle: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    ring: { position: 'absolute', borderRadius: 999, borderWidth: 2 },
-    ringOuter: {
-      width: BLEMISH_OUTER_RADIUS * 2,
-      height: BLEMISH_OUTER_RADIUS * 2,
-      borderColor: 'rgba(255,255,255,0.5)',
-    },
-    ringInner: { width: BLEMISH_INNER_RADIUS * 2, height: BLEMISH_INNER_RADIUS * 2, borderColor: colors.accent },
-
     controlRow: { alignItems: 'center', gap: 8, paddingHorizontal: 16 },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch' },
     backChip: {

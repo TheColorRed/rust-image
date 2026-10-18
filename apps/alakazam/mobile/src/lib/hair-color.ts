@@ -7,6 +7,7 @@ import { Image, type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
+import { MATTE_UNKNOWN } from '@/src/lib/eye-makeup';
 import { owning } from '@/src/lib/faces';
 import { people } from '@/src/state/analysis';
 import { type Painting } from '@/src/lib/layers';
@@ -143,7 +144,8 @@ export const applyHairColor = (
     // the hair on any body, leaving out the people who have their own. Their bodies are found at their own size, and the hair is at the
     // size the models looked at. The edge is then made to follow the photo.
     // The settings that make it are part of what it is kept under, so a change to one of them makes it again.
-    const kept = `${person?.id ?? ''}|${(others ?? []).join(',')}|${[EDGE_REACH, EDGE_STRENGTH, EDGE_GROW, SKIN_STRENGTH, WISP_BOOST, BAND_REACH, BAND_SPREAD, COLOR_MIX_LEAST, SKIN_AT_EDGE].join(',')}`;
+    const matte = preloaded['hair|matte'] as MaskLike | undefined;
+    const kept = `${matte ? 'matte' : 'color'}|${person?.id ?? ''}|${(others ?? []).join(',')}|${[EDGE_REACH, EDGE_STRENGTH, EDGE_GROW, SKIN_STRENGTH, WISP_BOOST, BAND_REACH, BAND_SPREAD, COLOR_MIX_LEAST, SKIN_AT_EDGE].join(',')}`;
     let foregroundMade: ImageLike | undefined;
     const region = derivedFor(preloaded, 'hair|refined', kept, () =>
       owning(own => {
@@ -202,7 +204,9 @@ export const applyHairColor = (
         // the wall) the fitted edge decides.
         const band = Math.max(2, Math.round(sheet.width() * BAND_REACH));
         const sureHair = own(edge.eroded(band));
-        const notBackground = own(edge.dilated(band));
+        // The model was left to decide as far from the hair as `MATTE_UNKNOWN`, so with its alpha the band reaches that far past the hair
+        // that is wanted, and not only past the fitted edge: otherwise most of what it found is cut off.
+        const notBackground = own(matte ? wanted.dilated(Math.max(band, Math.round(sheet.width() * MATTE_UNKNOWN))) : edge.dilated(band));
         const colorsOf = (zone: MaskLike) => {
           const colors = own(crop.clone());
           const weight = own(zone.toImage());
@@ -213,9 +217,11 @@ export const applyHairColor = (
           keep(keep(blend(weight)).withMode(BlendMode.Divide)).apply(colors);
           return colors;
         };
-        const byColor = own(
-          Mask.fromColorMix(crop, colorsOf(sureHair), colorsOf(own(notBackground.inverted())), edge, COLOR_MIX_LEAST),
-        );
+        // With the edge refinement model's alpha of the hair (`hair|matte`, made when the masks were), the band is what it says; without
+        // it, the band is decided by color.
+        const byColor = matte
+          ? own(matte.cropped(part))
+          : own(Mask.fromColorMix(crop, colorsOf(sureHair), colorsOf(own(notBackground.inverted())), edge, COLOR_MIX_LEAST));
         // The hair's own color near each pixel is kept, for the edge pixels to be colored from (see below).
         foregroundMade = colorsOf(sureHair).clone();
         foregroundOrigin.set(foregroundMade, { x, y });

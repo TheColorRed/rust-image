@@ -16,7 +16,7 @@ import { errorMessage } from '@/src/lib/error-message';
 import { useTheme } from '@/src/lib/theme';
 import { aiModelsVersion$ } from '@/src/state/ai-models';
 import { faceBoxes$, people } from '@/src/state/analysis';
-import { isPersonControlFocused$ } from '@/src/state/edits';
+import { isFaceControlFocused$, isPersonControlFocused$ } from '@/src/state/edits';
 import {
   personOutlinesVisible,
   personSelection,
@@ -24,7 +24,7 @@ import {
   selectionNeeded,
 } from '@/src/state/person-selection';
 import { openProject } from '@/src/state/project-session';
-import { previewBox, previewPressed$, previewScaleValue, previewTranslateValue, springPreview } from '@/src/state/gestures';
+import { previewBox, previewPressed$, previewRotationValue, previewScaleValue, previewTranslateValue, springPreview } from '@/src/state/gestures';
 import { currentImage, currentImage$, editBaseImage, editBaseImage$, originalImage } from '@/src/state/session';
 
 /** Zoomed to a face, the shorter side of the preview is this many times the face, and the zoom never goes past `MAX_FACE_ZOOM`. */
@@ -131,22 +131,33 @@ export function PersonSelectionToolController() {
             },
           );
         }),
-      // Zoom the preview to the selected person's face, and back out for everyone.
+      // Only face tools need a close-up. Skin and other body tools still use person selection,
+      // but leave the photo at its current scale.
       combineLatest([
+        isFaceControlFocused$,
         personSelection$.pipe(
-          map(state => state.selectedId),
-          distinctUntilChanged(),
+          // With one person there is nothing to pick, so that person is the one to zoom to. `focused` is part of the key so
+          // that opening a face control again zooms in again after the person zoomed out by hand.
+          map(state => [state.focused, state.selectedId ?? (state.people.length === 1 ? state.people[0].id : null)] as const),
+          distinctUntilChanged(([previousFocused, previousId], [focused, id]) => previousFocused === focused && previousId === id),
         ),
         faceBoxes$,
       ])
         .pipe(
-          map(([selectedId, boxes]) => [selectedId, selectedId === null ? undefined : boxes?.[selectedId]] as const),
-          distinctUntilChanged(([previousId, previousFace], [id, face]) => previousId === id && previousFace === face),
+          map(([isFaceControl, [focused, selectedId], boxes]) =>
+            [isFaceControl, selectedId, selectedId === null ? undefined : boxes?.[selectedId], focused] as const,
+          ),
+          distinctUntilChanged(
+            ([previousFaceControl, previousId, previousFace, previousFocused], [isFaceControl, id, face, focused]) =>
+              previousFaceControl === isFaceControl && previousId === id && previousFace === face && previousFocused === focused,
+          ),
         )
-        .subscribe(([selectedId, face]) => {
+        .subscribe(([isFaceControl, selectedId, face]) => {
+          if (__DEV__) console.debug('[zoom] face tool zoom', isFaceControl, selectedId, !!face, 'focused:', personSelection.value.focused);
           const image = getPersonSelectionImage();
           const box = previewBox.value;
           if (!personSelection.value.focused || !image || !box) return;
+          if (!isFaceControl) return springPreview({ x: 0, y: 0, scale: 1 });
           if (selectedId === null) return springPreview({ x: 0, y: 0, scale: 1 });
           const mask = people.value?.find(person => person.id === selectedId)?.mask;
           if (!face || !mask) return;
@@ -172,6 +183,7 @@ export function PersonSelectionToolController() {
           previewScaleValue.value,
           previewTranslateValue.value,
           event,
+          previewRotationValue.value,
         );
         if (!point) return;
 

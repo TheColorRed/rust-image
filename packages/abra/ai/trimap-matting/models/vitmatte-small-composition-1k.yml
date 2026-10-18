@@ -1,0 +1,26 @@
+# ViTMatte (small), trained on Composition-1k, quantized ONNX (27.5 MB)
+#
+# Purpose: Matting that is told where to look. It takes a photo and a trimap (sure subject, sure background and the unknown
+#   band between) and solves the alpha only in the unknown band, so a hair mask gives a hair-only alpha.
+# Origin: hustvl/vitmatte-small-composition-1k (ViTMatte, Yao et al.), ONNX export by Xenova
+# Input: pixel_values [1, 4, height, width]: RGB normalized with mean 0.5 and standard deviation 0.5, then the trimap
+#   scaled to 0..1 (0 background, 0.5 unknown, 1 subject) and not normalized. Height and width are multiples of 32.
+# Output: alphas [1, 1, height, width], from 0 to 1.
+# The base and small models are interchangeable: the same inputs and outputs, so changing model is changing the path.
+
+name: vitmatte-small-composition-1k
+decoder: matte
+description: Trimap-guided matting with ViTMatte (small)
+source: https://huggingface.co/Xenova/vitmatte-small-composition-1k/resolve/main/onnx/model_quantized.onnx
+license: Apache-2.0
+sha256: 8216103d998864e122333e17d7d346feb1d6558d96bf08695a9838dba4f114e0
+
+# How Abra feeds the model (see abra-ai-core: InputSpec). The photo and its trimap are fitted inside input_size by
+# input_size with padding (gray picture, background trimap) that is cut off the alpha again. input_size is a multiple of 32.
+params:
+  input_size: 1024
+  input_fit: letterbox
+  input_pad: 0.5
+  input_mean: [0.5, 0.5, 0.5]
+  input_standard_deviation: [0.5, 0.5, 0.5]
+  input_guide: 1

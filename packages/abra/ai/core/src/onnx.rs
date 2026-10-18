@@ -159,6 +159,39 @@ impl OnnxSession {
     Ok(tensors)
   }
 
+  /// Runs inference with any number of named input tensors and returns the first `p_limit` outputs in model order
+  /// (all of them when `p_limit` is `None`).
+  ///
+  /// - `p_inputs`: Each input as its name in the model, its shape and its values.
+  pub fn run_named(
+    &self, p_inputs: &[(&str, &[usize], &[f32])], p_limit: Option<usize>,
+  ) -> Result<Vec<(Vec<usize>, Vec<f32>)>, AiError> {
+    use ort::session::SessionInputValue;
+    use ort::value::TensorRef;
+    use std::borrow::Cow;
+
+    let mut inputs: Vec<(Cow<str>, SessionInputValue)> = Vec::with_capacity(p_inputs.len());
+    for (name, shape, data) in p_inputs {
+      let value = TensorRef::from_array_view((*shape, *data))
+        .map_err(|e| AiError::inference_failed(format!("Failed to create input tensor `{name}`: {}", e)))?;
+      inputs.push((Cow::Borrowed(*name), value.into()));
+    }
+
+    let mut session =
+      self.session.lock().map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
+    let outputs = session.run(inputs).map_err(|e| AiError::inference_failed(format!("Inference failed: {}", e)))?;
+
+    let count = p_limit.unwrap_or(outputs.len());
+    let mut tensors = Vec::with_capacity(count);
+    for (_, output) in outputs.iter().take(count) {
+      let (out_shape, out_view) = output
+        .try_extract_tensor::<f32>()
+        .map_err(|e| AiError::inference_failed(format!("Failed to extract output tensor: {}", e)))?;
+      tensors.push((out_shape.iter().map(|&dimension| dimension as usize).collect(), out_view.to_vec()));
+    }
+    Ok(tensors)
+  }
+
   /// Runs inference with an image input and a control vector.
   ///
   /// Used for models that take both image data and control parameters.

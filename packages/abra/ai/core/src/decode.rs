@@ -7,6 +7,7 @@
 //! | `decoder` | The model returns | [`AiOutput`] |
 //! |---|---|---|
 //! | `semantic-mask` | a score for every class at every pixel | [`AiOutput::Mask`]: how likely the chosen classes are |
+//! | `matte` | one value from 0 to 1 at every pixel (matting) | [`AiOutput::Mask`]: the model's alpha as it is |
 //! | `label-map` | a score for every class at every pixel | [`AiOutput::Labels`]: the best class at every pixel |
 //! | `instance-segmentation` | detections and mask prototypes (YOLO) | [`AiOutput::Instances`]: a box and mask for each |
 //! | `landmarks` | points and a presence score | [`AiOutput::Landmarks`] |
@@ -128,6 +129,10 @@ pub struct SemanticMask {
   mask_classes: Vec<usize>,
 }
 
+/// One alpha value at each pixel, read as it is.
+#[derive(Clone, Debug)]
+pub struct Matte;
+
 /// The best class at each pixel.
 #[derive(Clone, Debug)]
 pub struct LabelMapDecoder {
@@ -157,6 +162,7 @@ pub struct LandmarkDecoder {
 #[derive(Clone, Debug)]
 pub enum Decoder {
   SemanticMask(SemanticMask),
+  Matte(Matte),
   LabelMap(LabelMapDecoder),
   InstanceSegmentation(InstanceSegmentation),
   Landmarks(LandmarkDecoder),
@@ -167,6 +173,7 @@ impl Decoder {
   ///
   /// - `semantic-mask`: `class_count`, `mask_classes` (the classes that count as the mask) and `output_layout`
   ///   (`nhwc` or `nchw`, default `nchw`).
+  /// - `matte`: no params. The first output is `[1, 1, height, width]` at the size of the model's input, from `0` to `1`.
   /// - `label-map`: `class_count` and `output_layout`; the manifest's `classes` name them.
   /// - `instance-segmentation`: `class`, `confidence_threshold`, `detection_count`, `detection_size`, `mask_channels`
   ///   and `edge_snap`. A detection is `x1, y1, x2, y2, confidence, class, mask coefficients...`.
@@ -188,6 +195,7 @@ impl Decoder {
         }
         Ok(Decoder::SemanticMask(SemanticMask { scores, mask_classes }))
       }
+      Some("matte") => Ok(Decoder::Matte(Matte)),
       Some("label-map") => {
         let scores = scores()?;
         if scores.class_count == 0 || scores.class_count > 256 {
@@ -211,7 +219,7 @@ impl Decoder {
         coordinates_per_landmark: p_manifest.number("coordinates_per_landmark").unwrap_or(3.0) as usize,
       })),
       Some(other) => Err(AiError::config_error(format!(
-        "Unknown decoder `{other}`; use semantic-mask, label-map, instance-segmentation or landmarks"
+        "Unknown decoder `{other}`; use semantic-mask, matte, label-map, instance-segmentation or landmarks"
       ))),
       None => Err(AiError::config_error(format!("The manifest of {} names no `decoder`", p_manifest.name()))),
     }
@@ -226,6 +234,7 @@ impl Decoder {
   ) -> Result<AiOutput, AiError> {
     match self {
       Decoder::SemanticMask(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Mask),
+      Decoder::Matte(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Mask),
       Decoder::LabelMap(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Labels),
       Decoder::InstanceSegmentation(decoder) => {
         decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Instances)
@@ -286,6 +295,27 @@ fn class_confidence(p_logits: &[f32], p_classes: &[usize]) -> f32 {
   let exp_sum: f32 = p_logits.iter().map(|logit| (logit - max_logit).exp()).sum();
   let chosen: f32 = p_classes.iter().map(|class| (p_logits[*class] - max_logit).exp()).sum();
   chosen / exp_sum
+}
+
+impl Matte {
+  fn decode(
+    &self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement,
+  ) -> Result<Mask, AiError> {
+    let (shape, values) =
+      p_outputs.first().ok_or_else(|| AiError::inference_failed("The model returned no outputs"))?;
+    let (width, height) = (p_placement.input_width as usize, p_placement.input_height as usize);
+    if shape != &[1, 1, height, width] || values.len() != width * height {
+      return Err(AiError::inference_failed(format!(
+        "Unexpected matte output shape {shape:?}, expected [1, 1, {height}, {width}]"
+      )));
+    }
+    let model_mask = Mask::from_values(
+      p_placement.input_width,
+      p_placement.input_height,
+      values.iter().map(|value| (value * 255.0).round().clamp(0.0, 255.0) as u8).collect(),
+    );
+    Ok(p_placement.restore(&model_mask, p_width, p_height, TransformAlgorithm::Bilinear))
+  }
 }
 
 impl LabelMapDecoder {
@@ -552,6 +582,26 @@ mod tests {
     let placement = Placement::new(1, 1, 1, 1, Fit::Stretch);
     assert!(decoder.decode(&[], 1, 1, &placement).is_err());
     assert!(decoder.decode(&[(vec![1, 3, 1, 1], vec![0.0; 3])], 1, 1, &placement).is_err());
+  }
+
+  #[test]
+  fn a_matte_is_read_as_it_is_and_cut_to_the_picture() {
+    let decoder = Decoder::from_manifest(&manifest(
+      "decoder: matte
+",
+    ))
+    .unwrap();
+    // A 2 wide, 4 tall picture in a 4 x 4 input: the padding is the top and bottom row.
+    let placement = Placement::new(4, 4, 4, 2, Fit::Letterbox { pad: 0.0 });
+    let mut alpha = vec![0.0; 16];
+    alpha[4..12].fill(0.5);
+    let AiOutput::Mask(mask) = decoder.decode(&[(vec![1, 1, 4, 4], alpha.clone())], 4, 2, &placement).unwrap() else {
+      panic!("a matte is a mask");
+    };
+    assert_eq!((mask.width(), mask.height()), (4, 2));
+    assert!(mask.values().iter().all(|value| *value == 128), "0.5 is 128 of 255");
+    assert!(decoder.decode(&[(vec![1, 1, 2, 2], vec![0.0; 4])], 4, 2, &placement).is_err());
+    assert!(decoder.decode(&[], 4, 2, &placement).is_err());
   }
 
   #[test]

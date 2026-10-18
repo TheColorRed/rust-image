@@ -9,13 +9,14 @@ import { BehaviorSubject } from 'rxjs';
 export const projects = new BehaviorSubject<Project[]>([]);
 export const projects$ = projects.asObservable();
 
-/** Makes a project from a photo (Camera Roll or file picker) and adds it to `projects`. */
-export async function addProject(photo: EditablePhoto): Promise<void> {
+/** Makes a project from a photo (Camera Roll or file picker) and adds it to `projects`. Returns it, or nothing if it failed. */
+export async function addProject(photo: EditablePhoto): Promise<Project | undefined> {
   try {
     const project = await createProject(photo.uri, photo.fileName ?? `photo-${Date.now()}.jpg`);
     projects.next([project, ...projects.value]);
     // A picker leaves its own temporary copy in the cache; the project has its own now.
     await deleteMediaFromCache(photo.uri);
+    return project;
   } catch (error) {
     Alert.alert('Could not add the image', errorMessage(error));
   }

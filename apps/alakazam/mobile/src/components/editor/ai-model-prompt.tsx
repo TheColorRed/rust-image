@@ -1,12 +1,20 @@
-import { aiModels, downloadAiModel, refreshAiModels, type AiModelListing } from '@alakazam/mobile';
+import { downloadAiModel } from '@alakazam/mobile';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { detectSkin } from '@/src/lib/analysis';
+import { refreshAiModels, syncAiModels } from '@/src/lib/ai-model-catalog';
 import { errorMessage } from '@/src/lib/error-message';
 import { formatBytes } from '@/src/lib/format-bytes';
 import { useTheme } from '@/src/lib/theme';
-import { aiModelsOfferDeclined, aiModelsRequested, aiModelsRequested$, aiModelsVersion } from '@/src/state/ai-models';
+import {
+  aiModelList,
+  aiModelsOfferDeclined,
+  aiModelsRequested,
+  aiModelsRequested$,
+  aiModelsVersion,
+  type AiModelListing,
+} from '@/src/state/ai-models';
 import { isPersonControlFocused$ } from '@/src/state/edits';
 import { currentImage, editBaseImage, originalImage } from '@/src/state/session';
 
@@ -51,7 +59,7 @@ export function AiModelPrompt() {
     // The model list comes from S3; when it can't be reached there is nothing to offer.
     let cancelled = false;
     refreshAiModels().then(
-      models => !cancelled && setMissing(models.filter(model => !model.downloaded)),
+      models => !cancelled && setMissing(models.filter(model => model.enabled && !model.downloaded)),
       () => {},
     );
     return () => {
@@ -85,7 +93,8 @@ export function AiModelPrompt() {
     setError(null);
     setDownloading(true);
     try {
-      for (const model of missing) await downloadAiModel(model.id);
+      for (const model of missing) await downloadAiModel(model.file);
+      syncAiModels();
       if (request) {
         // Now that the models are here, do what was asked.
         setMissing([]);
@@ -104,7 +113,12 @@ export function AiModelPrompt() {
       aiModelsVersion.next(aiModelsVersion.value + 1);
     } catch (e) {
       setError(errorMessage(e));
-      setMissing(aiModels().filter(model => !model.downloaded));
+      syncAiModels();
+      setMissing(
+        aiModelList.value.filter(
+          model => !model.downloaded && (request ? request.roles.includes(model.id) : model.enabled),
+        ),
+      );
     }
     setDownloading(false);
   };
@@ -118,7 +132,7 @@ export function AiModelPrompt() {
     setMissing([]);
   };
 
-  const totalBytes = missing.reduce((sum, model) => sum + Number(model.downloadSizeBytes), 0);
+  const totalBytes = missing.reduce((sum, model) => sum + model.downloadSizeBytes, 0);
 
   return (
     <Modal visible={request !== null || missing.length > 0} transparent animationType="fade" onRequestClose={decline}>
@@ -136,14 +150,20 @@ export function AiModelPrompt() {
           </Text>
           {error && <Text style={styles.error}>{error}</Text>}
           <View style={styles.buttons}>
-            <Pressable accessibilityRole="button" disabled={downloading} onPress={decline} style={[styles.button, styles.decline]}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={downloading}
+              onPress={decline}
+              style={[styles.button, styles.decline]}
+            >
               <Text style={styles.declineText}>{request ? 'Cancel' : 'Not now'}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
               disabled={downloading || (request !== null && missing.length === 0)}
               onPress={download}
-              style={[styles.button, styles.accept]}>
+              style={[styles.button, styles.accept]}
+            >
               {downloading ? <ActivityIndicator color="#fff" /> : <Text style={styles.acceptText}>Download</Text>}
             </Pressable>
           </View>

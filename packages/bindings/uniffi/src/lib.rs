@@ -7,8 +7,8 @@
 //!
 //! One file for each part of the library: [`canvas`] (`Canvas` and `Layer`), [`color`] (the `primitives` color module),
 //! [`image`] (`Image`), [`gradient`] (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest)
-//! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`transform`] (rotate and flip)
-//! and [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
+//! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`drawing`] (brushes and the
+//! line they draw), [`transform`] (rotate and flip) and [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
 //! of the library is an array here, and an array of the wrong length panics, as the library does for input it cannot use.
 //!
 //! uniffi turns this crate into one namespace (`abra_uniffi`) of the generated TypeScript bindings. A crate that builds the
@@ -20,6 +20,7 @@ mod beauty;
 mod blend;
 mod canvas;
 mod color;
+mod drawing;
 mod effect;
 pub use effect::LiveEffect;
 mod filters;
@@ -51,6 +52,7 @@ pub use canvas::{
   add_canvas_options, new_layer_options,
 };
 pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
+pub use drawing::{Brush, max_stroke_points, stroke_overlay, stroke_overlay_deferred};
 pub use filters::{
   Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, Guided, LensBlur, Median,
   MotionBlur, Morphology, Noise, Pinch, Ripple, Sharpen, Smooth, Sobel, SurfaceBlur, blur, box_blur, despeckle,

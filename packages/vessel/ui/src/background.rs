@@ -361,7 +361,7 @@ mod tests {
   struct LiveImage;
 
   impl crate::Trackable for LiveImage {
-    fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, _p_viewport: &BehaviorSubject<crate::Viewport>) -> Subject<crate::Picture> {
+    fn pictures(&self, p_size: &BehaviorSubject<(u32, u32)>, _p_viewport: &BehaviorSubject<crate::Viewport>, _p_rotation: &BehaviorSubject<f32>) -> Subject<crate::Picture> {
       p_size.map(|&(width, height)| {
         crate::Picture::Pixels(Arc::new(Frame {
           width,

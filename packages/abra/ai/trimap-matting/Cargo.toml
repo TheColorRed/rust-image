@@ -1,0 +1,13 @@
+[package]
+name = "abra-trimap-matting"
+version = "1.0.0"
+edition = "2024"
+description = "Pre-trained models for matting that refine a rough mask: a photo and a trimap in, an alpha out"
+
+[dependencies]
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+mask = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

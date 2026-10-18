@@ -53,9 +53,9 @@ struct OnTheGpu {
 }
 
 impl Trackable for PreviewSource {
-  fn pictures(&self, size: &BehaviorSubject<(u32, u32)>, viewport: &BehaviorSubject<Viewport>) -> Subject<Picture> {
+  fn pictures(&self, size: &BehaviorSubject<(u32, u32)>, viewport: &BehaviorSubject<Viewport>, rotation: &BehaviorSubject<f32>) -> Subject<Picture> {
     let source = Arc::clone(&self.image);
-    let changes = size.combine_latest(viewport);
+    let changes = size.combine_latest(viewport).combine_latest(rotation);
     // The renderer draws again whenever the image is a different one (see `ImagePreview::refresh`), and keeps drawing while tiles
     // are still on their way; between them it sleeps.
     let version = {
@@ -66,7 +66,7 @@ impl Trackable for PreviewSource {
     // The photos on the GPU, the one drawn last at the end. An edit that is a smaller picture (a mood, say) and then undone brings
     // the full-size photo back, which must not be copied up and built again.
     let mut held: Vec<OnTheGpu> = Vec::new();
-    let renderer = Offscreen::tracking(&changes, version, { let busy = Arc::clone(&busy); move || busy.load(Ordering::SeqCst) }, move |(size, viewport)| {
+    let renderer = Offscreen::tracking(&changes, version, { let busy = Arc::clone(&busy); move || busy.load(Ordering::SeqCst) }, move |((size, viewport), angle)| {
       busy.store(false, Ordering::SeqCst);
       if size.0 == 0 || size.1 == 0 { return None }
       // An image that is still a recipe is the pixels it started from and the passes over them, so the GPU keeps those pixels
@@ -83,6 +83,7 @@ impl Trackable for PreviewSource {
         out_width: size.0,
         out_height: size.1,
         pad: 0,
+        angle: *angle,
       };
       let on_the_gpu = gpu::context().and_then(|context| {
         let key = (root.version(), (photo_width, photo_height));
@@ -125,6 +126,40 @@ impl Trackable for PreviewSource {
       // black, which is what the GPU draws where the view reaches past the photo.
       let whole = image;
       let frame = frame_of(&whole);
+      if *angle != 0.0 {
+        // A turned view: every pixel of the box looks up the photo pixel it shows (the GPU's own mapping, see `Window::angle`),
+        // smoothly, and is black where that is past the photo.
+        let (turn_cos, turn_sin) = (angle.cos(), angle.sin());
+        let (photo_w, photo_h) = (frame.width as f32, frame.height as f32);
+        let (scale_x, scale_y) = (viewport.width * photo_w / size.0 as f32, viewport.height * photo_h / size.1 as f32);
+        let (middle_x, middle_y) = ((viewport.x + viewport.width / 2.0) * photo_w, (viewport.y + viewport.height / 2.0) * photo_h);
+        let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for out_y in 0..size.1 {
+          for out_x in 0..size.0 {
+            let step_x = (out_x as f32 + 0.5 - size.0 as f32 / 2.0) * scale_x;
+            let step_y = (out_y as f32 + 0.5 - size.1 as f32 / 2.0) * scale_y;
+            let at = (middle_x + turn_cos * step_x + turn_sin * step_y, middle_y - turn_sin * step_x + turn_cos * step_y);
+            let target = (out_y as usize * size.0 as usize + out_x as usize) * 4;
+            if at.0 < 0.0 || at.1 < 0.0 || at.0 >= photo_w || at.1 >= photo_h {
+              pixels[target + 3] = 255;
+              continue;
+            }
+            let (left, top) = ((at.0 - 0.5).floor(), (at.1 - 0.5).floor());
+            let (share_x, share_y) = (at.0 - 0.5 - left, at.1 - 0.5 - top);
+            let load = |x: f32, y: f32, channel: usize| {
+              let (x, y) = (x.clamp(0.0, photo_w - 1.0) as usize, y.clamp(0.0, photo_h - 1.0) as usize);
+              frame.pixels[(y * frame.width as usize + x) * 4 + channel] as f32
+            };
+            for channel in 0..3 {
+              let above = load(left, top, channel) * (1.0 - share_x) + load(left + 1.0, top, channel) * share_x;
+              let below = load(left, top + 1.0, channel) * (1.0 - share_x) + load(left + 1.0, top + 1.0, channel) * share_x;
+              pixels[target + channel] = (above * (1.0 - share_y) + below * share_y).round() as u8;
+            }
+            pixels[target + 3] = 255;
+          }
+        }
+        return Some(RenderedFrame::Pixels(Arc::new(Frame { width: size.0, height: size.1, pixels: pixels.into() })));
+      }
       let whole = abra::prelude::Image::new_from_pixels(frame.width, frame.height, frame.pixels.to_vec(), abra::abra_core::Channels::RGBA);
       let mut pixels = [0u8, 0, 0, 255].repeat(size.0 as usize * size.1 as usize);
       let (left, top) = (viewport.x.max(0.0), viewport.y.max(0.0));
@@ -225,6 +260,31 @@ impl ImagePreview {
   /// whole native view and follows the rectangle at once, with no gliding, so a finger drag keeps the photo under it.
   pub fn set_viewport(&self, p_x: f32, p_y: f32, p_width: f32, p_height: f32) {
     self.image.jump_viewport(Viewport { x: p_x, y: p_y, width: p_width, height: p_height });
+  }
+
+  /// Moves the view to this part of the photo in `p_milliseconds`, easing in and out, with a frame for every tick on the way. The
+  /// part is a rectangle of the whole photo from 0 to 1, like [`set_viewport`](Self::set_viewport), which cancels the move.
+  pub fn tween_viewport(&self, p_x: f32, p_y: f32, p_width: f32, p_height: f32, p_milliseconds: u32) {
+    vessel::surface::log(&format!("[tween] to {p_x:.3},{p_y:.3},{p_width:.3},{p_height:.3} in {p_milliseconds} ms, from {:?}", self.image.viewport()));
+    self.image.tween_viewport(
+      Viewport { x: p_x, y: p_y, width: p_width, height: p_height },
+      TweenOptions::default().with_duration(std::time::Duration::from_millis(p_milliseconds as u64)),
+    );
+  }
+
+  /// Turns the photo to this many radians clockwise about the middle of what the view shows, at once. 0 is upright. The turn is
+  /// drawn by the GPU; a photo drawn on the CPU (no GPU, or an effect that needs the photo's own pixel positions) stays upright.
+  pub fn set_rotation(&self, p_radians: f32) {
+    self.image.set_rotation(p_radians);
+  }
+
+  /// Turns the photo to this many radians in `p_milliseconds`, easing in and out, with a frame for every tick on the way. It runs
+  /// beside a [`tween_viewport`](Self::tween_viewport), and [`set_rotation`](Self::set_rotation) cancels it.
+  pub fn tween_rotation(&self, p_radians: f32, p_milliseconds: u32) {
+    self.image.tween_rotation(
+      p_radians,
+      TweenOptions::default().with_duration(std::time::Duration::from_millis(p_milliseconds as u64)),
+    );
   }
 
   /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.

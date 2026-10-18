@@ -304,7 +304,10 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
             variant="card"
             showPreview={false}
             style={{ width: 280 }}
-            onPick={asset => addProject({ uri: asset.uri, fileName: asset.name ?? null })}
+            onPick={async asset => {
+              const project = await addProject({ uri: asset.uri, fileName: asset.name ?? null });
+              if (project) onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project });
+            }}
           />
         </ScrollView>
       </View>
@@ -313,8 +316,12 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
       {showCameraRoll && (
         <CameraRoll
           onAddPhotos={async photos => {
-            await Promise.all(photos.map(addProject));
+            const added = (await Promise.all(photos.map(addProject))).filter(project => project !== undefined);
             setShowCameraRoll(false);
+            // One photo opens right away; several stay on the home page.
+            if (photos.length === 1 && added[0]) {
+              onOpenPhoto({ uri: projectSourceUri(added[0]), fileName: added[0].name, project: added[0] });
+            }
           }}
         />
       )}

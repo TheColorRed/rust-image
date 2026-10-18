@@ -29,12 +29,38 @@ export const previewScaleValue = new BehaviorSubject(1);
 export const previewScaleValue$ = previewScaleValue.asObservable();
 /** The zoom once it stops changing, for overlays that would stutter the pinch if they re-rendered every frame. */
 export const previewScaleSettled$ = previewScaleValue.pipe(debounceTime(120));
+/** How far two fingers have turned the photo, clockwise, in radians. The overlay turns with the Animated value and the native views take the number. */
+export const previewRotation = new BehaviorSubject(new Animated.Value(0));
+export const previewRotation$ = previewRotation.asObservable();
+export const previewRotationValue = new BehaviorSubject(0);
+export const previewRotationValue$ = previewRotationValue.asObservable();
+/** Whether two fingers are kept from turning the photo: a pinch only zooms and pans. On until the person unlocks it. */
+export const previewRotationLocked = new BehaviorSubject(true);
+export const previewRotationLocked$ = previewRotationLocked.asObservable();
+/**
+ * Which fingers slide the photo: 'move' is any number, 'one-finger' is a single finger (two fingers only zoom and turn about the
+ * middle), and 'two-finger' is a pinch only (a single finger is left alone, e.g. for drawing).
+ */
+export type PreviewMoveMode = 'move' | 'one-finger' | 'two-finger' | 'off';
+export const previewMoveMode = new BehaviorSubject<PreviewMoveMode>('move');
+export const previewMoveMode$ = previewMoveMode.asObservable();
+/** The blemish tool has to slide the photo under its reticle, so the mode does not apply there. 'off' holds the pan for any fingers; a pinch still zooms and turns about the middle. */
+const panIsHeld = (fingers: number) => {
+  if (isBlemishToolFocused()) return false;
+  const mode = previewMoveMode.value;
+  return mode === 'off' || (mode === 'one-finger' && fingers > 1) || (mode === 'two-finger' && fingers < 2);
+};
+/** Whether "Circle to zoom" is drawing. The preview's pan and pinch leave every touch alone meanwhile, so the loop is not taken as a pan. */
+export const previewCircling = new BehaviorSubject(false);
 export const previewTranslateValue = new BehaviorSubject({ x: 0, y: 0 });
 export const previewTranslateValue$ = previewTranslateValue.asObservable();
 export const gestureStart = new BehaviorSubject({
   active: false,
   touchCount: 1 as 1 | 2,
   distance: 0,
+  /** The angle of the line between two fingers, and the photo's turn when they went down. */
+  angle: 0,
+  rotation: 0,
   midpoint: { x: 0, y: 0 },
   focalPoint: { x: 0, y: 0 },
   scale: 1,
@@ -92,25 +118,47 @@ export function trackPreviewTransform(): Subscription {
       .pipe(map(([x, y]) => ({ x, y })))
       .subscribe(translate => previewTranslateValue.next(translate)),
   );
+  subscription.add(
+    new Observable<number>(subscriber => {
+      const id = previewRotation.value.addListener(({ value }) => subscriber.next(value));
+      return () => previewRotation.value.removeListener(id);
+    }).subscribe(value => previewRotationValue.next(value)),
+  );
   return subscription;
 }
 
-/** Puts the preview back at 1x, centered. */
+/** Puts the preview back at 1x, centered and upright. */
 export function resetPreviewTransform() {
+  previewRotation.value.setValue(0);
   previewScale.value.setValue(1);
   previewTranslateX.value.setValue(0);
   previewTranslateY.value.setValue(0);
 }
 
-/** Springs the preview to `to` (and optionally `to.scale`) with the native driver. */
+/** How long the preview takes to glide to a new place. */
+export const PREVIEW_GLIDE_MS = 380;
+
+/**
+ * A move of the preview for the editor preview to carry out, or `null` to stop the one under way. The preview owns the photo
+ * views, so it hands the move to Vessel's tween (which makes a frame for every engine tick) and moves the outlines along the
+ * same curve.
+ */
+export const previewGlide = new Subject<{ x: number; y: number; scale?: number } | null>();
+
+/** Whether the preview is gliding to a new place. Heavy work on the JavaScript thread waits for this to be `false`, so it does not freeze the move. */
+export const previewMoving = new BehaviorSubject(false);
+export const previewMoving$ = previewMoving.asObservable();
+
+/** A turn of the photo for the editor preview to carry out: the angle to glide to, in radians. Vessel's tween turns the views. */
+export const previewRotationGlide = new Subject<number>();
+
+/** Glides the preview to `to` (and optionally `to.scale`); with no preview shown it just goes there. */
 export function springPreview(to: { x: number; y: number; scale?: number }) {
-  Animated.parallel([
-    ...(to.scale === undefined
-      ? []
-      : [Animated.spring(previewScale.value, { toValue: to.scale, useNativeDriver: true })]),
-    Animated.spring(previewTranslateX.value, { toValue: to.x, useNativeDriver: true }),
-    Animated.spring(previewTranslateY.value, { toValue: to.y, useNativeDriver: true }),
-  ]).start();
+  if (__DEV__) console.debug('[zoom] springPreview', JSON.stringify(to), 'observed:', previewGlide.observed);
+  if (previewGlide.observed) return previewGlide.next(to);
+  if (to.scale !== undefined) previewScale.value.setValue(to.scale);
+  previewTranslateX.value.setValue(to.x);
+  previewTranslateY.value.setValue(to.y);
 }
 
 // #endregion
@@ -141,6 +189,8 @@ function baselineOf(touches: Touches): GestureBaseline {
     active: true,
     touchCount: two ? 2 : 1,
     distance: two ? distanceBetweenTouches(touches) : 0,
+    angle: two ? Math.atan2(touches[1].pageY - touches[0].pageY, touches[1].pageX - touches[0].pageX) : 0,
+    rotation: previewRotationValue.value,
     // Screen coordinates for movement: `locationX/Y` are measured in the scaled child view, so
     // their deltas shrink as the preview gets larger.
     midpoint,
@@ -164,25 +214,40 @@ function transformFor(touches: Touches, start: GestureBaseline, box: { width: nu
   // Scaling happens about the preview's center; counteract that so the image pixel under the
   // initial pinch midpoint stays under the fingers as their distance changes.
   const scaleRatio = scale / start.scale;
-  const focalOffsetX = start.focalPoint.x - box.width / 2 - start.translate.x;
-  const focalOffsetY = start.focalPoint.y - box.height / 2 - start.translate.y;
+  // The photo is turned on the screen, outside its pan, so the fingers' screen positions are turned back into its own axes.
+  const cos = Math.cos(start.rotation);
+  const sin = Math.sin(start.rotation);
+  const alongPhoto = (x: number, y: number) => ({ x: cos * x + sin * y, y: -sin * x + cos * y });
+  const focal = alongPhoto(start.focalPoint.x - box.width / 2, start.focalPoint.y - box.height / 2);
+  const moved = alongPhoto(midpoint.x - start.midpoint.x, midpoint.y - start.midpoint.y);
+  const focalOffsetX = focal.x - start.translate.x;
+  const focalOffsetY = focal.y - start.translate.y;
   // Permit overscroll far enough that either image edge can reach the centered blemish reticle.
+  // Two fingers turn the photo by how far the line between them has turned, kept within half a turn either way of where they started.
+  const turned =
+    touches.length === 2 && !previewRotationLocked.value
+      ? Math.atan2(touches[1].pageY - touches[0].pageY, touches[1].pageX - touches[0].pageX) - start.angle
+      : 0;
+  const rotation = start.rotation + Math.atan2(Math.sin(turned), Math.cos(turned));
+  // With the pan held, the zoom is about the middle of the box: the pan grows and shrinks with it, so the same part stays centered.
+  if (panIsHeld(touches.length)) return { scale, rotation, x: start.translate.x * scaleRatio, y: start.translate.y * scaleRatio };
   return {
     scale,
+    rotation,
     x: clamp(
       (scale * box.width) / 2,
-      start.translate.x + (midpoint.x - start.midpoint.x) + (1 - scaleRatio) * focalOffsetX,
+      start.translate.x + moved.x + (1 - scaleRatio) * focalOffsetX,
     ),
     y: clamp(
       (scale * box.height) / 2,
-      start.translate.y + (midpoint.y - start.midpoint.y) + (1 - scaleRatio) * focalOffsetY,
+      start.translate.y + moved.y + (1 - scaleRatio) * focalOffsetY,
     ),
   };
 }
 
 type GestureStep =
   | { kind: 'baseline'; touches: Touches }
-  | { kind: 'transform'; scale: number; x: number; y: number }
+  | { kind: 'transform'; scale: number; rotation: number; x: number; y: number }
   | { kind: 'end' };
 
 const isPinchOrDrag = (touches: Touches) => touches.length === 1 || touches.length === 2;
@@ -211,7 +276,7 @@ export function startPreviewGestures(): Subscription {
       // leaving it a hair off — a deliberate zoom-out should feel like it actually reset.
       if (event.type === 'release' && !isBlemishToolFocused() && previewScaleValue.value <= MIN_PREVIEW_ZOOM + 0.05) {
         springPreview({ x: 0, y: 0, scale: 1 });
-      } else if (event.type === 'release' && event.velocity && previewScaleValue.value > MIN_PREVIEW_ZOOM) {
+      } else if (event.type === 'release' && event.velocity && previewScaleValue.value > MIN_PREVIEW_ZOOM && !panIsHeld(gestureStart.value.touchCount)) {
         // Keep gliding the way the fingers were going, slowing down like a game camera coasting to a stop.
         Animated.parallel([
           Animated.decay(previewTranslateX.value, { velocity: event.velocity.x, deceleration: 0.995, useNativeDriver: true }),
@@ -232,6 +297,7 @@ export function startPreviewGestures(): Subscription {
       gestureStart.next({ ...gestureStart.value, active: false });
     } else {
       previewScale.value.setValue(step.scale);
+      previewRotation.value.setValue(step.rotation);
       previewTranslateX.value.setValue(step.x);
       previewTranslateY.value.setValue(step.y);
     }
@@ -247,9 +313,11 @@ export function startPreviewGestures(): Subscription {
  */
 export function createPreviewPanResponder() {
   return PanResponder.create({
-    onStartShouldSetPanResponderCapture: event => event.nativeEvent.touches.length === 2,
+    onStartShouldSetPanResponderCapture: event => !previewCircling.value && event.nativeEvent.touches.length === 2,
     onMoveShouldSetPanResponderCapture: (event, gestureState) => {
+      if (previewCircling.value) return false;
       if (event.nativeEvent.touches.length === 2) return true;
+      if (panIsHeld(1)) return false;
       const moved = Math.hypot(gestureState.dx, gestureState.dy) > PAN_START_THRESHOLD;
       // At 1x, normal editing leaves taps alone, but blemish work needs to pan an edge under its
       // fixed center reticle without making the user zoom first.

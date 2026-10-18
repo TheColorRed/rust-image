@@ -1,8 +1,9 @@
-import { CircleQuestionMark, RotateCcw, X } from 'lucide-react-native';
+import { CircleQuestionMark, Library, RotateCcw, X } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { ImageInfoDialog } from '@/src/components/editor/image-info-dialog';
+import { PresetDialog } from '@/src/components/editor/preset-dialog';
 import { type EditablePhoto } from '@/src/lib/edit-source';
 import { resetEdits } from '@/src/lib/editor/editor-history';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
@@ -22,6 +23,7 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
   const hasEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
   const { colors } = useTheme();
   const [infoOpen, setInfoOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -38,7 +40,11 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
       <Pressable style={styles.iconButton} onPress={() => closeRequested.next()} hitSlop={8}>
         <X color={overlayIconColor} size={22} />
       </Pressable>
-      <View style={styles.right}>
+      {/* The close button stays put; the buttons beside it scroll sideways when the screen is too narrow for them all. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rightScroll} contentContainerStyle={styles.right}>
+        <Pressable accessibilityLabel="Presets" style={styles.iconButton} onPress={() => setPresetsOpen(true)} hitSlop={8}>
+          <Library color={overlayIconColor} size={22} />
+        </Pressable>
         <Pressable accessibilityLabel="Photo information" style={styles.iconButton} onPress={() => setInfoOpen(true)} hitSlop={8}>
           <CircleQuestionMark color={overlayIconColor} size={22} />
         </Pressable>
@@ -65,8 +71,9 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
             <RotateCcw color={overlayIconColor} size={22} />
           </Pressable>
         ) : null}
-      </View>
+      </ScrollView>
       <ImageInfoDialog photo={photo} visible={infoOpen} onClose={() => setInfoOpen(false)} />
+      <PresetDialog visible={presetsOpen} onClose={() => setPresetsOpen(false)} />
     </View>
   );
 }
@@ -81,6 +88,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       justifyContent: 'space-between',
     },
+    rightScroll: { flexGrow: 0, flexShrink: 1, marginLeft: 12 },
     right: {
       flexDirection: 'row',
       alignItems: 'center',

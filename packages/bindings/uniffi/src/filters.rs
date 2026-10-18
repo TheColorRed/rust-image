@@ -379,6 +379,14 @@ pub fn sharpen() -> Arc<Sharpen> {
   Arc::new(Sharpen(sharpen_module::sharpen()))
 }
 
+#[uniffi::export]
+impl Sharpen {
+  /// How strongly edges are sharpened. `0` leaves the image as it is; the default is `0.25`.
+  pub fn with_amount(&self, amount: f32) -> Arc<Sharpen> {
+    Arc::new(Sharpen(self.0.clone().with_amount(amount)))
+  }
+}
+
 /// Smooths the image. Made by [`smooth`].
 #[derive(uniffi::Object)]
 pub struct Smooth(smooth_module::Smooth);

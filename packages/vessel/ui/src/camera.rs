@@ -1,10 +1,15 @@
 use std::time::Duration;
 
+use vessel_api::prelude::*;
+
 use crate::image::Viewport;
 
 /// A viewport that glides to wherever it is told to go, like a game camera. Whoever drives it sets the target (from fingers,
 /// a mouse or a script) and calls [`step`](Self::step) once per frame with the time since the last one. The speeds live here
-/// so every view moves the same way: size changes ease in log space, so a zoom feels even, and the center eases in a line.
+/// so every view moves the same way: size changes ease in log space, so a zoom feels even, and the center eases in a line
+/// (see the [`Animatable`] impl of [`Viewport`]).
+///
+/// A move that should take a fixed time is a tween instead: `component.animate(&viewport, target, options)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
   current: Viewport,
@@ -51,11 +56,7 @@ impl Camera {
   pub fn step(&mut self, p_delta: Duration) -> Viewport {
     let share = 1.0 - (-self.rate * p_delta.as_secs_f32()).exp();
     let (from, to) = (self.current, self.target);
-    let width = from.width * (to.width / from.width).powf(share);
-    let height = from.height * (to.height / from.height).powf(share);
-    let center_x = (from.x + from.width / 2.0) + ((to.x + to.width / 2.0) - (from.x + from.width / 2.0)) * share;
-    let center_y = (from.y + from.height / 2.0) + ((to.y + to.height / 2.0) - (from.y + from.height / 2.0)) * share;
-    let next = Viewport { x: center_x - width / 2.0, y: center_y - height / 2.0, width, height };
+    let next = Viewport::lerp(&from, &to, share);
     let near = |a: f32, b: f32| (a - b).abs() <= 1e-6 + b.abs() * 1e-4;
     self.current = if near(next.x, to.x) && near(next.y, to.y) && near(next.width, to.width) && near(next.height, to.height) {
       to
@@ -109,5 +110,15 @@ mod tests {
     camera.jump_to(Viewport::default());
     assert_eq!(camera.viewport(), Viewport::default());
     assert!(!camera.is_moving());
+  }
+
+  #[test]
+  fn a_viewport_tween_zooms_evenly_along_its_whole_way() {
+    let mut tween = Tween::new(Viewport::default(), view(0.45, 0.45, 0.1), TweenOptions::default().with_duration(Duration::from_millis(100)).with_easing(Easing::Linear));
+    tween.step(Duration::ZERO);
+    let half = tween.step(Duration::from_millis(50));
+    assert!((half.width - 0.1f32.sqrt()).abs() < 1e-4, "half the time is half the zoom in log space: {half:?}");
+    assert!((half.x + half.width / 2.0 - 0.5).abs() < 1e-5, "zooming on the middle keeps the middle");
+    assert_eq!(tween.step(Duration::from_millis(60)), view(0.45, 0.45, 0.1));
   }
 }

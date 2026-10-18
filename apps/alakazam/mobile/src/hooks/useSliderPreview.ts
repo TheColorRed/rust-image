@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { AbraImage } from '@alakazam/mobile';
 import { useObservable } from 'react-rx';
+import { filter, take } from 'rxjs/operators';
 import { layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/edit-sections';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { ensureBase, editorPreview, showTool } from '@/src/lib/editor/editor-preview';
@@ -10,7 +11,7 @@ import { adjustmentKey, personAdjustmentTargets, scaledPersonBounds } from '@/sr
 import { personSelection$, personSelection } from '@/src/state/person-selection';
 import { appliedActions$, adjustments$ } from '@/src/state/edits';
 import { editBaseImage } from '@/src/state/session';
-import { previewBox$ } from '@/src/state/gestures';
+import { previewBox$, previewMoving$ } from '@/src/state/gestures';
 
 /**
  * Preview for a slider drag. Returns the change handler to give the slider, or undefined when the control has no tool or
@@ -44,7 +45,15 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
       ensureBase();
       return;
     }
-    editorPreview.ensure(`rest:${others}`, () => renderStackWithoutSlider(key), true);
+    // Rendering the rest of the stack takes the JavaScript thread for half a second or more, so it waits for a move of the preview
+    // (the zoom to another person) to land instead of freezing it.
+    const waiting = previewMoving$
+      .pipe(
+        filter(moving => !moving),
+        take(1),
+      )
+      .subscribe(() => editorPreview.ensure(`rest:${others}`, () => renderStackWithoutSlider(key), true));
+    return () => waiting.unsubscribe();
   }, [tool, layer, key, box, others]);
 
   // When the slider closes its frames go away, and the renderer goes back to the edit base for the next tap or drag.
@@ -104,7 +113,11 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
             skin: () => skinMaskFor(person?.id, photo, ownPeople),
           };
           // A control with a layer paints its own sheet, which is shown over the photo; the photo itself is not changed.
-          if (p_control.layer) return withLayers(photo, [layerSheet(p_control, pending.values, toolContext, targetKey)]);
+          if (p_control.layer) {
+            const laid = withLayers(photo, [layerSheet(p_control, pending.values, toolContext, targetKey)]) as AbraImage;
+            renderStepsAfterSlider(key, laid);
+            return laid;
+          }
           // The steps that come after this control in the stack (makeup over the skin) go back over what the drag made.
           const made = (tool!(photo, pending.values, toolContext) ?? photo) as AbraImage;
           renderStepsAfterSlider(key, made);

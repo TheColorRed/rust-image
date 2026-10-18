@@ -1,0 +1,13 @@
+[package]
+name = "abra-matting"
+version = "1.0.0"
+edition = "2024"
+description = "Pre-trained models for matting: a soft alpha for the subject of a photo"
+
+[dependencies]
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+mask = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]
