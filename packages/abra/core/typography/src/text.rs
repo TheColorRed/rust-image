@@ -284,7 +284,7 @@ impl Text {
     self.appearance.fill = match p_color.into() {
       Fill::Solid(color) => Fill::Solid(color),
       Fill::Gradient(gradient) => Fill::Gradient(Cow::Owned(gradient.into_owned())),
-      Fill::Image(image) => Fill::Image(image),
+      Fill::Image(image, repeat) => Fill::Image(image, repeat),
     };
     self
   }

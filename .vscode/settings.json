@@ -6,6 +6,7 @@
     "arboard",
     "badvalue",
     "bincode",
+    "bokeh",
     "bresenham",
     "cdylib",
     "clippy",

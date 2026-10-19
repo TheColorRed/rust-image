@@ -181,46 +181,56 @@ pub fn blend_mode_from_name(name: String) -> Option<BlendMode> {
   blend_modes().into_iter().find(|candidate| candidate.to_core() == mode)
 }
 
-/// A blend that has been described but not yet run. Start one with [`blend`], optionally set the offset, opacity and mode,
-/// then composite it onto a destination with [`apply`](Self::apply).
+/// The red, green and blue channels a blend may change. A channel that is off keeps the destination's value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelMask {
+  pub red: bool,
+  pub green: bool,
+  pub blue: bool,
+}
+
+impl ChannelMask {
+  const ALL: ChannelMask = ChannelMask { red: true, green: true, blue: true };
+
+  fn to_core(self) -> abra_core::ChannelMask {
+    abra_core::ChannelMask::RGB
+      .with(abra_core::Channel::R, self.red)
+      .with(abra_core::Channel::G, self.green)
+      .with(abra_core::Channel::B, self.blue)
+  }
+}
+
+/// A blend that has been described but not yet run. Start one with [`blend`], optionally set the offset, opacity, mode and
+/// channels, then composite it onto a destination with [`apply`](Self::apply).
 #[derive(Debug, uniffi::Object)]
 pub struct BlendImage {
   source: Arc<Image>,
   offset: PointF,
   opacity: f32,
   mode: BlendMode,
+  channels: ChannelMask,
 }
 
 #[uniffi::export]
 impl BlendImage {
   /// The same blend with the source placed at this position in the destination. Defaults to (0, 0).
   pub fn with_offset(&self, offset: PointF) -> Arc<BlendImage> {
-    Arc::new(BlendImage {
-      source: self.source.clone(),
-      offset,
-      opacity: self.opacity,
-      mode: self.mode,
-    })
+    Arc::new(BlendImage { offset, source: self.source.clone(), ..*self })
   }
 
   /// The same blend with this opacity applied to the source, 0 to 1. Defaults to 1.
   pub fn with_opacity(&self, opacity: f32) -> Arc<BlendImage> {
-    Arc::new(BlendImage {
-      source: self.source.clone(),
-      offset: self.offset,
-      opacity,
-      mode: self.mode,
-    })
+    Arc::new(BlendImage { opacity, source: self.source.clone(), ..*self })
   }
 
   /// The same blend with this mode. Defaults to normal.
   pub fn with_mode(&self, mode: BlendMode) -> Arc<BlendImage> {
-    Arc::new(BlendImage {
-      source: self.source.clone(),
-      offset: self.offset,
-      opacity: self.opacity,
-      mode,
-    })
+    Arc::new(BlendImage { mode, source: self.source.clone(), ..*self })
+  }
+
+  /// The same blend limited to these channels. The others keep the destination's values at any opacity. Defaults to all.
+  pub fn with_channels(&self, channels: ChannelMask) -> Arc<BlendImage> {
+    Arc::new(BlendImage { channels, source: self.source.clone(), ..*self })
   }
 
   /// Composites the source onto the destination, which is changed.
@@ -229,7 +239,7 @@ impl BlendImage {
     let source = self.source.core();
     let mode = self.mode.to_core();
     destination.edit(|image| {
-      if self.offset == (PointF { x: 0.0, y: 0.0 }) {
+      if self.offset == (PointF { x: 0.0, y: 0.0 }) && self.channels == ChannelMask::ALL {
         // Not offset: the GPU can do it when it is there, and `blended` blends on the CPU when it is not.
         *image = abra_core::image::recipe::blended(image, &source, mode, self.opacity);
       } else {
@@ -237,13 +247,14 @@ impl BlendImage {
           .with_offset(self.offset)
           .with_opacity(self.opacity)
           .with_mode(mode)
+          .with_channels(self.channels.to_core())
           .apply(image);
       }
     });
   }
 }
 
-/// Starts a blend of `source` over another image. Defaults to the normal mode at full opacity with no offset.
+/// Starts a blend of `source` over another image. Defaults to the normal mode at full opacity with no offset, on every channel.
 #[uniffi::export]
 pub fn blend(source: Arc<Image>) -> Arc<BlendImage> {
   Arc::new(BlendImage {
@@ -251,6 +262,7 @@ pub fn blend(source: Arc<Image>) -> Arc<BlendImage> {
     offset: PointF { x: 0.0, y: 0.0 },
     opacity: 1.0,
     mode: BlendMode::Normal,
+    channels: ChannelMask::ALL,
   })
 }
 

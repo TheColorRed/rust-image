@@ -2,6 +2,6 @@
 mod fill;
 mod gradient;
 
-pub use fill::Fill;
+pub use fill::{Fill, ImageRepeat};
 pub use gradient::{ColorStop, Gradient};
 pub use primitives::color::*;

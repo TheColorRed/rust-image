@@ -15,6 +15,7 @@
     "./canvas": "./entries/canvas.ts",
     "./color": "./entries/color.ts",
     "./drawing": "./entries/drawing.ts",
+    "./fill": "./entries/fill.ts",
     "./filters": "./entries/filters.ts",
     "./geometry": "./entries/geometry.ts",
     "./gradient": "./entries/gradient.ts",

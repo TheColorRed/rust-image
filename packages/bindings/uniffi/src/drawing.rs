@@ -1,8 +1,8 @@
 //! `Brush` from `drawing`, and the line it draws through points, `stroke_overlay`.
 //!
-//! Not exported: a brush's `area` and any fill that is not a solid color (a gradient or an image), and the `Painter`, which
-//! needs a `Path` and an image to change in place. `with_area` and `with_color` of a gradient can be added the same way the
-//! other handles take their arguments. A brush with no color set draws black, as the library's does.
+//! Not exported: a brush's `area`, the `Painter`, which needs a `Path` and an image to change in place, and a brush filled with
+//! a gradient or an image. The core draws a brush that is not a solid color as black, so those would silently come out
+//! black. Areas take any fill: see the `fill` module. A brush with no color set draws black, as the library's does.
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! Compositing one image onto another with a blend mode.
 
-use crate::{Image, IntoNumber, PointF, Rect, hsl_to_rgb, rgb_to_hsl};
+use crate::{Channel, ChannelMask, Image, IntoNumber, PointF, Rect, hsl_to_rgb, rgb_to_hsl};
 use rayon::prelude::*;
 
 /// A color with red, green, blue, and alpha channels.
@@ -360,6 +360,8 @@ pub struct BlendImage<'a> {
   pub opacity: f32,
   /// How the source color combines with the destination.
   pub mode: BlendMode,
+  /// The channels the blend may change. The red, green and blue channels left out keep the destination's values.
+  pub channels: ChannelMask,
 }
 
 impl<'a> BlendImage<'a> {
@@ -378,6 +380,13 @@ impl<'a> BlendImage<'a> {
   /// Sets the blend mode, such as [`BlendMode::Multiply`]. Defaults to [`BlendMode::Normal`].
   pub fn with_mode(mut self, p_mode: impl Into<BlendMode>) -> Self {
     self.mode = p_mode.into();
+    self
+  }
+
+  /// Limits the blend to some of the red, green and blue channels. The others keep the destination's values at any
+  /// opacity. Alpha is not affected. Defaults to every channel.
+  pub fn with_channels(mut self, p_channels: ChannelMask) -> Self {
+    self.channels = p_channels;
     self
   }
 
@@ -400,6 +409,7 @@ impl<'a> BlendImage<'a> {
     let source_stride = source_width as usize * 4;
     let destination_stride = destination_width as usize * 4;
     let mode = self.mode;
+    let channels = self.channels.with(Channel::A, true);
     p_destination
       .colors()
       .as_slice_mut()
@@ -415,7 +425,17 @@ impl<'a> BlendImage<'a> {
           let s = source_y * source_stride + (x - offset_x) as usize * 4;
           let destination = (row[d], row[d + 1], row[d + 2], row[d + 3]);
           let source = (source[s], source[s + 1], source[s + 2], source[s + 3]);
-          let color = alpha_over(destination, mode.apply(destination, source), source.3 as f32 / 255.0 * opacity);
+          let blended = mode.apply(destination, source);
+          let blended = if channels.is_all() {
+            blended
+          } else {
+            let [r, g, b, a] = channels.select(
+              [destination.0, destination.1, destination.2, destination.3],
+              [blended.0, blended.1, blended.2, blended.3],
+            );
+            (r, g, b, a)
+          };
+          let color = alpha_over(destination, blended, source.3 as f32 / 255.0 * opacity);
           row[d..d + 4].copy_from_slice(&[color.0, color.1, color.2, color.3]);
         }
       });
@@ -434,6 +454,7 @@ pub fn blend(p_source: &Image) -> BlendImage<'_> {
     offset: PointF::zero(),
     opacity: 1.0,
     mode: BlendMode::Normal,
+    channels: ChannelMask::ALL,
   }
 }
 
@@ -514,6 +535,20 @@ mod tests {
     blend(&source).with_opacity(0.5).apply(&mut destination);
 
     assert_eq!(destination.rgba(), &[0, 255, 0, 64]);
+  }
+
+  #[test]
+  fn disabled_channels_keep_the_destination_at_any_opacity() {
+    let source = image(1, 1, &[0, 0, 255, 255]);
+    let channels = ChannelMask::RGB.with(Channel::G, false).with(Channel::B, false);
+
+    let mut destination = image(1, 1, &[200, 100, 50, 255]);
+    blend(&source).with_channels(channels).apply(&mut destination);
+    assert_eq!(destination.rgba(), &[0, 100, 50, 255]);
+
+    let mut destination = image(1, 1, &[200, 100, 50, 255]);
+    blend(&source).with_mode(BlendMode::Multiply).with_channels(ChannelMask::of([Channel::R])).apply(&mut destination);
+    assert_eq!(destination.rgba(), &[0, 100, 50, 255]);
   }
 
   #[test]

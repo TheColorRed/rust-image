@@ -174,7 +174,7 @@ impl<'a> CollagePlugin<'a> {
             canvas
           }
         }
-        Fill::Image(image) => {
+        Fill::Image(image, _) => {
           let bg_image = Arc::new(Image::new(self.size.0, self.size.1));
           {
             let canvas = Canvas::new("Background Color");

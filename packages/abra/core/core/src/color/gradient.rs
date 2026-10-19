@@ -94,6 +94,10 @@ impl Gradient {
   pub fn direction(&self) -> Option<crate::geometry::Path> {
     self.direction.clone()
   }
+  /// The color stops, sorted by position.
+  pub fn stops(&self) -> &[ColorStop] {
+    &self.stops
+  }
   /// Creates a new rainbow gradient.
   /// This gradient goes from red to orange to yellow to green to blue to indigo to violet.
   pub fn rainbow() -> Gradient {

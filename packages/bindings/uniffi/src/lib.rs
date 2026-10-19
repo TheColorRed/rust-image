@@ -23,6 +23,7 @@ mod color;
 mod drawing;
 mod effect;
 pub use effect::LiveEffect;
+mod fill;
 mod filters;
 mod geometry;
 mod gradient;
@@ -53,6 +54,7 @@ pub use canvas::{
 };
 pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
 pub use drawing::{Brush, max_stroke_points, stroke_overlay, stroke_overlay_deferred};
+pub use fill::{Fill, FillArea, ImageRepeat, fill_area};
 pub use filters::{
   Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, Guided, LensBlur, Median,
   MotionBlur, Morphology, Noise, Pinch, Ripple, Sharpen, Smooth, Sobel, SurfaceBlur, blur, box_blur, despeckle,

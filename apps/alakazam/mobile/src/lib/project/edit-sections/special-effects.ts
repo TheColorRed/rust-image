@@ -1,9 +1,12 @@
 import { bleachBypass } from '@/src/effects/bleach-bypass';
+import { bokeh } from '@/src/effects/bokeh';
 import { chiaroscuro } from '@/src/effects/chiaroscuro';
 import { colorSplash } from '@/src/effects/color-splash';
 import { cyanotype } from '@/src/effects/cyanotype';
 import { fadedFilm } from '@/src/effects/faded-film';
+import { glitchArt } from '@/src/effects/glitch-art';
 import { infrared } from '@/src/effects/infrared';
+import { nightVision, NIGHT_VISION_DEFAULTS } from '@/src/effects/night-vision';
 import { splitTone } from '@/src/effects/split-tone';
 import { EditSection, SliderControl } from '@/src/lib/project/edit-sections';
 import { colorAreaKey } from '@/src/lib/project/edit-sections/keys';
@@ -118,6 +121,60 @@ export const specialEffects: EditSection = {
       applyOnSelect: true,
       tool: (photo, [amount]: number[]) => splitTone(photo, amount),
       thumb: photo => splitTone(photo, 1),
+    } satisfies SliderControl<number>,
+    {
+      kind: 'slider',
+      key: 'action-glitch-art',
+      label: 'Glitch Art',
+      sliderLabel: ['Strength', 'Horizontal', 'Vertical'],
+      display: 'tabulated',
+      min: [0, -20, -20],
+      max: [1, 20, 20],
+      step: [0.01, 1, 1],
+      defaultValue: [1, -10, 0],
+      applyOnSelect: true,
+      tool: (photo, [strength, offsetX, offsetY]) => glitchArt(photo, strength, offsetX, offsetY),
+      thumb: photo => glitchArt(photo, 1, -5, 0),
+    } satisfies SliderControl<number>,
+    {
+      kind: 'slider',
+      key: 'action-bokeh',
+      label: 'Bokeh',
+      sliderLabel: ['Layout', 'Orb 1', 'Orb 2', 'Strength'],
+      display: 'tabulated',
+      pillFormat: [undefined, undefined, undefined, undefined],
+      picker: [undefined, 'hue', 'hue', undefined],
+      min: [0, 0, 0, 0],
+      max: [99, 1, 1, 1],
+      step: [1, 0.01, 0.01, 0.01],
+      defaultValue: [0, 0.1, 0.9, 1],
+      applyOnSelect: true,
+      tool: (photo, [layout, color1, color2, amount]: number[]) => bokeh(photo, amount, color1, color2, layout),
+      thumb: photo => bokeh(photo, 1, 0.1, 0.9, 0),
+    } satisfies SliderControl<number>,
+    {
+      kind: 'slider',
+      key: 'action-night-vision',
+      label: 'Night Vision',
+      sliderLabel: ['Strength', 'Grain', 'Brightness', 'Midtones', 'Vignette', 'Barrel', 'Scanlines'],
+      display: 'tabulated',
+      pillFormat: ['percent', 'percent', 'plain', 'plain', 'percent', 'signed', 'percent'],
+      min: [0, 0, 0.5, 1, 0, -0.5, 0],
+      max: [1, 0.3, 2, 2, 1, 0.5, 1],
+      step: [0.01, 0.01, 0.05, 0.05, 0.01, 0.01, 0.01],
+      defaultValue: [
+        NIGHT_VISION_DEFAULTS.strength,
+        NIGHT_VISION_DEFAULTS.grain,
+        NIGHT_VISION_DEFAULTS.gain,
+        NIGHT_VISION_DEFAULTS.power,
+        NIGHT_VISION_DEFAULTS.vignette,
+        NIGHT_VISION_DEFAULTS.barrel,
+        NIGHT_VISION_DEFAULTS.scanlines,
+      ],
+      applyOnSelect: true,
+      tool: (photo, [strength, grain, gain, power, vignette, barrel, scanlines]: number[]) =>
+        nightVision(photo, { strength, grain, gain, power, vignette, barrel, scanlines }),
+      thumb: photo => nightVision(photo, NIGHT_VISION_DEFAULTS),
     } satisfies SliderControl<number>,
   ],
 };

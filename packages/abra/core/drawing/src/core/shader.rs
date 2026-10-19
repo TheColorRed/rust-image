@@ -30,6 +30,7 @@
 //! ```
 
 use abra_core::Fill;
+use abra_core::Gradient;
 use abra_core::Path;
 
 use crate::shaders::image_shader::ImageShader;
@@ -72,7 +73,7 @@ pub fn shader_from_fill<'a, F: Into<Fill<'a>>>(p_fill: F) -> Box<dyn Shader + Se
       let path = gradient.direction().unwrap_or_else(|| Path::new());
       Box::new(LinearGradientShader::new(path, gradient.into_owned()))
     }
-    Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
+    Fill::Image(image, repeat) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0, repeat)),
   }
 }
 
@@ -85,23 +86,28 @@ pub fn shader_from_fill_with_path<'a, F: Into<Fill<'a>>>(
   match p_fill.into() {
     Fill::Solid(color) => Box::new(SolidShader::new(color)),
     Fill::Gradient(gradient) => {
-      let path = match gradient.direction() {
-        Some(path) => path,
-        None => p_fallback_path
-          .clone()
-          .map(|path| {
-            let (min_x, min_y, max_x, _) = path.bounds().edges::<f32>();
-            Path::line((min_x, min_y), (max_x, min_y))
-          })
-          .unwrap_or_else(Path::new),
-      };
-      let path = resolve_angle_path(path, p_fallback_path.as_ref());
+      let path = gradient_path(&gradient, p_fallback_path.as_ref());
       let gradient_clone = gradient.clone().into_owned().with_direction(path.clone());
       // Ensure gradient has a direction so gradient::get_color uses path parameterization
       Box::new(LinearGradientShader::new(path, gradient_clone))
     }
-    Fill::Image(image) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0)),
+    Fill::Image(image, repeat) => Box::new(ImageShader::new(image.clone(), 0.0, 0.0, repeat)),
   }
+}
+
+/// The path a gradient runs along: its own direction, or else a line across the top of `p_fallback_path`'s bounds, with an
+/// angle resolved against those bounds. The GPU fill uses this too, so both run the gradient along the same line.
+pub(crate) fn gradient_path(p_gradient: &Gradient, p_fallback_path: Option<&Path>) -> Path {
+  let path = match p_gradient.direction() {
+    Some(path) => path,
+    None => p_fallback_path
+      .map(|path| {
+        let (min_x, min_y, max_x, _) = path.bounds().edges::<f32>();
+        Path::line((min_x, min_y), (max_x, min_y))
+      })
+      .unwrap_or_else(Path::new),
+  };
+  resolve_angle_path(path, p_fallback_path)
 }
 
 fn resolve_angle_path(p_path: Path, p_fallback_path: Option<&Path>) -> Path {

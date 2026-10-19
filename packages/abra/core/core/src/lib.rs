@@ -25,7 +25,7 @@ pub use performance::{Performance, PerformanceOptions};
 pub use primitives::Color;
 pub use primitives::Image;
 pub use primitives::Resolution;
-pub use primitives::{Channel, Channels};
+pub use primitives::{Channel, ChannelMask, Channels};
 pub use settings::Settings;
 pub use transform::*;
 pub use units::*;
