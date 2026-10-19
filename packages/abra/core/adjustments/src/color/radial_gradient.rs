@@ -166,7 +166,7 @@ mod tests {
     // The whole photo at two zooms, and a quarter of it magnified, which a window at the wrong place would get wrong.
     for (x, y, extent, out) in [(0.0, 0.0, 200.0, 100u32), (0.0, 0.0, 200.0, 400), (100.0, 100.0, 100.0, 200)] {
       let scale = extent / out as f32;
-      let window = Window { x, y, width: extent, height: extent, out_width: out, out_height: out, pad: 0 };
+      let window = Window { x, y, width: extent, height: extent, out_width: out, out_height: out, pad: 0, angle: 0.0 };
       windowed.render(&window, &passes)?;
       let drawn = windowed.read_pixels()?;
       let mut worst = 0.0f32;

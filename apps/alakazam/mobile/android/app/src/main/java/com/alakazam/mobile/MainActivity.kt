@@ -6,6 +6,7 @@ import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import com.zoontek.rnbootsplash.RNBootSplash
 
 class MainActivity : ReactActivity() {
 
@@ -16,6 +17,8 @@ class MainActivity : ReactActivity() {
   override fun getMainComponentName(): String = "Alakazam"
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Must run before super.onCreate so the splash shows from the first frame.
+    RNBootSplash.init(this, R.style.BootTheme)
     super.onCreate(savedInstanceState)
     // Keep the screen awake while the app is in the foreground; Android drops the flag when it isn't.
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

@@ -1,6 +1,7 @@
 //! Geometry module
 
 mod area;
+mod boolean;
 mod homography;
 mod line;
 mod line_segment;
@@ -13,6 +14,7 @@ mod size;
 mod stroke;
 
 pub use area::{Area, polygon_contains};
+pub use boolean::{polygon_difference, polygon_union};
 pub use homography::Homography;
 pub use line::bresenham;
 pub use line_segment::{LineSegment, Orientation};

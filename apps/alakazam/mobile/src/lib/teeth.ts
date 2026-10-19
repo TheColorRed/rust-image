@@ -2,7 +2,8 @@ import { brightness, saturation } from '@abra/core/adjustments';
 import { teethMask } from '@abra/core/beauty';
 import { type MaskLike } from '@abra/core/mask';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { belongsTo, owning } from '@/src/lib/faces';
+import { belongsTo } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 import { type Painting } from '@/src/lib/layers';
 import { type ToolContext } from '@/src/lib/edit-sections';
 

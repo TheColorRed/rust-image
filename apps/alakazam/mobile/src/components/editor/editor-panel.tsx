@@ -2,9 +2,10 @@ import { filter, takeUntil } from 'rxjs/operators';
 import { ColorBarPicker } from '@/src/components/editor/color-bar-picker';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { CropControls, CropToolController } from '@/src/components/tools/crop-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
-import { GLOW_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
+import { GLOW_COLORS, INFRARED_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
 import { missingModels } from '@/src/lib/ai-model-availability';
 import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai-analyses';
 import { HAIR_MODELS, MAKEUP_MODELS } from '@/src/lib/faces';
@@ -26,6 +27,7 @@ import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
 import {
   BLEMISH_TOOL_KEY,
+  CROP_TOOL_KEY,
   RED_EYE_TOOL_KEY,
   EDIT_SECTIONS,
   appliesOnSelect,
@@ -48,6 +50,7 @@ import { useTheme } from '@/src/lib/theme';
 import {
   actionPreviewRequested,
   blemishApplyRequested,
+  cropApplyRequested,
   redEyeAutoRequested,
   redoRequested,
   redoRequested$,
@@ -74,6 +77,9 @@ import {
   isPersonControlFocused$,
   openGroupKey,
   openGroupKey$,
+  openSliderState,
+  openSliderState$,
+  areaOutlinesHidden,
 } from '@/src/state/edits';
 import { canRedo$, canUndo$ } from '@/src/state/history';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
@@ -86,7 +92,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
 
 /** The colors of the bar that picks a color, by the name a control gives its `picker`. */
-const barColors = { hue: hueColors, shade: () => SHADE_COLORS, glow: () => GLOW_COLORS, 'skin-tan': () => TAN_COLORS };
+const barColors = {
+  hue: hueColors,
+  shade: () => SHADE_COLORS,
+  glow: () => GLOW_COLORS,
+  'skin-tan': () => TAN_COLORS,
+  infrared: () => INFRARED_COLORS,
+};
 
 /** The control that is open in the active section, or undefined. */
 function useFocusedControl() {
@@ -126,12 +138,16 @@ export function EditorPanel() {
         openGroupKey.next(null);
         activeSectionKey.next(key);
       }),
+      // Opening a tool opens its first color; leaving it (back, commit, or a section switch) closes it.
+      focusedControlKey$.subscribe(key => {
+        openSliderState.next({ key: key ?? '', index: 0 });
+      }),
       selectControlRequested$.subscribe(control => {
         if (control.kind === 'action') {
           if (control.tool) {
             // Applying previews at once; removing has nothing to preview, but the same short replay needs no spinner either.
             replayHidden.next(true);
-            if (!appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
+            if (control.repeatable || !appliedActions.value.includes(control.key)) actionPreviewRequested.next(control);
             // The live view is still showing the tool's result over the photo, so taking the tool off has to take that off too.
             else editorPreview.hide();
           }
@@ -200,6 +216,7 @@ export function EditorPanel() {
       <BlemishToolController />
       <RedEyeToolController />
       <PersonSelectionToolController />
+      <CropToolController />
       <View style={styles.history}>
         <View style={styles.breadcrumbs}>
           {[
@@ -241,6 +258,8 @@ export function EditorPanel() {
           <BlemishControls onBack={() => focusedControlKey.next(null)} onApply={() => blemishApplyRequested.next()} />
         ) : focusedControl?.kind === 'tool' && focusedControl.key === RED_EYE_TOOL_KEY ? (
           <RedEyeControls onBack={() => focusedControlKey.next(null)} onAuto={() => redEyeAutoRequested.next()} />
+        ) : focusedControl?.kind === 'tool' && focusedControl.key === CROP_TOOL_KEY ? (
+          <CropControls onBack={() => focusedControlKey.next(null)} onApply={() => cropApplyRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (
           <SliderEditor />
         ) : activeSection.previewThumbnails ? (
@@ -280,11 +299,17 @@ function SliderEditor() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const onLiveChange = useSliderPreview(control?.kind === 'slider' ? control : undefined);
+  // Drawn areas step aside while a slider moves and come back when it is released.
+  const liveChange = (next: number[]) => {
+    areaOutlinesHidden.next(true);
+    onLiveChange?.(next);
+  };
   const preview = useSyncObservable(editorPreview.view, null);
   // The value of every slider as the user has set them, for a control with several: moving one sends all of them.
   const sliderState = useRef<{ resetKey: string; values: number[] }>({ resetKey: '', values: [] });
   // Which slider a control that shows them one at a time (`display: 'tabulated'`) has open.
-  const [selectedSlider, setSelectedSlider] = useState({ key: '', index: 0 });
+  const selectedSlider = useObservable(openSliderState$, openSliderState.value);
+  const setSelectedSlider = (value: { key: string; index: number }) => openSliderState.next(value);
   // Counts the times the values were set from outside the sliders (a swatch, a reset), so the sliders and the picker are made
   // again with their handles where the values are now.
   const [valueSets, setValueSets] = useState(0);
@@ -447,7 +472,7 @@ function SliderEditor() {
                           });
                           setValueSets(sets => sets + 1);
                           // Draws the color on the live preview as a drag of the bar does, then commits it.
-                          onLiveChange?.([...values]);
+                          liveChange([...values]);
                           sliderCommitRequested.next({ control, value: committedValue() });
                         }}
                       >
@@ -469,7 +494,7 @@ function SliderEditor() {
                   value={values[index]}
                   onChange={value => {
                     values[index] = value;
-                    onLiveChange?.([...values]);
+                    liveChange([...values]);
                   }}
                   onRelease={value => {
                     values[index] = value;
@@ -501,7 +526,7 @@ function SliderEditor() {
               triggerType="release"
               onChange={value => {
                 values[index] = value;
-                onLiveChange?.([...values]);
+                liveChange([...values]);
               }}
               reset
               onTrigger={value => {
@@ -536,7 +561,7 @@ function ThumbnailControls() {
       contentContainerStyle={styles.thumbnailRow}
     >
       {activeSection.controls.map(control => {
-        const adjusted = control.kind === 'action' && appliedActions.includes(control.key);
+        const adjusted = control.kind === 'action' && !control.repeatable && appliedActions.includes(control.key);
         const thumbnail = controlThumbnails[control.key];
         return (
           <Pressable
@@ -573,7 +598,7 @@ function ChipControls() {
   const group = path[path.length - 1];
   const isApplied = (control: Exclude<EditControl, GroupControl>) =>
     control.kind === 'action'
-      ? appliedActions.includes(control.key)
+      ? !control.repeatable && appliedActions.includes(control.key)
       : control.kind === 'slider' &&
         (isPersonAdjustment(control.key)
           ? personAdjustmentTargets(adjustments, control.key).some(target => isSliderApplied(control, target.value))

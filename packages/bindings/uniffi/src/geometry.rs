@@ -506,6 +506,18 @@ pub fn polygon_contains(points: Vec<PointF>, point: PointF) -> bool {
   abra_core::polygon_contains(&points, point)
 }
 
+/// The union of two shapes, each given as a list of rings. Holes are rings inside an outer ring.
+#[uniffi::export]
+pub fn polygon_union(a: Vec<Vec<PointF>>, b: Vec<Vec<PointF>>) -> Vec<Vec<PointF>> {
+  abra_core::polygon_union(&a, &b)
+}
+
+/// The shape `a` with the shape `b` removed. Both are lists of rings, as in `polygon_union`.
+#[uniffi::export]
+pub fn polygon_difference(a: Vec<Vec<PointF>>, b: Vec<Vec<PointF>>) -> Vec<Vec<PointF>> {
+  abra_core::polygon_difference(&a, &b)
+}
+
 // #endregion
 
 // #region: Line segments and perspective

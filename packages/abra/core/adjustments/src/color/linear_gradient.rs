@@ -350,7 +350,7 @@ mod tests {
     // all with square pixels: each shows the gradient where the photo has it.
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
     for (x, y, w, h, out) in [(0.0, 0.0, width * 2.0, height * 2.0, (WIDTH, HEIGHT)), (0.0, 0.0, width, height, (WIDTH * 2, HEIGHT * 2)), (width / 4.0, height / 4.0, width / 2.0, height / 2.0, (WIDTH, HEIGHT))] {
-      windowed.render(&Window { x, y, width: w, height: h, out_width: out.0, out_height: out.1, pad: 0 }, &passes)?;
+      windowed.render(&Window { x, y, width: w, height: h, out_width: out.0, out_height: out.1, pad: 0, angle: 0.0 }, &passes)?;
       let drawn = windowed.read_pixels()?;
       let (scale_x, scale_y) = (w / out.0 as f32, h / out.1 as f32);
       for row in 0..out.1 {

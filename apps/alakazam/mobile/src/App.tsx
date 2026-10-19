@@ -5,6 +5,7 @@ import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';
 import { StorageScreen } from '@/src/screens/storage';
 import { restoreProjects } from '@/src/state/projects';
+import BootSplash from 'react-native-bootsplash';
 import { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -31,10 +32,19 @@ function AppContent() {
   // Editing takes over the whole screen (no tab bar), like a photo app's editor, so it's
   // tracked separately from the tabs rather than as one of them.
   const [editingPhoto, setEditingPhoto] = useState<EditablePhoto | null>(null);
+  // The home screen waits for the saved projects, so it never shows its empty state before they appear.
+  const [restored, setRestored] = useState(false);
 
   useEffect(() => {
-    restoreProjects();
+    restoreProjects().finally(() => setRestored(true));
   }, []);
+
+  // The native splash covers the screen until the first real screen is ready to show.
+  useEffect(() => {
+    if (restored) BootSplash.hide({ fade: true });
+  }, [restored]);
+
+  if (!restored) return null;
 
   return (
     <>

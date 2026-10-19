@@ -10,6 +10,8 @@ export type TimelineChange =
   | { type: 'red-eye'; x: number; y: number }
   /** Red-eye fixed on every face the models found. */
   | { type: 'red-eye-auto' }
+  /** The photo cropped to this part of it. The edges are fractions of the photo, from 0 to 1, so they hold at any size. */
+  | { type: 'crop'; left: number; top: number; right: number; bottom: number; turn?: number }
   /** A reusable, non-destructive recipe was merged into the current edit. */
   | { type: 'preset'; id: string }
   /** Edits made while a project was still loading, merged into its saved edits as one step. */
@@ -47,11 +49,11 @@ export function recipeAt(entries: readonly TimelineEntry[], cursor: number): Pro
 }
 
 /** The steps that change pixels, which become the base that the edits after them are rendered on. */
-export type PixelChange = Extract<TimelineChange, { type: 'blemish' | 'red-eye' | 'red-eye-auto' }>;
+export type PixelChange = Extract<TimelineChange, { type: 'blemish' | 'red-eye' | 'red-eye-auto' | 'crop' }>;
 
-/** Whether a step changes pixels, as a blemish fix or a red-eye fix does, and not just the edit state. */
+/** Whether a step changes pixels, as a blemish fix, a red-eye fix, or a crop does, and not just the edit state. */
 export const changesPixels = (change: TimelineChange): change is PixelChange =>
-  change.type === 'blemish' || change.type === 'red-eye' || change.type === 'red-eye-auto';
+  change.type === 'blemish' || change.type === 'red-eye' || change.type === 'red-eye-auto' || change.type === 'crop';
 
 /** A round part of the photo, in its pixels. A brush stroke is a row of these. */
 export type Spot = { x: number; y: number; radius: number };

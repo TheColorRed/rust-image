@@ -14,7 +14,8 @@ import {
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { FACE_MODELS, findFaces, inside, model, owning } from '@/src/lib/faces';
+import { FACE_MODELS, findFaces, inside, model } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */
 export const RED_EYE_MODELS = FACE_MODELS;

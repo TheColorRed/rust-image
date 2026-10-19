@@ -543,11 +543,15 @@ impl Mask {
   /// Draws a filled area onto the mask with the specified color.
   /// - `p_area`: The Area to draw.
   /// - `p_color`: The Color to use for the area.
-  /// - `p_at`: Optional position as a tuple, PointF, or None. Defaults to (0, 0) if not provided.
+  /// - `p_at`: Optional position of the filled image's top-left corner. Defaults to the top-left of the area's bounds, so the
+  ///   area lands where it is drawn.
   pub fn draw_area(&mut self, p_area: &Area, p_color: Color, p_at: impl IntoOptionalPointF) {
     let color = self.to_color(p_color);
-    let position = p_at.into_optional_point_f().unwrap_or(PointF::new(0, 0));
     let filled_image = fill(p_area, &color).to_image();
+    let position = p_at.into_optional_point_f().unwrap_or_else(|| {
+      let (min_x, min_y, _, _) = p_area.bounds().edges::<f32>();
+      PointF::new(min_x, min_y)
+    });
     let mut image = self.to_image();
     blend::blend(&filled_image).with_offset((position.x as i32, position.y as i32)).apply(&mut image);
     // A new buffer, so clones made earlier keep the old values.
@@ -1052,6 +1056,15 @@ mod tests {
     mask.apply_to_image(&mut img);
     let after_ptr = mask.values().as_ptr();
     assert_eq!(before_ptr, after_ptr, "apply_to_image should not mutate or clone the mask's internal buffer");
+  }
+
+  #[test]
+  fn draw_area_without_position_lands_where_the_area_is() {
+    let img = Image::new_from_color(10, 10, Color::from_rgba(255, 255, 255, 255));
+    let mut mask = Mask::new_from_image(&img);
+    mask.draw_area(&Area::rect((6.0, 6.0), (2.0, 2.0)), Color::black(), None);
+    assert_eq!(mask.get(7, 7), Some(0));
+    assert_eq!(mask.get(1, 1), Some(255));
   }
 
   #[test]

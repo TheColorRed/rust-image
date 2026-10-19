@@ -3,7 +3,7 @@ import { Canvas, type LayerLike } from '@abra/core/canvas';
 import { type ColorLike } from '@abra/core/color';
 import { Image, type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
-import { owning } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 
 /**
  * What a makeup tool paints on: the size of the photo it is for, and, once `paintSheet` has been called, the picture it painted. A

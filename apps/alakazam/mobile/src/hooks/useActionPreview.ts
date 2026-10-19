@@ -29,10 +29,16 @@ export function useActionPreview() {
         return;
       }
       const rest = restForAction(control);
-      // The CPU-rendered rest is different every time, so it always opens a new preview.
-      const ready = rest ? editorPreview.ensure(`action:${++restCount}`, rest, true) : ensureBase();
-      if (!ready) return;
-      showTool(tool);
+      // A repeatable action builds on what is already applied, so its tool runs on the rest of the stack.
+      const start = control.repeatable && rest ? rest() : undefined;
+      try {
+        // The CPU-rendered rest is different every time, so it always opens a new preview.
+        const ready = rest ? editorPreview.ensure(`action:${++restCount}`, () => start ?? rest(), !start) : ensureBase();
+        if (!ready) return;
+        showTool(tool, start);
+      } finally {
+        start?.uniffiDestroy();
+      }
     });
     return () => subscription.unsubscribe();
   }, []);

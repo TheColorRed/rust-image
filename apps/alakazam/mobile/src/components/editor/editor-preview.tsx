@@ -1,5 +1,7 @@
 import { ViewControls } from '@/src/components/editor/view-controls';
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
+import { AreaOutlines, ColorAreaOverlay, areaDrawKey$ } from '@/src/components/tools/color-area-tool';
+import { CropGizmos } from '@/src/components/tools/crop-tool';
 import { comparisonImage, shownImage } from '@/src/lib/editor/editor-pictures';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { useTheme, type ThemeColors } from '@/src/lib/theme';
@@ -9,7 +11,7 @@ import {
   showCheckpointRequested,
   showCheckpointRequested$,
 } from '@/src/state/commands';
-import { isBlemishToolFocused$, isPersonControlFocused$ } from '@/src/state/edits';
+import { isBlemishToolFocused$, isCropToolFocused$, isPersonControlFocused$ } from '@/src/state/edits';
 import {
   ensurePreviewPanResponder,
   PREVIEW_GLIDE_MS,
@@ -38,6 +40,7 @@ import {
   resetPreviewTransform,
   startPreviewGestures,
   trackPreviewTransform,
+  type PreviewBox,
 } from '@/src/state/gestures';
 import {
   liveSurface$,
@@ -82,6 +85,8 @@ import { auditTime } from 'rxjs/operators';
 const CHECKPOINT_HOLD_MS = 250;
 /** How far (screen dp) a finger may drift and still count as holding still. */
 const HOLD_MOVE_TOLERANCE = 8;
+// How long the photo takes to ease to a new height when the panel changes size.
+const BOX_TWEEN_MS = 240;
 const PERSON_OUTLINE_COLORS = [
   '#FF4FA3',
   '#FF453A',
@@ -102,6 +107,8 @@ const PERSON_OUTLINE_COLORS = [
 export function EditorPreview() {
   const topInset = useObservable(topInset$, 0);
   const photo = useObservable(previewSize$, null);
+  // The size of the frames on screen while a preview is open. A tool's result can have another shape than the photo.
+  const liveShown = useObservable(liveSurface$, null);
   const liveViewRef = useRef<ElementRef<NonNullable<typeof VesselView>> | null>(null);
   const checkpointHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkpointPreviewActive = useRef(false);
@@ -127,6 +134,8 @@ export function EditorPreview() {
   const loadError = useObservable(loadError$, null);
   const busy = useObservable(busy$, false);
   const blemishFocused = useObservable(isBlemishToolFocused$, false);
+  const drawingArea = useObservable(areaDrawKey$, null);
+  const cropFocused = useObservable(isCropToolFocused$, false);
   const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const personSelectionState = useObservable(personSelection$, personSelection.value);
   // People are found in the edit base, not in the screen-size preview, so their boxes are in its pixels.
@@ -143,9 +152,10 @@ export function EditorPreview() {
   // is sent to the GPU on every change, which draws it from the photo that already sits there. Nothing is laid out again,
   // so the photo is complete at every frame of a gesture, and the part past its edges is black.
   useEffect(() => {
-    if (!photo || !box) return;
-    const fit = Math.min(box.width / photo.width, box.height / photo.height);
-    const size = { width: Math.max(1, photo.width * fit), height: Math.max(1, photo.height * fit) };
+    const shown = liveShown ?? photo;
+    if (!shown || !box) return;
+    const fit = Math.min(box.width / shown.width, box.height / shown.height);
+    const size = { width: Math.max(1, shown.width * fit), height: Math.max(1, shown.height * fit) };
     type Viewport = [number, number, number, number];
     // The camera: the middle of the view as a point on the photo (0 to 1) and the zoom. It is kept in these terms, not as the part
     // of the photo that shows, because the box changes shape when a control opens: the same camera still points at the same place
@@ -325,7 +335,7 @@ export function EditorPreview() {
       stopTurn();
       subscription.unsubscribe();
     };
-  }, [photo, box, baseView, liveView]);
+  }, [photo, liveShown, box, baseView, liveView]);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -377,6 +387,38 @@ export function EditorPreview() {
     });
   }, []);
 
+  // The photo always fits the visible area, between the top bar and the panel. When the panel changes height the area changes too,
+  // so the box eases to its new height over a few frames instead of jumping.
+  const boxTarget = useRef<PreviewBox | null>(null);
+  const boxTween = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (boxTween.current !== null) cancelAnimationFrame(boxTween.current);
+  }, []);
+
+  const tweenPreviewBox = useCallback((target: PreviewBox) => {
+    const from = previewBox.value;
+    if (boxTween.current !== null) cancelAnimationFrame(boxTween.current);
+    boxTween.current = null;
+    // A first layout or a turned phone (new width) is a new box, not a resize, so it is not animated.
+    if (!from || from.width !== target.width) {
+      previewBox.next(target);
+      return;
+    }
+    const started = Date.now();
+    const step = () => {
+      const t = Math.min(1, (Date.now() - started) / BOX_TWEEN_MS);
+      const eased = 1 - (1 - t) ** 3;
+      if (t >= 1) {
+        boxTween.current = null;
+        previewBox.next(target);
+        return;
+      }
+      previewBox.next({ width: target.width, height: Math.round(from.height + (target.height - from.height) * eased) });
+      boxTween.current = requestAnimationFrame(step);
+    };
+    boxTween.current = requestAnimationFrame(step);
+  }, []);
+
   // Debounced to a frame: a layout that shifts while an edit replay is in flight would otherwise
   // land two rAF-deferred state updates in one native frame batch.
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
@@ -386,17 +428,14 @@ export function EditorPreview() {
       requestAnimationFrame(() => {
         previewLayoutFrame.next(null);
         touchTargetRef.current?.measureInWindow((left, top) => previewOrigin.next({ x: left, y: top }));
-        const current = previewBox.value;
-        // The photo keeps its size and shape when the area gets shorter (a control opening a taller panel): the panel covers the
-        // bottom of the photo. Resizing a native view stretches its last frame until the new one arrives. A different width (the
-        // phone turned) is a new box.
-        const kept = current?.width === width ? Math.max(current.height, height) : height;
-        if (current?.width === width && current.height === kept) return;
-        if (__DEV__) console.debug('[preview] box changed:', current?.width, 'x', current?.height, '->', width, 'x', kept);
-        previewBox.next({ width, height: kept });
+        const target = { width, height };
+        if (boxTarget.current?.width === width && boxTarget.current.height === height) return;
+        if (__DEV__) console.debug('[preview] box target:', boxTarget.current?.width, 'x', boxTarget.current?.height, '->', width, 'x', height);
+        boxTarget.current = target;
+        tweenPreviewBox(target);
       }),
     );
-  }, []);
+  }, [tweenPreviewBox]);
 
   useEffect(() => {
     ensurePreviewPanResponder();
@@ -552,6 +591,7 @@ export function EditorPreview() {
                 previewSize={box}
               />
             )}
+            <AreaOutlines imageSize={photo} previewSize={box} />
           </Animated.View>
         )}
         {photo && box && VesselView && skinControlFocused && personSelectionState.focused && outlinesVisible && selectionNeeded(personSelectionState) && (
@@ -589,6 +629,8 @@ export function EditorPreview() {
           />
         )}
         {blemishFocused && <BlemishReticle />}
+        {drawingArea !== null && <ColorAreaOverlay />}
+        {cropFocused && <CropGizmos />}
         <ViewControls />
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}
       </Pressable>

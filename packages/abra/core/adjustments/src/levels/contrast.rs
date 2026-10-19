@@ -3,7 +3,6 @@ use abra_core::{
   image::gpu::{GpuPass, GpuProcessor},
 };
 
-use crate::lut::channel_lut_pass;
 use options::{Effect, Options};
 
 use rayon::prelude::*;
@@ -31,10 +30,17 @@ pub struct Contrast {
   options: Options,
 }
 
+impl Contrast {
+  /// The factor applied around mid gray, the same formula the CPU uses.
+  fn factor(&self) -> f32 {
+    let amount = self.amount.clamp(-100.0, 100.0) as f32;
+    (259.0 * (amount + 255.0)) / (255.0 * (259.0 - amount))
+  }
+}
+
 impl GpuProcessor for Contrast {
-  /// A lookup table built from the CPU code, so the GPU gives exactly the CPU's pixels.
   fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
-    vec![channel_lut_pass(|image| self.cpu_processor(image))]
+    vec![GpuPass::new(include_str!("./contrast.wgsl"), self.factor().to_le_bytes().to_vec())]
   }
 }
 
@@ -82,5 +88,27 @@ mod tests {
     let p = img.get_pixel(0, 0).unwrap();
     // With contrast 50, the value should not remain unchanged (and should be darker than 100).</n+    assert!(p.0 != 100 || p.1 != 100 || p.2 != 100, "Pixel didn't change with contrast 50");
     assert!(p.0 < 100 && p.1 < 100 && p.2 < 100, "Pixel didn't become darker as expected");
+  }
+
+  #[test]
+  fn gpu_matches_cpu_within_one_byte_for_contrast() -> anyhow::Result<()> {
+    use gpu::{GpuContext, LiveRenderer};
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels: Vec<u8> =
+      (0..65536u32).flat_map(|i| [i as u8, (i >> 8) as u8, (i * 37 % 256) as u8, (i * 13 % 256) as u8]).collect();
+    for amount in [0.0, 50.0, -50.0, 100.0, -100.0] {
+      let effect = contrast(amount);
+      let actual = renderer.process(&[effect.passes(256, 256)], 256, 256, &pixels)?;
+      let mut expected = Image::new_from_pixels(256, 256, pixels.clone(), abra_core::Channels::RGBA);
+      effect.apply_on_cpu(&mut expected);
+      for (index, (&actual, &expected)) in actual.iter().zip(expected.rgba().iter()).enumerate() {
+        let tolerance = if index % 4 == 3 { 0 } else { 1 };
+        assert!(
+          (actual as i16 - expected as i16).abs() <= tolerance,
+          "byte {index}, amount={amount}: {actual} != {expected}"
+        );
+      }
+    }
+    Ok(())
   }
 }

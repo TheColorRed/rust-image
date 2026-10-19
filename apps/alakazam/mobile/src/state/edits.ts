@@ -3,6 +3,7 @@ import { distinctUntilChanged, map } from 'rxjs/operators';
 import {
   BLEMISH_TOOL_KEY,
   BROW_BONE_KEY,
+  CROP_TOOL_KEY,
   EYELINER_KEY,
   EYESHADOW_KEY,
   LIPSTICK_KEY,
@@ -31,6 +32,12 @@ export const activeSectionKey = new BehaviorSubject('section-colorization');
 export const activeSectionKey$ = activeSectionKey.asObservable();
 export const focusedControlKey = new BehaviorSubject<string | null>(null);
 export const focusedControlKey$ = focusedControlKey.asObservable();
+/** The slider a tabulated control has open (for example Color 2 of Color Splash), so the gesture bar can act on it. */
+export const openSliderState = new BehaviorSubject<{ key: string; index: number }>({ key: '', index: 0 });
+export const openSliderState$ = openSliderState.asObservable();
+/** True while a slider is being dragged, so drawn areas are hidden and come back on release. */
+export const areaOutlinesHidden = new BehaviorSubject(false);
+export const areaOutlinesHidden$ = areaOutlinesHidden.asObservable();
 /** The group whose controls the section's row is showing in place of its own, or null. */
 export const openGroupKey = new BehaviorSubject<string | null>(null);
 export const openGroupKey$ = openGroupKey.asObservable();
@@ -48,6 +55,11 @@ export const isBlemishToolFocused$ = focusedControlKey$.pipe(
   distinctUntilChanged(),
 );
 export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOOL_KEY;
+export const isCropToolFocused = () => focusedControlKey.value === CROP_TOOL_KEY;
+export const isCropToolFocused$ = focusedControlKey$.pipe(
+  map(key => key === CROP_TOOL_KEY),
+  distinctUntilChanged(),
+);
 /** Controls whose work is confined to a face, so opening them can bring that face closer. */
 export const isFaceControlFocused$ = focusedControlKey$.pipe(
   map(

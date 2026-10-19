@@ -64,7 +64,7 @@ pub use geometry::{
   aspect_ratio_none, aspect_ratio_slice, bresenham, homography_from_points, homography_from_quads, point_f_add,
   point_f_angle, point_f_cross, point_f_distance_to, point_f_div, point_f_dot, point_f_length, point_f_length_squared,
   point_f_lerp, point_f_mul, point_f_new, point_f_normalize, point_f_perpendicular, point_f_sub, point_f_zero,
-  polygon_contains, quad_bounds, quad_corners, quad_flattened_aspect, quad_flattened_size, quad_from_rect, quad_new,
+  polygon_contains, polygon_difference, polygon_union, quad_bounds, quad_corners, quad_flattened_aspect, quad_flattened_size, quad_from_rect, quad_new,
   quad_rect, rect_bottom, rect_center, rect_contains, rect_corners, rect_edges, rect_from_edges, rect_from_points,
   rect_from_size, rect_intersect, rect_is_empty, rect_left, rect_map_point, rect_new, rect_origin, rect_right,
   rect_size, rect_top, segment_end, size_add, size_add_scalar, size_aspect_ratio, size_div,

@@ -2,7 +2,8 @@ import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { belongsTo, owning } from '@/src/lib/faces';
+import { belongsTo } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 import { paintSheet, type Painting } from '@/src/lib/layers';
 import { type ToolContext } from '@/src/lib/edit-sections';
 

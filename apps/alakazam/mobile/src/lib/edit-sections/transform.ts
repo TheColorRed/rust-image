@@ -1,5 +1,6 @@
 import { EditSection } from '../edit-sections';
-import { FlipAxis, TransformFit, flip, rotate } from '@abra/core/transform';
+import { FlipAxis, flip, rotate } from '@abra/core/transform';
+import { CROP_TOOL_KEY } from './keys';
 
 export const transform: EditSection = {
   key: 'section-transform',
@@ -10,15 +11,17 @@ export const transform: EditSection = {
       kind: 'action',
       key: 'action-rotate-left',
       label: 'Rotate Left',
-      tool: photo => rotate(-90).withFit(TransformFit.Fill).apply(photo),
-      thumb: photo => rotate(-90).withFit(TransformFit.Fill).apply(photo),
+      repeatable: true,
+      tool: photo => rotate(-90).apply(photo),
+      thumb: photo => rotate(-90).apply(photo),
     },
     {
       kind: 'action',
       key: 'action-rotate-right',
       label: 'Rotate Right',
-      tool: photo => rotate(90).withFit(TransformFit.Fill).apply(photo),
-      thumb: photo => rotate(90).withFit(TransformFit.Fill).apply(photo),
+      repeatable: true,
+      tool: photo => rotate(90).apply(photo),
+      thumb: photo => rotate(90).apply(photo),
     },
     {
       kind: 'action',
@@ -34,5 +37,7 @@ export const transform: EditSection = {
       tool: photo => flip(FlipAxis.Vertical).apply(photo),
       thumb: photo => flip(FlipAxis.Vertical).apply(photo),
     },
+    // The crop changes the photo only when it is applied, so its thumbnail is the photo as it is.
+    { kind: 'tool', key: CROP_TOOL_KEY, label: 'Crop', thumb: () => undefined },
   ],
 };

@@ -1,7 +1,9 @@
 import { Animated, PanResponder, type GestureResponderEvent } from 'react-native';
 import { BehaviorSubject, combineLatest, merge, Observable, Subject, type Subscription } from 'rxjs';
-import { debounceTime, filter, map, startWith, tap } from 'rxjs/operators';
-import { isBlemishToolFocused } from '@/src/state/edits';
+import { debounceTime, distinctUntilChanged, filter, map, startWith, tap } from 'rxjs/operators';
+import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY } from '@/src/lib/edit-sections/keys';
+import { focusedControlKey, focusedControlKey$, isBlemishToolFocused, isCropToolFocused } from '@/src/state/edits';
+import { cropHandleGrabbed } from '@/src/state/crop';
 
 // #region: Preview layout
 
@@ -14,6 +16,9 @@ export const previewLayoutFrame = new BehaviorSubject<number | null>(null);
 export const previewLayoutFrame$ = previewLayoutFrame.asObservable();
 /** Window position of the preview's top-left, so pinch anchors don't depend on which child got the touch. */
 export const previewOrigin = new BehaviorSubject({ x: 0, y: 0 });
+/** How far the controls along the preview's bottom edge reach up from it, so a tool can keep clear of them. */
+export const previewControlsCover = new BehaviorSubject(0);
+export const previewControlsCover$ = previewControlsCover.asObservable();
 
 // #endregion
 
@@ -44,14 +49,33 @@ export const previewRotationLocked$ = previewRotationLocked.asObservable();
 export type PreviewMoveMode = 'move' | 'one-finger' | 'two-finger' | 'off';
 export const previewMoveMode = new BehaviorSubject<PreviewMoveMode>('move');
 export const previewMoveMode$ = previewMoveMode.asObservable();
-/** The blemish tool has to slide the photo under its reticle, so the mode does not apply there. 'off' holds the pan for any fingers; a pinch still zooms and turns about the middle. */
+/**
+ * A tool that needs its own panning. While the tool is open the pan is this mode, and the pan button is locked showing the tool's name.
+ * The person's own setting in `previewMoveMode` is left as it is, so it returns when the tool closes.
+ */
+export type PanOverride = { mode: PreviewMoveMode; tool: string };
+const TOOL_PAN_OVERRIDES: Record<string, PanOverride | undefined> = {
+  // Any finger pans the photo while crop is open, except one that grabbed a corner handle (see createPreviewPanResponder).
+  [CROP_TOOL_KEY]: { mode: 'move', tool: 'Crop' },
+  // The blemish reticle needs the photo to slide under it at any zoom.
+  [BLEMISH_TOOL_KEY]: { mode: 'move', tool: 'Blemish' },
+};
+const panOverrideFor = (key: string | null): PanOverride | null => (key && TOOL_PAN_OVERRIDES[key]) || null;
+/** The pan a focused tool sets, or `null` when the person's own setting applies. */
+export const currentPanOverride = (): PanOverride | null => panOverrideFor(focusedControlKey.value);
+const samePanOverride = (a: PanOverride | null, b: PanOverride | null) =>
+  a === b || (!!a && !!b && a.mode === b.mode && a.tool === b.tool);
+export const previewPanOverride$ = focusedControlKey$.pipe(map(panOverrideFor), distinctUntilChanged(samePanOverride));
+/** Whether the pan is held back for `fingers` touches, given the tool's pan or else the person's own. */
 const panIsHeld = (fingers: number) => {
-  if (isBlemishToolFocused()) return false;
-  const mode = previewMoveMode.value;
+  const mode = currentPanOverride()?.mode ?? previewMoveMode.value;
   return mode === 'off' || (mode === 'one-finger' && fingers > 1) || (mode === 'two-finger' && fingers < 2);
 };
 /** Whether "Circle to zoom" is drawing. The preview's pan and pinch leave every touch alone meanwhile, so the loop is not taken as a pan. */
 export const previewCircling = new BehaviorSubject(false);
+/** Maps a zoom and pan to the ones the preview should use, e.g. to keep a crop frame covered by the photo. `null` leaves them alone. */
+export type PreviewLimit = (scale: number, translate: { x: number; y: number }) => { scale: number; x: number; y: number };
+export const previewLimit = new BehaviorSubject<PreviewLimit | null>(null);
 export const previewTranslateValue = new BehaviorSubject({ x: 0, y: 0 });
 export const previewTranslateValue$ = previewTranslateValue.asObservable();
 export const gestureStart = new BehaviorSubject({
@@ -75,6 +99,8 @@ export const previewPanResponder$ = previewPanResponder.asObservable();
 // #region: Preview gesture events
 
 export const MIN_PREVIEW_ZOOM = 1;
+/** The lowest zoom the preview may reach. The crop tool lowers it so the whole photo can sit above the gestures row. */
+export const previewZoomFloor = new BehaviorSubject(MIN_PREVIEW_ZOOM);
 export const MAX_PREVIEW_ZOOM = 100;
 /** How far (screen px) a single finger must move before it's treated as a pan instead of a
  * potential long-press — only relevant while already zoomed in. */
@@ -207,7 +233,7 @@ function transformFor(touches: Touches, start: GestureBaseline, box: { width: nu
     touches.length === 2
       ? Math.min(
           MAX_PREVIEW_ZOOM,
-          Math.max(MIN_PREVIEW_ZOOM, start.scale * (distanceBetweenTouches(touches) / start.distance)),
+          Math.max(previewZoomFloor.value, start.scale * (distanceBetweenTouches(touches) / start.distance)),
         )
       : start.scale;
   const midpoint = touches.length === 2 ? midpointOfTouches(touches) : { x: touches[0].pageX, y: touches[0].pageY };
@@ -266,7 +292,11 @@ export function startPreviewGestures(): Subscription {
       // A finger was lifted or added since the last move (e.g. a pinch settling down to one finger
       // still dragging) — re-baseline instead of jumping to a stale delta.
       if (event.touches.length !== start.touchCount) return { kind: 'baseline', touches: event.touches };
-      return { kind: 'transform', ...transformFor(event.touches, start, previewBox.value!) };
+      const next = transformFor(event.touches, start, previewBox.value!);
+      // Limits apply to this gesture's result, not to the current value, so they never build up across moves.
+      const limit = previewLimit.value;
+      if (!limit) return { kind: 'transform', ...next };
+      return { kind: 'transform', rotation: next.rotation, ...limit(next.scale, { x: next.x, y: next.y }) };
     }),
   );
   const ends$ = previewTouch.pipe(
@@ -274,6 +304,8 @@ export function startPreviewGestures(): Subscription {
     tap(event => {
       // Snap fully back to centered/unzoomed once the pinch closes back down near 1x, rather than
       // leaving it a hair off — a deliberate zoom-out should feel like it actually reset.
+      // A limit (the crop frame) owns the zoom and pan, so the snap-back and the coast would both move the photo off it.
+      if (previewLimit.value) return;
       if (event.type === 'release' && !isBlemishToolFocused() && previewScaleValue.value <= MIN_PREVIEW_ZOOM + 0.05) {
         springPreview({ x: 0, y: 0, scale: 1 });
       } else if (event.type === 'release' && event.velocity && previewScaleValue.value > MIN_PREVIEW_ZOOM && !panIsHeld(gestureStart.value.touchCount)) {
@@ -317,8 +349,10 @@ export function createPreviewPanResponder() {
     onMoveShouldSetPanResponderCapture: (event, gestureState) => {
       if (previewCircling.value) return false;
       if (event.nativeEvent.touches.length === 2) return true;
-      if (panIsHeld(1)) return false;
       const moved = Math.hypot(gestureState.dx, gestureState.dy) > PAN_START_THRESHOLD;
+      // While crop is open, a finger on a corner handle belongs to that handle; any other finger moves the photo under the frame.
+      if (isCropToolFocused()) return moved && !cropHandleGrabbed.value;
+      if (panIsHeld(1)) return false;
       // At 1x, normal editing leaves taps alone, but blemish work needs to pan an edge under its
       // fixed center reticle without making the user zoom first.
       if (isBlemishToolFocused()) return moved;

@@ -24,6 +24,9 @@ export const restorePreviewRequested = new Subject<void>();
 export const restorePreviewRequested$ = restorePreviewRequested.asObservable();
 export const blemishApplyRequested = new Subject<void>();
 export const blemishApplyRequested$ = blemishApplyRequested.asObservable();
+/** The crop tool's Apply button was pressed. */
+export const cropApplyRequested = new Subject<void>();
+export const cropApplyRequested$ = cropApplyRequested.asObservable();
 /** The red-eye tool's Auto Removal button was pressed. */
 export const redEyeAutoRequested = new Subject<void>();
 export const redEyeAutoRequested$ = redEyeAutoRequested.asObservable();

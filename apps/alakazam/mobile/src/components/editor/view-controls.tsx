@@ -4,11 +4,15 @@ import {
   MIN_PREVIEW_ZOOM,
   previewBox,
   previewCircling,
+  previewControlsCover,
   previewOrigin,
+  previewZoomFloor,
   previewScaleValue,
   previewTranslateValue,
   previewMoveMode,
   previewMoveMode$,
+  currentPanOverride,
+  previewPanOverride$,
   previewRotationGlide,
   previewRotationLocked,
   previewRotationLocked$,
@@ -17,14 +21,27 @@ import {
   previewScaleSettled$,
   springPreview,
 } from '@/src/state/gestures';
-import { Grab, Hand, Lock, Maximize, Minus, Plus, Pointer, RotateCw, Undo2, ZoomIn } from 'lucide-react-native';
+import { Grab, Hand, Lock, Maximize, Minus, Pencil, Plus, Pointer, RotateCw, Undo2, ZoomIn } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, PixelRatio, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Color } from '@abra/core/color';
 import { Brush } from '@abra/core/drawing';
 import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
 import { useObservable } from 'react-rx';
-import { debounceTime } from 'rxjs/operators';
+import { merge } from 'rxjs';
+import { debounceTime, skip } from 'rxjs/operators';
+import {
+  activeSectionKey,
+  activeSectionKey$,
+  adjustments,
+  adjustments$,
+  focusedControlKey,
+  focusedControlKey$,
+  openSliderState,
+  openSliderState$,
+} from '@/src/state/edits';
+import { areaDrawKey, areaDrawKey$, areaDrawMode, areaDrawMode$ } from '@/src/components/tools/color-area-tool';
+import { areaPoints, findSection, leafControls, sliderSpecs, sliderValues } from '@/src/lib/edit-sections';
 
 const ICON = '#fff';
 
@@ -51,18 +68,63 @@ export function ViewControls() {
   const turn = useObservable(settledTurn$, previewRotationValue.value);
   const locked = useObservable(previewRotationLocked$, previewRotationLocked.value);
   const moveMode = useObservable(previewMoveMode$, previewMoveMode.value);
-  const MoveIcon = MOVE_MODES[moveMode].icon;
+  const panOverride = useObservable(previewPanOverride$, currentPanOverride());
+  const move = panOverride ? { label: `Pan: locked by ${panOverride.tool}`, icon: Lock } : MOVE_MODES[moveMode];
+  const MoveIcon = move.icon;
   const [circling, setCircling] = useState(false);
+  const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
+  const edits = useObservable(adjustments$, adjustments.value);
+  const focusedKey = useObservable(focusedControlKey$, focusedControlKey.value);
+  const openSlider = useObservable(openSliderState$, openSliderState.value);
+  const drawing = useObservable(areaDrawKey$, areaDrawKey.value);
+  const drawMode = useObservable(areaDrawMode$, areaDrawMode.value);
+  // A tool that paints an area (today only Color Splash) gets the Draw area button. It targets the slider tab that is open.
+  const focusedSlider = focusedKey ? leafControls(findSection(sectionKey).controls).find(control => control.key === focusedKey) : undefined;
+  const drawable = focusedSlider?.kind === 'slider' && focusedSlider.areaKeys ? focusedSlider : null;
+  const drawIndex = drawable && openSlider.key === drawable.key ? openSlider.index : 0;
+  const drawKey = drawable?.areaKeys?.[drawIndex] ?? null;
+  // A color must be on before an area can attach to it.
+  const drawValue = drawable ? sliderValues(drawable, edits[drawable.key])[drawIndex] : 0;
+  const canDraw = drawKey !== null && drawValue > (drawable ? sliderSpecs(drawable)[drawIndex]?.min ?? 0 : 0);
+  // "+" and "−" only edit an area that is already drawn. "Draw area" starts the first one.
+  const hasArea = drawKey !== null && (areaPoints(edits[drawKey]) ?? []).length > 0;
+  const drawActive = drawKey !== null && drawing === drawKey;
+  // "+" draws to add to the color's area and "−" draws to take away from it. Tapping the one that is on turns drawing off.
+  const toggleDraw = (mode: 'add' | 'subtract') => {
+    if (drawActive && areaDrawMode.value === mode) {
+      areaDrawKey.next(null);
+      return;
+    }
+    areaDrawMode.next(mode);
+    areaDrawKey.next(drawKey);
+  };
   const zoomed = zoom > 1.01;
   const turned = Math.abs(turn) > 0.01;
+
+  useEffect(() => {
+    // Changing the tool or the open color ends the drawing, so an area never lands on the wrong color.
+    const subscription = merge(focusedControlKey$, openSliderState$)
+      .pipe(skip(1))
+      .subscribe(() => areaDrawKey.next(null));
+    return () => subscription.unsubscribe();
+  }, []);
 
   const wholeTurns = () => Math.round(previewRotationValue.value / (2 * Math.PI)) * 2 * Math.PI;
   return (
     <>
     {circling ? <CircleToZoomOverlay onDone={() => setCircling(false)} /> : null}
-    <View style={styles.area} pointerEvents="box-none">
+    <View
+      style={styles.area}
+      pointerEvents="box-none"
+      // The row sits 12 px above the preview's bottom edge (see `area`), so the cover includes that gap.
+      onLayout={event => previewControlsCover.next(event.nativeEvent.layout.height + 12)}
+    >
       {circling ? <Text style={styles.hint}>Draw a circle around what to zoom into</Text> : null}
+      {!circling && drawActive ? (
+        <Text style={styles.hint}>{drawMode === 'add' ? 'Draw to add to this color' : 'Draw to take away from this color'}</Text>
+      ) : null}
       {!circling && !locked && !turned ? <Text style={styles.hint}>Twist with two fingers to turn the photo</Text> : null}
+      <View style={styles.barRow}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rowScroll} contentContainerStyle={styles.row}>
         <View style={styles.group}>
           <Pressable
@@ -83,10 +145,11 @@ export function ViewControls() {
             style={styles.segment}
             hitSlop={8}
             onPress={() => {
-              const next = Math.max(MIN_PREVIEW_ZOOM, previewScaleValue.value / ZOOM_STEP);
+              const floor = previewZoomFloor.value;
+              const next = Math.max(floor, previewScaleValue.value / ZOOM_STEP);
               const ratio = next / previewScaleValue.value;
               springPreview(
-                next <= MIN_PREVIEW_ZOOM
+                next <= floor && floor >= MIN_PREVIEW_ZOOM
                   ? { x: 0, y: 0, scale: 1 }
                   : { x: previewTranslateValue.value.x * ratio, y: previewTranslateValue.value.y * ratio, scale: next },
               );
@@ -126,13 +189,17 @@ export function ViewControls() {
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Move: ${MOVE_MODES[moveMode].label}. Tap to change`}
-          style={styles.pill}
+          accessibilityLabel={
+            panOverride ? `Move: locked by ${panOverride.tool}` : `Move: ${MOVE_MODES[moveMode].label}. Tap to change`
+          }
+          accessibilityState={{ disabled: !!panOverride }}
+          disabled={!!panOverride}
+          style={[styles.pill, panOverride && styles.pillLocked]}
           hitSlop={8}
           onPress={() => previewMoveMode.next(MOVE_MODES[moveMode].next)}
         >
           <MoveIcon color={ICON} size={16} />
-          <Text style={styles.label}>{MOVE_MODES[moveMode].label}</Text>
+          <Text style={styles.label}>{move.label}</Text>
         </Pressable>
         {turned ? (
           <Pressable style={styles.pill} hitSlop={8} onPress={() => previewRotationGlide.next(wholeTurns())}>
@@ -147,6 +214,47 @@ export function ViewControls() {
           </Pressable>
         ) : null}
       </ScrollView>
+      {drawable ? (
+        <View style={styles.group}>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: drawActive, disabled: !canDraw }}
+            accessibilityLabel="Draw area"
+            disabled={!canDraw}
+            style={[styles.segment, drawActive && styles.pillOn, !canDraw && styles.pillLocked]}
+            hitSlop={8}
+            onPress={() => toggleDraw('add')}
+          >
+            <Pencil color={ICON} size={16} />
+            <Text style={styles.label}>Draw area</Text>
+          </Pressable>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Draw to add to this color"
+            accessibilityState={{ checked: drawActive && drawMode === 'add', disabled: !canDraw || !hasArea }}
+            disabled={!canDraw || !hasArea}
+            style={[styles.segment, drawActive && drawMode === 'add' && styles.pillOn, (!canDraw || !hasArea) && styles.pillLocked]}
+            hitSlop={8}
+            onPress={() => toggleDraw('add')}
+          >
+            <Plus color={ICON} size={16} />
+          </Pressable>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Draw to take away from this color"
+            accessibilityState={{ checked: drawActive && drawMode === 'subtract', disabled: !canDraw || !hasArea }}
+            disabled={!canDraw || !hasArea}
+            style={[styles.segment, drawActive && drawMode === 'subtract' && styles.pillOn, (!canDraw || !hasArea) && styles.pillLocked]}
+            hitSlop={8}
+            onPress={() => toggleDraw('subtract')}
+          >
+            <Minus color={ICON} size={16} />
+          </Pressable>
+        </View>
+      ) : null}
+      </View>
     </View>
     </>
   );
@@ -256,7 +364,8 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     area: { position: 'absolute', left: 12, right: 12, bottom: 12, gap: 8, alignItems: 'flex-start' },
-    rowScroll: { flexGrow: 0, maxWidth: '100%' },
+    rowScroll: { flex: 1, minWidth: 0 },
+    barRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', gap: 8 },
     row: { flexDirection: 'row', gap: 8 },
     pill: {
       flexDirection: 'row',
@@ -271,6 +380,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     segment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 34, paddingHorizontal: 12 },
     divider: { width: 1, alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.35)' },
     pillOn: { backgroundColor: colors.accent },
+    pillLocked: { opacity: 0.6 },
     label: { color: ICON, fontSize: 13, fontWeight: '600' },
     hint: {
       color: ICON,

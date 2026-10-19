@@ -11,7 +11,8 @@ import { paintSheet, type Painting } from '@/src/lib/layers';
 import { AiModel } from '@abra/core';
 import { aiModelPath, runAiModelAsync, runAiModelGuidedAsync } from '@alakazam/mobile';
 import { aiProgress } from '@/src/state/ai-progress';
-import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, SKIN_SEGMENTATION, belongsTo, boxKey, findFacesAsync, model, owning, unloadModel } from '@/src/lib/faces';
+import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, SKIN_SEGMENTATION, belongsTo, boxKey, findFacesAsync, model, unloadModel } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 
 const LIPS = ['upper lip', 'lower lip'];
 

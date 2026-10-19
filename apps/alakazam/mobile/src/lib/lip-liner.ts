@@ -3,7 +3,8 @@ import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { belongsTo, owning } from '@/src/lib/faces';
+import { belongsTo } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 import { paintSheet, type Painting } from '@/src/lib/layers';
 
 /** How wide the line is, as a fraction of the width of the mouth: the least (the Width slider's 0) and the most (its 1). */

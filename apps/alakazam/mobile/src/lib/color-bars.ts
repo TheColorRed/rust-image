@@ -1,6 +1,6 @@
 import { Color } from '@abra/core/color';
 import { Gradient } from '@abra/core/gradient';
-import { owning } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 
 /**
  * The colors of the bars that pick a color (`picker` of a slider control), each as red, green and blue from 0 to 255. The bar
@@ -45,6 +45,17 @@ export const GLOW_COLORS = [
 ];
 export const glowGradient = once(() =>
   Gradient.evenly(GLOW_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
+);
+
+/** The infrared tints, from hot pink foliage to snowy white. */
+export const INFRARED_COLORS = [
+  [230, 30, 140],
+  [255, 120, 190],
+  [255, 210, 230],
+  [255, 255, 255],
+];
+export const infraredGradient = once(() =>
+  Gradient.evenly(INFRARED_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
 );
 
 /** The tan scale, from no tan to the darkest: white, tan, light brown, brown, dark brown and black. */

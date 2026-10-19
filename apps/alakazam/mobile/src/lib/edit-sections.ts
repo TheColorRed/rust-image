@@ -11,9 +11,10 @@ import { blur } from './edit-sections/blur';
 import { cleanup } from './edit-sections/cleanup';
 import { detail } from './edit-sections/detail';
 import { effects } from './edit-sections/effects';
-import { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
+import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from './edit-sections/keys';
 import { colorization } from './edit-sections/mood';
 import { sharpen } from './edit-sections/sharpen';
+import { specialEffects } from './edit-sections/special-effects';
 import { transform } from './edit-sections/transform';
 
 /**
@@ -34,6 +35,12 @@ export type ToolContext = {
    * becomes an array of one, and nothing an empty array. Missing for a control with no `preload`, and for a thumb.
    */
   preloaded?: Preloaded;
+  /**
+   * The closed outlines drawn for each slider of a control that has `areaKeys`, in slider order. Each area is a list of rings, and
+   * each ring a list of `[x, y]` points, each a fraction of the photo from 0 to 1. Missing for a slider with no area, which means
+   * the whole photo.
+   */
+  areas?: (number[][][] | undefined)[];
   /**
    * The box of the one person the edit is for, in pixels of the photo the tool is given, for a control that can be set for one
    * person. Missing when the edit is for everyone.
@@ -117,6 +124,12 @@ export type SliderControl<T = unknown> = {
    */
   defaultValue?: PerSlider<number>;
   /**
+   * The adjustment keys holding a drawn area for each slider, in slider order (see `colorAreaKey`). Each is a flat list of x and y
+   * fractions of the photo, from 0 to 1, with rings separated by `AREA_RING_BREAK` pairs (see `areaPoints`). The area reaches the
+   * tool as `context.areas`; a slider with no area has none there.
+   */
+  areaKeys?: string[];
+  /**
    * Whether selecting the slider applies `defaultValue` at once, and the control counts as applied whenever it has a value.
    * On by default, for effects with no neutral value (Threshold has no "off" setting). Set it to `false` when `defaultValue`
    * means "no change" (Brightness at 0): the control then counts as applied only once it differs from `defaultValue`.
@@ -133,9 +146,10 @@ export type SliderControl<T = unknown> = {
    * A Vessel component to show in place of the plain slider, for a slider whose value is better picked another way; one for
    * each slider of a control that has several. The value is still 0 to 1 on the slider's scale. 'skin-tan' is the bar of tans;
    * 'hue' is the bar of colors and 'shade' the bar of shadow shades (a light tan to a dark
-   * brown) and 'glow' the bar of highlighter tints (pearl to rose), which only pick.
+   * brown) and 'glow' the bar of highlighter tints (pearl to rose) and 'infrared' the bar of infrared tints (hot pink to white),
+   * which only pick.
    */
-  picker?: PerSlider<'skin-tan' | 'hue' | 'shade' | 'glow'>;
+  picker?: PerSlider<'skin-tan' | 'hue' | 'shade' | 'glow' | 'infrared'>;
   /**
    * Ready-made choices shown above a picker, for people who would not know which sliders to move to get a color (black is no
    * brightness). Tapping one sets the sliders it lists, in `values` (one for each slider; `undefined` leaves a slider alone),
@@ -217,6 +231,8 @@ export type ActionControl = {
    * control in the same group (across all sections). Ungrouped controls toggle independently.
    */
   group?: string;
+  /** Each tap adds another application of the action instead of toggling it off. Undo steps it back. */
+  repeatable?: boolean;
   /**
    * A tool written against the Abra library (`@abra/core`), the same as a slider's: it gets an image that is its own to
    * change, and either changes it in place and returns nothing, or returns a new image to use instead. An action has no
@@ -329,13 +345,49 @@ export const sliderContext = (
   scale: number,
   person?: ToolContext['person'],
   others?: number[],
+  areas?: ToolContext['areas'],
 ): ToolContext => ({
   scale,
   preloaded: control.preload ? preloadFor(control, image.width(), image) : undefined,
   person,
   others,
+  areas,
   skin: () => skinMaskFor(person?.id, image, others),
 });
+
+/** Separates the rings of an area in its flat list. Points are clamped to 0 to 1, so this pair cannot be a real point. */
+export const AREA_RING_BREAK = -1;
+
+/** The rings of an area saved as a flat list of x and y fractions, or undefined when there is no area. Rings with no area are dropped. */
+export const areaPoints = (value: AdjustmentValue | undefined): number[][][] | undefined => {
+  if (!Array.isArray(value) || value.length < 6) return undefined;
+  const rings: number[][][] = [[]];
+  for (let index = 0; index + 1 < value.length; index += 2) {
+    const x = value[index];
+    const y = value[index + 1];
+    if (x === AREA_RING_BREAK && y === AREA_RING_BREAK) rings.push([]);
+    else rings[rings.length - 1].push([x, y]);
+  }
+  return rings.filter(ring => ring.length >= 3 && ringArea(ring) !== 0);
+};
+
+/** The flat list saved for a set of rings. Empty rings give a degenerate triangle, so an area that was fully taken away is not read as the whole photo. */
+export const encodeAreaRings = (rings: number[][][]): number[] => {
+  const flat = rings
+    .filter(ring => ring.length >= 3)
+    .flatMap((ring, index) => [
+      ...(index > 0 ? [AREA_RING_BREAK, AREA_RING_BREAK] : []),
+      ...ring.flatMap(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))]),
+    ]);
+  return flat.length > 0 ? flat : [0, 0, 0, 0, 0, 0];
+};
+
+/** The shoelace area of a ring of `[x, y]` points: positive when it winds counter-clockwise, negative when clockwise. */
+export const ringArea = (ring: number[][]): number =>
+  ring.reduce((sum, [x, y], index) => {
+    const [nextX, nextY] = ring[(index + 1) % ring.length];
+    return sum + x * nextY - nextX * y;
+  }, 0) / 2;
 
 /** The sheet a control with a `layer` paints, for these slider values. `name` is the layer's name: the control's key, or its key for one person. */
 export const layerSheet = (
@@ -366,9 +418,10 @@ export const applySlider = (
   value: AdjustmentValue,
   scale = 1,
   person?: ToolContext['person'],
+  areas?: ToolContext['areas'],
 ) => {
   const values = sliderValues(control, value);
-  const context = sliderContext(control, image, scale, person);
+  const context = sliderContext(control, image, scale, person, undefined, areas);
   if (control.layer) {
     const laid = withLayers(image, [layerSheet(control, values, context)]);
     image.replaceWith(laid);
@@ -415,7 +468,7 @@ export type EditSection = {
 };
 
 /** Key of the blemish tool control; the editor dispatches on it to render the reticle and controls. */
-export { BLEMISH_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY };
+export { BLEMISH_TOOL_KEY, CROP_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY };
 
 // Ordered by what a casual, non-designer social-media poster reaches for first: filters, then
 // basic brightness/color tweaks, then face retouching — with the more technical, restoration-style
@@ -427,6 +480,7 @@ export const EDIT_SECTIONS: EditSection[] = [
   transform,
   sharpen,
   effects,
+  specialEffects,
   blur,
   detail,
   cleanup,

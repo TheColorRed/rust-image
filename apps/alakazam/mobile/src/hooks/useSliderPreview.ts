@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { AbraImage } from '@alakazam/mobile';
 import { useObservable } from 'react-rx';
 import { filter, take } from 'rxjs/operators';
-import { layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/edit-sections';
+import { areaPoints, layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/edit-sections';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { ensureBase, editorPreview, showTool } from '@/src/lib/editor/editor-preview';
 import { hasOtherSteps, isStackDeferred, renderStackWithoutSlider, renderStepsAfterSlider } from '@/src/lib/editor/editor-replay';
@@ -106,11 +106,13 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
             ? undefined
             : personAdjustmentTargets(adjustments, key ?? '').flatMap(target => (target.personId === null ? [] : [target.personId]));
           const toolContext = {
-            ...context,
-            preloaded: preloadFor(p_control, photo.width()),
-            person,
-            others: ownPeople,
-            skin: () => skinMaskFor(person?.id, photo, ownPeople),
+           ...context,
+           preloaded: preloadFor(p_control, photo.width()),
+           person,
+           others: ownPeople,
+           skin: () => skinMaskFor(person?.id, photo, ownPeople),
+           // The drawn areas the drag is kept in, as the committed replay gets them.
+           areas: p_control.areaKeys?.map(areaKey => areaPoints(adjustments[areaKey])),
           };
           // A control with a layer paints its own sheet, which is shown over the photo; the photo itself is not changed.
           if (p_control.layer) {

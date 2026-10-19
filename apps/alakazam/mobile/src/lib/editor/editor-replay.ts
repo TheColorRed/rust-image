@@ -3,6 +3,7 @@ import { batch } from '@/src/lib/batch';
 import {
   applyAction,
   applySlider,
+  areaPoints,
   EDIT_SECTIONS,
   findSection,
   layerSheet,
@@ -134,7 +135,7 @@ function appliedSteps(
 ): Step[] {
   const steps: Step[] = [];
   const keys =
-    pending && !recipe.appliedActions.includes(pending.key)
+    pending && (pending.repeatable || !recipe.appliedActions.includes(pending.key))
       ? [...recipe.appliedActions, pending.key]
       : recipe.appliedActions;
   for (const key of keys) {
@@ -190,7 +191,11 @@ function appliedSteps(
       const dragged = slider?.key === control.key;
       if (dragged && slider.value === undefined) continue;
       const committed = dragged ? slider.value : recipe.adjustments[control.key];
-      if (!dragged && !isSliderApplied(control, committed)) continue;
+      const areas = control.areaKeys?.map(key => areaPoints(recipe.adjustments[key]));
+      // A color with an area drawn still applies before its slider is moved.
+      const hasArea = !!areas?.some(rings => (rings ?? []).some(ring => ring.length > 0));
+
+      if (!dragged && !hasArea && !isSliderApplied(control, committed)) continue;
       const value = committed ?? sliderDefault(control);
       steps.push({
         key: control.key,
@@ -200,7 +205,7 @@ function appliedSteps(
         sheet: control.layer
           ? (image, scale) => layerSheet(control, sliderValues(control, value), sliderContext(control, image, scale))
           : undefined,
-        run: (image, scale) => applySlider(control, image, value, scale),
+        run: (image, scale) => applySlider(control, image, value, scale, undefined, areas),
       });
     }
   }
@@ -316,7 +321,7 @@ export function restForAction(control: ActionControl, full = false): (() => Abra
   const base = editBaseImage.value;
   if (!base) return null;
   const groups = control.group ? new Set([control.group]) : undefined;
-  if (appliedSteps(groups).filter(step => step.key !== control.key).length === 0) return null;
+  if (appliedSteps(groups).filter(step => control.repeatable || step.key !== control.key).length === 0) return null;
   return () => renderEditStack(base, groups, full);
 }
 

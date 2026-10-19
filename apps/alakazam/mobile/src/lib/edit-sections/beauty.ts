@@ -1,5 +1,5 @@
 ﻿import { tanGradient } from '@/src/lib/color-bars';
-import { owning } from '@/src/lib/faces';
+import { owning } from '@/src/lib/native-handles';
 import { paintSheet } from '@/src/lib/layers';
 import { grayscale, invert, saturation } from '@abra/core/adjustments';
 import { skinSmooth, skinTone } from '@abra/core/beauty';

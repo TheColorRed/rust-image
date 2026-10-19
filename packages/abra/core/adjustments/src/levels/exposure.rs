@@ -1,4 +1,3 @@
-use crate::lut::channel_lut_pass;
 use abra_core::{
   IntoNumber,
   image::{
@@ -100,9 +99,11 @@ impl Effect for Exposure {
 }
 
 impl GpuProcessor for Exposure {
-  /// A lookup table built from the CPU code, so the GPU gives exactly the CPU's pixels.
   fn passes(&self, _p_width: u32, _p_height: u32) -> Vec<GpuPass> {
-    vec![channel_lut_pass(|image| self.cpu_processor(image))]
+    let (exposure, offset, gamma_correction) = self.params();
+    let uniforms = [(1.4f32).powf(exposure), offset, 1.0 / gamma_correction, 0.0];
+    let bytes: Vec<u8> = uniforms.iter().flat_map(|value| value.to_le_bytes()).collect();
+    vec![GpuPass::new(include_str!("./exposure.wgsl"), bytes)]
   }
 }
 
@@ -139,5 +140,37 @@ pub fn exposure(p_exposure: impl Into<f64>) -> Exposure {
     offset: 0.0,
     gamma_correction: 1.0,
     options: None,
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use abra_core::Channels;
+  use gpu::{GpuContext, LiveRenderer};
+
+  #[test]
+  fn gpu_matches_cpu_within_one_byte_for_exposure_offset_and_gamma() -> anyhow::Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels: Vec<u8> =
+      (0..65536u32).flat_map(|i| [i as u8, (i >> 8) as u8, (i * 37 % 256) as u8, (i * 13 % 256) as u8]).collect();
+    for (exposure, offset, gamma) in [(0.0, 0.0, 1.0), (0.5, 0.0, 1.0), (-1.0, -0.2, 0.7), (2.0, 0.3, 1.8)] {
+      let effect = exposure_with(exposure, offset, gamma);
+      let actual = renderer.process(&[effect.passes(256, 256)], 256, 256, &pixels)?;
+      let mut expected = Image::new_from_pixels(256, 256, pixels.clone(), Channels::RGBA);
+      effect.apply_on_cpu(&mut expected);
+      for (index, (&actual, &expected)) in actual.iter().zip(expected.rgba().iter()).enumerate() {
+        let tolerance = if index % 4 == 3 { 0 } else { 1 };
+        assert!(
+          (actual as i16 - expected as i16).abs() <= tolerance,
+          "byte {index}, E={exposure}, O={offset}, G={gamma}: {actual} != {expected}"
+        );
+      }
+    }
+    Ok(())
+  }
+
+  fn exposure_with(stops: f64, offset_amount: f64, gamma_amount: f64) -> Exposure {
+    exposure(stops).with_offset(offset_amount).with_gamma(gamma_amount)
   }
 }

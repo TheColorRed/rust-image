@@ -84,6 +84,9 @@ export class LiveRenderer {
     if (!open) return;
     try {
       open.display.replaceWith(image as AbraImage);
+      // A tool can change the shape of the photo (a rotation swaps width and height), so the size on screen follows what is drawn.
+      open.width = image.width();
+      open.height = image.height();
       open.preview.refresh();
       this.publish(open);
     } catch (error) {

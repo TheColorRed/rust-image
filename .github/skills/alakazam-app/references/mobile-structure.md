@@ -115,7 +115,7 @@ projects/<id>/
 - **The result image** is saved so the grid and the next open can show the picture before anything is replayed. Each save uses a new name (`result-<time>`) so the image cache never shows an old one, and `writeProject` deletes the earlier `result*` files.
 - **Saving a project is safe against a crash.** `project.json` is written to `project.json.tmp` and then renamed over the old file, so a crash leaves the old file, never half of a new one.
 - **When it saves:** `saveOpenProject` in `src/lib/editor/editor-session.ts` runs when the editor closes and when the app leaves the foreground, because Android can kill a background app without warning. It does nothing if nothing changed, or while the project is still loading.
-- **Opening:** `restoreProjects` lists the folders at startup. A folder with no readable `project.json` is skipped. `openEditorSession` shows `result-*` at once, then reads the source and rebuilds the base from the saved checkpoints.
+- **Opening:** `restoreProjects` lists the folders at startup. A folder with no readable `project.json` is skipped. `App` renders nothing until it finishes while the native splash (`react-native-bootsplash`, configured in `android/` and `ios/`, assets in `assets/bootsplash/`; its background is white in light mode and black in dark mode, following the system setting) covers the screen; then it mounts the tabs and calls `BootSplash.hide`, so the home screen never shows an empty list while saved projects are still loading. `openEditorSession` shows `result-*` at once, then reads the source and rebuilds the base from the saved checkpoints.
 
 ### The in-memory list
 

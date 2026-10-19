@@ -9,12 +9,15 @@ import {
 } from '@/src/lib/edit-sections';
 import { renderRecipe } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/error-message';
+import { rotate } from '@abra/core/transform';
+import { type CropRect, cropImage, turnDegrees } from '@/src/lib/crop';
 import type { ProjectRecipe } from '@/src/lib/project-store';
 import { type EditPreset } from '@/src/lib/presets';
 import { applyRedEyeStep } from '@/src/lib/red-eye';
 import { adjustmentKey } from '@/src/lib/skin-adjustments';
 import {
   baseIndexAt,
+  changesPixels,
   emptyTimeline,
   moveCursor,
   pushEntry,
@@ -23,7 +26,7 @@ import {
   type TimelineChange,
   type TimelineEntry,
 } from '@/src/lib/timeline';
-import { adjustments, appliedActions, focusedControlKey, historyVersion } from '@/src/state/edits';
+import { adjustments, appliedActions, areaOutlinesHidden, focusedControlKey, historyVersion } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { historyReady, openProject } from '@/src/state/project-session';
@@ -32,10 +35,11 @@ import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
 import { Alert } from 'react-native';
 
 /**
- * The picture each blemish step left, by step: the base that the edits after it are rendered on. Kept for as long as the
- * step is in the timeline, so undoing or redoing across a blemish only swaps the base instead of healing again.
+ * The picture each pixel-changing step left (a blemish, red-eye, or crop), by step: the base that the edits after it are rendered on.
+ * Kept for as long as the step is in the timeline, so undoing or redoing across it only swaps the base instead of redoing it.
  */
 const blemishBases = new Map<TimelineEntry, AbraImage>();
+
 
 /** The group of the action picked last, while nothing else has been done since: picking another one in it replaces that step. */
 let lastGroup: string | null = null;
@@ -54,10 +58,17 @@ export const editsAPerson = (recipe: ProjectRecipe) =>
  */
 export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
   const change = entry.change;
-  if ((change.type !== 'blemish' && change.type !== 'red-eye' && change.type !== 'red-eye-auto') || !entry.before) {
+  if (!changesPixels(change) || !entry.before) {
     throw new Error('A saved retouch step is damaged.');
   }
   const healed = renderRecipe(base, entry.before);
+  if (change.type === 'crop') {
+    try {
+      return cropPicture(healed, change, change.turn);
+    } finally {
+      healed.uniffiDestroy();
+    }
+  }
   try {
     if (change.type === 'blemish') removeBlemish(healed, change.x, change.y, change.radius);
     else applyRedEyeStep(healed, change);
@@ -116,13 +127,19 @@ function recordEdit(
   );
 }
 
-/** Tap on an action control: toggles it in the applied stack, clearing the rest of its group. */
+/** Tap on an action control: toggles it in the applied stack, clearing the rest of its group. A repeatable one adds another step each tap. */
 function toggleAction(control: ActionControl) {
   // Picking another option in the same single-select group as the last step replaces that step
   // instead of adding a new one — trying Warm, Cold, Sunny should leave one undo step behind.
   const replace = !!control.group && lastGroup === control.group;
   lastGroup = control.group ?? null;
   const keys = appliedActions.value;
+  if (control.repeatable) {
+    const next = [...keys, control.key];
+    recordEdit({ type: 'action', key: control.key, on: true, group: control.group }, { appliedActions: next });
+    appliedActions.next(next);
+    return;
+  }
   const on = !keys.includes(control.key);
   // Controls sharing a group are mutually exclusive: applying one clears the others in that group.
   const others = control.group ? keys.filter(key => !isInGroup(key, control.group!)) : keys;
@@ -141,6 +158,7 @@ const endsWithSlider = (key: string) => {
 /** A slider was released at `value`. */
 function commitSlider(control: SliderControl, value: AdjustmentValue) {
   replayHidden.next(!!(control.tool || control.layer));
+  areaOutlinesHidden.next(false);
   lastGroup = null;
   const key = adjustmentKey(control.key, personSelection.value.selectedId);
   const next = { ...adjustments.value, [key]: value };
@@ -160,6 +178,16 @@ function removeSlider(control: SliderControl) {
   const { [key]: _removed, [control.key]: _everyone, ...rest } = adjustments.value;
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));
   adjustments.next(rest);
+}
+
+/** A color's drawn area changed. `points` is a flat list of x, y fractions of the photo, or null to clear it. */
+function commitColorArea(key: string, points: number[] | null) {
+  replayHidden.next(true);
+  lastGroup = null;
+  const { [key]: _old, ...rest } = adjustments.value;
+  const next = points ? { ...rest, [key]: points } : rest;
+  recordEdit({ type: 'slider', key, value: points }, { adjustments: next }, endsWithSlider(key));
+  adjustments.next(next);
 }
 
 /** Applies the checked parts of a preset as one undoable change, preserving every unchecked existing edit. */
@@ -219,7 +247,51 @@ function commitRetouch(change: PixelChange) {
   appliedActions.next([]);
 }
 
-/** Moves to `cursor`: shows the edit state of that step, on the base picture it was made on. */
+/** Cuts `image` to `rect`, turning the picture by `turn` radians first when it is tilted. The image given is left as it was. */
+function cropPicture(image: AbraImage, rect: CropRect, turn = 0): AbraImage {
+  if (!turn) return cropImage(image, rect);
+  const turned = image.clone() as AbraImage;
+  try {
+    rotate(turnDegrees(turn)).apply(turned);
+    return cropImage(turned, rect);
+  } finally {
+    turned.uniffiDestroy();
+  }
+}
+
+/**
+ * The crop tool cut the photo to `rect`, turned by `turn` radians. Unlike a retouch, the picture changes size, so the full-size photo is replaced too.
+ * The cropped photo is the base the edits after it are rendered on, so those start empty.
+ */
+function commitCrop(rect: CropRect, turn = 0) {
+  const image = currentImage.value;
+  if (!image || !historyReady.value) return;
+  const cropped = cropPicture(image, rect, turn);
+  const change: TimelineChange = {
+    type: 'crop',
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    ...(turn ? { turn } : {}),
+  };
+  const entry: TimelineEntry = {
+    change,
+    adjustments: {},
+    appliedActions: [],
+    before: { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] },
+  };
+  record(entry);
+  blemishBases.set(entry, cropped.clone() as AbraImage);
+  editBaseImage.value?.uniffiDestroy();
+  editBaseImage.next(cropped.clone() as AbraImage);
+  image.uniffiDestroy();
+  currentImage.next(cropped);
+  lastGroup = null;
+  adjustments.next({});
+  appliedActions.next([]);
+}
+
 function moveTo(cursor: number) {
   const before = timeline.value;
   const after = moveCursor(before, cursor);
@@ -296,9 +368,13 @@ const commitSliderBatched = batched(commitSlider);
 export { commitSliderBatched as commitSlider };
 const removeSliderBatched = batched(removeSlider);
 export { removeSliderBatched as removeSlider };
+const commitColorAreaBatched = batched(commitColorArea);
+export { commitColorAreaBatched as commitColorArea };
 const commitRetouchBatched = batched(commitRetouch);
 export { commitRetouchBatched as commitRetouch };
 const commitBlemishBatched = batched((blemish: { x: number; y: number; radius: number }) =>
   commitRetouch({ type: 'blemish', ...blemish }),
 );
 export { commitBlemishBatched as commitBlemish };
+const commitCropBatched = batched(commitCrop);
+export { commitCropBatched as commitCrop };
