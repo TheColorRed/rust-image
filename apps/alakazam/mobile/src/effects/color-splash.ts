@@ -5,7 +5,7 @@ import { Area } from '@abra/core/geometry';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { owning } from '@/src/lib/native-handles';
+import { owning } from '@/src/lib/native/native-handles';
 
 /** How far the edge of the color fades, as a fraction of the shorter side of the photo. */
 const EDGE_FADE = 0.008;

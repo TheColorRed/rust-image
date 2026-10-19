@@ -5,10 +5,10 @@ import { BlemishControls, BlemishToolController } from '@/src/components/tools/b
 import { CropControls, CropToolController } from '@/src/components/tools/crop-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
-import { GLOW_COLORS, INFRARED_COLORS, SHADE_COLORS, TAN_COLORS, hueColors } from '@/src/lib/color-bars';
-import { missingModels } from '@/src/lib/ai-model-availability';
-import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai-analyses';
-import { HAIR_MODELS, MAKEUP_MODELS } from '@/src/lib/faces';
+import { GLOW_COLORS, INFRARED_COLORS, SHADE_COLORS, TAN_COLORS, colorAlongBar, hueColors } from '@/src/lib/ui/color-bars';
+import { missingModels } from '@/src/lib/ai/ai-model-availability';
+import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai/ai-analyses';
+import { HAIR_MODELS, MAKEUP_MODELS } from '@/src/lib/ai/faces';
 import { aiModelList, aiModelList$, aiModelsRequested } from '@/src/state/ai-models';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import {
@@ -22,7 +22,7 @@ import {
   HAIR_COLOR_KEY,
   LIPSTICK_KEY,
   UNDER_EYE_KEY,
-} from '@/src/lib/edit-sections/keys';
+} from '@/src/lib/project/edit-sections/keys';
 import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
 import {
@@ -41,12 +41,14 @@ import {
   sliderDefault,
   sliderSpecs,
   sliderValues,
-} from '@/src/lib/edit-sections';
+  pillFormatAt,
+  pillText,
+} from '@/src/lib/project/edit-sections';
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor/editor-history';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor/editor-thumbnails';
-import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
-import { useTheme } from '@/src/lib/theme';
+import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/beauty/skin-adjustments';
+import { useTheme } from '@/src/lib/ui/theme';
 import {
   actionPreviewRequested,
   blemishApplyRequested,
@@ -431,25 +433,37 @@ function SliderEditor() {
         )}
         {tabulated && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sliderPills}>
-            {specs.map((spec, index) => (
-              <Pressable
-                key={index}
-                style={[styles.sliderPill, index === openSlider && styles.sliderPillOpen]}
-                onPress={() => setSelectedSlider({ key: control.key, index })}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: index === openSlider }}
-              >
-                <Text style={[styles.sliderPillText, index === openSlider && styles.sliderPillTextOpen]}>
-                  {spec.label}
-                </Text>
-                {/* A dot marks a slider that is off its default, as the committed value has it. */}
-                {committed[index] !== spec.defaultValue && (
-                  <View style={[styles.sliderPillDot, index === openSlider && styles.sliderPillDotOpen]} />
-                )}
-              </Pressable>
-            ))}
+            {specs.map((spec, index) => {
+              // A slider with a color bar shows the color it is at, rather than a number a person cannot read as a color.
+              const pickerKind = barKindAt(index);
+              const pickerColor = pickerKind
+                ? colorAlongBar(barColors[pickerKind](), (committed[index] - spec.min) / (spec.max - spec.min))
+                : undefined;
+              return (
+                <Pressable
+                  key={index}
+                  style={[styles.sliderPill, index === openSlider && styles.sliderPillOpen]}
+                  onPress={() => setSelectedSlider({ key: control.key, index })}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: index === openSlider }}
+                >
+                  <Text style={[styles.sliderPillText, index === openSlider && styles.sliderPillTextOpen]}>
+                    {pickerKind ? spec.label : pillText(spec, committed[index], pillFormatAt(control, index))}
+                  </Text>
+                  {pickerColor ? (
+                    <View style={[styles.sliderPillSwatch, { backgroundColor: `rgb(${pickerColor.join(', ')})` }]} />
+                  ) : (
+                    /* A dot marks a slider that is off its default, as the committed value has it. */
+                    committed[index] !== spec.defaultValue && (
+                      <View style={[styles.sliderPillDot, index === openSlider && styles.sliderPillDotOpen]} />
+                    )
+                  )}
+                </Pressable>
+              );
+            })}
           </ScrollView>
         )}
+
         {specs.map((spec, index) =>
           tabulated && index !== openSlider ? null : barKindAt(index) ? (
             <View key={resetKey + '-' + index}>
@@ -686,6 +700,7 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     sliderPillTextOpen: { color: '#fff' },
     sliderPillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
     sliderPillDotOpen: { backgroundColor: '#fff' },
+    sliderPillSwatch: { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: colors.textTertiary },
     sliderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     sliderHeaderSpacer: { flex: 1 },
     // Same side margin as the slider track, so the tan bar also stays clear of the screen edge.

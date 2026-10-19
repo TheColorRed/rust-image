@@ -41,6 +41,8 @@ resolver = "2"
 
 [profile.dev]
 opt-level = 1
+split-debuginfo = "off"   # Stops LLVM from creating separate massive cache files
+debug = 1                 # Drastically shrinks binary and 'deps' metadata size
 
 [profile.dev.package."*"]
 opt-level = 3

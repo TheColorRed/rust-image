@@ -1,6 +1,6 @@
 import { AppText } from '@/src/components/app-text';
-import { useCommonStyles } from '@/src/lib/styles';
-import { useTheme, type ThemePreference } from '@/src/lib/theme';
+import { useCommonStyles } from '@/src/lib/ui/styles';
+import { useTheme, type ThemePreference } from '@/src/lib/ui/theme';
 import AbraScreen from '@/src/screens/abra';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';

@@ -19,7 +19,7 @@ const stable = [
   ...fs.readdirSync(path.join(src, 'state')).map(name => `state/${name}`),
   'lib/editor/editor-pictures.ts',
   'lib/editor/editor-preloads.ts',
-  'lib/edit-sections/keys.ts',
+  'lib/project/edit-sections/keys.ts',
 ];
 
 test('the editor state and the modules that hold native images do not import the controls or the replay', () => {

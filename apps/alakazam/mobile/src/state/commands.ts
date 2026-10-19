@@ -1,5 +1,5 @@
 import { Subject } from 'rxjs';
-import { type ActionControl, type AdjustmentValue, type EditControl, type SliderControl } from '@/src/lib/edit-sections';
+import { type ActionControl, type AdjustmentValue, type EditControl, type SliderControl } from '@/src/lib/project/edit-sections';
 
 // Fire-and-forget editor commands: UI emits them, whichever component or tool owns the behavior subscribes.
 

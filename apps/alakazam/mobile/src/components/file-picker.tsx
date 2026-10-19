@@ -1,4 +1,4 @@
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-native-documents/picker';
 import { ImagePlus } from 'lucide-react-native';
 import { useMemo, useState } from 'react';

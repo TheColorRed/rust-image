@@ -2,7 +2,7 @@ import { contrast, exposure, grayscale, highlightsShadows as toneAdjustment } fr
 import { blend, BlendMode } from '@abra/core/blend';
 import { gaussianBlur } from '@abra/core/filters';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { owning } from '@/src/lib/native-handles';
+import { owning } from '@/src/lib/native/native-handles';
 
 /** Neighborhood radius for the shadow recovery, as a fraction of photo width. Wider than the shared default so areas blend smoothly. */
 const SHADOW_RADIUS = 0.05;

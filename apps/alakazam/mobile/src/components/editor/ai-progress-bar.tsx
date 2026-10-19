@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import { aiProgress, aiProgress$, overallProgress } from '@/src/state/ai-progress';
 
 const HEIGHT = 4;

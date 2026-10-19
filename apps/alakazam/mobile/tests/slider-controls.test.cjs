@@ -11,7 +11,7 @@ const babel = require(
 );
 
 globalThis.__DEV__ = false;
-const filename = path.join(__dirname, '..', 'src', 'lib', 'edit-sections.ts');
+const filename = path.join(__dirname, '..', 'src', 'lib', 'project', 'edit-sections', 'index.ts');
 const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
   filename,
   babelrc: false,

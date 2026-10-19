@@ -1,20 +1,20 @@
-import { batch } from '@/src/lib/batch';
-import { removeBlemish } from '@/src/lib/blemish';
+import { batch } from '@/src/lib/utils/batch';
+import { removeBlemish } from '@/src/lib/beauty/blemish';
 import {
   EDIT_SECTIONS,
   leafControls,
   type ActionControl,
   type AdjustmentValue,
   type SliderControl,
-} from '@/src/lib/edit-sections';
+} from '@/src/lib/project/edit-sections';
 import { renderRecipe } from '@/src/lib/editor/editor-replay';
-import { errorMessage } from '@/src/lib/error-message';
+import { errorMessage } from '@/src/lib/utils/error-message';
 import { rotate } from '@abra/core/transform';
-import { type CropRect, cropImage, turnDegrees } from '@/src/lib/crop';
-import type { ProjectRecipe } from '@/src/lib/project-store';
-import { type EditPreset } from '@/src/lib/presets';
-import { applyRedEyeStep } from '@/src/lib/red-eye';
-import { adjustmentKey } from '@/src/lib/skin-adjustments';
+import { type CropRect, cropImage, turnDegrees } from '@/src/lib/tools/crop';
+import type { ProjectRecipe } from '@/src/lib/project/project-store';
+import { type EditPreset } from '@/src/lib/project/presets';
+import { applyRedEyeStep } from '@/src/lib/beauty/red-eye';
+import { adjustmentKey } from '@/src/lib/beauty/skin-adjustments';
 import {
   baseIndexAt,
   changesPixels,
@@ -25,7 +25,7 @@ import {
   type PixelChange,
   type TimelineChange,
   type TimelineEntry,
-} from '@/src/lib/timeline';
+} from '@/src/lib/project/timeline';
 import { adjustments, appliedActions, areaOutlinesHidden, focusedControlKey, historyVersion } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';

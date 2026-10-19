@@ -1,7 +1,7 @@
 import { Animated, PanResponder, type GestureResponderEvent } from 'react-native';
 import { BehaviorSubject, combineLatest, merge, Observable, Subject, type Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged, filter, map, startWith, tap } from 'rxjs/operators';
-import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY } from '@/src/lib/edit-sections/keys';
+import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { focusedControlKey, focusedControlKey$, isBlemishToolFocused, isCropToolFocused } from '@/src/state/edits';
 import { cropHandleGrabbed } from '@/src/state/crop';
 

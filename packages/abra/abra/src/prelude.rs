@@ -19,6 +19,7 @@ pub use crate::abra_core::Transform;
 // Common geometry and path helpers
 pub use crate::abra_core::Area;
 pub use crate::abra_core::AspectRatio;
+pub use crate::abra_core::Curve;
 pub use crate::abra_core::Fill;
 pub use crate::abra_core::LineJoin;
 pub use crate::abra_core::LineSegment;

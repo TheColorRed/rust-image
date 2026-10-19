@@ -1,8 +1,8 @@
-import { formatBytes } from '@/src/lib/format-bytes';
-import { useTheme } from '@/src/lib/theme';
+import { formatBytes } from '@/src/lib/utils/format-bytes';
+import { useTheme } from '@/src/lib/ui/theme';
 import { timeline$ } from '@/src/state/history';
 import { previewSize$ } from '@/src/state/preview';
-import { type EditablePhoto } from '@/src/lib/edit-source';
+import { type EditablePhoto } from '@/src/lib/editor/edit-source';
 import { editBaseImage$, originalImage$ } from '@/src/state/session';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useEffect, useMemo, useState } from 'react';

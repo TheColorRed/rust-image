@@ -1,5 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
-import { type CropAspect, type ScreenRect } from '@/src/lib/crop';
+import { type CropAspect, type ScreenRect } from '@/src/lib/tools/crop';
 
 /** The crop frame drawn over the preview while the Crop tool is open, in dp from the preview's top-left. It stays put on screen while the photo zooms and pans under it. */
 export const cropFrame = new BehaviorSubject<ScreenRect | null>(null);

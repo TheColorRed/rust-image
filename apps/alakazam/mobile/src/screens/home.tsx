@@ -8,10 +8,10 @@ import {
   useSelection,
 } from '@/src/components/selection';
 import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
-import { useCommonStyles } from '@/src/lib/styles';
-import { useTheme } from '@/src/lib/theme';
+import { useCommonStyles } from '@/src/lib/ui/styles';
+import { useTheme } from '@/src/lib/ui/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
-import { projectImageUri, projectSourceUri } from '@/src/lib/project-store';
+import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-store';
 import { addProject, projects$, removeProjects } from '@/src/state/projects';
 import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
 import { CameraIcon } from 'lucide-react-native';

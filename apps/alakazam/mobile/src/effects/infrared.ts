@@ -1,7 +1,7 @@
 import { channelMix, invert } from '@abra/core/adjustments';
 import { blend, BlendMode } from '@abra/core/blend';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { owning } from '@/src/lib/native-handles';
+import { owning } from '@/src/lib/native/native-handles';
 
 /**
  * Turns `photo` into a false-color infrared look in place. At 0 the colors are inverted and their red and blue swapped, which

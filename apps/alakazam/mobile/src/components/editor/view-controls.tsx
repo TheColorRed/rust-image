@@ -1,4 +1,4 @@
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import {
   MAX_PREVIEW_ZOOM,
   MIN_PREVIEW_ZOOM,
@@ -41,7 +41,7 @@ import {
   openSliderState$,
 } from '@/src/state/edits';
 import { areaDrawKey, areaDrawKey$, areaDrawMode, areaDrawMode$ } from '@/src/components/tools/color-area-tool';
-import { areaPoints, findSection, leafControls, sliderSpecs, sliderValues } from '@/src/lib/edit-sections';
+import { areaPoints, findSection, leafControls, sliderSpecs, sliderValues } from '@/src/lib/project/edit-sections';
 
 const ICON = '#fff';
 

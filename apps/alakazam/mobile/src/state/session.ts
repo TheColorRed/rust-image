@@ -1,6 +1,6 @@
 import { AbraImage } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
-import { type EditablePhoto } from '@/src/lib/edit-source';
+import { type EditablePhoto } from '@/src/lib/editor/edit-source';
 
 // #region: Source and native image session
 

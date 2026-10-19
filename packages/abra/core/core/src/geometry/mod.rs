@@ -2,6 +2,7 @@
 
 mod area;
 mod boolean;
+mod curve;
 mod homography;
 mod line;
 mod line_segment;
@@ -15,6 +16,7 @@ mod stroke;
 
 pub use area::{Area, polygon_contains};
 pub use boolean::{polygon_difference, polygon_union};
+pub use curve::Curve;
 pub use homography::Homography;
 pub use line::bresenham;
 pub use line_segment::{LineSegment, Orientation};

@@ -36,11 +36,11 @@ pub use abra::canvas::prelude::{
   AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
 };
 pub use adjustments::{
-  AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, Exposure, FilterType, GradientMap,
+  AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
   Grayscale, HighlightsShadows, Hue, Invert, Levels, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment,
   Posterize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
   gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, reduce_opacity, saturation,
-  selective_color, threshold, vibrance,
+  selective_color, threshold, vibrance, curves,
 };
 pub use ai::{
   AiListening, AiModel, AiOutput, AiOutputKind, ImageModel, Instance, LabelMap, Listening, ProgressListener,
@@ -60,8 +60,8 @@ pub use filters::{
   ripple, sharpen, smooth, sobel, sobel_magnitude, surface_blur,
 };
 pub use geometry::{
-  Area, AreaStroke, Homography, LineSegment, Path, PathStroke, Shape, aspect_ratio_meet, aspect_ratio_new,
-  aspect_ratio_none, aspect_ratio_slice, bresenham, homography_from_points, homography_from_quads, point_f_add,
+  Area, AreaStroke, Curve, Homography, LineSegment, Path, PathStroke, Shape, aspect_ratio_meet, aspect_ratio_new,
+  aspect_ratio_none, aspect_ratio_slice, bresenham, curve_cubic_bezier, curve_from_path, homography_from_points, homography_from_quads, point_f_add,
   point_f_angle, point_f_cross, point_f_distance_to, point_f_div, point_f_dot, point_f_length, point_f_length_squared,
   point_f_lerp, point_f_mul, point_f_new, point_f_normalize, point_f_perpendicular, point_f_sub, point_f_zero,
   polygon_contains, polygon_difference, polygon_union, quad_bounds, quad_corners, quad_flattened_aspect, quad_flattened_size, quad_from_rect, quad_new,

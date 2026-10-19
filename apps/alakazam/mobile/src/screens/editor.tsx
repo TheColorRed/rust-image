@@ -3,16 +3,16 @@ import { AiProgressBar } from '@/src/components/editor/ai-progress-bar';
 import { EditorPanel } from '@/src/components/editor/editor-panel';
 import { EditorPreview } from '@/src/components/editor/editor-preview';
 import { EditorToolbar } from '@/src/components/editor/editor-toolbar';
-import { type EditablePhoto } from '@/src/lib/edit-source';
+import { type EditablePhoto } from '@/src/lib/editor/edit-source';
 import { openEditorSession } from '@/src/lib/editor/editor-session';
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import { closeRequested } from '@/src/state/commands';
 import { bottomInset, topInset } from '@/src/state/preview';
 import { useEffect, useRef } from 'react';
 import { BackHandler, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-export type { EditablePhoto } from '@/src/lib/edit-source';
+export type { EditablePhoto } from '@/src/lib/editor/edit-source';
 
 export interface EditScreenProps {
   photo: EditablePhoto;

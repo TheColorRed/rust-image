@@ -1,4 +1,4 @@
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import type { LucideIcon } from 'lucide-react-native';
 import { Children, useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';

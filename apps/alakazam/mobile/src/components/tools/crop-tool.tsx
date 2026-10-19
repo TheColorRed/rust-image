@@ -12,7 +12,7 @@ import {
   type GestureResponderHandlers,
   type ViewStyle,
 } from 'react-native';
-import { useTheme, type ThemeColors } from '@/src/lib/theme';
+import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import {
   CROP_ASPECTS,
   FULL_CROP,
@@ -38,7 +38,7 @@ import {
   type CropRect,
   type Photo,
   type ScreenRect,
-} from '@/src/lib/crop';
+} from '@/src/lib/tools/crop';
 import { commitCrop } from '@/src/lib/editor/editor-history';
 import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { cropApplyRequested$ } from '@/src/state/commands';

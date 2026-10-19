@@ -1,4 +1,4 @@
-import { type Project } from '@/src/lib/project-store';
+import { type Project } from '@/src/lib/project/project-store';
 import { BehaviorSubject } from 'rxjs';
 
 /** The project open in the editor, or null when the editor was opened on a photo that is not a project. */

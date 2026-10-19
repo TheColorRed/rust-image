@@ -1,4 +1,4 @@
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 import { ArrowLeftIcon, CheckIcon, ImageMinusIcon, ImagesIcon, XIcon } from 'lucide-react-native';
 import { useState } from 'react';
 import { FlatList, Image, Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';

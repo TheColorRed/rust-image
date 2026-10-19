@@ -1,7 +1,7 @@
-import { type EditablePhoto } from '@/src/lib/edit-source';
-import { errorMessage } from '@/src/lib/error-message';
-import { deleteMediaFromCache } from '@/src/lib/media-file';
-import { createProject, deleteProject, listProjects, writeProject, type Project } from '@/src/lib/project-store';
+import { type EditablePhoto } from '@/src/lib/editor/edit-source';
+import { errorMessage } from '@/src/lib/utils/error-message';
+import { deleteMediaFromCache } from '@/src/lib/native/media-file';
+import { createProject, deleteProject, listProjects, writeProject, type Project } from '@/src/lib/project/project-store';
 import { Alert } from 'react-native';
 import { BehaviorSubject } from 'rxjs';
 

@@ -3,7 +3,7 @@ import { blend } from '@abra/core/blend';
 import { Color } from '@abra/core/color';
 import { ColorStop, Gradient } from '@abra/core/gradient';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { owning } from '@/src/lib/native-handles';
+import { owning } from '@/src/lib/native/native-handles';
 
 /** The deepest tone, Prussian blue, that the shadows are mapped to. */
 const PRUSSIAN_BLUE: [number, number, number] = [0, 49, 83];

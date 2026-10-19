@@ -8,7 +8,8 @@ use std::sync::{Arc, RwLock};
 use abra::adjustments::prelude::{color, levels};
 
 use crate::effect::effect_methods;
-use crate::{Color, Gradient};
+use crate::{Color, Curve, Gradient};
+use abra::abra_core::PointF;
 
 /// Reduces an image to this many levels of each color channel. Made by [`posterize`].
 #[derive(uniffi::Object)]
@@ -237,6 +238,51 @@ impl Levels {
   /// The range the result is put in, 0 to 255: the value the darkest tone becomes and the value the lightest becomes.
   pub fn with_output(&self, black: f32, white: f32) -> Arc<Levels> {
     Arc::new(Levels(self.0.clone().with_output(black, white)))
+  }
+}
+
+/// A channel of a [`Curves`] adjustment that a curve can be set for.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum CurveChannel {
+  /// All of the red, green and blue channels together, applied after the curve of each channel on its own.
+  Rgb,
+  Red,
+  Green,
+  Blue,
+}
+
+impl From<CurveChannel> for levels::CurveChannel {
+  fn from(channel: CurveChannel) -> Self {
+    match channel {
+      CurveChannel::Rgb => levels::CurveChannel::Rgb,
+      CurveChannel::Red => levels::CurveChannel::Red,
+      CurveChannel::Green => levels::CurveChannel::Green,
+      CurveChannel::Blue => levels::CurveChannel::Blue,
+    }
+  }
+}
+
+/// A curves adjustment: remaps the tones of the image by a curve for the red, green and blue channels together and for each of them
+/// on its own. Made by [`curves`].
+#[derive(uniffi::Object)]
+pub struct Curves(levels::Curves);
+
+/// A curves adjustment that changes nothing until a curve is set for a channel.
+#[uniffi::export]
+pub fn curves() -> Arc<Curves> {
+  Arc::new(Curves(levels::curves()))
+}
+
+#[uniffi::export]
+impl Curves {
+  /// Sets the curve of a channel, in place of the one it had. The value of a channel goes through its own curve first and then the `Rgb` one.
+  pub fn with_curve(&self, channel: CurveChannel, curve: Arc<Curve>) -> Arc<Curves> {
+    Arc::new(Curves(self.0.clone().with_curve(channel.into(), curve.core())))
+  }
+
+  /// Sets the curve of a channel to a smooth line through points, each `(input, output)` on a scale of 0 to 255.
+  pub fn with_points(&self, channel: CurveChannel, points: Vec<PointF>) -> Arc<Curves> {
+    Arc::new(Curves(self.0.clone().with_points(channel.into(), points)))
   }
 }
 
@@ -500,6 +546,7 @@ effect_methods!(
   Contrast,
   Exposure,
   Levels,
+  Curves,
   SelectiveColor,
   HighlightsShadows,
   Hue,
@@ -812,6 +859,23 @@ mod tests {
         handle_and_library(
           |i| levels(20.0, 230.0).with_gamma(1.6).with_output(10.0, 245.0).apply_on_cpu(i),
           |e| levels::levels(20.0, 230.0).with_gamma(1.6).with_output(10.0, 245.0).apply_on_cpu(e),
+        ),
+      ),
+      (
+        "curves",
+        handle_and_library(
+          |i| {
+            curves()
+              .with_curve(CurveChannel::Rgb, Arc::new(Curve::ease_in_out(2.0)))
+              .with_points(CurveChannel::Blue, vec![PointF::new(0.0, 20.0), PointF::new(255.0, 235.0)])
+              .apply_on_cpu(i)
+          },
+          |e| {
+            levels::curves()
+              .with_curve(levels::CurveChannel::Rgb, abra::abra_core::Curve::ease_in_out(2.0))
+              .with_points(levels::CurveChannel::Blue, [(0.0, 20.0), (255.0, 235.0)])
+              .apply_on_cpu(e)
+          },
         ),
       ),
       (

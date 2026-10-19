@@ -1,9 +1,9 @@
-import { registerAiAnalysis } from '@/src/lib/ai-analyses';
-import { clearAnalysis } from '@/src/lib/analysis';
-import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/edit-sections/keys';
-import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/faces';
-import { batch } from '@/src/lib/batch';
-import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/edit-source';
+import { registerAiAnalysis } from '@/src/lib/ai/ai-analyses';
+import { clearAnalysis } from '@/src/lib/ai/analysis';
+import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
+import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/ai/faces';
+import { batch } from '@/src/lib/utils/batch';
+import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/editor/edit-source';
 import {
   PERSON_MODEL_MISSING,
   checkpointFor,
@@ -13,7 +13,7 @@ import {
   keepBlemishBase,
 } from '@/src/lib/editor/editor-history';
 import { analysisOf, forgetAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
-import { HAIR_MASKS_VERSION, MAKEUP_MASKS_VERSION, hairMasks, makeupMasks } from '@/src/lib/eye-makeup';
+import { HAIR_MASKS_VERSION, MAKEUP_MASKS_VERSION, hairMasks, makeupMasks } from '@/src/lib/beauty/eye-makeup';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
@@ -23,10 +23,10 @@ import {
   startReplay,
 } from '@/src/lib/editor/editor-replay';
 import { showStandIn } from '@/src/lib/editor/editor-pictures';
-import { errorMessage } from '@/src/lib/error-message';
-import { ownedImage } from '@/src/lib/native-image';
-import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project-store';
-import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/timeline';
+import { errorMessage } from '@/src/lib/utils/error-message';
+import { ownedImage } from '@/src/lib/native/native-image';
+import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project/project-store';
+import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/project/timeline';
 import { analysisVersion, faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { aiModelsVersion } from '@/src/state/ai-models';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';

@@ -5,10 +5,12 @@
 //! `Size` (in the image file), `Rect`, `Quad` and `AspectRatio`. Rust only lets a type's own crate add functions to it, so the
 //! functions of these types are free functions named for the type, taking it first: `point_f_dot(a, b)` is `a.dot(b)`, and
 //! `rect_intersect(rect, other)` is `rect.intersect(other)`. Types that change in place or hide their fields are handles with
-//! the library's functions: `Path`, `Area`, `LineSegment`, `Homography` and the two strokes.
+//! the library's functions: `Path`, `Area`, `Curve`, `LineSegment`, `Homography` and the two strokes.
 //!
 //! What is not exported, and why:
 //! - `Area` derefs to its `Path` in Rust, so it has every path function here too, written once by `path_methods!`.
+//! - `Curve` derefs to its `Path` in Rust for reading, which here is `Curve::to_path`. `Curve::from_path` and `Curve::cubic_bezier` can
+//!   fail, so they are the free functions `curve_from_path` and `curve_cubic_bezier`, which return nothing when they do.
 //! - `PathStroke` and `AreaStroke` borrow the shape they stroke, which a handle cannot hold, so each holds a copy of it and the
 //!   settings, and `Path::stroke` and `Area::stroke` start one. Their `From` conversions into a `Path` or an `Area` are
 //!   `to_path` and `to_area`.
@@ -1072,9 +1074,153 @@ impl AreaStroke {
 
 // #endregion
 
+// #region: Curves
+
+/// A smooth line through points that gives one `y` for every `x`, such as a tone curve from an input to an output on a scale
+/// of 0 to 255. It never goes back in `x`. Use a `Path` for a line that can.
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct Curve(abra_core::Curve);
+
+impl Curve {
+  /// A handle for a curve of the library.
+  pub fn from_core(curve: abra_core::Curve) -> Self {
+    Self(curve)
+  }
+
+  /// A copy of the curve of the library that this holds.
+  pub fn core(&self) -> abra_core::Curve {
+    self.0.clone()
+  }
+}
+
+#[uniffi::export]
+impl Curve {
+  /// A smooth curve through the points, in any order. A point at the same `x` as another replaces it, and no points give the
+  /// straight line.
+  #[uniffi::constructor]
+  pub fn new(points: Vec<PointF>) -> Self {
+    Self(abra_core::Curve::new(points))
+  }
+
+  /// The curve that changes nothing: a straight line from (0, 0) to (255, 255).
+  #[uniffi::constructor]
+  pub fn identity() -> Self {
+    Self(abra_core::Curve::identity())
+  }
+
+  /// Starts slow and ends fast, `x ^ power` on a scale of 0 to 1. A power of 1 is the straight line.
+  #[uniffi::constructor]
+  pub fn ease_in(power: f32) -> Self {
+    Self(abra_core::Curve::ease_in(power))
+  }
+
+  /// Starts fast and ends slow, the mirror of `ease_in`. A power of 1 is the straight line.
+  #[uniffi::constructor]
+  pub fn ease_out(power: f32) -> Self {
+    Self(abra_core::Curve::ease_out(power))
+  }
+
+  /// Slow at both ends and fast in the middle, an "S". A power of 1 is the straight line.
+  #[uniffi::constructor]
+  pub fn ease_in_out(power: f32) -> Self {
+    Self(abra_core::Curve::ease_in_out(power))
+  }
+
+  /// Fast at both ends and slow in the middle, the inverse "S". A power of 1 is the straight line.
+  #[uniffi::constructor]
+  pub fn ease_out_in(power: f32) -> Self {
+    Self(abra_core::Curve::ease_out_in(power))
+  }
+
+  /// An "S" that is flat at both ends, `3t² - 2t³`.
+  #[uniffi::constructor]
+  pub fn smoothstep() -> Self {
+    Self(abra_core::Curve::smoothstep())
+  }
+
+  /// A gentle `ease_in` that follows a sine wave.
+  #[uniffi::constructor]
+  pub fn ease_in_sine() -> Self {
+    Self(abra_core::Curve::ease_in_sine())
+  }
+
+  /// A gentle `ease_out` that follows a sine wave.
+  #[uniffi::constructor]
+  pub fn ease_out_sine() -> Self {
+    Self(abra_core::Curve::ease_out_sine())
+  }
+
+  /// A gentle `ease_in_out` that follows a sine wave.
+  #[uniffi::constructor]
+  pub fn ease_in_out_sine() -> Self {
+    Self(abra_core::Curve::ease_in_out_sine())
+  }
+
+  /// The curve with a point added, or moved if there is already a point at that `x`.
+  pub fn with_point(&self, x: f32, y: f32) -> Arc<Curve> {
+    Arc::new(Self(self.0.clone().with_point(x, y)))
+  }
+
+  /// The curve flipped top to bottom: every `y` becomes `255 - y`. Flipping the identity gives a photographic negative.
+  pub fn inverted(&self) -> Arc<Curve> {
+    Arc::new(Self(self.0.inverted()))
+  }
+
+  /// The `y` of the curve at `x`. Before the first point and after the last it is the `y` of that point.
+  pub fn value(&self, x: f32) -> f32 {
+    self.0.value(x)
+  }
+
+  /// The curve as a lookup table of 256 entries, for the values 0 to 255.
+  pub fn to_table(&self) -> Vec<u8> {
+    self.0.to_table().to_vec()
+  }
+
+  /// The path the curve is made of.
+  pub fn to_path(&self) -> Arc<Path> {
+    Arc::new(Path::from_core(self.0.as_path().clone()))
+  }
+}
+
+/// A curve shaped by two handles, as in the CSS `cubic-bezier()` function, from (0, 0) to (255, 255). The handles are on a
+/// scale of 0 to 1: `(0.42, 0, 0.58, 1)` is CSS's `ease-in-out`. `None` when a handle's `x` is outside 0 to 1.
+#[uniffi::export]
+pub fn curve_cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> Option<Arc<Curve>> {
+  abra_core::Curve::cubic_bezier(x1, y1, x2, y2).map(|curve| Arc::new(Curve::from_core(curve)))
+}
+
+/// A curve from a path, or `None` when the path goes back in `x`.
+#[uniffi::export]
+pub fn curve_from_path(path: Arc<Path>) -> Option<Arc<Curve>> {
+  abra_core::Curve::from_path(path.core()).map(|curve| Arc::new(Curve::from_core(curve)))
+}
+
+// #endregion
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_curve_goes_through_its_points_and_makes_a_table() {
+    let curve = Curve::new(vec![point_f_new(0.0, 0.0), point_f_new(128.0, 40.0), point_f_new(255.0, 255.0)]);
+    assert!((curve.value(128.0) - 40.0).abs() < 0.1);
+    let table = curve.to_table();
+    assert_eq!(table.len(), 256);
+    assert!(table.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(Curve::ease_in_out(1.0).to_table()[100], 100);
+  }
+
+  #[test]
+  fn a_curve_can_be_made_from_handles_or_a_path_that_does_not_go_back() {
+    assert!(curve_cubic_bezier(0.42, 0.0, 0.58, 1.0).is_some());
+    assert!(curve_cubic_bezier(-0.5, 0.0, 0.58, 1.0).is_none());
+    let path = Path::line(point_f_new(0.0, 0.0), point_f_new(255.0, 255.0));
+    assert!(curve_from_path(Arc::new(path)).is_some());
+    let back = Path::line(point_f_new(100.0, 0.0), point_f_new(0.0, 255.0));
+    assert!(curve_from_path(Arc::new(back)).is_none());
+    assert_eq!(Curve::identity().to_path().core().points().len(), 2);
+  }
 
   #[test]
   fn points_sizes_and_rectangles_are_records_with_free_functions() {

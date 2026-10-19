@@ -9,7 +9,7 @@ const babel = require(
   }),
 );
 
-const filename = path.join(__dirname, '..', 'src', 'lib', 'crop.ts');
+const filename = path.join(__dirname, '..', 'src', 'lib', 'tools', 'crop.ts');
 const { code } = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
   filename,
   babelrc: false,

@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { canRedo, canUndo, emptyTimeline, type Timeline } from '@/src/lib/timeline';
+import { canRedo, canUndo, emptyTimeline, type Timeline } from '@/src/lib/project/timeline';
 
 /**
  * The edit history: every step in the order it was performed, and how many are applied. Undo and redo move the cursor.

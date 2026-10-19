@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { StyleSheet, Text } from 'react-native';
-import { useTheme } from '@/src/lib/theme';
+import { useTheme } from '@/src/lib/ui/theme';
 
 type AppTextProps = {
   children: React.ReactNode;

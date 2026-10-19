@@ -1,10 +1,10 @@
 import { AppText } from '@/src/components/app-text';
 import { Card, CardHeader } from '@/src/components/card';
-import { errorMessage } from '@/src/lib/error-message';
-import { formatBytes } from '@/src/lib/format-bytes';
-import { useCommonStyles } from '@/src/lib/styles';
-import { useTheme } from '@/src/lib/theme';
-import { refreshAiModels, syncAiModels } from '@/src/lib/ai-model-catalog';
+import { errorMessage } from '@/src/lib/utils/error-message';
+import { formatBytes } from '@/src/lib/utils/format-bytes';
+import { useCommonStyles } from '@/src/lib/ui/styles';
+import { useTheme } from '@/src/lib/ui/theme';
+import { refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
 import { deleteAiModel, downloadAiModel } from '@alakazam/mobile';
 import { useCallback, useEffect, useMemo, useState } from 'react';

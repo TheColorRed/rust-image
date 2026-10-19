@@ -1,5 +1,5 @@
 import { BottomTabBar, type TabItem } from '@/src/components/bottom-tab-bar';
-import { ThemeProvider, useTheme } from '@/src/lib/theme';
+import { ThemeProvider, useTheme } from '@/src/lib/ui/theme';
 import { EditScreen, type EditablePhoto } from '@/src/screens/editor';
 import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';

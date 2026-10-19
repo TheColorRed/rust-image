@@ -86,7 +86,7 @@ function fixture() {
     }
   }
   const bindings = { ThumbnailPreview, AbraImage };
-  const nativeImages = load('native-image', { '@alakazam/mobile': bindings });
+  const nativeImages = load('native/native-image', { '@alakazam/mobile': bindings });
   const sections = {
     EDIT_SECTIONS: [section],
     leafControls: controls => controls,
@@ -100,8 +100,8 @@ function fixture() {
     {
       '@alakazam/mobile': bindings,
       'react-native': { PixelRatio: { get: () => 2.5 } },
-      '@/src/lib/edit-sections': sections,
-      '@/src/lib/native-image': nativeImages,
+      '@/src/lib/project/edit-sections': sections,
+      '@/src/lib/native/native-image': nativeImages,
     },
     { console: { warn: (...args) => f.warnings.push(args) } },
   );
@@ -193,8 +193,8 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       '@alakazam/mobile': f.bindings,
       rxjs: require('rxjs'),
       'rxjs/operators': require('rxjs/operators'),
-      '@/src/lib/batch': { batch: run => run() },
-      '@/src/lib/edit-sections': {
+      '@/src/lib/utils/batch': { batch: run => run() },
+      '@/src/lib/project/edit-sections': {
         ...f.sections,
         applyAction: (control, image) => control.tool(image),
         applySlider() {},
@@ -206,8 +206,8 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
       },
       '@/src/lib/editor/editor-history': { recordDraftStep() {}, comparisonImage: () => null },
       '@/src/lib/editor/editor-preloads': { preloadFor: () => undefined, clearPreloads() {} },
-      '@/src/lib/analysis': { personIn: () => undefined },
-      '@/src/lib/layers': { withLayers: photo => photo },
+      '@/src/lib/ai/analysis': { personIn: () => undefined },
+      '@/src/lib/beauty/layers': { withLayers: photo => photo },
       '@/src/lib/editor/editor-pictures': loadTs('lib/editor/editor-pictures.ts', {
         '@abra/core/canvas': { ResizeTarget: { Fit: { new: size => size } } },
         '@abra/core/transform': { resize: () => ({ apply() {} }) },
@@ -216,7 +216,7 @@ test('replay defers thumbnails, caches exclusive groups and discards retired bui
         '@/src/state/session': session,
         'react-native': { Dimensions: { get: () => ({ width: 320, height: 640 }) }, PixelRatio: { get: () => 1 } },
       }),
-      '@/src/lib/skin-adjustments': {},
+      '@/src/lib/beauty/skin-adjustments': {},
       '@/src/state/person-selection': { personSelection: subject(null) },
       '@/src/lib/editor/editor-thumbnails': f,
       '@/src/state/edits': edits,
@@ -307,17 +307,17 @@ test('closing an editor during async decoding releases late native images withou
     new Promise(resolve => {
       resolveDecode = resolve;
     });
-  const nativeImages = load('native-image', { '@alakazam/mobile': f.bindings });
+  const nativeImages = load('native/native-image', { '@alakazam/mobile': f.bindings });
   const api = load('editor/editor-session', {
     '@alakazam/mobile': { ...f.bindings, personDetectionDownloaded: () => true, readImageAsync },
     'react-native': { Alert: { alert() {} }, AppState: { addEventListener: () => ({ remove() {} }) } },
-    '@/src/lib/batch': { batch: run => run() },
+    '@/src/lib/utils/batch': { batch: run => run() },
     '@abra/core/mask': { TransformAlgorithm: {} },
     '@/src/state/analysis': { people: subject(null), skinMask: subject(null) },
-    '@/src/lib/analysis': { personIn: () => undefined, clearAnalysis() {} },
-    '@/src/lib/eye-makeup': { makeupMasks: () => undefined },
+    '@/src/lib/ai/analysis': { personIn: () => undefined, clearAnalysis() {} },
+    '@/src/lib/beauty/eye-makeup': { makeupMasks: () => undefined },
     '@/src/lib/editor/editor-preloads': { releasePreloads() {}, clearPreloads() {} },
-    '@/src/lib/edit-source': { resolveLocalPhotoPath: async () => 'photo.png', toLocalPath: path => path },
+    '@/src/lib/editor/edit-source': { resolveLocalPhotoPath: async () => 'photo.png', toLocalPath: path => path },
     '@/src/lib/editor/editor-history': { clearTimeline() {}, keepBlemishBase() {} },
     '@/src/lib/editor/editor-preview': { startEditorPreview: () => ({ unsubscribe() {} }) },
     '@/src/lib/editor/editor-replay': {
@@ -327,10 +327,10 @@ test('closing an editor during async decoding releases late native images withou
       releaseShownImages() {},
     },
     '@/src/lib/editor/editor-pictures': { showStandIn() {} },
-    '@/src/lib/error-message': { errorMessage: String },
-    '@/src/lib/native-image': nativeImages,
-    '@/src/lib/project-store': { projectImageUri: () => '' },
-    '@/src/lib/timeline': { recipeAt: () => ({ adjustments: {}, appliedActions: [] }) },
+    '@/src/lib/utils/error-message': { errorMessage: String },
+    '@/src/lib/native/native-image': nativeImages,
+    '@/src/lib/project/project-store': { projectImageUri: () => '' },
+    '@/src/lib/project/timeline': { recipeAt: () => ({ adjustments: {}, appliedActions: [] }) },
     '@/src/state/edits': edits,
     '@/src/state/history': { timeline: subject(null) },
     '@/src/state/preview': { previewSourceImage: subject(null), showingCheckpoint: subject(false) },

@@ -1,8 +1,8 @@
-import { EDIT_SECTIONS, type EditControl } from '@/src/lib/edit-sections';
+import { EDIT_SECTIONS, type EditControl } from '@/src/lib/project/edit-sections';
 import { applyPreset } from '@/src/lib/editor/editor-history';
-import { listPresets, makePreset, portableRecipe, writePresets, type EditPreset } from '@/src/lib/presets';
-import type { ProjectRecipe } from '@/src/lib/project-store';
-import { useTheme } from '@/src/lib/theme';
+import { listPresets, makePreset, portableRecipe, writePresets, type EditPreset } from '@/src/lib/project/presets';
+import type { ProjectRecipe } from '@/src/lib/project/project-store';
+import { useTheme } from '@/src/lib/ui/theme';
 import { adjustments, appliedActions } from '@/src/state/edits';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, View } from 'react-native';

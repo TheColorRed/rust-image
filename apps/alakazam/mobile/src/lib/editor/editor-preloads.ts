@@ -2,7 +2,7 @@ import { fitted } from '@/src/lib/editor/editor-pictures';
 import type { AbraImage, AbraImageLike } from '@alakazam/mobile';
 import type { Image as AbraPixels } from '@abra/core/image';
 import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
-import type { DataLike, Preloaded, Preloading, SliderControl } from '@/src/lib/edit-sections';
+import type { DataLike, Preloaded, Preloading, SliderControl } from '@/src/lib/project/edit-sections';
 import { analysisVersion } from '@/src/state/analysis';
 
 // This module holds native images, so it imports nothing but types from the controls: saving a control or a tool re-runs
@@ -25,6 +25,15 @@ const analyses = new Map<PreloadFunction, Preloaded>();
 const controlPreloads = new Map<string, PreloadFunction>();
 /** The background preloads (see `SliderControl.preload`) that have started and not finished, so each is started once for a photo. */
 const running = new Set<PreloadFunction>();
+/**
+ * How many background preloads run at once. Each loads several models, and the device runs out of memory when they all load together.
+ */
+const MAX_BACKGROUND_PRELOADS = 2;
+/** Preloads waiting for a free slot in `running`; each asks for its control's preload again when it is called. */
+const waiting: Array<() => void> = [];
+const startWaiting = () => {
+  while (waiting.length && running.size < MAX_BACKGROUND_PRELOADS) waiting.shift()?.();
+};
 /** Counts the photos let go of, so a background preload that finishes after its photo is gone frees what it made. */
 let session = 0;
 
@@ -128,6 +137,10 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
 
   // Not made yet: run it, once, on a photo that is not too large for it. One that is running in the background is waited for.
   if (!held && source && !running.has(preload)) {
+    if (running.size >= MAX_BACKGROUND_PRELOADS) {
+      waiting.push(() => preloadFor(control, width, source));
+      return undefined;
+    }
     // A copy, shrunk when it is wider than the analysis needs. Both are the tool's to change.
     const photo = fitted(source as AbraImage, ANALYSIS_WIDTH, ANALYSIS_WIDTH * 4) as AbraImageLike;
     const analysedWidth = photo.width();
@@ -151,7 +164,8 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
           .catch(error => {
             running.delete(preload);
             console.warn(`[preload] ${control.key} failed:`, error);
-          });
+          })
+          .finally(startWaiting);
         if (__DEV__) console.debug(`[preload] ${control.key} started in the background`);
         return undefined;
       }
@@ -224,12 +238,14 @@ export const clearPreloads = () => {
   for (const byWidth of preloads.values()) for (const held of byWidth.values()) if (!kept.has(held)) free(held);
   preloads.clear();
   controlPreloads.clear();
+  waiting.length = 0;
 };
 
 /** Frees every preloaded image and everything the preloads made of the photo, when the photo goes away. */
 export const releasePreloads = () => {
   session++;
   running.clear();
+  waiting.length = 0;
   clearPreloads();
   for (const analysis of analyses.values()) free(analysis);
   analyses.clear();

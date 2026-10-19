@@ -1,8 +1,8 @@
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { leafControls, scaleBetween, type EditSection } from '@/src/lib/edit-sections';
-import { ownedImage } from '@/src/lib/native-image';
+import { leafControls, scaleBetween, type EditSection } from '@/src/lib/project/edit-sections';
+import { ownedImage } from '@/src/lib/native/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
 export const THUMBNAIL_WIDTH = 112;

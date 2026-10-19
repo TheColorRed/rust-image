@@ -19,8 +19,8 @@ import {
   HIGHLIGHTER_KEY,
   CONTOUR_KEY,
   TEETH_WHITENING_KEY,
-} from '@/src/lib/edit-sections/keys';
-import type { AdjustmentValue } from '@/src/lib/edit-sections';
+} from '@/src/lib/project/edit-sections/keys';
+import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
 
 // #region: Edit controls
 

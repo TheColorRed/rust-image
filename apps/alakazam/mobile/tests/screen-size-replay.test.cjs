@@ -90,8 +90,8 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false, preloade
     'react-native': { Dimensions: { get: () => ({ width: 360, height: 800 }) }, PixelRatio: { get: () => 2 } },
   });
   const modules = {
-    '@/src/lib/batch': { batch: run => run() },
-    '@/src/lib/edit-sections': {
+    '@/src/lib/utils/batch': { batch: run => run() },
+    '@/src/lib/project/edit-sections': {
       EDIT_SECTIONS: [{ key: 'section', controls: [{ key: 'size', kind: 'slider', defaultValue: 0, deferred }] }],
       applyAction() {},
       leafControls: controls => controls,
@@ -115,13 +115,13 @@ function fixture({ box = { width: 320, height: 200 }, deferred = false, preloade
     },
     '@/src/lib/editor/editor-pictures': pictures,
     '@/src/lib/editor/editor-thumbnails': { buildControlThumbnails() {} },
-    '@/src/lib/skin-adjustments': {
+    '@/src/lib/beauty/skin-adjustments': {
       isPersonAdjustment: () => false,
       adjustmentKey: key => key,
       personAdjustmentTargets: () => [],
     },
-    '@/src/lib/analysis': { personIn: () => undefined },
-    '@/src/lib/layers': { withLayers: photo => photo },
+    '@/src/lib/ai/analysis': { personIn: () => undefined },
+    '@/src/lib/beauty/layers': { withLayers: photo => photo },
     '@/src/state/edits': edits,
     '@/src/state/analysis': { analysisVersion$: subject(0) },
     '@/src/state/gestures': { previewBox$: previewBoxes },

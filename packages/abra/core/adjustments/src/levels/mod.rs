@@ -1,5 +1,6 @@
 mod brightness;
 mod contrast;
+mod curves;
 mod exposure;
 mod highlights_shadows;
 mod hue;
@@ -10,6 +11,7 @@ mod vibrance;
 
 pub use brightness::*;
 pub use contrast::*;
+pub use curves::*;
 pub use exposure::*;
 pub use highlights_shadows::*;
 pub use hue::*;

@@ -1,5 +1,5 @@
-import { personIn } from '@/src/lib/analysis';
-import { batch } from '@/src/lib/batch';
+import { personIn } from '@/src/lib/ai/analysis';
+import { batch } from '@/src/lib/utils/batch';
 import {
   applyAction,
   applySlider,
@@ -16,13 +16,13 @@ import {
   type AdjustmentValue,
   type ActionControl,
   type EditSection,
-} from '@/src/lib/edit-sections';
+} from '@/src/lib/project/edit-sections';
 import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor/editor-pictures';
-import { withLayers, type Sheet } from '@/src/lib/layers';
+import { withLayers, type Sheet } from '@/src/lib/beauty/layers';
 import { clearPreloads, preloadFor, releasePreloads } from '@/src/lib/editor/editor-preloads';
 import { buildControlThumbnails, thumbnailPixels } from '@/src/lib/editor/editor-thumbnails';
-import { type ProjectRecipe } from '@/src/lib/project-store';
-import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/skin-adjustments';
+import { type ProjectRecipe } from '@/src/lib/project/project-store';
+import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/beauty/skin-adjustments';
 import {
   activeSectionKey,
   activeSectionKey$,
@@ -75,6 +75,7 @@ export function flushFullReplay() {
 /** Lets go of every screen-size picture and forgets a full-size edit that was waiting, when the session ends. */
 export function releaseShownImages() {
   fullReplayPending = false;
+  clearRenderCache();
   releasePreloads();
   preloadedBase = null;
   replayedBase = null;
@@ -115,6 +116,8 @@ type Step = {
   stage: number;
   /** Whether it only makes the photo remember library effects for the GPU (see `SliderControl.deferred`), so it costs nothing at full size. */
   deferred: boolean;
+  /** Identifies what the step does, so a rendered stack can be reused up to the first step that differs. */
+  signature: string;
   run: (image: AbraImageLike, scale: number) => void;
   /** For a control that has a layer: the layer's sheet, so that the steps next to it go on one canvas. `run` does it alone. */
   sheet?: (image: AbraImageLike, scale: number) => Sheet;
@@ -149,6 +152,7 @@ function appliedSteps(
       key,
       stage: stageOf(section.key, false),
       deferred: !!control.deferred && !control.apply,
+      signature: JSON.stringify(['action', key]),
       run: (image, scale) => applyAction(control, image, scale),
     });
   }
@@ -171,6 +175,7 @@ function appliedSteps(
             value: target.value,
             stage: stageOf(section.key, !!control.layer),
             deferred: false,
+            signature: JSON.stringify([target.key, target.value, target.personId]),
             sheet: control.layer
               ? (image, scale) =>
                   layerSheet(
@@ -202,6 +207,7 @@ function appliedSteps(
         value,
         stage: stageOf(section.key, !!control.layer),
         deferred: !!control.deferred && !control.layer,
+        signature: JSON.stringify([control.key, value, areas]),
         sheet: control.layer
           ? (image, scale) => layerSheet(control, sliderValues(control, value), sliderContext(control, image, scale))
           : undefined,
@@ -230,8 +236,91 @@ function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, f
   return next;
 }
 
-/** Runs the steps on `image`, telling each how much smaller it is than `full`, the photo they are all edits of. */
-function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
+/**
+ * The last stack rendered for the live edit, kept so a change only runs the steps from the first one that differs. `snaps[i]` is
+ * the picture before step `i` (only where no layers are waiting), and `snaps[steps.length]` is the finished picture.
+ */
+type RenderCache = {
+  base: number;
+  full: boolean;
+  width: number;
+  height: number;
+  signatures: string[];
+  snaps: (AbraImage | undefined)[];
+};
+let renderCache: RenderCache | undefined;
+
+/** Frees the pictures the rendered stack kept, so the next render starts from the base. */
+function clearRenderCache() {
+  renderCache?.snaps.forEach(snap => snap?.uniffiDestroy());
+  renderCache = undefined;
+}
+
+/**
+ * Renders the live edit onto a fresh copy of the edit base, as `renderEditStack` does, but reuses what the last render made up to
+ * the first step that changed. The caller owns the result.
+ */
+function renderCachedStack(base: AbraImage, full: boolean): AbraImage {
+  const start = full ? base : shrunkOf('base', base);
+  const steps = appliedSteps();
+  const signatures = steps.map(step => step.signature);
+  const baseId = imageId(base);
+  const width = start.width();
+  const height = start.height();
+  let image: AbraImage;
+  let from = 0;
+  const kept = renderCache;
+  if (kept && kept.base === baseId && kept.full === full && kept.width === width && kept.height === height) {
+    let firstChanged = 0;
+    while (
+      firstChanged < signatures.length &&
+      firstChanged < kept.signatures.length &&
+      signatures[firstChanged] === kept.signatures[firstChanged]
+    ) {
+      firstChanged++;
+    }
+    if (firstChanged === signatures.length && firstChanged === kept.signatures.length) {
+      return kept.snaps[firstChanged]!.clone() as AbraImage;
+    }
+    from = firstChanged;
+    while (!kept.snaps[from]) from--;
+    kept.snaps.forEach((snap, index) => {
+      if (index > from) {
+        snap?.uniffiDestroy();
+        kept.snaps[index] = undefined;
+      }
+    });
+    kept.signatures = signatures;
+    image = kept.snaps[from]!.clone() as AbraImage;
+  } else {
+    clearRenderCache();
+    renderCache = { base: baseId, full, width, height, signatures, snaps: [] };
+    image = start.clone() as AbraImage;
+  }
+  const cache = renderCache!;
+  try {
+    runSteps(image, steps, base, from, (index, state) => {
+      if (!cache.snaps[index]) cache.snaps[index] = state.clone() as AbraImage;
+    });
+  } catch (error) {
+    clearRenderCache();
+    throw error;
+  }
+  return cache.snaps[steps.length]!.clone() as AbraImage;
+}
+
+/**
+ * Runs the steps on `image`, telling each how much smaller it is than `full`, the photo they are all edits of. Runs from step
+ * `from`, which must be a point where no layers are waiting. `capture` is told the image before each step that is not
+ * a layer, and at the end, once the layers are laid.
+ */
+function runSteps(
+  image: AbraImage,
+  steps: Step[],
+  full: AbraImage | null,
+  from = 0,
+  capture?: (index: number, state: AbraImage) => void,
+) {
   const scale = scaleBetween(image, full);
   // Steps with a layer wait here until a step that is not one comes (or the steps end), and then go on a canvas over the photo.
   let sheets: Sheet[] = [];
@@ -250,7 +339,9 @@ function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
     timings.push(`${label} ${Date.now() - started}`);
     return result;
   };
-  for (const step of steps) {
+  if (from === 0) capture?.(0, image);
+  for (let index = from; index < steps.length; index++) {
+    const step = steps[index];
     if (step.sheet) {
       const sheet = step.sheet(image, scale);
       if (sheet.overEarlier) timed('layers', lay);
@@ -258,9 +349,11 @@ function runSteps(image: AbraImage, steps: Step[], full: AbraImage | null) {
       continue;
     }
     timed('layers', lay);
+    capture?.(index, image);
     timed(step.key, () => step.run(image, scale));
   }
   timed('layers', lay);
+  capture?.(steps.length, image);
   if (__DEV__) console.debug(`[steps] ${image.width()}px:`, timings.join(', '));
 }
 
@@ -465,7 +558,7 @@ function replay() {
   // When every control only makes the photo remember effects, the edit is made on the full-size photo, which costs nothing and
   // is what is drawn and saved. Otherwise it is made on a screen-size copy first, and on the full-size photo a moment later.
   const deferred = isStackDeferred();
-  const next = renderEditStack(base, undefined, deferred);
+  const next = renderCachedStack(base, deferred);
   // Keeps a held before/after preview correct even if an edit finishes replaying with a finger down.
   setShown(next);
   if (deferred) {
@@ -499,11 +592,21 @@ function replay() {
  * Full-resolution replay is deferred so immediate feedback can paint. Thumbnail work starts in a
  * separate timer after the main preview's update; async native results publish progressively.
  */
+/** The preview size and analysis the last replay ran for, so a change to either starts the stack again. */
+let renderedBox: unknown;
+let renderedAnalysis: unknown;
+
 export function startReplay(): Subscription {
   const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$])
     .pipe(
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
-      tap(() => {
+      tap(([, , , , box, analysis]) => {
+        // A new preview size or new analysis changes what the steps make, so the rendered stack is not reused.
+        if (box !== renderedBox || analysis !== renderedAnalysis) {
+          renderedBox = box;
+          renderedAnalysis = analysis;
+          clearRenderCache();
+        }
         cancelThumbnailBuild();
         busy.next(!replayHidden.value);
       }),
