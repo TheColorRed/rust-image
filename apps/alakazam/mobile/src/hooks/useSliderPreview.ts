@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { AbraImage } from '@alakazam/mobile';
 import { useObservable } from 'react-rx';
 import { filter, take } from 'rxjs/operators';
-import { areaPoints, layerSheet, skinMaskFor, type SliderControl } from '@/src/lib/project/edit-sections';
+import { areaPoints, layerSheet, skinMaskFor, sliderValues, type SliderControl } from '@/src/lib/project/edit-sections';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { ensureBase, editorPreview, showTool } from '@/src/lib/editor/editor-preview';
 import { hasOtherSteps, isStackDeferred, renderStackWithoutSlider, renderStepsAfterSlider } from '@/src/lib/editor/editor-replay';
@@ -26,7 +26,8 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
   const adjustments = useObservable(adjustments$, {});
   const actions = useObservable(appliedActions$, []);
   const selection = useObservable(personSelection$, personSelection.value);
-  const tool = p_control?.tool;
+  const joint = p_control?.joint;
+  const tool = p_control?.tool ?? joint?.tool;
   const layer = p_control?.layer;
   const key = p_control?.key;
 
@@ -107,7 +108,9 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
             : personAdjustmentTargets(adjustments, key ?? '').flatMap(target => (target.personId === null ? [] : [target.personId]));
           const toolContext = {
            ...context,
-           preloaded: preloadFor(p_control, photo.width()),
+           // A slider of a mixed control is drawn by the control's one tool, which is given what the first slider preloaded, as the
+           // committed replay gives it (see `applyJoint`), and not what the slider that moved preloaded (usually nothing).
+           preloaded: preloadFor(joint && !p_control.tool ? joint.sliders[0] : p_control, photo),
            person,
            others: ownPeople,
            skin: () => skinMaskFor(person?.id, photo, ownPeople),
@@ -121,7 +124,18 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
             return laid;
           }
           // The steps that come after this control in the stack (makeup over the skin) go back over what the drag made.
-          const made = (tool!(photo, pending.values, toolContext) ?? photo) as AbraImage;
+          // A slider of a mixed control is drawn with the committed values of the others.
+          const made = ((
+            joint && !p_control.tool && !p_control.tool
+              ? joint.tool(
+                  photo,
+                  joint.sliders.map(each =>
+                    each.key === key ? pending.values : sliderValues(each, adjustments[each.key]),
+                  ),
+                  toolContext,
+                )
+              : p_control.tool!(photo, pending.values, toolContext)
+          ) ?? photo) as AbraImage;
           renderStepsAfterSlider(key, made);
           return made === photo ? undefined : made;
         }, rest.current.image ?? (full ? (editBaseImage.value ?? undefined) : undefined));

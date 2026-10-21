@@ -1,6 +1,6 @@
 //! Stroke expansion for paths and areas.
 
-use crate::{Area, Path, PointF};
+use crate::{Area, Path, PointF, StrokeWidth};
 use std::f32::consts::PI;
 
 /// Line cap styles for path endpoints.
@@ -30,10 +30,10 @@ const DEFAULT_MITER_LIMIT: f32 = 4.0;
 
 /// A stroke of an open path that has been described but not yet built. Create one with [`Path::stroke`], adjust
 /// it with the `with_*` methods, then build the outline with [`PathStroke::to_path`] or convert it with `into()`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PathStroke<'a> {
   path: &'a Path,
-  width: f32,
+  width: StrokeWidth,
   join: LineJoin,
   cap: LineCap,
   miter_limit: f32,
@@ -61,16 +61,26 @@ impl<'a> PathStroke<'a> {
 
   /// Builds the outline of the stroke as a closed path.
   pub fn to_path(&self) -> Path {
-    let half_width = self.width / 2.0;
     // Use a lower flatten tolerance to produce smoother joins and arcs.
     let points = dedupe(self.path.flatten(0.125));
-    if points.len() < 2 || half_width <= 0.0 {
+    if points.len() < 2 || self.width.widest() <= 0.0 {
       return Path::new();
     }
     let segments = Segments::new(&points, false);
+    // Where each point is along the path, as the width stops say it: `0` at the start and `1` at the end, by length.
+    let total: f32 = segments.lengths.iter().sum();
+    let mut along = 0.0;
+    let half_widths: Vec<f32> = (0..points.len())
+      .map(|at| {
+        if at > 0 {
+          along += segments.lengths[at - 1];
+        }
+        self.width.width_at(if total > 0.0 { along / total } else { 0.0 }) / 2.0
+      })
+      .collect();
 
-    let left = offset_side(&points, &segments, false, 1.0, half_width, self.join, self.miter_limit);
-    let right = offset_side(&points, &segments, false, -1.0, half_width, self.join, self.miter_limit);
+    let left = offset_side(&points, &segments, false, 1.0, &half_widths, self.join, self.miter_limit);
+    let right = offset_side(&points, &segments, false, -1.0, &half_widths, self.join, self.miter_limit);
 
     let first = points[0];
     let last = points[points.len() - 1];
@@ -78,9 +88,9 @@ impl<'a> PathStroke<'a> {
     let end_normal = segments.normals[segments.normals.len() - 1];
 
     let mut outline = left;
-    push_cap(&mut outline, last, end_normal, 1.0, half_width, self.cap);
+    push_cap(&mut outline, last, end_normal, 1.0, half_widths[half_widths.len() - 1], self.cap);
     outline.extend(right.iter().rev());
-    push_cap(&mut outline, first, start_normal, -1.0, half_width, self.cap);
+    push_cap(&mut outline, first, start_normal, -1.0, half_widths[0], self.cap);
 
     to_closed_path(&dedupe(outline))
   }
@@ -101,11 +111,12 @@ impl From<PathStroke<'_>> for Area {
 impl Path {
   /// Strokes this path as an open line. Set the join, cap, and miter limit on the result, then build it with
   /// [`PathStroke::to_path`] or `into()`.
-  /// - `p_width`: The stroke width.
-  pub fn stroke(&self, p_width: f32) -> PathStroke<'_> {
+  /// - `p_width`: How wide the stroke is along the path, where `0` is the start of the path and `1` is its end: a [`StrokeWidth`], or a
+  ///   number for the same width the whole way.
+  pub fn stroke(&self, p_width: impl Into<StrokeWidth>) -> PathStroke<'_> {
     PathStroke {
       path: self,
-      width: p_width,
+      width: p_width.into(),
       join: LineJoin::Miter,
       cap: LineCap::Butt,
       miter_limit: DEFAULT_MITER_LIMIT,
@@ -150,8 +161,9 @@ impl<'a> AreaStroke<'a> {
     }
     let segments = Segments::new(&points, true);
 
-    let outer = offset_side(&points, &segments, true, 1.0, half_width, self.join, self.miter_limit);
-    let inner = offset_side(&points, &segments, true, -1.0, half_width, self.join, self.miter_limit);
+    let half_widths = vec![half_width; points.len()];
+    let outer = offset_side(&points, &segments, true, 1.0, &half_widths, self.join, self.miter_limit);
+    let inner = offset_side(&points, &segments, true, -1.0, &half_widths, self.join, self.miter_limit);
 
     // Trace one ring forwards and the other backwards so they wind in opposite directions and the middle stays
     // empty. A seam joins the two rings; it is crossed once each way, so it adds nothing to the shape.
@@ -206,16 +218,17 @@ impl Segments {
   }
 }
 
-/// Offsets a polyline to one side by half the stroke width, adding joins at the corners.
+/// Offsets a polyline to one side by half the stroke width at each point, adding joins at the corners.
 /// - `p_side`: `1.0` for the side the normals point to, `-1.0` for the other.
+/// - `p_half_widths`: Half the stroke width at each point of the polyline.
 fn offset_side(
-  p_points: &[PointF], p_segments: &Segments, p_closed: bool, p_side: f32, p_half_width: f32, p_join: LineJoin,
+  p_points: &[PointF], p_segments: &Segments, p_closed: bool, p_side: f32, p_half_widths: &[f32], p_join: LineJoin,
   p_miter_limit: f32,
 ) -> Vec<PointF> {
   let normals = &p_segments.normals;
   let lengths = &p_segments.lengths;
-  let offset = |point: PointF, normal: (f32, f32)| {
-    PointF::new(point.x + normal.0 * p_side * p_half_width, point.y + normal.1 * p_side * p_half_width)
+  let offset = |point: PointF, normal: (f32, f32), half_width: f32| {
+    PointF::new(point.x + normal.0 * p_side * half_width, point.y + normal.1 * p_side * half_width)
   };
 
   let mut out = Vec::with_capacity(p_points.len() * 2);
@@ -239,12 +252,12 @@ fn offset_side(
           previous_length: lengths[previous],
           next_length: lengths[next],
           side: p_side,
-          half_width: p_half_width,
+          half_width: p_half_widths[i],
         };
         join.push(&mut out, p_join, p_miter_limit);
       }
       // The two ends of an open line have only one segment each.
-      None => out.push(offset(p_points[i], normals[i.min(normals.len() - 1)])),
+      None => out.push(offset(p_points[i], normals[i.min(normals.len() - 1)], p_half_widths[i])),
     }
   }
   out
@@ -389,6 +402,7 @@ fn to_closed_path(p_points: &[PointF]) -> Path {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::WidthStop;
 
   fn polyline(p_points: &[(f32, f32)]) -> Path {
     let mut path = Path::new();
@@ -477,5 +491,59 @@ mod tests {
     let round = square.stroke(2.0).with_join(LineJoin::Round).to_area();
     assert!(miter.contains((-0.9, -0.9)));
     assert!(!round.contains((-0.9, -0.9)));
+  }
+
+  /// The area of a closed outline, from its flattened points.
+  fn outline_area(p_path: &Path) -> f32 {
+    let points = p_path.flatten(0.05);
+    let mut sum = 0.0;
+    for (at, point) in points.iter().enumerate() {
+      let next = points[(at + 1) % points.len()];
+      sum += point.x * next.y - next.x * point.y;
+    }
+    (sum / 2.0).abs()
+  }
+
+  #[test]
+  fn a_stroke_that_tapers_to_a_point_is_a_triangle() {
+    let line = polyline(&[(0.0, 0.0), (10.0, 0.0)]);
+    let outline = line.stroke(StrokeWidth::from_to(4.0, 0.0)).to_path();
+    // Four wide at the start and nothing at the end, over ten: a triangle of 4 x 10 / 2.
+    assert!((outline_area(&outline) - 20.0).abs() < 0.01, "{}", outline_area(&outline));
+    assert_bounds(outline.bounds().edges(), (0.0, -2.0, 10.0, 2.0));
+  }
+
+  #[test]
+  fn the_width_follows_the_stops_by_length_along_the_path() {
+    // A path of two lines, 10 and 30 long, so the stop at 0.25 is at the corner. Thin to the corner, then wide to the end.
+    let path = polyline(&[(0.0, 0.0), (10.0, 0.0), (10.0, 30.0)]);
+    let width = StrokeWidth::new(vec![WidthStop::new(2.0, 0.0), WidthStop::new(2.0, 0.25), WidthStop::new(10.0, 1.0)]);
+    let outline = path.stroke(width).with_join(LineJoin::Bevel).to_path();
+    let (left, _, right, _) = outline.bounds().edges::<f32>();
+    // The first line is 2 wide (1 each side of y = 0, so the outline does not reach x < 0), and the last point is 10 wide: x = 10 +- 5.
+    assert!((left - 0.0).abs() < 0.1, "{left}");
+    assert!((right - 15.0).abs() < 0.1, "{right}");
+  }
+
+  #[test]
+  fn a_constant_stroke_width_is_the_same_as_a_number() {
+    let line = polyline(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]);
+    let by_number = line.stroke(4.0).with_join(LineJoin::Round).to_path();
+    let by_stops = line.stroke(StrokeWidth::constant(4.0)).with_join(LineJoin::Round).to_path();
+    assert_eq!(by_number.flatten(0.1), by_stops.flatten(0.1));
+  }
+
+  #[test]
+  fn a_round_cap_at_a_point_adds_nothing() {
+    let line = polyline(&[(0.0, 0.0), (10.0, 0.0)]);
+    let outline = line.stroke(StrokeWidth::from_to(4.0, 0.0)).with_cap(LineCap::Round).to_path();
+    // The start is rounded out by 2, and the point at the end is not.
+    assert_bounds(outline.bounds().edges(), (-2.0, -2.0, 10.0, 2.0));
+  }
+
+  #[test]
+  fn a_stroke_with_no_width_has_no_outline() {
+    let line = polyline(&[(0.0, 0.0), (10.0, 0.0)]);
+    assert!(line.stroke(StrokeWidth::constant(0.0)).to_path().flatten(0.1).len() <= 1);
   }
 }

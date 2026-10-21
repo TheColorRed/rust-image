@@ -133,6 +133,30 @@ impl Color {
     self.a = p_a.into().0;
     self
   }
+  /// This color with its hue turned by some degrees, keeping its saturation, value and alpha. The hue wraps around the color wheel, so
+  /// any number of degrees works, and a negative one turns the other way. A gray has no hue, so turning it changes nothing.
+  /// - `p_degrees`: How far to turn the hue: `120` takes red to green, and `180` to cyan.
+  pub fn with_hue_rotated(self, p_degrees: f32) -> Self {
+    let (h, s, v) = self.hsv();
+    Self::from_hsv((h + p_degrees).rem_euclid(360.0), s, v).set_alpha(self.a)
+  }
+
+  /// This color with at least this much saturation, keeping its hue, value and alpha. A color that already has more is unchanged. A gray
+  /// has no hue, so raising its saturation tints it as a hue of `0` (red) would.
+  /// - `p_saturation`: The least saturation, from 0 (gray) to 1 (the purest color of its hue).
+  pub fn with_least_saturation(self, p_saturation: f32) -> Self {
+    let (h, s, v) = self.hsv();
+    Self::from_hsv(h, s.max(p_saturation), v).set_alpha(self.a)
+  }
+
+  /// This color with at least this much value (the brightness of its purest form: 0 is black and 1 is the brightest), keeping its hue,
+  /// saturation and alpha. A color that already has more is unchanged.
+  /// - `p_value`: The least value, from 0 to 1.
+  pub fn with_least_value(self, p_value: f32) -> Self {
+    let (h, s, v) = self.hsv();
+    Self::from_hsv(h, s, v.max(p_value)).set_alpha(self.a)
+  }
+
   /// Returns the RGB values of the color as a tuple.
   pub fn rgb(&self) -> (u8, u8, u8) {
     (self.r, self.g, self.b)
@@ -192,6 +216,39 @@ impl Color {
 #[cfg(test)]
 mod tests {
   use super::Color;
+
+  #[test]
+  fn the_hue_turns_around_the_wheel_and_the_rest_is_kept() {
+    let red = Color::from_rgba(255, 0, 0, 90);
+    assert_eq!(red.with_hue_rotated(120.0).rgba(), (0, 255, 0, 90));
+    assert_eq!(red.with_hue_rotated(240.0).rgba(), (0, 0, 255, 90));
+    // A full turn, and a turn back, come to the same place, and a negative turn goes the other way.
+    assert_eq!(red.with_hue_rotated(360.0).rgba(), red.rgba());
+    assert_eq!(red.with_hue_rotated(-120.0).rgba(), red.with_hue_rotated(240.0).rgba());
+    assert_eq!(red.with_hue_rotated(480.0).rgba(), red.with_hue_rotated(120.0).rgba());
+    // A paler, darker color keeps its saturation and value as the hue moves.
+    let (_, s, v) = Color::from_rgb(200, 100, 100).hsv();
+    let (h2, s2, v2) = Color::from_rgb(200, 100, 100).with_hue_rotated(90.0).hsv();
+    assert!((s - s2).abs() < 0.01 && (v - v2).abs() < 0.01 && (h2 - 90.0).abs() < 2.0, "{h2} {s2} {v2}");
+    // A gray has no hue to turn.
+    assert_eq!(Color::from_rgb(120, 120, 120).with_hue_rotated(90.0).rgb(), (120, 120, 120));
+  }
+
+  #[test]
+  fn saturation_and_value_are_raised_to_a_least_and_never_lowered() {
+    let muted = Color::from_rgba(150, 110, 100, 200);
+    let (h, s, v) = muted.hsv();
+    let (h2, s2, v2) = muted.with_least_saturation(0.9).hsv();
+    assert!((h - h2).abs() < 2.0 && (v - v2).abs() < 0.01 && s2 > 0.88, "{h2} {s2} {v2}");
+    assert_eq!(muted.with_least_saturation(0.9).a, 200);
+    let (h3, s3, v3) = muted.with_least_value(0.95).hsv();
+    assert!((h - h3).abs() < 2.0 && (s - s3).abs() < 0.01 && v3 > 0.94, "{h3} {s3} {v3}");
+    assert_eq!(muted.with_least_value(0.95).a, 200);
+    // A color that has more already is as it was.
+    let vivid = Color::from_rgba(250, 40, 30, 77);
+    assert_eq!(vivid.with_least_saturation(0.5).rgba(), vivid.rgba());
+    assert_eq!(vivid.with_least_value(0.5).rgba(), vivid.rgba());
+  }
 
   #[test]
   fn contrast_ratio_matches_wcag() {

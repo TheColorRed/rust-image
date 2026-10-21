@@ -53,7 +53,7 @@ fn detect_ellipse_from_points(p_points: &[PointF], p_tol: f32) -> Option<(f32, f
 pub fn draw_ellipse_fill(p_img: &mut Image, p_cx: f32, p_cy: f32, p_rx: f32, p_ry: f32, p_brush: &crate::Brush) {
   // Only Solid fill supported
   let (color, opacity) = match p_brush.color() {
-    abra_core::Fill::Solid(c) => (c, p_brush.opacity()),
+    abra_core::Fill::Solid(c) => (c, p_brush.opacity().opacity_at(0.0)),
     _ => return,
   };
   let alpha_base = (color.a as f32 / 255.0) * opacity;
@@ -154,7 +154,7 @@ pub fn draw_ellipse_stroke(p_img: &mut Image, p_cx: f32, p_cy: f32, p_rx: f32, p
   let stroke_w = p_brush.size() as f32;
   let half = stroke_w / 2.0;
   let (color, hardness, opacity) = match p_brush.color() {
-    abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity()),
+    abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity().opacity_at(0.0)),
     _ => {
       // Unsupported brush fill; fallback to no-op
       return;
@@ -241,7 +241,7 @@ pub fn draw_area_fill(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &cra
 
   // Extract color and opacity from brush
   let (color, opacity) = match p_brush.color() {
-    abra_core::Fill::Solid(c) => (c, p_brush.opacity()),
+    abra_core::Fill::Solid(c) => (c, p_brush.opacity().opacity_at(0.0)),
     _ => return,
   };
   let avg_r = color.r as f32;
@@ -310,7 +310,7 @@ pub fn draw_area_stroke(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &c
   let stroke_w = p_brush.size() as f32;
   let half = stroke_w / 2.0;
   let (color, hardness, opacity) = match p_brush.color() {
-    abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity()),
+    abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity().opacity_at(0.0)),
     _ => return,
   };
 

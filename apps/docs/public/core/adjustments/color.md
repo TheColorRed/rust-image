@@ -48,6 +48,45 @@ color::posterize(6).apply(&mut image);
 
 The level count is clamped to `2..=255`. Lower values create a more graphic, banded result.
 
+## Quantize
+
+`quantize` merges the colors of an image into a few. It groups the colors by how alike they look (in the Lab color space), works out the average color of each group, and paints every pixel with the average color of its group. Unlike `posterize`, which cuts each channel on its own and can shift hues, the colors come from the picture itself, so a photo of a red apple on a green table keeps a red and a green:
+
+```rust
+color::quantize(5).apply(&mut image);
+```
+
+The groups are found by k-means on a sample of the pixels, so the same image always gives the same colors. Tune the search with `with_iterations` (default 8) and `with_sample` (default 20000 pixels); every pixel is still painted.
+
+`with_tolerance(distance)` merges colors that are alike. After the groups are found, any two whose average colors are closer than `distance` in the Lab color space (about 2 is the least a person can see, 10 is clearly different, 100 is black against white) are merged, nearest first, into the average of the two, each counted as many times as it has pixels. The number of colors given to `quantize` is then the most there will be. A face that was found as a light, a middle and a dark skin color becomes one skin color, while black, white and a gray stay apart. The default of `0` merges nothing.
+
+`with_lightness(weight)` sets how much a difference in brightness counts, against a difference in color, when deciding how alike two colors are: both when found colors are merged and when each pixel takes the nearest color. The default of `1.0` is the Lab distance as it is. A lower weight such as `0.6` makes the lit and the shaded part of one surface look more alike, since they differ mostly in brightness, and makes a gray look nearer to another gray than to a tan of the same brightness. Without it a pale gray shadow can be nearer a pale tan than the white beside it, and takes the tan's color. Black and white stay apart while the weight is not far below `1.0`. It is not used to find the groups.
+
+To paint with colors you choose, give a palette. Each pixel takes the nearest palette color, and this form runs on the GPU for up to 64 colors. A [`Palette`](../color/palette) can be given as it is, and there are ready made ones such as `Palette::comic()`:
+
+```rust
+color::quantize(0).with_palette([Color::from_rgb(232, 28, 92), Color::from_rgb(255, 214, 0)]).apply(&mut image);
+```
+
+`palette(&image)` returns the colors an image would be painted with, so they can be found once and reused:
+
+```rust
+let palette = color::quantize(5).palette(&image);
+color::quantize(0).with_palette(palette).apply(&mut image);
+```
+
+To replace each color of a picture with a color of your choosing, give `with_sources` the colors that are there and `with_palette` what each should become. A pixel takes the palette color that goes with the source color nearest to it, so every color is swapped for its own new color:
+
+```rust
+let found = color::quantize(6).with_tolerance(25.0).palette(&image);
+let bolder = found.iter().map(|color| make_bolder(color));
+color::quantize(0).with_sources(found.clone()).with_palette(bolder).apply(&mut image);
+```
+
+The sources and the palette need the same number of colors; otherwise the sources are not used.
+
+Finding the colors looks at the whole image, so it always runs on the CPU. With a given palette the result of each pixel depends only on that pixel.
+
 ## Opacity
 
 Reduce the alpha channel by a factor from `0.0` to `1.0`:
@@ -136,6 +175,7 @@ Each range is given a change of `[cyan, magenta, yellow, black]`: positive adds 
 | `invert().apply(image)`                 | Invert RGB channels.                               |
 | `threshold(value).apply(image)`         | Convert pixels to black or white.                  |
 | `posterize(levels).apply(image)`         | Reduce the number of RGB tonal levels.             |
+| `quantize(colors).apply(image)`         | Merge similar colors into their group's average.   |
 | `reduce_opacity(value).apply(image)`    | Scale the alpha channel.                           |
 | `auto_tone().apply(image)`              | Stretch per-channel tonal ranges.                  |
 | `auto_color().apply(image)`              | Stretch levels and neutralize midtone color casts. |

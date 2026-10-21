@@ -4,7 +4,7 @@
 //! related regions. Use the returned [`FaceSegmentation`] to create a mask for any one feature.
 //! It is [`AiModel`] with the model's manifest built in.
 
-use abra_ai_core::{AiError, AiModel, AiOutput, ImageAi, LabelMap, ReportsProgress};
+use abra_ai_core::{AiError, AiModel, AiOutput, ImageAi, LabelMap, Placeable, ReportsProgress};
 use abra_core::Image;
 pub use mask::Mask;
 use std::path::Path;
@@ -54,6 +54,15 @@ impl FaceSegmentation {
   }
 }
 
+impl Placeable for FaceSegmentation {
+  /// The pixels outside the part have no region.
+  fn placed(&self, p_width: u32, p_height: u32, p_x: u32, p_y: u32) -> Self {
+    Self {
+      labels: self.labels.placed(p_width, p_height, p_x, p_y),
+    }
+  }
+}
+
 /// Labels facial features in a face crop with a BiSeNet face-parsing model.
 pub struct FaceParser {
   model: AiModel,
@@ -61,7 +70,7 @@ pub struct FaceParser {
 
 pub mod prelude {
   pub use crate::{FaceParser, FaceRegion, FaceSegmentation, Mask};
-  pub use abra_ai_core::{AiError, ImageAi, ReportsProgress};
+  pub use abra_ai_core::{AiError, ImageAi, Placeable, ReportsProgress};
 }
 
 impl ImageAi for FaceParser {

@@ -49,7 +49,7 @@ let path = Path::line((40, 240), (600, 240));
 painter.stroke_with_brush(&path, &brush);
 ```
 
-The painter converts the path into a stroked area and uses brush hardness and fill to shade the stroke.
+The painter converts the path into a stroked area and uses the brush's width, opacity, hardness and fill to shade the stroke, so a stroke can taper and fade along the path.
 
 ## Fill areas with a brush
 
@@ -62,7 +62,7 @@ painter.fill_area_with_brush(&area, &brush);
 
 ## Convenience functions
 
-For one-off operations, use the free functions documented in [Brushes](./brushes): `paint_with_brush`, `stroke_with_brush`, and `fill_area_with_brush`. Use `Painter` when several operations target the same image and a context makes the workflow clearer.
+A painter holds the image for as many operations as you like. For a single one, make it in place: `Painter::new(&mut image).stroke_with_brush(&path, &brush)`. See [Brushes](./brushes) for the brush's size, width, hardness and opacity.
 
 ## Rasterization behavior
 

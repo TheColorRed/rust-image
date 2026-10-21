@@ -7,7 +7,7 @@ import { Image, type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/project/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { MATTE_UNKNOWN } from '@/src/lib/beauty/eye-makeup';
+import { MATTE_UNKNOWN } from '@/src/lib/ai/edge-matte';
 import { owning } from '@/src/lib/native/native-handles';
 import { people } from '@/src/state/analysis';
 import { type Painting } from '@/src/lib/beauty/layers';

@@ -1,6 +1,7 @@
 pub use abra_core::rgba_to_gray;
 use abra_core::{
-  Area, Color, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm, blend,
+  Area, Channels, Color, ColorStat, Fill, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm,
+  blend,
 };
 use std::borrow::Cow;
 
@@ -195,6 +196,98 @@ impl Mask {
       })
       .collect();
     Mask::from_values(width, height, values)
+  }
+
+  /// Creates a mask of the pixels of an image that are between two brightnesses: `255` where a pixel is no darker than
+  /// `p_darkest` and no lighter than `p_lightest`, `0` where it is not, and values between along the edge when `p_feather` is
+  /// more than `0`. Use it to pick out the shadows, the highlights or the midtones of a picture, then limit an effect to them, or
+  /// combine it with other masks to pick out the shadows of one person only.
+  ///
+  /// The brightness of a pixel is the library's: the ITU-R BT.601 weights of its red, green and blue, from `0` for black to
+  /// `255` for white, ignoring its alpha.
+  /// - `p_image`: The image to look at.
+  /// - `p_darkest`: The darkest brightness that counts fully.
+  /// - `p_lightest`: The lightest brightness that counts fully. A `p_lightest` below `p_darkest` selects nothing.
+  /// - `p_feather`: How many levels of brightness beyond either end ease from `255` down to `0`. `0` is a hard edge.
+  pub fn from_brightness_range(p_image: &Image, p_darkest: u8, p_lightest: u8, p_feather: u8) -> Mask {
+    let (width, height) = p_image.dimensions::<u32>();
+    let feather = p_feather as f32;
+    let values: Vec<u8> = p_image
+      .rgba()
+      .par_chunks_exact(4)
+      .map(|pixel| {
+        let brightness = abra_core::rgba_to_gray(pixel);
+        // How far outside the range the pixel is, in levels.
+        let outside = if brightness < p_darkest {
+          p_darkest - brightness
+        } else if brightness > p_lightest {
+          brightness - p_lightest
+        } else {
+          0
+        };
+        if p_lightest < p_darkest {
+          0
+        } else if outside == 0 {
+          255
+        } else if feather > 0.0 {
+          ((1.0 - outside as f32 / feather).clamp(0.0, 1.0) * 255.0).round() as u8
+        } else {
+          0
+        }
+      })
+      .collect();
+    Mask::from_values(width, height, values)
+  }
+
+  /// The brightness at a share of the way through the pixels this mask covers, from the darkest to the lightest: `0` is the darkest of
+  /// them, `0.5` the median and `1` the lightest, so with a `p_fraction` of `0.3` about the darkest 30% of the covered pixels are at or
+  /// below the level it gives. Use it to set a threshold that suits the subject of a photo, whatever its tones are, for instance to
+  /// turn the darkest third of a person black. The brightness is the library's (see [`Mask::from_brightness_range`]).
+  ///
+  /// Panics when the image and the mask are not the same size.
+  /// - `p_image`: The image to look at.
+  /// - `p_fraction`: The share of the covered pixels, from `0` to `1`. `0.5` is the median.
+  /// - `p_threshold`: Pixels of the mask above this value are covered. `0` covers every pixel the mask reaches at all.
+  ///
+  /// Returns `0` when the mask covers nothing.
+  pub fn brightness_percentile(&self, p_image: &Image, p_fraction: f32, p_threshold: u8) -> u8 {
+    assert!(
+      p_image.dimensions::<u32>() == (self.width(), self.height()),
+      "the image and the mask must be the same size"
+    );
+    let mut counts = abra_core::Bins::new();
+    for (pixel, value) in p_image.rgba().chunks_exact(4).zip(self.values()) {
+      if *value > p_threshold {
+        counts.add(abra_core::rgba_to_gray(pixel));
+      }
+    }
+    if counts.total() == 0 { 0 } else { counts.percentile(p_fraction) }
+  }
+
+  /// The one color that stands for the part of an image this mask covers: the average, median or mode of those pixels (see
+  /// [`Color::from_pixels`]). Use it to find the color of a part of a picture that a mask has found, such as the color of the hair or of
+  /// a shirt, to base another color on. Each covered pixel counts the same however strongly the mask covers it, so grow a mask in (see
+  /// [`Mask::eroded`]) or raise `p_threshold` to leave out its soft edge, where the color of what is next to it has mixed in.
+  ///
+  /// Panics when the image and the mask are not the same size.
+  /// - `p_image`: The image to look at.
+  /// - `p_stat`: Which color stands for the pixels: their average, their median or their most common value.
+  /// - `p_threshold`: Pixels of the mask above this value are covered. `0` covers every pixel the mask reaches at all.
+  ///
+  /// Returns `None` when the mask covers nothing.
+  pub fn color_in(&self, p_image: &Image, p_stat: ColorStat, p_threshold: u8) -> Option<Color> {
+    assert!(
+      p_image.dimensions::<u32>() == (self.width(), self.height()),
+      "the image and the mask must be the same size"
+    );
+    let covered: Vec<u8> = p_image
+      .rgba()
+      .chunks_exact(4)
+      .zip(self.values())
+      .filter(|(_, value)| **value > p_threshold)
+      .flat_map(|(pixel, _)| pixel.iter().copied())
+      .collect();
+    (!covered.is_empty()).then(|| Color::from_pixels(&covered, Channels::RGBA, p_stat))
   }
 
   /// Creates a mask of how much of each pixel of an image is a foreground color rather than a background color, taking each pixel's
@@ -394,6 +487,21 @@ impl Mask {
     self.windowed(p_radius, false)
   }
 
+  /// This mask opened: shrunk and then grown by the same amount, so that specks and thin spurs smaller than the window are taken
+  /// away, while larger regions come back to their size. Use it to clean a mask a model or a color range left with stray dots.
+  /// - `p_radius`: The size of the window to clear. `0` gives the same mask.
+  pub fn opened(&self, p_radius: u32) -> Mask {
+    self.eroded(p_radius).dilated(p_radius)
+  }
+
+  /// This mask closed: grown and then shrunk by the same amount, so that holes and gaps smaller than the window are filled in,
+  /// while the outside of a region stays where it was. Use it to fill the eyes of a face that was found as skin, or the gaps
+  /// in a region a color range left patchy.
+  /// - `p_radius`: The size of the window to fill. `0` gives the same mask.
+  pub fn closed(&self, p_radius: u32) -> Mask {
+    self.dilated(p_radius).eroded(p_radius)
+  }
+
   /// The strongest (`p_strongest`) or weakest value in the square window of `p_radius` pixels around each pixel, done as one
   /// pass along the rows and one along the columns.
   fn windowed(&self, p_radius: u32, p_strongest: bool) -> Mask {
@@ -582,6 +690,30 @@ impl Mask {
     }
   }
 
+  /// Paints a fill onto an image only where this mask is on: a flat color, a gradient or a picture, as strong as the mask is. It is
+  /// what Photoshop calls filling a layer clipped to a selection. Where the mask is `255` the image gets the fill, where it is `0` the
+  /// image is as it was, and in between the two are mixed, with the fill composited over the image as `fill(..).apply(..)` does, so a
+  /// fill that is partly transparent shows what is under it. It is the same as filling an area the size of the image through this mask,
+  /// without having to make the area.
+  ///
+  /// The fill is placed at the top left corner of the image, so a gradient runs across the whole image and a picture starts at the
+  /// corner (use `Fill::with_repeat` to tile one). The mask size must match the image size.
+  /// - `p_image`: The image to paint on.
+  /// - `p_fill`: What to paint: a [`Color`], a gradient or an image.
+  ///
+  /// ```ignore
+  /// skin.fill_image(&mut print, Color::from_rgb(255, 190, 150));
+  /// ```
+  pub fn fill_image<'a>(&self, p_image: &mut Image, p_fill: impl Into<Fill<'a>>) {
+    let (width, height) = p_image.dimensions::<u32>();
+    assert_eq!(self.dimensions::<u32>(), (width, height), "mask must be the same size as the image");
+    if width == 0 || height == 0 {
+      return;
+    }
+    let everywhere = Area::rect((0.0, 0.0), (width as f32, height as f32));
+    fill(everywhere, p_fill).with_mask(self.clone()).apply(p_image);
+  }
+
   fn to_color(&self, p_color: Color) -> Color {
     let c = ((p_color.r as u16 + p_color.g as u16 + p_color.b as u16) / 3) as u8;
     Color::from_rgba(c, c, c, p_color.a)
@@ -676,6 +808,141 @@ mod tests {
   fn row_of(p_colors: &[(u8, u8, u8)]) -> Image {
     let pixels: Vec<u8> = p_colors.iter().flat_map(|(r, g, b)| [*r, *g, *b, 255]).collect();
     Image::new_from_pixels(p_colors.len() as u32, 1, pixels, abra_core::Channels::RGBA)
+  }
+
+  #[test]
+  fn a_fill_is_painted_only_where_the_mask_is_on() {
+    let mut image = row_of(&[(10, 10, 10); 4]);
+    Mask::from_values(4, 1, vec![0, 255, 0, 255]).fill_image(&mut image, Color::from_rgb(255, 0, 0));
+    let pixels = image.rgba();
+    assert_eq!(pixels[0..4], [10, 10, 10, 255]);
+    assert_eq!(pixels[4..8], [255, 0, 0, 255]);
+    assert_eq!(pixels[8..12], [10, 10, 10, 255]);
+    assert_eq!(pixels[12..16], [255, 0, 0, 255]);
+  }
+
+  #[test]
+  fn a_soft_mask_mixes_the_fill_with_what_is_under_it() {
+    let mut image = row_of(&[(0, 0, 0); 3]);
+    Mask::from_values(3, 1, vec![0, 128, 255]).fill_image(&mut image, Color::from_rgb(200, 100, 50));
+    let pixels = image.rgba();
+    assert_eq!(pixels[0..3], [0, 0, 0]);
+    // Half way, to within a level of rounding.
+    for (got, full) in pixels[4..7].iter().zip([200u8, 100, 50]) {
+      assert!((*got as i32 - (full as i32 * 128 / 255)).abs() <= 1, "{pixels:?}");
+    }
+    assert_eq!(pixels[8..11], [200, 100, 50]);
+  }
+
+  #[test]
+  fn a_gradient_runs_across_the_whole_image_not_only_the_part_that_is_on() {
+    use abra_core::Gradient;
+    let mut image = row_of(&[(0, 0, 0); 8]);
+    // Only the right half is on, and the gradient from black to white still starts at the left edge of the image.
+    Mask::from_values(8, 1, vec![0, 0, 0, 0, 255, 255, 255, 255])
+      .fill_image(&mut image, Gradient::from_to(Color::from_rgb(0, 0, 0), Color::from_rgb(255, 255, 255)));
+    let pixels = image.rgba();
+    assert_eq!(pixels[0..4], [0, 0, 0, 255]);
+    assert!(pixels[16] > 100 && pixels[16] < 160, "the fifth pixel is past the middle: {}", pixels[16]);
+    assert!(pixels[28] > 200, "the last is near white: {}", pixels[28]);
+  }
+
+  #[test]
+  fn a_picture_fill_can_be_tiled_through_a_mask() {
+    use abra_core::ImageRepeat;
+    let mut image = row_of(&[(0, 0, 0); 6]);
+    let tile = std::sync::Arc::new(row_of(&[(255, 0, 0), (0, 0, 255)]));
+    Mask::from_values(6, 1, vec![255; 6]).fill_image(&mut image, Fill::image(tile).with_repeat(ImageRepeat::X));
+    let pixels = image.rgba();
+    let reds: Vec<bool> = (0..6).map(|x| pixels[x * 4] == 255).collect();
+    assert_eq!(reds, vec![true, false, true, false, true, false]);
+  }
+
+  #[test]
+  fn a_mask_of_another_size_panics_and_an_empty_image_is_left_alone() {
+    let result = std::panic::catch_unwind(|| {
+      let mut image = row_of(&[(0, 0, 0); 4]);
+      Mask::from_values(3, 1, vec![255; 3]).fill_image(&mut image, Color::from_rgb(255, 0, 0));
+    });
+    assert!(result.is_err());
+    let mut nothing = Image::new(0, 0);
+    Mask::from_values(0, 0, Vec::new()).fill_image(&mut nothing, Color::from_rgb(255, 0, 0));
+    assert_eq!(nothing.dimensions::<u32>(), (0, 0));
+  }
+
+  #[test]
+  fn a_brightness_range_selects_the_pixels_in_it_and_eases_at_the_edges() {
+    let grays = row_of(&[(0, 0, 0), (50, 50, 50), (100, 100, 100), (150, 150, 150), (200, 200, 200), (255, 255, 255)]);
+    // Hard: the two ends of the range count and nothing beyond.
+    assert_eq!(Mask::from_brightness_range(&grays, 50, 150, 0).values(), &[0, 255, 255, 255, 0, 0]);
+    // Soft: 25 levels beyond an end is half way, and 50 is none.
+    let soft = row_of(&[(25, 25, 25), (75, 75, 75), (175, 175, 175), (200, 200, 200)]);
+    let eased = Mask::from_brightness_range(&soft, 50, 150, 50);
+    let found = eased.values();
+    assert!((found[0] as i32 - 128).abs() <= 1 && found[1] == 255 && (found[2] as i32 - 128).abs() <= 1 && found[3] == 0, "{found:?}");
+    // A range that ends before it starts selects nothing, and the whole range selects everything.
+    assert_eq!(Mask::from_brightness_range(&grays, 200, 100, 0).values(), &[0; 6]);
+    assert_eq!(Mask::from_brightness_range(&grays, 0, 255, 0).values(), &[255; 6]);
+  }
+
+  #[test]
+  fn the_brightness_percentile_is_taken_over_the_pixels_the_mask_covers() {
+    let grays = row_of(&[(0, 0, 0), (10, 10, 10), (20, 20, 20), (30, 30, 30), (40, 40, 40), (50, 50, 50), (60, 60, 60), (70, 70, 70), (80, 80, 80), (90, 90, 90)]);
+    let everything = Mask::from_values(10, 1, vec![255; 10]);
+    let median = everything.brightness_percentile(&grays, 0.5, 0);
+    assert!((40..=50).contains(&median), "{median}");
+    // Covering only the lighter half moves the median up into that half.
+    let lighter = Mask::from_values(10, 1, vec![0, 0, 0, 0, 0, 255, 255, 255, 255, 255]);
+    let median = lighter.brightness_percentile(&grays, 0.5, 0);
+    assert!((60..=80).contains(&median), "{median}");
+    // A mask that covers nothing gives 0, and a threshold leaves out the weaker values.
+    assert_eq!(Mask::empty(10, 1).brightness_percentile(&grays, 0.5, 0), 0);
+    let faint = Mask::from_values(10, 1, vec![100; 10]);
+    assert_eq!(faint.brightness_percentile(&grays, 0.5, 100), 0);
+  }
+
+  #[test]
+  fn the_color_of_a_part_of_an_image_is_taken_over_the_pixels_the_mask_covers() {
+    // Four reds and two blues: where the mask covers only the blues, they are the color.
+    let image = row_of(&[(200, 0, 0), (200, 0, 0), (200, 0, 0), (200, 0, 0), (0, 0, 100), (0, 0, 200)]);
+    let blues = Mask::from_values(6, 1, vec![0, 0, 0, 0, 255, 255]);
+    assert_eq!(blues.color_in(&image, ColorStat::Average, 0).map(|color| color.rgba()), Some((0, 0, 150, 255)));
+    let everything = Mask::from_values(6, 1, vec![255; 6]);
+    assert_eq!(everything.color_in(&image, ColorStat::Median, 0).map(|color| color.rgba().0), Some(200));
+    // A threshold leaves out the weaker values, and a mask that covers nothing has no color.
+    let soft = Mask::from_values(6, 1, vec![255, 255, 255, 255, 100, 100]);
+    assert_eq!(soft.color_in(&image, ColorStat::Average, 100).map(|color| color.rgba()), Some((200, 0, 0, 255)));
+    assert_eq!(Mask::empty(6, 1).color_in(&image, ColorStat::Average, 0), None);
+  }
+
+  #[test]
+  #[should_panic(expected = "the same size")]
+  fn the_color_of_a_part_needs_the_image_and_the_mask_to_be_the_same_size() {
+    Mask::empty(3, 1).color_in(&row_of(&[(0, 0, 0)]), ColorStat::Average, 0);
+  }
+
+  #[test]
+  fn opening_takes_away_specks_and_closing_fills_holes() {
+    // A block of 12 by 12 with a one pixel speck outside it and a one pixel hole in it.
+    let mut values = vec![0u8; 30 * 30];
+    for y in 5..17 {
+      for x in 5..17 {
+        values[y * 30 + x] = 255;
+      }
+    }
+    values[10 * 30 + 10] = 0; // the hole
+    values[25 * 30 + 25] = 255; // the speck
+    let mask = Mask::from_values(30, 30, values);
+    let opened = mask.opened(2);
+    assert_eq!(opened.get(25, 25), Some(0), "the speck is gone");
+    assert_eq!(opened.get(8, 8), Some(255), "the block is kept");
+    let closed = mask.closed(2);
+    assert_eq!(closed.get(10, 10), Some(255), "the hole is filled");
+    assert_eq!(closed.get(25, 25), Some(255), "the speck is kept, since closing only fills");
+    assert_eq!(closed.get(2, 2), Some(0), "the outside stays outside");
+    // No window changes nothing.
+    assert_eq!(mask.opened(0).values(), mask.values());
+    assert_eq!(mask.closed(0).values(), mask.values());
   }
 
   #[test]

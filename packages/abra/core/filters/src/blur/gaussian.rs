@@ -275,7 +275,7 @@ mod tests {
     let mut photo = TiledRenderer::with_options(context, width, height, pixels.into(), TileOptions::default().with_tile_size(64))?;
     for out in [100u32, 400] {
       let scale = 200.0 / out as f32;
-      let window = Window { x: 0.0, y: 0.0, width: 200.0, height: 200.0, out_width: out, out_height: out, pad: 0 };
+      let window = Window { x: 0.0, y: 0.0, width: 200.0, height: 200.0, out_width: out, out_height: out, pad: 0, angle: 0.0 };
       photo.render(&window, &passes)?;
       let drawn = photo.read_pixels()?;
       let side = ((drawn.len() / 4) as f32).sqrt() as u32;

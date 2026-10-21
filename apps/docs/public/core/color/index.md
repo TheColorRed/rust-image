@@ -17,6 +17,7 @@ Color documentation covers RGBA values, named colors, fills, gradients, and hist
 | [Fill](./fill)                 | Solid, gradient, and image fills for areas and existing images.                                      |
 | [Gradient](./gradient)         | Color stops, direction, sampling, presets, and overlays.                                             |
 | [Histogram](./histogram)       | Channel counts, clipping, levels LUTs, medians, means, and percentiles.                              |
+| [Palette](./palette)           | Lists of colors, the nearest color of a palette, tones, and ready made palettes of up to 64 colors.  |
 
 ## A complete color workflow
 

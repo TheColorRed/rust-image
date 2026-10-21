@@ -55,6 +55,12 @@ macro_rules! effect_methods {
         image.edit(|image| ::abra::options::prelude::Effect::apply(&effect, image));
       }
 
+      /// A copy of the image with the effect applied, and the image itself left as it was.
+      pub fn applied(&self, image: ::std::sync::Arc<$crate::Image>) -> ::std::sync::Arc<$crate::Image> {
+        let effect = self.0.read().unwrap().clone();
+        ::std::sync::Arc::new($crate::Image::from_core(::abra::options::prelude::Effect::applied(&effect, &image.core())))
+      }
+
       /// Applies the effect to the image later, as the library's `apply(deferred(&mut image))`: the image remembers the effect
       /// and the GPU does it when the picture is drawn, in one run with the effects after it. The effect is applied now when
       /// it cannot wait (no shader, an area or a mask, set to the CPU, or no GPU).
@@ -112,6 +118,11 @@ macro_rules! effect_methods {
       /// Applies the effect to the image now, on whichever hardware suits.
       pub fn apply(&self, image: ::std::sync::Arc<$crate::Image>) {
         image.edit(|image| ::abra::options::prelude::Effect::apply(&self.0, image));
+      }
+
+      /// A copy of the image with the effect applied, and the image itself left as it was.
+      pub fn applied(&self, image: ::std::sync::Arc<$crate::Image>) -> ::std::sync::Arc<$crate::Image> {
+        ::std::sync::Arc::new($crate::Image::from_core(::abra::options::prelude::Effect::applied(&self.0, &image.core())))
       }
 
       /// Applies the effect to the image later, as the library's `apply(deferred(&mut image))`: the image remembers the effect

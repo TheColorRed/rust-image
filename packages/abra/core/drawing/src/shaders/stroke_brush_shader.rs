@@ -1,5 +1,5 @@
 use crate::Shader;
-use abra_core::{Path, PointF};
+use abra_core::{Path, PointF, StrokeOpacity, StrokeWidth};
 
 /// Stroke brush shader: applies hardness-based falloff relative to a path centerline.
 ///
@@ -16,8 +16,12 @@ pub(crate) struct StrokeBrushShader {
   /// Inner shader providing base RGBA values.
   inner: Box<dyn Shader + Send + Sync>,
   fallback_point: PointF,
-  /// Maximum influence distance from the centerline.
-  max_distance: f32,
+  /// How wide the stroke is along the path, `0` at its start and `1` at its end. Half of it is the influence distance from the centerline.
+  width: StrokeWidth,
+  /// How opaque the stroke is along the path, `0` at its start and `1` at its end.
+  opacity: StrokeOpacity,
+  /// How far along the path each flattened point is, from `0` at the start to `1` at the end, by length.
+  along: Vec<f32>,
   /// Falloff hardness in [0.0, 1.0].
   hardness: f32,
   // Pre-flattened path points for fast closest-point queries during shading.
@@ -31,7 +35,8 @@ impl StrokeBrushShader {
   /// Parameters
   /// - `p_inner`: boxed inner shader providing base RGBA values
   /// - `p_path`: path forming the stroke centerline
-  /// - `p_max_distance`: maximum influence distance from the centerline
+  /// - `p_width`: how wide the stroke is along the path; half of it is the influence distance from the centerline
+  /// - `p_opacity`: how opaque the stroke is along the path
   /// - `p_hardness`: falloff hardness in [0.0, 1.0]
   ///
   /// Example
@@ -39,14 +44,25 @@ impl StrokeBrushShader {
   /// let s = StrokeBrushShader::new(inner, path.clone(), 6.0, 0.7);
   /// ```
   pub fn new(
-    p_inner: Box<dyn Shader + Send + Sync>, p_path: &Path, p_max_distance: impl Into<f64>, p_hardness: impl Into<f64>,
+    p_inner: Box<dyn Shader + Send + Sync>, p_path: &Path, p_width: StrokeWidth, p_opacity: StrokeOpacity, p_hardness: impl Into<f64>,
   ) -> Self {
     // Pre-flatten the path to a set of points; choose a tolerance that balances accuracy and performance.
     let flattened = p_path.flatten(1.0);
+    let mut along = vec![0.0; flattened.len()];
+    for at in 1..flattened.len() {
+      let (from, to) = (flattened[at - 1], flattened[at]);
+      along[at] = along[at - 1] + ((to.x - from.x).powi(2) + (to.y - from.y).powi(2)).sqrt();
+    }
+    let total = along.last().copied().unwrap_or(0.0);
+    if total > 0.0 {
+      along.iter_mut().for_each(|length| *length /= total);
+    }
     StrokeBrushShader {
       inner: p_inner,
       fallback_point: p_path.start(),
-      max_distance: p_max_distance.into() as f32,
+      width: p_width,
+      opacity: p_opacity,
+      along,
       hardness: p_hardness.into().clamp(0.0, 1.0) as f32,
       flattened,
     }
@@ -56,11 +72,12 @@ impl StrokeBrushShader {
   /// from the stroke's centerline. This function is used by `shade` to
   /// modulate the alpha channel.
   /// - `p_distance`: perpendicular distance from the stroke centerline.
-  fn compute_alpha_falloff_from_distance(&self, p_distance: f32) -> f32 {
-    if p_distance >= self.max_distance {
+  /// - `p_max_distance`: how far from the centerline the stroke reaches there: half its width.
+  fn compute_alpha_falloff_from_distance(&self, p_distance: f32, p_max_distance: f32) -> f32 {
+    if p_distance >= p_max_distance {
       return 0.0;
     }
-    let normalized_dist = p_distance / self.max_distance;
+    let normalized_dist = p_distance / p_max_distance;
 
     if self.hardness < 0.5 {
       let t = self.hardness * 2.0;
@@ -79,9 +96,9 @@ impl StrokeBrushShader {
 impl Shader for StrokeBrushShader {
   fn shade(&self, p_x: f32, p_y: f32) -> (u8, u8, u8, u8) {
     let (r, g, b, mut a) = self.inner.shade(p_x, p_y);
-    let distance = self.closest_distance_squared(p_x, p_y).sqrt();
-    let falloff = self.compute_alpha_falloff_from_distance(distance);
-    a = ((a as f32) * falloff) as u8;
+    let (distance_sq, along) = self.closest_on_path(p_x, p_y);
+    let falloff = self.compute_alpha_falloff_from_distance(distance_sq.sqrt(), self.width.width_at(along) / 2.0);
+    a = ((a as f32) * falloff * self.opacity.opacity_at(along)) as u8;
     (r, g, b, a)
   }
 }
@@ -97,13 +114,14 @@ impl StrokeBrushShader {
   /// - `p_x`, `p_y`: the query point in device coordinates.
   ///
   /// Returns a `PointF` representing the point on the path closest to the query.
-  fn closest_distance_squared(&self, p_x: f32, p_y: f32) -> f32 {
+  fn closest_on_path(&self, p_x: f32, p_y: f32) -> (f32, f32) {
     if self.flattened.len() < 2 {
       let dx = p_x - self.fallback_point.x;
       let dy = p_y - self.fallback_point.y;
-      return dx * dx + dy * dy;
+      return (dx * dx + dy * dy, 0.0);
     }
     let mut min_distance_sq = f32::MAX;
+    let mut along = 0.0;
     for i in 0..self.flattened.len() - 1 {
       let p1 = self.flattened[i];
       let p2 = self.flattened[i + 1];
@@ -119,8 +137,9 @@ impl StrokeBrushShader {
       let distance_sq = dx * dx + dy * dy;
       if distance_sq < min_distance_sq {
         min_distance_sq = distance_sq;
+        along = self.along[i] + (self.along[i + 1] - self.along[i]) * t;
       }
     }
-    min_distance_sq
+    (min_distance_sq, along)
   }
 }

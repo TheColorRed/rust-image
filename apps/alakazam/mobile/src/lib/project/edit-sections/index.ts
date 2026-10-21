@@ -1,3 +1,4 @@
+import { type ImageSourcePropType } from 'react-native';
 import { skinMaskSized } from '@/src/lib/ai/analysis';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { withLayers, type Painting, type Sheet } from '@/src/lib/beauty/layers';
@@ -32,7 +33,8 @@ export type ToolContext = {
   /**
    * What the control's `preload` made: masks or other images the tool needs but should not make on every call. It is the
    * editor's to free, so a tool must not destroy it. It is the array or the object the `preload` returned, one image or mask
-   * becomes an array of one, and nothing an empty array. Missing for a control with no `preload`, and for a thumb.
+   * becomes an array of one, and nothing an empty array. Missing for a control with no `preload`, and for a thumb when what the
+   * `preload` makes has not been made yet.
    */
   preloaded?: Preloaded;
   /**
@@ -56,6 +58,11 @@ export type ToolContext = {
    * faces are left out of it, so their own value replaces this one for them. Missing for a layer that is for one person.
    */
   others?: number[];
+  /**
+   * For the `thumb` of a picker item: the values the slider the picker saves to holds now, with what the pickers saved after its
+   * own, so a picture changes only its own part and shows the choices made in the other tabs. Missing otherwise.
+   */
+  values?: number[];
 };
 
 /** What a `preload` makes, as the tool gets it: an array, or an object with a name for each image or mask. */
@@ -85,6 +92,13 @@ export const scaleBetween = (image: { width(): number }, full: { width(): number
  */
 export type PerSlider<T> = T | (T | undefined)[];
 
+/**
+ * A setting of one slider that may be given as a pair `[low, high]`: a pair makes the slider a range slider, with two thumbs
+ * that pick a low and a high value. `defaultValue` being a pair is what makes it a range; `min`, `max` and `step` then may be
+ * a pair too, one for each thumb, or a single number for both.
+ */
+export type RangeSetting = number | [number, number];
+
 /** What a slider control has committed: a number for a control with one slider, an array of numbers (one each) for several. */
 export type AdjustmentValue = number | number[];
 
@@ -111,6 +125,11 @@ export type SliderControl<T = unknown> = {
    * or 'plain' as `Range · 40`. Defaults to 'signed'. A slider with a `picker` shows its color on the pill instead.
    */
   pillFormat?: PerSlider<PillFormat>;
+  /**
+   * Words to show in place of a slider's number, for the values that mean something other than a quantity (`Random` at the top
+   * of a rotation). It gets the value and returns the text, or nothing to show the number. Used by the readout and the pill.
+   */
+  valueText?: PerSlider<(value: number) => string | undefined>;
   /** The unique key identifying this control. */
   key: string;
   /** The main label for the control. */
@@ -118,16 +137,18 @@ export type SliderControl<T = unknown> = {
   /** The label displayed for each individual slider, if different from the main label. */
   sliderLabel?: PerSlider<string>;
   /** The minimum value each slider can take. Defaults to 0 if not specified. */
-  min?: PerSlider<number>;
+  min?: PerSlider<RangeSetting>;
   /** The maximum value each slider can take. Defaults to 100 if not specified. */
-  max?: PerSlider<number>;
+  max?: PerSlider<RangeSetting>;
   /** The increment by which each slider value changes. Defaults to 1 if not specified. */
-  step?: PerSlider<number>;
+  step?: PerSlider<RangeSetting>;
   /**
    * The value each slider snaps back to after each release; each drag applies a fresh delta.
-   *  Defaults to 0 if not specified.
+   *  Defaults to 0 if not specified. A pair makes a range slider: `defaultValue: [0, 0, [2, 8]]` has two sliders and a range
+   * slider. A range slider takes two places in the control's value, its low value and then its high value, and in a tabulated
+   * control it is one tab.
    */
-  defaultValue?: PerSlider<number>;
+  defaultValue?: PerSlider<RangeSetting>;
   /**
    * The adjustment keys holding a drawn area for each slider, in slider order (see `colorAreaKey`). Each is a flat list of x and y
    * fractions of the photo, from 0 to 1, with rings separated by `AREA_RING_BREAK` pairs (see `areaPoints`). The area reaches the
@@ -151,10 +172,11 @@ export type SliderControl<T = unknown> = {
    * A Vessel component to show in place of the plain slider, for a slider whose value is better picked another way; one for
    * each slider of a control that has several. The value is still 0 to 1 on the slider's scale. 'skin-tan' is the bar of tans;
    * 'hue' is the bar of colors and 'shade' the bar of shadow shades (a light tan to a dark
-   * brown) and 'glow' the bar of highlighter tints (pearl to rose) and 'infrared' the bar of infrared tints (hot pink to white),
-   * which only pick.
+   * brown) and 'glow' the bar of highlighter tints (pearl to rose) and 'infrared' the bar of infrared tints (hot pink to white) and 'neon' the bar of neon tints (teal to hot pink),
+   * which only pick. 'swatches' has no bar: the slider is chosen from the control's `swatches` alone, so a control can offer only a set of
+   * named colors.
    */
-  picker?: PerSlider<'skin-tan' | 'hue' | 'shade' | 'glow' | 'infrared'>;
+  picker?: PerSlider<'skin-tan' | 'hue' | 'shade' | 'glow' | 'infrared' | 'neon' | 'swatches'>;
   /**
    * Ready-made choices shown above a picker, for people who would not know which sliders to move to get a color (black is no
    * brightness). Tapping one sets the sliders it lists, in `values` (one for each slider; `undefined` leaves a slider alone),
@@ -186,6 +208,15 @@ export type SliderControl<T = unknown> = {
    * method so that a tool may declare a narrower parameter type than the control's `T`.
    */
   tool?(photo: ImageLike, value: T[], context: ToolContext): ImageLike | void;
+  /**
+   * Set by `leafControls` on the sliders of a mixed control with a `tool`: that tool, and the sliders it is made from, which
+   * are applied together as one edit.
+   */
+  joint?: {
+    key: string;
+    sliders: SliderControl[];
+    tool(photo: ImageLike, values: number[][], context: ToolContext): ImageLike | void;
+  };
   /**
    * Set when the `tool` only applies library effects with `applyDeferred`, so it changes no pixels: the photo remembers the
    * effects and the GPU does them when it draws, for the part in view. The edit can then be made on the full-size photo at no
@@ -281,6 +312,85 @@ export type ToolControl<T = unknown> = {
 };
 
 /**
+ * A control that opens a row of controls of its own, one level down: tapping it replaces the section's row with these, with a
+ * way back. The controls inside may be any kind, so a group may hold groups.
+ */
+export type GroupControl = {
+  kind: 'group';
+  key: string;
+  label: string;
+  controls: EditControl[];
+};
+
+/**
+ * A row of controls of mixed kinds (slider, action, picker, ...): each control is one tab of the row, shown the way a tabulated
+ * slider's sliders are. Tapping a tab opens that control. Its controls are part of the section, so they are found by `leafControls`.
+ */
+export type MixedControl = {
+  kind: 'mixed';
+  key: string;
+  label: string;
+  controls: EditControl[];
+  /**
+   * Makes the control's thumbnail, in sections that show one. The controls inside are not given thumbnails of their own, since the
+   * row shows this control as one. Works as a slider's `thumb` does.
+   */
+  thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
+  /**
+   * The effect of the sliders inside, written against the Abra library as a slider's `tool` is, and made once for all of them.
+   * It gets the values of each slider, in the order the sliders are found (including those of mixed controls inside this one),
+   * with the values pickers saved on a slider after that slider's own. A slider with a `tool` of its own keeps it.
+   */
+  tool?(photo: ImageLike, values: number[][], context: ToolContext): ImageLike | void;
+};
+
+/**
+ * A picture the user taps to choose an item: either a file shipped with the app, or the thumbnail the library renders for the
+ * item's key (the same way effect thumbnails are drawn).
+ */
+export type PickerPicture = { kind: 'asset'; source: ImageSourcePropType } | { kind: 'rendered' };
+
+export type PickerItem = {
+  key: string;
+  label: string;
+  picture: PickerPicture;
+  /** What tapping the item does, besides committing its `value` when the picker has a `commitTo`. */
+  onTap?: () => void;
+  /** The number saved when the item is chosen, for a picker with a `commitTo`. */
+  value?: number;
+  /**
+   * Makes the item's picture from the photo, for an item whose `picture` is `rendered`: the editor draws it at thumbnail size, the
+   * way it draws a one-tap control's thumbnail, and shows it in the row. It gets a thumbnail-size copy of the photo, which is its
+   * own to change: it changes it in place and returns nothing, or returns a new image to use instead. An item without one shows
+   * its label.
+   */
+  thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
+};
+
+/**
+ * A control that opens a row of pictures, like the crop tool's aspect choices. Tapping an item calls its own `onTap`. With
+ * `selection: 'one'` the last item tapped stays marked; with `'many'` each tapped item toggles its mark.
+ *
+ * With `commitTo`, tapping an item saves its `value` as the value at `index` of the slider control with that key, after the
+ * values the sliders already hold, and the marked item is the one whose value is saved.
+ */
+export type PickerControl = {
+  kind: 'picker';
+  key: string;
+  label: string;
+  selection: 'one' | 'many';
+  items: PickerItem[];
+  commitTo?: { slider: string; index: number };
+  /**
+   * In a mixed control with a tabulated slider, the index of the slider tab this picker's tab comes after, or -1 for before the first
+   * slider tab, where the control also opens. Without it, it comes last.
+   */
+  after?: number;
+};
+
+export type EditControl = SliderControl | ActionControl | ToolControl | GroupControl | MixedControl | PickerControl;
+
+/**
  * Applies an action to `image`: its own `apply`, or else its tool.
  * The `apply` path is deprecated (see `ActionControl.apply`); use `tool`.
  */
@@ -301,16 +411,30 @@ export const applyAction = (control: ActionControl, image: AbraImageLike, scale 
 /** How a tabulated slider's pill shows its value (see `SliderControl.pillFormat`). */
 export type PillFormat = 'signed' | 'percent' | 'plain';
 
-/** One slider of a control, with every setting filled in. */
-export type SliderSpec = { label: string; min: number; max: number; step: number; defaultValue: number };
+/**
+ * One slider of a control, with every setting filled in. A range slider is two of these in a row: the `low` and then the `high`
+ * thumb, each holding one place of the control's value.
+ */
+export type SliderSpec = {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  valueText?: (value: number) => string | undefined;
+  /** The place of the slider in the control's arrays (`sliderLabel`, `pillFormat`, `picker`), which a range slider shares. */
+  entry: number;
+  /** Which thumb of a range slider this is; not set for a plain slider. */
+  range?: 'low' | 'high';
+};
 
 /** Whether the control has several sliders, which is when any of its per-slider settings is an array. */
 export const isMultiSlider = (control: SliderControl): boolean =>
   [control.sliderLabel, control.min, control.max, control.step, control.defaultValue].some(Array.isArray);
 
 /**
- * The sliders of a control, one for each item of its arrays, or the one slider of a control that has none. Throws when the
- * arrays are not all the same length.
+ * The sliders of a control, one for each item of its arrays, or the one slider of a control that has none. A range slider gives
+ * two. Throws when the arrays are not all the same length.
  */
 export const sliderSpecs = (control: SliderControl): SliderSpec[] => {
   const settings = [control.sliderLabel, control.min, control.max, control.step, control.defaultValue, control.pillFormat];
@@ -324,13 +448,28 @@ export const sliderSpecs = (control: SliderControl): SliderSpec[] => {
   // A setting that is not given, or is left out of an array, is the default. A slider with no label of its own takes the control's.
   const at = <V>(setting: PerSlider<V> | undefined, index: number, fallback: V): V =>
     (Array.isArray(setting) ? setting[index] : setting) ?? fallback;
-  return Array.from({ length: count }, (_, index) => ({
-    label: at(control.sliderLabel, index, control.label),
-    min: at(control.min, index, 0),
-    max: at(control.max, index, 100),
-    step: at(control.step, index, 1),
-    defaultValue: at(control.defaultValue, index, 0),
-  }));
+  // One thumb's share of a setting that may be a pair.
+  const part = (setting: RangeSetting, thumb: 0 | 1) => (Array.isArray(setting) ? setting[thumb] : setting);
+  return Array.from({ length: count }, (_, index): SliderSpec[] => {
+    const base = {
+      label: at(control.sliderLabel, index, control.label),
+      valueText: at(control.valueText, index, undefined),
+      entry: index,
+    };
+    const min = at<RangeSetting>(control.min, index, 0);
+    const max = at<RangeSetting>(control.max, index, 100);
+    const step = at<RangeSetting>(control.step, index, 1);
+    const defaultValue = at<RangeSetting>(control.defaultValue, index, 0);
+    const thumb = (which: 0 | 1, range?: 'low' | 'high'): SliderSpec => ({
+      ...base,
+      min: part(min, which),
+      max: part(max, which),
+      step: part(step, which),
+      defaultValue: part(defaultValue, which),
+      range,
+    });
+    return Array.isArray(defaultValue) ? [thumb(0, 'low'), thumb(1, 'high')] : [thumb(0)];
+  }).flat();
 };
 
 /** What a control's value is while it has not been changed: a number for one slider, one number for each of several. */
@@ -339,19 +478,33 @@ export const sliderDefault = (control: SliderControl): AdjustmentValue => {
   return isMultiSlider(control) ? defaults : defaults[0];
 };
 
-/** The value of each slider, taken from the committed `value` and from the default where there is none. */
+/**
+ * The value of each slider, taken from the committed `value` and from the default where there is none. Values past the last
+ * slider are kept as they are: they belong to something other than a slider, such as a picker that commits to this control.
+ */
 export const sliderValues = (control: SliderControl, value?: AdjustmentValue): number[] => {
   const defaults = sliderSpecs(control).map(spec => spec.defaultValue);
   const committed = value === undefined ? [] : Array.isArray(value) ? value : [value];
-  return defaults.map((fallback, index) => committed[index] ?? fallback);
+  return [...defaults.map((fallback, index) => committed[index] ?? fallback), ...committed.slice(defaults.length)];
 };
 
 /** The pill format of one slider of a control. */
 export const pillFormatAt = (control: SliderControl, index: number): PillFormat =>
   (Array.isArray(control.pillFormat) ? control.pillFormat[index] : control.pillFormat) ?? 'signed';
 
+/** The pill text of a range slider: its label and the low and high values, as `Orbs · 2–8`. */
+export const rangePillText = (low: SliderSpec, lowValue: number, high: SliderSpec, highValue: number): string => {
+  const show = (spec: SliderSpec, value: number) => {
+    const decimals = spec.step >= 1 ? 0 : (String(spec.step).split('.')[1] ?? '').length;
+    return spec.valueText?.(value) ?? value.toFixed(decimals);
+  };
+  return `${low.label} · ${show(low, lowValue)}–${show(high, highValue)}`;
+};
+
 /** The text of a tabulated slider's pill: its label and its value in `format`, rounded to the places its step has. */
 export const pillText = (spec: SliderSpec, value: number, format: PillFormat): string => {
+  const words = spec.valueText?.(value);
+  if (words !== undefined) return format === 'plain' ? `${spec.label} · ${words}` : `${spec.label} (${words})`;
   const decimals = spec.step >= 1 ? 0 : (String(spec.step).split('.')[1] ?? '').length;
   const rounded = Number(value.toFixed(decimals));
   if (format === 'percent') {
@@ -374,7 +527,7 @@ export const sliderContext = (
   areas?: ToolContext['areas'],
 ): ToolContext => ({
   scale,
-  preloaded: control.preload ? preloadFor(control, image.width(), image) : undefined,
+  preloaded: control.preload ? preloadFor(control, image, image) : undefined,
   person,
   others,
   areas,
@@ -464,26 +617,29 @@ export const applySlider = (
   }
 };
 
+/** Applies the tool of a mixed control, made from several sliders, to `image`, given the values of each slider. */
+export const applyJoint = (
+  joint: NonNullable<SliderControl['joint']>,
+  image: AbraImageLike,
+  values: number[][],
+  scale = 1,
+) => {
+  const photo = image.clone();
+  const returned = joint.tool(photo, values, sliderContext(joint.sliders[0], image, scale)) as ImageLike | undefined;
+  image.replaceWith(returned ?? photo);
+  (photo as AbraPixels).uniffiDestroy();
+  if (returned) (returned as AbraPixels).uniffiDestroy();
+};
+
 /** Whether a slider's effect is on, given its committed value (undefined when it has none). */
 export const appliesOnSelect = (control: SliderControl) => control.applyOnSelect !== false;
 
 export const isSliderApplied = (control: SliderControl, value: AdjustmentValue | undefined) =>
   appliesOnSelect(control)
     ? value !== undefined
-    : sliderValues(control, value).some((slider, index) => slider !== sliderSpecs(control)[index].defaultValue);
-
-/**
- * A control that opens a row of controls of its own, one level down: tapping it replaces the section's row with these, with a
- * way back. The controls inside may be any kind, so a group may hold groups.
- */
-export type GroupControl = {
-  kind: 'group';
-  key: string;
-  label: string;
-  controls: EditControl[];
-};
-
-export type EditControl = SliderControl | ActionControl | ToolControl | GroupControl;
+    : sliderValues(control, value).some(
+        (slider, index) => index < sliderSpecs(control).length && slider !== sliderSpecs(control)[index].defaultValue,
+      );
 
 export type EditSection = {
   key: string;
@@ -512,17 +668,73 @@ export const EDIT_SECTIONS: EditSection[] = [
   cleanup,
 ];
 
-/** The controls that do something, with every group opened out into the controls inside it. */
-export const leafControls = (controls: EditControl[]): Exclude<EditControl, GroupControl>[] =>
-  controls.flatMap(control => (control.kind === 'group' ? leafControls(control.controls) : [control]));
+/**
+ * The controls that do something, with every group and mixed control opened out into the controls inside it. A mixed control's
+ * `tool` is given to each slider inside that has none of its own.
+ */
+export const leafControls = (controls: EditControl[]): Exclude<EditControl, GroupControl | MixedControl>[] =>
+  controls.flatMap(control => {
+    if (control.kind === 'group') return leafControls(control.controls);
+    if (control.kind !== 'mixed') return [control];
+    const { tool } = control;
+    const inside = leafControls(control.controls);
+    const joint = tool
+      ? { key: control.key, tool, sliders: inside.filter((inner): inner is SliderControl => inner.kind === 'slider') }
+      : undefined;
+    return inside.map(inner =>
+      joint && inner.kind === 'slider' && !inner.tool && !inner.joint ? { ...inner, joint } : inner,
+    );
+  });
 
 /**
- * The groups to open, outermost first, to reach the group with this key at any depth: the last is that group and the one before
- * it is the group to go back to. Empty when there is no such group.
+ * The controls that get a thumbnail: the leaf controls, except that a mixed control with a `thumb` counts as one, in place of
+ * the controls inside it.
  */
-export const groupPath = (controls: EditControl[], key: string): GroupControl[] => {
+export const thumbnailControls = (controls: EditControl[]): Exclude<EditControl, GroupControl>[] =>
+  controls.flatMap(control =>
+    control.kind === 'group' || (control.kind === 'mixed' && !control.thumb)
+      ? thumbnailControls(control.controls)
+      : [control],
+  );
+
+const holds = (control: EditControl, key: string): boolean =>
+  control.key === key || ('controls' in control && control.controls.some(inner => holds(inner, key)));
+
+/**
+ * The sliders that are worked together with the control with this key: all the sliders of the outermost mixed control it sits in (the
+ * tabs of Pop Art), or just itself. A group only holds controls side by side, so it is not counted. Empty when there is no such control.
+ */
+export const controlsWith = (controls: EditControl[], key: string): SliderControl[] => {
   for (const control of controls) {
-    if (control.kind !== 'group') continue;
+    if (!holds(control, key)) continue;
+    if (control.kind === 'group') return controlsWith(control.controls, key);
+    return leafControls([control]).filter((inner): inner is SliderControl => inner.kind === 'slider');
+  }
+  return [];
+};
+
+/** The mixed control that holds the control with this key directly, if there is one. */
+export const mixedParent = (controls: EditControl[], key: string): MixedControl | undefined => {
+  for (const control of controls) {
+    if (control.kind !== 'group' && control.kind !== 'mixed') continue;
+    if (control.kind === 'mixed' && control.controls.some(inner => inner.key === key)) return control;
+    const inside = mixedParent(control.controls, key);
+    if (inside) return inside;
+  }
+  return undefined;
+};
+
+/**
+ * The groups and tables to open, outermost first, to reach the one with this key at any depth: the last is that one and the one
+ * before it is the one to go back to. Empty when there is no such one.
+ */
+export const groupPath = (controls: EditControl[], key: string): (GroupControl | MixedControl | PickerControl)[] => {
+  for (const control of controls) {
+    if (control.kind === 'picker') {
+      if (control.key === key) return [control];
+      continue;
+    }
+    if (control.kind !== 'group' && control.kind !== 'mixed') continue;
     if (control.key === key) return [control];
     const inside = groupPath(control.controls, key);
     if (inside.length) return [control, ...inside];

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use abra::abra_core::Image as CoreImage;
 use abra::filters::prelude::{
-  blur, distort, edges, morphology, noise, sharpen as sharpen_module, smooth as smooth_module, sobel as sobel_module,
+  blur, distort, edges, halftone as halftone_module, morphology, noise, sharpen as sharpen_module, smooth as smooth_module, sobel as sobel_module,
 };
 // The enums are redeclared below for uniffi, which needs the library's own type in scope under its own name.
 use blur::{ApertureShape, FocusShape};
@@ -19,7 +19,7 @@ use distort::{RippleShape, RippleSize};
 use noise::NoiseDistribution;
 use sobel_module::SobelDirection;
 
-use crate::{Image, Mask};
+use crate::{Color, Image, Mask};
 use crate::effect::effect_methods;
 
 // The shape of the focus area of a focus blur.
@@ -280,6 +280,18 @@ pub fn pinch(amount: f32) -> Arc<Pinch> {
   Arc::new(Pinch(distort::pinch(amount)))
 }
 
+/// Moves the pixels of an image by the brightness of another image. Made by [`displace`].
+#[derive(uniffi::Object)]
+pub struct Displace(distort::Displace);
+
+/// A displacement by the brightness of `map`: mid gray moves nothing, white moves content by `amount_x` and `amount_y` pixels and
+/// black moves it the same distance the other way. A map of another size is stretched over the image.
+#[uniffi::export]
+pub fn displace(map: Arc<Image>, amount_x: f32, amount_y: f32) -> Arc<Displace> {
+  let map: CoreImage = map.core();
+  Arc::new(Displace(distort::displace(&map, amount_x, amount_y)))
+}
+
 /// Ripples the image. Made by [`ripple`].
 #[derive(uniffi::Object)]
 pub struct Ripple(distort::Ripple);
@@ -346,6 +358,70 @@ impl Noise {
   /// How the noise is spread.
   pub fn with_distribution(&self, distribution: NoiseDistribution) -> Arc<Noise> {
     Arc::new(Noise(self.0.clone().with_distribution(distribution)))
+  }
+}
+
+/// Draws a line wherever the color of the image changes: ink where a pixel's color differs from the pixel a thickness to the left of it or
+/// above it, and paper everywhere else. Made by [`color_edges`].
+#[derive(uniffi::Object)]
+pub struct ColorEdges(edges::ColorEdges);
+
+/// Lines of this width in pixels where the color changes.
+#[uniffi::export]
+pub fn color_edges(thickness: u32) -> Arc<ColorEdges> {
+  Arc::new(ColorEdges(edges::color_edges(thickness)))
+}
+
+#[uniffi::export]
+impl ColorEdges {
+  /// How different two colors must be to make an edge: the mean difference of their red, green and blue levels, `0` to `255`. Defaults
+  /// to 16.
+  pub fn with_tolerance(&self, tolerance: u8) -> Arc<ColorEdges> {
+    Arc::new(ColorEdges(self.0.clone().with_tolerance(tolerance)))
+  }
+
+  /// The color of the lines. Defaults to black.
+  pub fn with_ink(&self, ink: Arc<Color>) -> Arc<ColorEdges> {
+    Arc::new(ColorEdges(self.0.clone().with_ink(ink.0)))
+  }
+
+  /// The color everywhere else. Defaults to white.
+  pub fn with_paper(&self, paper: Arc<Color>) -> Arc<ColorEdges> {
+    Arc::new(ColorEdges(self.0.clone().with_paper(paper.0)))
+  }
+}
+
+/// Turns the image into a halftone screen: dots of one ink on a paper color, each as big as the image is dark under it. Made by
+/// [`halftone`].
+#[derive(uniffi::Object)]
+pub struct Halftone(halftone_module::Halftone);
+
+/// A halftone screen with this distance in pixels between the dots of a row.
+#[uniffi::export]
+pub fn halftone(spacing: f32) -> Arc<Halftone> {
+  Arc::new(Halftone(halftone_module::halftone(spacing)))
+}
+
+#[uniffi::export]
+impl Halftone {
+  /// Turns the rows of dots by this many degrees. Defaults to 45.
+  pub fn with_angle(&self, degrees: f32) -> Arc<Halftone> {
+    Arc::new(Halftone(self.0.clone().with_angle(degrees)))
+  }
+
+  /// The color of the dots. Defaults to black.
+  pub fn with_ink(&self, ink: Arc<Color>) -> Arc<Halftone> {
+    Arc::new(Halftone(self.0.clone().with_ink(ink.0)))
+  }
+
+  /// The color between the dots. Defaults to white.
+  pub fn with_paper(&self, paper: Arc<Color>) -> Arc<Halftone> {
+    Arc::new(Halftone(self.0.clone().with_paper(paper.0)))
+  }
+
+  /// How many pixels in each direction are looked at over a dot's cell to work out how dark it is. Defaults to 5.
+  pub fn with_samples(&self, samples: u32) -> Arc<Halftone> {
+    Arc::new(Halftone(self.0.clone().with_samples(samples)))
   }
 }
 
@@ -463,8 +539,11 @@ effect_methods!(
   SurfaceBlur,
   FocusBlur,
   Pinch,
+  Displace,
   Ripple,
   GlowingEdges,
+  ColorEdges,
+  Halftone,
   Noise,
   Despeckle,
   Median,
@@ -480,6 +559,36 @@ mod tests {
   use super::*;
   use abra::abra_core::Channels;
   use abra::filters::prelude::Effect;
+
+  #[test]
+  fn color_edges_draw_a_line_where_the_color_changes() {
+    let pixels: Vec<u8> = (0..10).flat_map(|x| if x < 5 { [200, 20, 20, 255] } else { [20, 20, 200, 255] }).collect();
+    let image = Arc::new(Image::new_from_pixels(10, 1, pixels, Channels::RGBA));
+    color_edges(2)
+      .with_tolerance(10)
+      .with_ink(Arc::new(Color::from_rgb(0, 0, 0)))
+      .with_paper(Arc::new(Color::from_rgb(255, 255, 255)))
+      .apply_on_cpu(image.clone());
+    let rgba = image.rgba();
+    let ink: Vec<usize> = (0..10).filter(|x| rgba[x * 4] == 0).collect();
+    assert_eq!(ink, vec![5, 6]);
+  }
+
+  #[test]
+  fn a_halftone_is_all_paper_on_white_and_all_ink_on_black() {
+    let paint = |gray: u8| {
+      let pixels: Vec<u8> = (0..24 * 24).flat_map(|_| [gray, gray, gray, 255]).collect();
+      Arc::new(Image::new_from_pixels(24, 24, pixels, Channels::RGBA))
+    };
+    let ink = Arc::new(Color::from_rgb(200, 30, 60));
+    let paper = Arc::new(Color::from_rgb(250, 240, 220));
+    let white = paint(255);
+    halftone(8.0).with_ink(ink.clone()).with_paper(paper.clone()).with_angle(30.0).apply_on_cpu(white.clone());
+    assert!(white.rgba().chunks_exact(4).all(|pixel| pixel[..3] == [250, 240, 220]));
+    let black = paint(0);
+    halftone(8.0).with_ink(ink).with_paper(paper).with_samples(3).apply_on_cpu(black.clone());
+    assert!(black.rgba().chunks_exact(4).all(|pixel| pixel[..3] == [200, 30, 60]));
+  }
 
   const WIDTH: u32 = 16;
   const HEIGHT: u32 = 12;
@@ -603,6 +712,16 @@ mod tests {
         ),
       ),
       ("pinch", handle_and_library(|i| pinch(0.5).apply_on_cpu(i), |e| distort::pinch(0.5).apply_on_cpu(e))),
+      (
+        "displace",
+        handle_and_library(
+          |i| displace(new_image(), 6.0, 3.0).apply_on_cpu(i),
+          |e| {
+            let map = CoreImage::new_from_pixels(WIDTH, HEIGHT, picture(), Channels::RGBA);
+            distort::displace(&map, 6.0, 3.0).apply_on_cpu(e)
+          },
+        ),
+      ),
       (
         "ripple",
         handle_and_library(

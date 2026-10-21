@@ -1,17 +1,16 @@
-import { ResizeTarget } from '@abra/core/canvas';
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { rectOrigin } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
-import { resize } from '@abra/core/transform';
 import { type ToolContext } from '@/src/lib/project/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
 import { paintSheet, type Painting } from '@/src/lib/beauty/layers';
 import { AiModel } from '@abra/core';
-import { aiModelPath, runAiModelAsync, runAiModelGuidedAsync } from '@alakazam/mobile';
+import { aiModelPath, runAiModelAsync } from '@alakazam/mobile';
 import { aiProgress } from '@/src/state/ai-progress';
 import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, SKIN_SEGMENTATION, belongsTo, boxKey, findFacesAsync, model, unloadModel } from '@/src/lib/ai/faces';
+import { edgeMatte } from '@/src/lib/ai/edge-matte';
 import { owning } from '@/src/lib/native/native-handles';
 
 const LIPS = ['upper lip', 'lower lip'];
@@ -252,108 +251,6 @@ const regionAt = (
  * Which set of masks `makeupMasks` makes. A project saves the masks it made and opens with those, so a project saved with an older set
  * has the models run once more, and saves the new set. Raise it when `makeupMasks` makes a new kind.
  */
-export const MAKEUP_MASKS_VERSION = 5;
-
-/**
- * How far from the hair the model found, as a fraction of the photo's width, the edge refinement model is left to decide: the trimap is
- * sure hair inside this, sure background outside it, and unknown in the band between. Wide enough for the wisps the first model missed.
- */
-export const MATTE_UNKNOWN = 0.012;
-
-/**
- * How the edge refinement model is given the hair. The photo the masks are made on is small (a preview), so a strand of hair is a pixel or
- * two across and the model, which sees 1024 pixels at most, has little to go on. The part of the photo with hair is enlarged by
- * `MATTE_SCALE` and given to the model in tiles of `MATTE_TILE` pixels that overlap by `MATTE_OVERLAP`, each tile with the model's full attention.
- */
-const MATTE_SCALE = 1.5;
-const MATTE_TILE = 1024;
-const MATTE_OVERLAP = 128;
-
-/** Where tiles start along a side of `length` pixels: the first at 0, the last ending at the side, and each overlapping the one before. */
-const tileStarts = (length: number): number[] => {
-  if (length <= MATTE_TILE) return [0];
-  const count = Math.ceil((length - MATTE_OVERLAP) / (MATTE_TILE - MATTE_OVERLAP));
-  return Array.from({ length: count }, (_, at) => (at === count - 1 ? length - MATTE_TILE : at * (MATTE_TILE - MATTE_OVERLAP)));
-};
-
-/**
- * The alpha of the hair from the edge refinement model, as a mask of the whole photo (`hair|matte`): `hair` is the trimap's guess and the
- * model decides the band around its edge. Only the part of the photo the band is in is looked at, enlarged and in tiles (see `MATTE_SCALE`).
- * Nothing when there is no hair.
- */
-const hairMatte = async (
-  matting: NonNullable<ReturnType<typeof model>>,
-  photo: ImageLike,
-  hair: MaskLike,
-  keep: <V>(value: V) => V,
-  progress: (share: number) => void,
-): Promise<MaskLike | undefined> => {
-  const reach = Math.max(2, Math.round(photo.width() * MATTE_UNKNOWN));
-  const grown = keep(hair.dilated(reach));
-  const box = grown.bounds(0);
-  if (!box) return undefined;
-  const [x, y] = [Math.max(0, Math.floor(box.x)), Math.max(0, Math.floor(box.y))];
-  const part = {
-    x,
-    y,
-    width: Math.min(photo.width(), Math.ceil(box.x + box.width)) - x,
-    height: Math.min(photo.height(), Math.ceil(box.y + box.height)) - y,
-  };
-  if (part.width < 1 || part.height < 1) return undefined;
-  const unknown = keep(grown.toImage());
-  unknown.mul(128 / 255);
-  const trimap = keep(keep(Mask.fromImage(unknown)).maximum(keep(hair.eroded(reach))).cropped(part));
-
-  // The part of the photo and its trimap, enlarged.
-  const [width, height] = [Math.round(part.width * MATTE_SCALE), Math.round(part.height * MATTE_SCALE)];
-  const picture = keep(photo.cropped(part.x, part.y, part.width, part.height));
-  keep(resize(ResizeTarget.Exact.new({ width, height }))).apply(picture);
-  const guide = keep(trimap.resized(width, height, TransformAlgorithm.Bilinear));
-
-  // Each tile is run alone and only its middle is kept, where the model has context all around: a tile loses its outer half-overlap on each
-  // side that has a neighbor. A tile with nothing for the model to decide is skipped.
-  const xs = tileStarts(width);
-  const ys = tileStarts(height);
-  const trim = MATTE_OVERLAP / 2;
-  let alpha: MaskLike | undefined;
-  for (const [row, top] of ys.entries()) {
-    for (const [column, left] of xs.entries()) {
-      const tile = { x: left, y: top, width: Math.min(MATTE_TILE, width), height: Math.min(MATTE_TILE, height) };
-      const tileGuide = keep(guide.cropped(tile));
-      const done = () => progress((row * xs.length + column + 1) / (xs.length * ys.length));
-      if (!tileGuide.bounds(0)) {
-        done();
-        continue;
-      }
-      const found = keep(
-        await runAiModelGuidedAsync(
-          matting,
-          keep(picture.cropped(tile.x, tile.y, tile.width, tile.height)) as Parameters<typeof runAiModelGuidedAsync>[1],
-          tileGuide as Parameters<typeof runAiModelGuidedAsync>[2],
-        ),
-      );
-      const [cutLeft, cutTop] = [column > 0 ? trim : 0, row > 0 ? trim : 0];
-      const [cutRight, cutBottom] = [column < xs.length - 1 ? trim : 0, row < ys.length - 1 ? trim : 0];
-      const middle = keep(
-        keep(found.mask()).cropped({
-          x: cutLeft,
-          y: cutTop,
-          width: tile.width - cutLeft - cutRight,
-          height: tile.height - cutTop - cutBottom,
-        }),
-      );
-      const placed = keep(middle.placed(width, height, { x: left + cutLeft, y: top + cutTop }));
-      alpha = alpha ? keep(alpha.maximum(placed)) : placed;
-      done();
-    }
-  }
-  if (__DEV__) console.debug('[hair] edge refinement looked at', width, 'x', height, 'in', xs.length * ys.length, 'tiles');
-  if (!alpha) return undefined;
-  return keep(alpha.resized(part.width, part.height, TransformAlgorithm.Bilinear)).placed(photo.width(), photo.height(), {
-    x: part.x,
-    y: part.y,
-  });
-};
 
 /**
  * The skin model read for its hair class instead of its skin classes. It is the same `.onnx` file, so it needs no download of its own:
@@ -428,11 +325,6 @@ export const makeupMasks = async (photo: ImageLike): Promise<Record<string, Mask
 };
 
 /**
- * Which set of masks `hairMasks` makes, kept with the project like `MAKEUP_MASKS_VERSION`. Raise it when `hairMasks` makes a new kind.
- */
-export const HAIR_MASKS_VERSION = 1;
-
-/**
  * Runs the hair analysis once and keeps what Hair Color is made from: the hair of the whole photo (`hair|all`), the skin of the face and
  * body to keep it off (`bodyskin|all`), and, with the edge refinement model on this device, the hair's alpha (`hair|matte`). It is
  * the hair controls' own analysis, so the other Beauty controls never pay for the edge model. The models run in the background, like
@@ -466,7 +358,7 @@ export const hairMasks = async (photo: ImageLike): Promise<Record<string, MaskLi
         const started = Date.now();
         let matte: MaskLike | undefined;
         try {
-          matte = await hairMatte(refiner, mine, made['hair|all'], keep, share => aiProgress.next({ ...aiProgress.value, hair: share }));
+          matte = await edgeMatte(refiner, mine, made['hair|all'], keep, share => aiProgress.next({ ...aiProgress.value, hair: share }));
         } finally {
           // The model holds gigabytes of memory after it has run, and it runs once per photo, so it is not kept.
           unloadModel(EDGE_REFINEMENT);

@@ -1,12 +1,10 @@
-import { type Image as AbraPixels } from '@abra/core/image';
-import { findPeopleAsync, personDetectionDownloaded } from '@alakazam/mobile';
-import { aiProgress } from '@/src/state/ai-progress';
+import { personDetectionDownloaded } from '@alakazam/mobile';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { useObservable } from 'react-rx';
 import { combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
-import { detectSkin, peopleNotHealed, personAt } from '@/src/lib/ai/analysis';
+import { detectPeople, detectSkin, peopleNotHealed, personAt } from '@/src/lib/ai/analysis';
 import { timeline } from '@/src/state/history';
 import { replacedSpots } from '@/src/lib/project/timeline';
 import { findFaceBoxes } from '@/src/lib/ai/faces';
@@ -81,25 +79,10 @@ export function PersonSelectionToolController() {
             error: null,
           });
           // The people were found already when the photo is a saved project, or when the selector was opened before.
-          const finding = people.value ? Promise.resolve(people.value) : findPeopleAsync(image);
-          if (!people.value) {
-            aiProgress.next({ ...aiProgress.value, people: null });
-            finding.then(
-              () => aiProgress.next({ ...aiProgress.value, people: 1 }),
-              () => {
-                // A run that failed did no work, so it leaves nothing on the bar.
-                const { people: _failed, ...others } = aiProgress.value;
-                aiProgress.next(others);
-              },
-            );
-          }
-          finding.then(
+          // The people are found when the photo opens, so this normally has them already; if that run is still going, this waits for it.
+          detectPeople(image).then(
             found => {
-              if (requestId !== currentRequest || !personSelection.value.focused) {
-                if (found !== people.value) found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
-                return;
-              }
-              people.next(found);
+              if (requestId !== currentRequest || !personSelection.value.focused) return;
               // Someone a tool has removed from the photo is not there to pick any more.
               const { entries, cursor } = timeline.value;
               const present = peopleNotHealed(found, replacedSpots(entries, cursor), (originalImage.value ?? image).width());

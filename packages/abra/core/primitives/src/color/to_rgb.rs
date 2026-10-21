@@ -1,4 +1,5 @@
-fn lab_to_linear_rgb(p_l: f32, p_a: f32, p_b: f32) -> (f32, f32, f32) {
+/// Converts Lab to linear-light RGB, without clamping: out-of-gamut colors have a channel below 0 or above 1.
+pub(crate) fn lab_to_linear_rgb(p_l: f32, p_a: f32, p_b: f32) -> (f32, f32, f32) {
   // XYZ <-> Lab helpers (D65 white point)
   const XN: f32 = 0.95047;
   const YN: f32 = 1.00000;
@@ -53,8 +54,8 @@ pub fn hsl_to_rgb(p_h: f32, p_s: f32, p_l: f32) -> (u8, u8, u8) {
   chroma_to_rgb(p_h, c, p_l - c / 2.0)
 }
 /// Shared final step of the HSV and HSL conversions: places chroma `p_c` on the hue sector for
-/// `p_h` (degrees) and adds the lightness offset `p_m`.
-fn chroma_to_rgb(p_h: f32, p_c: f32, p_m: f32) -> (u8, u8, u8) {
+/// `p_h` (degrees) and adds the lightness offset `p_m`. The channels are 0-1, not rounded to bytes.
+pub(crate) fn chroma_to_unit_rgb(p_h: f32, p_c: f32, p_m: f32) -> (f32, f32, f32) {
   let x = p_c * (1.0 - (((p_h / 60.0) % 2.0) - 1.0).abs());
   let (r1, g1, b1) = if p_h < 60.0 {
     (p_c, x, 0.0)
@@ -69,7 +70,21 @@ fn chroma_to_rgb(p_h: f32, p_c: f32, p_m: f32) -> (u8, u8, u8) {
   } else {
     (p_c, 0.0, x)
   };
-  (((r1 + p_m) * 255.0).round() as u8, ((g1 + p_m) * 255.0).round() as u8, ((b1 + p_m) * 255.0).round() as u8)
+  (r1 + p_m, g1 + p_m, b1 + p_m)
+}
+fn chroma_to_rgb(p_h: f32, p_c: f32, p_m: f32) -> (u8, u8, u8) {
+  let (r, g, b) = chroma_to_unit_rgb(p_h, p_c, p_m);
+  ((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+}
+/// Converts HSV to RGB with channels 0-1 and no rounding or clamping.
+pub(crate) fn hsv_to_unit_rgb(p_h: f32, p_s: f32, p_v: f32) -> (f32, f32, f32) {
+  let c = p_v * p_s;
+  chroma_to_unit_rgb(p_h, c, p_v - c)
+}
+/// Converts HSL to RGB with channels 0-1 and no rounding or clamping.
+pub(crate) fn hsl_to_unit_rgb(p_h: f32, p_s: f32, p_l: f32) -> (f32, f32, f32) {
+  let c = (1.0 - (2.0 * p_l - 1.0).abs()) * p_s;
+  chroma_to_unit_rgb(p_h, c, p_l - c / 2.0)
 }
 /// Converts LAB color to RGB color space.
 /// - `p_l`: The lightness component (0-100).

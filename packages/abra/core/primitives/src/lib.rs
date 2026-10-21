@@ -8,6 +8,9 @@ pub mod image;
 pub mod resolution;
 
 pub use self::channels::{Channel, ChannelMask, Channels};
-pub use self::color::{Bins, Color, ColorStat, Harmony, Histogram, LumaStandard, luma};
+pub use self::color::{
+  Bins, Color, ColorSpace, ColorStat, Harmony, Histogram, HueDirection, ColorInterpolation, LumaStandard, Palette,
+  luma,
+};
 pub use self::image::{DeferredPixels, Image};
 pub use self::resolution::Resolution;

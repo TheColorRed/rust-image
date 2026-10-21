@@ -39,6 +39,8 @@ export interface SliderProps {
   onReset?: () => void;
   /** Trigged when the slider value is triggered based on `triggerType`. */
   onTrigger?: (value: number) => void;
+  /** Words to show in place of the number for some values: it gets the value and returns the text, or nothing for the number. */
+  valueText?: (value: number) => string | undefined;
   /** Shown at the start of the header line, before the label. */
   leading?: ReactNode;
   /** Shown at the end of the header line, after the reset button. */
@@ -61,6 +63,7 @@ export function Slider({
   onChange,
   onReset,
   onTrigger,
+  valueText,
   leading,
   trailing,
 }: SliderProps) {
@@ -110,7 +113,7 @@ export function Slider({
         <Text style={styles.label} numberOfLines={1}>
           {label}
         </Text>
-        <Text style={styles.value}>{formatValue(value, step)}</Text>
+        <Text style={styles.value}>{valueText?.(value) ?? formatValue(value, step)}</Text>
         {reset && (
           <Pressable onPress={handleReset} hitSlop={8} style={styles.resetButton}>
             <RotateCcw color={colors.textSecondary} size={16} />

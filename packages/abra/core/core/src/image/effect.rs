@@ -188,6 +188,16 @@ pub trait Effect: Sized + Send + Sync {
   fn apply<T: ApplyTarget<Self>>(&self, p_target: T) {
     p_target.receive(self);
   }
+
+  /// A copy of an image with the operation applied, and the image itself left as it was. It is `apply` on a clone, for when both the
+  /// original and the result are wanted, such as a layer made from a photo that is then laid back over it. It is limited to the
+  /// operation's area and mask and runs on whichever hardware suits, as [`apply`](Self::apply) does.
+  /// - `p_image`: The image to take a copy of.
+  fn applied(&self, p_image: &Image) -> Image {
+    let mut result = p_image.clone();
+    self.apply(&mut result);
+    result
+  }
 }
 
 impl<T: Effect> CpuProcessor for T {
@@ -403,5 +413,32 @@ mod tests {
     assert_eq!(red_at(&image, 20, 3), 0, "right of the area");
     assert_eq!(red_at(&image, 12, 0), 0, "above the area");
     assert_eq!(red_at(&image, 12, 6), 0, "below the area");
+  }
+
+  #[test]
+  fn applied_gives_the_result_and_leaves_the_image_alone() {
+    let image = Image::new_from_pixels(32, 8, [0, 0, 0, 255].repeat(32 * 8), Channels::RGBA);
+    let effect = Columns {
+      positional: false,
+      options: None,
+    };
+    let result = effect.applied(&image);
+    assert_eq!(red_at(&result, 7, 3), 7, "the result has the effect");
+    assert_eq!(red_at(&image, 7, 3), 0, "the image does not");
+    // It matches applying to a copy by hand.
+    let mut by_hand = image.clone();
+    effect.apply(&mut by_hand);
+    assert_eq!(result.to_rgba_vec(), by_hand.to_rgba_vec());
+  }
+
+  #[test]
+  fn applied_is_limited_to_the_area_of_the_operation() {
+    let image = Image::new_from_pixels(32, 8, [0, 0, 0, 255].repeat(32 * 8), Channels::RGBA);
+    let effect = Columns {
+      positional: true,
+      options: Some(ApplyOptions::new().with_area(Area::rect((10.0, 2.0), (4.0, 3.0)))),
+    };
+    let result = effect.applied(&image);
+    assert_eq!((red_at(&result, 12, 3), red_at(&result, 5, 3)), (12, 0));
   }
 }

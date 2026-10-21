@@ -1,4 +1,4 @@
-use abra_core::{Area, Color, Fill};
+use abra_core::{Area, Color, Fill, StrokeOpacity, StrokeWidth};
 
 /// A brush represents a drawing tool with a specific size.
 /// It encapsulates properties such as size, shape (area), and fill color.
@@ -13,26 +13,29 @@ use abra_core::{Area, Color, Fill};
 /// ```
 #[derive(Clone, Debug)]
 pub struct Brush<'a> {
-  /// The size of the brush.
+  /// The size of the brush. It is the width of a stroke, unless `width` says otherwise, and the size of a dab.
   size: u32,
+  /// How wide a stroke along a path is, when it changes along the path. Nothing means the stroke is `size` wide all the way.
+  width: Option<StrokeWidth>,
   /// The shape of the brush as an area.
   area: Area,
   /// The fill color of the brush.
   color: Fill<'a>,
   /// The hardness of the brush (0.0 to 1.0).
   hardness: f32,
-  /// The opacity of the brush (0.0 to 1.0).
-  opacity: f32,
+  /// How opaque the brush is: one number, or stops along a stroke, where `0` is the start of the stroke and `1` is its end.
+  opacity: StrokeOpacity,
 }
 
 impl<'a> Default for Brush<'a> {
   fn default() -> Self {
     Brush {
       size: 5,
+      width: None,
       area: Area::circle((0, 0), 5),
       color: Fill::Solid(Color::black()),
       hardness: 0.0,
-      opacity: 1.0,
+      opacity: StrokeOpacity::default(),
     }
   }
 }
@@ -49,10 +52,19 @@ impl<'a> Brush<'a> {
   pub fn new() -> Self {
     Self::default()
   }
-  /// Sets the size of the brush.
+  /// Sets the size of the brush: the size of a dab and the width of a stroke, the same all the way along it. It replaces a width set with
+  /// [`Brush::with_width`].
   /// - `p_size`: The size to set for the brush.
   pub fn with_size(mut self, p_size: u32) -> Self {
     self.size = p_size;
+    self.width = None;
+    self
+  }
+  /// Sets how wide a stroke along a path is, where `0` is the start of the path and `1` is its end, so a stroke can taper or swell. A
+  /// number is the same width all the way. A dab and a stroke that is not along a path (a stroke overlay, drawn through points) still use [`Brush::size`].
+  /// - `p_width`: The width along the stroke.
+  pub fn with_width(mut self, p_width: impl Into<StrokeWidth>) -> Self {
+    self.width = Some(p_width.into());
     self
   }
   /// Sets the area of the brush.
@@ -74,14 +86,20 @@ impl<'a> Brush<'a> {
     self
   }
   /// Sets the opacity of the brush.
-  /// - `p_opacity`: The opacity value to set for the brush (0.0 to 1.0). A value of 0.0 is fully transparent, while 1.0 is fully opaque.
-  pub fn with_opacity(mut self, p_opacity: f32) -> Self {
-    self.opacity = p_opacity.clamp(0.0, 1.0);
+  /// - `p_opacity`: A [`StrokeOpacity`]: how opaque a stroke is at each place along it, where `0` is its start and `1` is its end. A
+  ///   number is the same opacity all the way, from `0.0` (fully transparent) to `1.0` (fully opaque, the brush's default). A dab, an area
+  ///   fill and the stroke of a closed area have no line to run along, so they use the opacity at the start.
+  pub fn with_opacity(mut self, p_opacity: impl Into<StrokeOpacity>) -> Self {
+    self.opacity = p_opacity.into();
     self
   }
   /// Returns the size of the brush.
   pub fn size(&self) -> u32 {
     self.size
+  }
+  /// Returns how wide a stroke along a path is: what was set with [`Brush::with_width`], or the brush's size all the way along.
+  pub fn width(&self) -> StrokeWidth {
+    self.width.clone().unwrap_or_else(|| StrokeWidth::constant(self.size))
   }
   /// Returns the area shape of the brush.
   pub fn area(&self) -> &Area {
@@ -95,8 +113,8 @@ impl<'a> Brush<'a> {
   pub fn hardness(&self) -> f32 {
     self.hardness
   }
-  /// Returns the opacity of the brush (0.0 to 1.0).
-  pub fn opacity(&self) -> f32 {
-    self.opacity
+  /// Returns how opaque the brush is along a stroke.
+  pub fn opacity(&self) -> StrokeOpacity {
+    self.opacity.clone()
   }
 }

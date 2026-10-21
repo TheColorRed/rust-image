@@ -8,8 +8,8 @@ use std::sync::{Arc, RwLock};
 use abra::adjustments::prelude::{color, levels};
 
 use crate::effect::effect_methods;
-use crate::{Color, Curve, Gradient};
-use abra::abra_core::PointF;
+use crate::{Color, Curve, Gradient, Image};
+use abra::abra_core::{Image as CoreImage, PointF};
 
 /// Reduces an image to this many levels of each color channel. Made by [`posterize`].
 #[derive(uniffi::Object)]
@@ -19,6 +19,59 @@ pub struct Posterize(color::Posterize);
 #[uniffi::export]
 pub fn posterize(levels: u8) -> Arc<Posterize> {
   Arc::new(Posterize(color::posterize(levels)))
+}
+
+/// Merges the colors of an image into a few: similar colors are grouped, and every pixel is painted with the average color of its
+/// group. Made by [`quantize`].
+#[derive(uniffi::Object)]
+pub struct Quantize(color::Quantize);
+
+/// A merge of the image's colors into this many average colors. 0 is taken as 1.
+#[uniffi::export]
+pub fn quantize(colors: u32) -> Arc<Quantize> {
+  Arc::new(Quantize(color::quantize(colors)))
+}
+
+#[uniffi::export]
+impl Quantize {
+  /// The most times the groups' centers are moved to the average of their colors. Defaults to 8.
+  pub fn with_iterations(&self, iterations: u32) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_iterations(iterations)))
+  }
+
+  /// About how many pixels are looked at to find the groups. Every pixel is still painted. Defaults to 20000.
+  pub fn with_sample(&self, pixels: u32) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_sample(pixels)))
+  }
+
+  /// How different two of the found colors may be, as the distance between them in the Lab color space, and still be merged into
+  /// one color. Defaults to 0, which merges nothing.
+  pub fn with_tolerance(&self, distance: f32) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_tolerance(distance)))
+  }
+
+  /// How much a difference in brightness counts, against a difference in color, when deciding how alike two colors are, in merging
+  /// found colors and in finding the nearest color of each pixel. Defaults to 1.
+  pub fn with_lightness(&self, weight: f32) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_lightness(weight)))
+  }
+
+  /// The colors that decide which palette color a pixel takes, one for each color of the palette: a pixel takes the palette color
+  /// that goes with the source color nearest to it.
+  pub fn with_sources(&self, sources: Vec<Arc<Color>>) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_sources(sources.iter().map(|color| color.0.clone()))))
+  }
+
+  /// Paints with these colors instead of finding them from the image.
+  pub fn with_palette(&self, palette: Vec<Arc<Color>>) -> Arc<Quantize> {
+    Arc::new(Quantize(self.0.clone().with_palette(palette.iter().map(|color| color.0.clone()))))
+  }
+
+  /// The colors the pixels of `image` are painted with: the palette given, or else the average colors found from the image.
+  pub fn palette(&self, image: Arc<Image>) -> Vec<Arc<Color>> {
+    let image: CoreImage = image.core();
+    self.0.palette(&image).into_iter().map(|color| Arc::new(Color(color))).collect()
+  }
 }
 
 /// Turns every pixel black or white: white where the mean of its red, green and blue is above the threshold. Made by
@@ -533,6 +586,7 @@ impl LinearGradientEffect {
 
 effect_methods!(
   Posterize,
+  Quantize,
   Threshold,
   AutoColor,
   AutoTone,
@@ -568,10 +622,46 @@ mod tests {
   }
 
   #[test]
+  fn applied_gives_a_changed_copy_and_leaves_the_image_alone() {
+    let image = pixel(10, 20, 30, 255);
+    let result = invert().applied(image.clone());
+    assert_eq!(result.get_pixel(0, 0), Some(vec![245, 235, 225, 255]));
+    assert_eq!(image.get_pixel(0, 0), Some(vec![10, 20, 30, 255]));
+    // A handle whose effect is behind a lock does the same.
+    let gradient = Arc::new(Gradient::from_to(Arc::new(Color::black()), Arc::new(Color::white())));
+    let effect = LinearGradientEffect::angle(gradient, 0.0);
+    let flat = Arc::new(Image::new_from_pixels(6, 4, picture(), Channels::RGBA));
+    let result = effect.applied(flat.clone());
+    assert_eq!(flat.rgba(), picture(), "the image is as it was");
+    assert_ne!(result.rgba(), picture(), "the copy has the gradient");
+  }
+
+  #[test]
   fn posterizing_to_two_levels_makes_each_channel_dark_or_light_and_leaves_alpha() {
     let image = pixel(100, 200, 255, 77);
     posterize(2).apply(image.clone());
     assert_eq!(image.get_pixel(0, 0), Some(vec![0, 255, 255, 77]));
+  }
+
+  #[test]
+  fn quantizing_merges_close_colors_and_a_given_palette_is_used_as_it_is() {
+    let row = || {
+      let pixels = vec![200, 30, 30, 255, 205, 34, 28, 255, 30, 30, 210, 255, 36, 28, 205, 255];
+      Arc::new(Image::new_from_pixels(4, 1, pixels, Channels::RGBA))
+    };
+    let image = row();
+    quantize(2).apply_on_cpu(image.clone());
+    let out = image.rgba();
+    assert_eq!(out[0..4], out[4..8], "the two reds became one color");
+    assert_eq!(out[8..12], out[12..16], "the two blues became one color");
+    assert_ne!(out[0..3], out[8..11]);
+
+    let palette = vec![Arc::new(Color::from_rgb(255, 0, 0)), Arc::new(Color::from_rgb(0, 0, 255))];
+    let image = row();
+    let effect = quantize(9).with_palette(palette);
+    assert_eq!(effect.palette(image.clone()).len(), 2);
+    effect.apply_on_cpu(image.clone());
+    assert_eq!(image.rgba(), vec![255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255]);
   }
 
   #[test]

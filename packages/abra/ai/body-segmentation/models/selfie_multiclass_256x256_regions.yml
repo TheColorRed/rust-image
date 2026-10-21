@@ -1,0 +1,30 @@
+# MediaPipe Selfie Multiclass Segmentation Model, read as regions
+#
+# The same model file as selfie_multiclass_256x256.yml, read another way. That manifest combines the two skin classes into one mask.
+# This one gives the best class at every pixel, so that a mask can be made for any one of the six: the background, the hair, the body
+# skin, the face skin, the clothes and the accessories.
+#
+# Input: RGB float32 tensor [1, 256, 256, 3], normalized to [0, 1] (NHWC)
+# Preprocessing: Bilinear resize to 256x256, stretching the image without letterboxing
+# Output: Float32 logits [1, 256, 256, 6]; the class with the highest score is the label
+
+name: selfie_multiclass_256x256_regions
+decoder: label-map
+description: Six-class selfie segmentation with Google MediaPipe, read as a label for every pixel
+source: https://huggingface.co/senty-au/selfie_multiclass_256x256-ONNX
+license: Apache-2.0
+
+params:
+  input_size: 256
+  input_layout: nhwc
+  input_fit: stretch
+  output_layout: nhwc
+  class_count: 6
+
+classes:
+  - background
+  - hair
+  - body skin
+  - face skin
+  - clothes
+  - others (accessories)

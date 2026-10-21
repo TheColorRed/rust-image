@@ -17,6 +17,7 @@ The current filter implementation includes these modules:
 | Blur    | Soften detail with blur kernels and specialized blur effects.  |
 | Distort | Transform or displace image coordinates.                       |
 | Edges   | Detect or emphasize image edges.                               |
+| Halftone | Turn an image into dots of one ink that grow with the tone.   |
 | Morphology | Grow or shrink the bright parts of an image.                |
 | Noise   | Add or process image noise.                                    |
 | Sharpen | Increase local detail and edge definition.                     |
@@ -29,11 +30,12 @@ The current filter implementation includes these modules:
 | Guide                | Covers                                                         |
 | -------------------- | -------------------------------------------------------------- |
 | [Blur](./blur)       | Gaussian, box, motion, surface, focus, lens, and general blur. |
-| [Distort](./distort) | Pinch and ripple displacement effects.                         |
+| [Distort](./distort) | Pinch, ripple and image-driven displacement effects.           |
 | [Grow and shrink](./morphology) | Dilate and erode, on the CPU or the GPU.                  |
 | [Noise](./noise)     | Noise generation, median filtering, and despeckling.           |
 | [Detail](./detail)   | Sharpening, smoothing, and skin smoothing.                     |
 | [Edges](./edges)     | Glowing edges and Sobel horizontal/vertical operators.         |
+| [Halftone](./halftone) | A halftone screen: dots that are as big as the image is dark. |
 | [Kernels](./kernels) | Custom 3x3 convolution kernels and low-level processing.       |
 
 ## Typical filter workflow

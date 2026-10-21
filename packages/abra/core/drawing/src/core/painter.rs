@@ -68,7 +68,8 @@ impl<'a> Painter<'a> {
   /// - `p_path`: The path to stroke.
   /// - `p_brush`: The brush to use for stroking.
   pub fn stroke_with_brush(&mut self, p_path: &Path, p_brush: &Brush) {
-    let width = p_brush.size() as f32;
+    let width = p_brush.width();
+    let opacity = p_brush.opacity();
 
     // Fast-path: if the original path is an ellipse and the brush is a solid color,
     // use the SDF-based rasterizer for a much faster stroke of large circular shapes.
@@ -93,7 +94,10 @@ impl<'a> Painter<'a> {
       Some((cx, cy, rx, ry))
     }
 
+    // The fast path draws one width all the way round, the brush's size, so a stroke that changes along the path is rasterized.
     if self.performance.algorithm != DrawingAlgorithm::Rasterizer
+      && width.constant_width() == Some(p_brush.size() as f32)
+      && opacity.constant_opacity().is_some()
       && let Some((cx, cy, rx, ry)) = detect_ellipse(p_path)
     {
       // Only fast-path for solid-color brushes
@@ -109,11 +113,11 @@ impl<'a> Painter<'a> {
 
     // Convert open path into an area and then create a stroked outline
     // using round joins for smooth corners.
-    let stroke_path = p_path.stroke(width).with_join(LineJoin::Round).with_cap(LineCap::Round).to_path();
+    let stroke_path = p_path.stroke(width.clone()).with_join(LineJoin::Round).with_cap(LineCap::Round).to_path();
     let stroke_area: Area = stroke_path.into();
 
     // Build flattened polygon coverage for the stroked area
-    let tolerance = (width * 0.01).max(0.5).min(8.0);
+    let tolerance = (width.widest() * 0.01).max(0.5).min(8.0);
     let flattened: Vec<PointF> =
       stroke_area.path.flatten(tolerance).into_iter().map(|p| PointF::new(p.x, p.y)).collect();
 
@@ -123,10 +127,9 @@ impl<'a> Painter<'a> {
     // For stroke brushes, prefer the stroke path as the gradient direction so
     // gradients are oriented along the stroke centerline.
     let inner_shader = shader_from_fill_with_path(p_brush.color().clone(), Some(p_path.clone()));
-    // Path stroke shading falloff radius is (width / 2)
-    let max_distance = width / 2.0;
+    // Path stroke shading falloff radius is half the width where the stroke is
     let shader: Box<dyn Shader + Send + Sync> =
-      Box::new(StrokeBrushShader::new(inner_shader, p_path, max_distance, p_brush.hardness()));
+      Box::new(StrokeBrushShader::new(inner_shader, p_path, width, opacity, p_brush.hardness()));
 
     let compositor = SourceOverCompositor;
     let sample_grid = SampleGrid::from_aa_level(self.performance.anti_aliasing);
@@ -197,7 +200,7 @@ impl<'a> Painter<'a> {
 mod tests {
   use super::*;
   use crate::Brush;
-  use abra_core::{Color, Image, Path};
+  use abra_core::{Color, Image, Path, StrokeOpacity, StrokeWidth};
 
   #[test]
   fn stroke_ellipse_fastpath_works() {
@@ -211,6 +214,47 @@ mod tests {
     let rgba = img.rgba();
     let idx = ((600 * 1200 + 1000) as usize) * 4 + 3;
     assert!(rgba[idx] != 0, "expected alpha written by fast-path stroke");
+  }
+
+  /// How many pixels of a column of the image have anything painted on them.
+  fn painted_in_column(p_image: &Image, p_x: u32) -> usize {
+    let (width, height) = p_image.dimensions::<u32>();
+    let rgba = p_image.rgba();
+    (0..height).filter(|y| rgba[((y * width + p_x) as usize) * 4 + 3] > 127).count()
+  }
+
+  #[test]
+  fn a_brush_with_a_width_that_tapers_paints_a_thinner_line_toward_the_end() {
+    let mut img = Image::new(100, 40);
+    let mut path = Path::new();
+    path.move_to((10.0, 20.0)).line_to((90.0, 20.0));
+    let brush = Brush::new().with_size(20).with_width(StrokeWidth::from_to(20.0, 2.0)).with_color(&Color::black()).with_hardness(1.0);
+    Painter::new(&mut img).stroke_with_brush(&path, &brush);
+    let (near_start, middle, near_end) = (painted_in_column(&img, 15), painted_in_column(&img, 50), painted_in_column(&img, 85));
+    // The width at those places is 18.9, 11 and 3.1, and a hard stroke is solid over the middle half of its width: about 9, 5 and 1 rows.
+    assert!(near_start > middle && middle > near_end, "{near_start} {middle} {near_end}");
+    assert!((7..=11).contains(&near_start) && near_end <= 3, "{near_start} {near_end}");
+  }
+
+  #[test]
+  fn a_stroke_is_as_opaque_as_the_brush_and_fades_when_the_opacity_does() {
+    let mut path = Path::new();
+    path.move_to((10.0, 20.0)).line_to((90.0, 20.0));
+    let alpha_at = |p_image: &Image, p_x: usize| p_image.rgba()[(20 * 100 + p_x) * 4 + 3] as i32;
+    let mut half = Image::new(100, 40);
+    Painter::new(&mut half).stroke_with_brush(&path, &Brush::new().with_size(12).with_color(&Color::black()).with_hardness(1.0).with_opacity(0.5));
+    assert!((alpha_at(&half, 50) - 128).abs() <= 2, "{}", alpha_at(&half, 50));
+    let mut faded = Image::new(100, 40);
+    Painter::new(&mut faded).stroke_with_brush(&path, &Brush::new().with_size(12).with_color(&Color::black()).with_hardness(1.0).with_opacity(StrokeOpacity::from_to(1.0, 0.0)));
+    let (start, middle, end) = (alpha_at(&faded, 14), alpha_at(&faded, 50), alpha_at(&faded, 86));
+    assert!(start > 220 && (110..=145).contains(&middle) && end < 40, "{start} {middle} {end}");
+  }
+
+  #[test]
+  fn setting_a_size_after_a_width_replaces_it() {
+    let brush = Brush::new().with_width(StrokeWidth::from_to(8.0, 0.0)).with_size(6);
+    assert_eq!(brush.width().constant_width(), Some(6.0));
+    assert_eq!(Brush::new().width().constant_width(), Some(5.0));
   }
 
   #[test]

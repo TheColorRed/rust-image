@@ -80,14 +80,14 @@ pub use error::AiError;
 pub use input::{Fit, InputSpec, Layout, Placement};
 pub use manifest::Manifest;
 
-pub use image_ai::{ImageAi, ImageAiWithControl};
+pub use image_ai::{ImageAi, ImageAiWithControl, Placeable};
 pub use image_model::{ControlParameter, ControlParams, ControlSpec, ImageModel, ModelSpec, discover_models};
 pub use progress::{Listening, ReportsProgress};
 
 /// Prelude module for convenient imports.
 pub mod prelude {
   pub use crate::error::AiError;
-  pub use crate::image_ai::{ImageAi, ImageAiWithControl};
+  pub use crate::image_ai::{ImageAi, ImageAiWithControl, Placeable};
   pub use crate::tensor::{image_to_nchw, nchw_to_image};
   pub use crate::tiled::{TileAccumulator, TileConfig, TileInfo, generate_tiles};
 

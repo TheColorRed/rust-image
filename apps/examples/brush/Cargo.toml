@@ -12,5 +12,5 @@ name = "brush-test"
 path = "main.rs"
 
 [[bin]]
-name = "live-stroke-test"
-path = "live.rs"
+name = "stroke-overlay-test"
+path = "stroke_overlay.rs"

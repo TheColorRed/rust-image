@@ -1,7 +1,7 @@
 import { registerAiAnalysis } from '@/src/lib/ai/ai-analyses';
-import { clearAnalysis } from '@/src/lib/ai/analysis';
+import { clearAnalysis, detectPeople } from '@/src/lib/ai/analysis';
 import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
-import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/ai/faces';
+import { EDGE_REFINEMENT, HAIR_MODELS, findFaceBoxes, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/ai/faces';
 import { batch } from '@/src/lib/utils/batch';
 import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/editor/edit-source';
 import {
@@ -12,8 +12,10 @@ import {
   healBlemish,
   keepBlemishBase,
 } from '@/src/lib/editor/editor-history';
-import { analysisOf, forgetAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
-import { HAIR_MASKS_VERSION, MAKEUP_MASKS_VERSION, hairMasks, makeupMasks } from '@/src/lib/beauty/eye-makeup';
+import { analysisOf, forgetAnalysis } from '@/src/lib/editor/editor-preloads';
+import { buildMasks, loadSavedMasks, saveMasks, saveMasksInBackground, withoutGroup, withoutPeople } from '@/src/lib/ai/saved-masks';
+import { subjectMask } from '@/src/lib/ai/subject';
+import { hairMasks, makeupMasks } from '@/src/lib/beauty/eye-makeup';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
@@ -25,10 +27,13 @@ import {
 import { showStandIn } from '@/src/lib/editor/editor-pictures';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { ownedImage } from '@/src/lib/native/native-image';
+import { cacheFileUri, shareImageFile } from '@/src/lib/native/media-file';
+import { EXPORT_QUALITIES, exportFormat, exportQuality } from '@/src/state/settings';
 import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/project/timeline';
-import { analysisVersion, faceBoxes, people, skinMask } from '@/src/state/analysis';
+import { analysisVersion, analysisVersion$, faceBoxes, faceBoxes$, people, people$, skinMask, skinMask$ } from '@/src/state/analysis';
 import { aiModelsVersion } from '@/src/state/ai-models';
+import { closeRequested } from '@/src/state/commands';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
@@ -40,7 +45,8 @@ import { type Image as AbraPixels } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { AbraImage, personDetectionDownloaded, readImageAsync, type PersonDetection } from '@alakazam/mobile';
 import { Alert, AppState } from 'react-native';
-import { type BehaviorSubject } from 'rxjs';
+import { merge, type BehaviorSubject } from 'rxjs';
+import { debounceTime } from 'rxjs/operators';
 
 /** Nulls the subject before destroying its Rust object so no subscriber can read a dangling pointer. */
 function destroy<T extends { uniffiDestroy(): void }>(subject: BehaviorSubject<T | null>) {
@@ -82,53 +88,6 @@ const JPEG_FALLBACK_QUALITY = 90;
 
 const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-/** The masks a project saved, read back as they were, so the edits replay with the same masks without running the models. */
-async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () => boolean) {
-  const readMask = async (file: string, sameSize = true) => {
-    const image = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${file}`)));
-    const mask = Mask.fromImage(image);
-    image.uniffiDestroy();
-    if (sameSize && (mask.width() !== photo.width() || mask.height() !== photo.height())) {
-      throw new Error(`The saved mask ${file} does not match the project image`);
-    }
-    return mask;
-  };
-  if (project.skinMaskFile) {
-    const mask = await readMask(project.skinMaskFile);
-    if (isCancelled()) return (mask as unknown as AbraPixels).uniffiDestroy();
-    skinMask.next(mask);
-  }
-  // An empty list is saved too: the face models ran and found no face.
-  // A set saved before the hair was one of the masks is not used: the models run once more, and the new set is saved.
-  if (project.makeupMasks && project.makeupMasksVersion === MAKEUP_MASKS_VERSION) {
-    const masks = Object.fromEntries(
-      await Promise.all(project.makeupMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
-    );
-    if (isCancelled()) return Object.values(masks).forEach(mask => (mask as unknown as AbraPixels).uniffiDestroy());
-    provideAnalysis(makeupMasks, masks);
-  }
-  if (project.hairMasks && project.hairMasksVersion === HAIR_MASKS_VERSION) {
-    const masks = Object.fromEntries(
-      await Promise.all(project.hairMasks.map(async ({ name, file }) => [name, await readMask(file, false)] as const)),
-    );
-    if (isCancelled()) return Object.values(masks).forEach(mask => (mask as unknown as AbraPixels).uniffiDestroy());
-    provideAnalysis(hairMasks, masks);
-  }
-  if (project.people) {
-    const found = await Promise.all(
-      project.people.map(async person => ({
-        ...person,
-        // Projects saved before the masks sat beside the photo kept them in a folder of their own.
-        mask: await readMask(`person-${person.id}.webp`).catch(() => readMask(`people/person-${person.id}.webp`)),
-      })),
-    );
-    if (isCancelled()) return found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
-    people.next(found);
-  }
-  // Saved with the people, in the same pixels. An empty object is an answer too: the models ran and found no face.
-  if (project.faceBoxes) faceBoxes.next(project.faceBoxes);
-}
-
 /**
  * Finds the faces' masks again, in case the first time went wrong: what was found is thrown away, the editor draws again without it,
  * which starts the models, and the new masks are saved over the old ones when the project is saved.
@@ -136,7 +95,7 @@ async function loadAnalysis(project: Project, photo: AbraImage, isCancelled: () 
 export function rescanFaceMasks() {
   forgetAnalysis(makeupMasks);
   const project = openProject.value;
-  if (project) openProject.next({ ...project, makeupMasks: undefined, makeupMasksVersion: undefined });
+  if (project) openProject.next(withoutGroup(project, 'makeup'));
   analysisVersion.next(analysisVersion.value + 1);
 }
 
@@ -144,7 +103,7 @@ export function rescanFaceMasks() {
 export function rescanHair() {
   forgetAnalysis(hairMasks);
   const project = openProject.value;
-  if (project) openProject.next({ ...project, hairMasks: undefined, hairMasksVersion: undefined });
+  if (project) openProject.next(withoutGroup(project, 'hair'));
   analysisVersion.next(analysisVersion.value + 1);
 }
 
@@ -155,11 +114,19 @@ export function rescanHair() {
  */
 export function rescanPeople() {
   const project = openProject.value;
-  if (project) openProject.next({ ...project, skinMaskFile: undefined, people: undefined, faceBoxes: undefined });
+  if (project) openProject.next(withoutPeople(project));
   personSelection.next({ ...personSelection.value, people: [], selectedId: null, loading: true });
   clearAnalysis();
   analysisVersion.next(analysisVersion.value + 1);
   aiModelsVersion.next(aiModelsVersion.value + 1);
+}
+
+/** Finds the cutout of the people again, like `rescanHair`. */
+export function rescanSubject() {
+  forgetAnalysis(subjectMask);
+  const project = openProject.value;
+  if (project) openProject.next(withoutGroup(project, 'subject'));
+  analysisVersion.next(analysisVersion.value + 1);
 }
 
 registerAiAnalysis('makeup', {
@@ -174,30 +141,18 @@ registerAiAnalysis('hair', {
   usedBy: control => control.preload === hairMasks,
   regenerate: rescanHair,
 });
+registerAiAnalysis('subject', {
+  roles: [PERSON_DETECTION, SKIN_SEGMENTATION, EDGE_REFINEMENT],
+  required: [PERSON_DETECTION],
+  usedBy: control => control.preload === subjectMask,
+  regenerate: rescanSubject,
+});
 registerAiAnalysis('people', {
   roles: [SKIN_SEGMENTATION, PERSON_DETECTION],
   required: [SKIN_SEGMENTATION, PERSON_DETECTION],
   usedBy: control => [SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY].includes(control.key),
   regenerate: rescanPeople,
 });
-
-/** Saves a mask as a gray image. */
-function writeMask(mask: MaskLike, file: string) {
-  const image = mask.toImage();
-  try {
-    image.write(file, undefined);
-  } finally {
-    (image as AbraPixels).uniffiDestroy();
-  }
-}
-
-/** Saves each person's mask in the project's folder and gives back what is left to remember about them. */
-function writePeople(found: PersonDetection[], directory: string): SavedPersonDetection[] {
-  return found.map(({ mask, ...person }) => {
-    writeMask(mask, `${directory}/person-${person.id}.webp`);
-    return person;
-  });
-}
 
 const NOT_SAVED = 'This session will not be saved, so the project keeps what it had.';
 
@@ -213,35 +168,8 @@ function saveOpenProject() {
   // Until the history is built the base is only the saved picture, and the steps are not there yet.
   if (!project || !base || !historyReady.value) return;
   const { entries, cursor } = timeline.value;
-  // The skin mask belongs to the original, so it is saved once: the first time the image has one.
-  let skinMaskFile = project.skinMaskFile;
-  if (!skinMaskFile && skinMask.value) {
-    writeMask(skinMask.value, toLocalPath(`${project.dir}/skin-mask.webp`));
-    skinMaskFile = 'skin-mask.webp';
-  }
-  // Like the skin mask, the people belong to the original, so they are saved once: the first time the photo has them.
-  // So are the masks the face models made, so the project opens without running them.
-  let makeupFiles = project.makeupMasks;
-  let makeupVersion = project.makeupMasksVersion;
-  const faces = analysisOf(makeupMasks);
-  if ((!makeupFiles || makeupVersion !== MAKEUP_MASKS_VERSION) && faces && !Array.isArray(faces)) {
-    makeupVersion = MAKEUP_MASKS_VERSION;
-    makeupFiles = Object.entries(faces).map(([name, mask], index) => {
-      writeMask(mask as MaskLike, toLocalPath(`${project.dir}/makeup-${index}.webp`));
-      return { name, file: `makeup-${index}.webp` };
-    });
-  }
-  let hairFiles = project.hairMasks;
-  let hairVersion = project.hairMasksVersion;
-  const hair = analysisOf(hairMasks);
-  if ((!hairFiles || hairVersion !== HAIR_MASKS_VERSION) && hair && !Array.isArray(hair)) {
-    hairVersion = HAIR_MASKS_VERSION;
-    hairFiles = Object.entries(hair).map(([name, mask], index) => {
-      writeMask(mask as MaskLike, toLocalPath(`${project.dir}/hair-${index}.webp`));
-      return { name, file: `hair-${index}.webp` };
-    });
-  }
-  const savedPeople = project.people ?? (people.value ? writePeople(people.value, toLocalPath(project.dir)) : undefined);
+  // The masks belong to the original, so each is saved once: the first time it exists. The project then opens without the models.
+  const { masks, maskGroups, people: savedPeople } = saveMasks(project);
   // Like the people, the faces belong to the original, so they are saved once: the first time they are known.
   const savedFaceBoxes = project.faceBoxes ?? faceBoxes.value ?? undefined;
   const entriesWithResources = entries.map((entry, index) => {
@@ -253,11 +181,8 @@ function saveOpenProject() {
     return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
   });
   if (
-    skinMaskFile === project.skinMaskFile &&
-    makeupFiles === project.makeupMasks &&
-    makeupVersion === project.makeupMasksVersion &&
-    hairFiles === project.hairMasks &&
-    hairVersion === project.hairMasksVersion &&
+    masks === project.masks &&
+    maskGroups === project.maskGroups &&
     JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
       JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
   )
@@ -289,7 +214,7 @@ function saveOpenProject() {
         rendered?.uniffiDestroy();
       }
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, skinMaskFile, makeupMasks: makeupFiles, makeupMasksVersion: makeupVersion, hairMasks: hairFiles, hairMasksVersion: hairVersion, people: savedPeople, faceBoxes: savedFaceBoxes };
+    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {
@@ -304,6 +229,46 @@ function saveOpenProject() {
  * image. Destroying nulls the subjects rather than just freeing the objects: a Fast Refresh remount runs this cleanup on
  * the old instance, and a stale in-flight callback could otherwise read a freed pointer ("Raw pointer value was null").
  */
+/**
+ * For developers: makes the open project as it was when it was first opened. Every edit, the final image, and everything the models
+ * found (the masks, the people, the face boxes) are taken off the project, and the editor is closed without saving, so opening the
+ * project again starts from the photo alone. The files they were in are left in the project's folder, unused, until it is deleted.
+ */
+export async function resetProjectToNew() {
+  const project = openProject.value;
+  if (!project) return;
+  const { version, id, name, sourceFile, createdAt, dir } = project;
+  const fresh: Project = { version, id, name, sourceFile, timeline: [], cursor: 0, createdAt, modifiedAt: Date.now(), dir };
+  // Nothing may save over it: not the save when the editor closes, and not the masks being saved in the background.
+  historyReady.next(false);
+  openProject.next(fresh);
+  await updateProject(fresh);
+  closeRequested.next();
+}
+
+/**
+ * Writes the photo as it is edited now, full size, to the cache and opens the phone's share sheet with it. The file is in the
+ * export format chosen in Settings, and it stays in the cache until the next share.
+ */
+export async function shareEditedPhoto() {
+  const base = editBaseImage.value;
+  if (!base) return;
+  const recipe: ProjectRecipe = { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] };
+  const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
+  if (hasRecipe) flushFullReplay();
+  const rendered = hasRecipe && !currentImage.value ? renderRecipe(base, recipe) : null;
+  const final = rendered ?? (hasRecipe ? currentImage.value! : base);
+  let uri: string | undefined;
+  try {
+    uri = await cacheFileUri(`${openProject.value?.name || 'photo'}.${exportFormat.value}`);
+    final.write(toLocalPath(uri), { quality: EXPORT_QUALITIES.find(option => option.value === exportQuality.value)!.encoder });
+  } finally {
+    rendered?.uniffiDestroy();
+  }
+  // Not deleted here: the app picked in the share sheet reads the file later. The next share clears it.
+  await shareImageFile(uri);
+}
+
 export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
@@ -314,6 +279,11 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   const appState = AppState.addEventListener('change', state => {
     if (state !== 'active') saveOpenProject();
   });
+  // What the models find is saved as soon as it is found, a file at a time without blocking, so closing the editor has little left to
+  // write and a crash loses nothing that was found.
+  const masksFound = merge(analysisVersion$, people$, skinMask$, faceBoxes$)
+    .pipe(debounceTime(1000))
+    .subscribe(() => saveMasksInBackground());
 
   (async () => {
     try {
@@ -343,7 +313,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         original.uniffiDestroy();
         return;
       }
-      if (project) await loadAnalysis(project, original, () => cancelled);
+      if (project) await loadSavedMasks(project, original, () => cancelled);
       if (cancelled) {
         original.uniffiDestroy();
         return;
@@ -364,6 +334,13 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         const checkpoint = ownedImage(
           await readImageAsync(toLocalPath(`${project!.dir}/${entry.checkpointFile}`)),
         );
+        // The editor may have been left while this was decoding: the session's maps are already cleared, so a picture kept now would
+        // stay in memory with no owner.
+        if (cancelled) {
+          checkpoint.uniffiDestroy();
+          original.uniffiDestroy();
+          return;
+        }
         keepBlemishBase(entry, checkpoint);
       }
       let base = original.clone() as AbraImage;
@@ -433,6 +410,10 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         historyReady.next(true);
         ready.next(true);
       });
+
+      // Every mask the photo is missing is built in the background now that the editor is usable, so the controls find them ready.
+      // Nothing waits for this and nothing saved is made again (see `buildMasks`).
+      buildMasks(original, () => cancelled);
     } catch (e: any) {
       busy.next(false);
       if (!cancelled) loadError.next(String(e?.message ?? e));
@@ -442,6 +423,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   return () => {
     cancelled = true;
     appState.remove();
+    masksFound.unsubscribe();
     saveOpenProject();
     replay.unsubscribe();
     live.unsubscribe();

@@ -20,6 +20,7 @@
     "kadabra",
     "Lanczos",
     "luma",
+    "Midtones",
     "mkdirp",
     "napi",
     "nasm",
@@ -38,6 +39,7 @@
     "rngs",
     "rxrs",
     "saphyr",
+    "scanlines",
     "serde",
     "simd",
     "skia",
@@ -62,9 +64,10 @@
     "**/node_modules": true,
     "**/bower_components": true,
     "**/*.code-search": true,
-    "target": true,
+    "**/target": true,
     "**/*.js": true,
-    ".venv*": true
+    "**/.venv*": true,
+    "**/android/**": true
   },
   "search.useIgnoreFiles": false,
   "svg.preview.background": "editor",

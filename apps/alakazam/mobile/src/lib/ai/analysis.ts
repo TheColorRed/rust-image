@@ -1,7 +1,7 @@
 import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { type PersonDetection } from '@alakazam/mobile';
-import { detectSkinAsync } from '@alakazam/mobile';
+import { detectSkinAsync, findPeopleAsync } from '@alakazam/mobile';
 import { aiProgress } from '@/src/state/ai-progress';
 import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { adjustments } from '@/src/state/edits';
@@ -159,6 +159,44 @@ export const detectSkin = (photo: Parameters<typeof detectSkinAsync>[0]): Promis
       detecting = undefined;
     });
   return detecting;
+};
+
+let findingPeople: Promise<PersonDetection[]> | undefined;
+
+/**
+ * Finds the people of the photo with the person model, unless they have been found, and keeps them in `people`. It runs when a
+ * photo opens (when the model is on the device) and when a person control opens, and both share one run. `isCancelled` is for the
+ * photo that started the run: when it has been closed by the time the people are found, they are freed instead of kept. Fails if
+ * the model is not on the device.
+ */
+export const detectPeople = (
+  photo: Parameters<typeof findPeopleAsync>[0],
+  { isCancelled = () => false, silent = false }: { isCancelled?: () => boolean; silent?: boolean } = {},
+): Promise<PersonDetection[]> => {
+  if (people.value) return Promise.resolve(people.value);
+  if (!findingPeople) {
+    // A run the user did not ask for (the photo just opened) stays off the progress bar.
+    if (!silent) aiProgress.next({ ...aiProgress.value, people: null });
+    findingPeople = findPeopleAsync(photo)
+      .then(found => {
+        if (!silent) aiProgress.next({ ...aiProgress.value, people: 1 });
+        if (isCancelled()) found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
+        else people.next(found);
+        return found;
+      })
+      .catch(error => {
+        // A run that failed did no work, so it leaves nothing on the bar.
+        if (!silent) {
+          const { people: _failed, ...others } = aiProgress.value;
+          aiProgress.next(others);
+        }
+        throw error;
+      })
+      .finally(() => {
+        findingPeople = undefined;
+      });
+  }
+  return findingPeople;
 };
 
 /** Forgets the skin and the people of the photo that was open, and frees their masks. */

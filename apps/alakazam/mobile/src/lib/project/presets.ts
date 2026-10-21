@@ -28,10 +28,11 @@ function native(): PresetStoreModule {
 }
 
 /** Controls that are meaningful on another photo. Tools and transforms are deliberately left out. */
-const reusableControls = (): Exclude<EditControl, { kind: 'group' | 'tool' }>[] =>
+const reusableControls = (): Exclude<EditControl, { kind: 'group' | 'mixed' | 'tool' | 'picker' }>[] =>
   EDIT_SECTIONS.filter(section => PRESET_SECTIONS.has(section.key)).flatMap(section =>
     leafControls(section.controls).filter(
-      (control): control is Exclude<EditControl, { kind: 'group' | 'tool' }> => control.kind !== 'tool',
+      (control): control is Exclude<EditControl, { kind: 'group' | 'mixed' | 'tool' | 'picker' }> =>
+        control.kind !== 'tool' && control.kind !== 'picker',
     ),
   );
 

@@ -1,16 +1,17 @@
-//! The color module of `primitives`: `Color`, `Harmony`, `luma`, and the value histograms `Bins` and `Histogram`.
+//! The color module of `primitives`: `Color`, `Harmony`, `Palette`, `luma`, and the value histograms `Bins` and `Histogram`.
 //!
 //! What cannot cross to other languages, and what stands in for it:
 //! - A tuple becomes an array: `rgb()` is `[r, g, b]`, `hsla()` is `[h, s, l, a]`, and so on.
 //! - `set_alpha` takes `impl Into<ColorNumber>`, which is a whole number 0-255 or a fraction 0-1: they are `set_alpha` and
 //!   `set_alpha_fraction`.
-//! - `Harmony::Shades(usize)` and `Monochromatic(usize)` count with a `u32` here.
+//! - `Harmony::Shades(usize)` and `Monochromatic(usize)` count with a `u32` here, and so do the places and counts of `Palette`.
+//! - `Palette::labs`, `distance`, `nearest_in` and `nearest_index_to_lab` are for loops over many pixels in Rust and are not exported.
 //! - `Channel::RGB`/`RGBA` and `Histogram::channel_mut` (a borrow into the histogram) are not exported; the first is a list
 //!   a caller writes, and `Histogram::channel` returns a copy.
 
 use std::sync::{Arc, Mutex};
 
-use abra::abra_core::{self, Channel, Channels, ColorStat, LumaStandard};
+use abra::abra_core::{self, Channel, Channels, ColorInterpolation, ColorSpace, ColorStat, HueDirection, LumaStandard};
 
 /// A color with red, green, blue and alpha, each 0 to 255.
 #[derive(Debug, PartialEq, uniffi::Object)]
@@ -22,6 +23,36 @@ pub enum ColorStat {
   Average,
   Median,
   Mode,
+}
+
+// A color space to mix colors in, or to read a color in.
+#[uniffi::remote(Enum)]
+pub enum ColorSpace {
+  Srgb,
+  LinearSrgb,
+  Hsl,
+  Hsv,
+  Lab,
+  Lch,
+  Oklab,
+  Oklch,
+}
+
+// Which way round the color wheel a hue goes when mixing two colors in a polar space.
+#[uniffi::remote(Enum)]
+pub enum HueDirection {
+  Shorter,
+  Longer,
+  Increasing,
+  Decreasing,
+}
+
+// How two colors are mixed: the space, and for a polar space which way round the wheel the hue goes. `{ space, hue }`; the library's
+// `ColorInterpolation::new(space)` is the same with `hue` as `HueDirection.Shorter`.
+#[uniffi::remote(Record)]
+pub struct ColorInterpolation {
+  pub space: ColorSpace,
+  pub hue: HueDirection,
 }
 
 // The weighting standard used to compute luma (perceived brightness) from RGB.
@@ -67,6 +98,99 @@ impl From<Harmony> for abra_core::Harmony {
   }
 }
 
+/// A list of colors to choose from, with the nearest of them to any color, and ready made ones such as [`Palette::comic`]. The places
+/// in the palette and the counts are `u32` here, as the library's `usize`.
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct Palette(pub abra_core::Palette);
+
+#[uniffi::export]
+impl Palette {
+  /// A palette of these colors, in this order.
+  #[uniffi::constructor]
+  pub fn new(colors: Vec<Arc<Color>>) -> Self {
+    Self(abra_core::Palette::new(colors.iter().map(|color| color.0)))
+  }
+
+  /// `levels` grays from black to white, evenly spaced.
+  #[uniffi::constructor]
+  pub fn grayscale(levels: u32) -> Self {
+    Self(abra_core::Palette::grayscale(levels as usize))
+  }
+
+  /// The inks of a comic book, 64 colors: ten inks, each in five tones from dark to light, and fourteen grays from black to white.
+  #[uniffi::constructor]
+  pub fn comic() -> Self {
+    Self(abra_core::Palette::comic())
+  }
+
+  /// The colors of a silk screen print, 64 colors: eight inks, each in eight tones from dark to light.
+  #[uniffi::constructor]
+  pub fn silk_screen() -> Self {
+    Self(abra_core::Palette::silk_screen())
+  }
+
+  /// Bright colors that glow against a dark background.
+  #[uniffi::constructor]
+  pub fn neon() -> Self {
+    Self(abra_core::Palette::neon())
+  }
+
+  /// Soft light colors.
+  #[uniffi::constructor]
+  pub fn pastel() -> Self {
+    Self(abra_core::Palette::pastel())
+  }
+
+  /// The four colors of the first color graphics cards for the PC: black, cyan, magenta and white.
+  #[uniffi::constructor]
+  pub fn cga() -> Self {
+    Self(abra_core::Palette::cga())
+  }
+
+  /// The four greens of the screen of the original Game Boy.
+  #[uniffi::constructor]
+  pub fn game_boy() -> Self {
+    Self(abra_core::Palette::game_boy())
+  }
+
+  /// 64 browns from dark to light.
+  #[uniffi::constructor]
+  pub fn sepia() -> Self {
+    Self(abra_core::Palette::sepia())
+  }
+
+  /// Each color of the palette as `steps` colors of its own hue, from dark to light, with the color itself as one of them, as a new
+  /// palette.
+  pub fn tones(&self, steps: u32) -> Arc<Palette> {
+    Arc::new(Self(self.0.tones(steps as usize)))
+  }
+
+  /// The colors of the palette, in order.
+  pub fn colors(&self) -> Vec<Arc<Color>> {
+    self.0.colors().iter().map(|color| Arc::new(Color(*color))).collect()
+  }
+
+  /// How many colors the palette has.
+  pub fn len(&self) -> u32 {
+    self.0.len() as u32
+  }
+
+  /// Whether the palette has no colors.
+  pub fn is_empty(&self) -> bool {
+    self.0.is_empty()
+  }
+
+  /// The place in the palette of the color nearest to a color, or nothing when the palette has no colors.
+  pub fn nearest_index(&self, color: Arc<Color>) -> Option<u32> {
+    self.0.nearest_index(color.0).map(|index| index as u32)
+  }
+
+  /// The color of the palette nearest to a color, or nothing when the palette has no colors.
+  pub fn nearest(&self, color: Arc<Color>) -> Option<Arc<Color>> {
+    self.0.nearest(color.0).map(|color| Arc::new(Color(color)))
+  }
+}
+
 #[uniffi::export]
 impl Color {
   /// A color from RGB values (alpha 255).
@@ -99,6 +223,25 @@ impl Color {
     Self(abra_core::Color::from_lab(l, a, b))
   }
 
+  /// A color from Oklab values (L 0-1, a and b about -0.4 to 0.4; alpha 255). A color outside the sRGB gamut is clipped to it.
+  #[uniffi::constructor]
+  pub fn from_oklab(l: f32, a: f32, b: f32) -> Self {
+    Self(abra_core::Color::from_oklab(l, a, b))
+  }
+
+  /// A color from Oklch values (L 0-1, chroma 0 to about 0.4, hue in degrees; alpha 255). A color outside the sRGB gamut is clipped to it.
+  #[uniffi::constructor]
+  pub fn from_oklch(l: f32, chroma: f32, hue: f32) -> Self {
+    Self(abra_core::Color::from_oklch(l, chroma, hue))
+  }
+
+  /// A color from CIE Lch values (L 0-100, chroma 0 to about 130, hue in degrees; alpha 255). A color outside the sRGB gamut is clipped
+  /// to it.
+  #[uniffi::constructor]
+  pub fn from_lch(l: f32, chroma: f32, hue: f32) -> Self {
+    Self(abra_core::Color::from_lch(l, chroma, hue))
+  }
+
   /// A color from a hexadecimal value (alpha 255).
   #[uniffi::constructor]
   pub fn from_hex(hex: u32) -> Self {
@@ -121,6 +264,23 @@ impl Color {
   #[uniffi::constructor]
   pub fn black_white_contrast(color: Arc<Color>) -> Self {
     Self(abra_core::Color::black_white_contrast(color.0))
+  }
+
+  /// A copy of the color with its hue turned by `degrees`, keeping its saturation, value and alpha. The hue wraps around the color wheel.
+  pub fn with_hue_rotated(&self, degrees: f32) -> Arc<Color> {
+    Arc::new(Color(self.0.with_hue_rotated(degrees)))
+  }
+
+  /// A copy of the color with at least this much saturation (`0` to `1`), keeping its hue, value and alpha. A color that already has more is
+  /// unchanged.
+  pub fn with_least_saturation(&self, saturation: f32) -> Arc<Color> {
+    Arc::new(Color(self.0.with_least_saturation(saturation)))
+  }
+
+  /// A copy of the color with at least this much value (`0` to `1`), keeping its hue, saturation and alpha. A color that already has more is
+  /// unchanged.
+  pub fn with_least_value(&self, value: f32) -> Arc<Color> {
+    Arc::new(Color(self.0.with_least_value(value)))
   }
 
   /// This color with its alpha set to `a`, 0 to 255.
@@ -178,6 +338,30 @@ impl Color {
   pub fn lab(&self) -> Vec<f32> {
     let (l, a, b) = self.0.lab();
     vec![l, a, b]
+  }
+
+  /// CIE Lch: `[l, chroma, hue]`, the hue in degrees from 0 to 360. The hue of a gray is 0.
+  pub fn lch(&self) -> Vec<f32> {
+    let (l, c, h) = self.0.lch();
+    vec![l, c, h]
+  }
+
+  /// Oklab: `[l, a, b]`, with `l` from 0 (black) to 1 (white) and `a` and `b` about -0.4 to 0.4.
+  pub fn oklab(&self) -> Vec<f32> {
+    let (l, a, b) = self.0.oklab();
+    vec![l, a, b]
+  }
+
+  /// Oklch: `[l, chroma, hue]`, the hue in degrees from 0 to 360. The hue of a gray is 0.
+  pub fn oklch(&self) -> Vec<f32> {
+    let (l, c, h) = self.0.oklch();
+    vec![l, c, h]
+  }
+
+  /// This color mixed with another, `amount` of the way from this color to the other, in the color space of `interpolation`, following CSS
+  /// Color 4: alpha is premultiplied, the hue of a gray is taken from the other color, and the result is clipped to the sRGB gamut.
+  pub fn mix(&self, other: Arc<Color>, amount: f32, interpolation: ColorInterpolation) -> Arc<Color> {
+    Arc::new(Color(self.0.mix(other.0, amount, interpolation)))
   }
 
   /// The relative luminance of the color.
@@ -346,6 +530,45 @@ mod tests {
   fn named_colors_are_the_librarys_colors() {
     assert_eq!(Color::red().0, abra_core::Color::red());
     assert_eq!(Color::transparent().0, abra_core::Color::transparent());
+  }
+
+  #[test]
+  fn a_palette_gives_the_nearest_color_and_the_ready_made_ones_are_the_librarys() {
+    let palette = Palette::new(vec![Arc::new(Color::from_rgb(255, 0, 0)), Arc::new(Color::from_rgb(0, 0, 255))]);
+    assert_eq!(palette.len(), 2);
+    assert_eq!(palette.nearest_index(Arc::new(Color::from_rgb(30, 30, 200))), Some(1));
+    assert_eq!(palette.nearest(Arc::new(Color::from_rgb(200, 40, 40))).map(|color| color.rgb()), Some(vec![255, 0, 0]));
+    assert_eq!(Palette::comic().len(), 64);
+    assert_eq!(Palette::comic().tones(2).len(), 128);
+    assert_eq!(Palette::grayscale(5).colors().len(), 5);
+    assert!(Palette::new(vec![]).nearest(Arc::new(Color::red())).is_none());
+  }
+
+  #[test]
+  fn a_color_turns_its_hue_and_is_raised_to_a_least_saturation_and_value() {
+    let red = Color::from_rgba(255, 0, 0, 90);
+    assert_eq!(red.with_hue_rotated(120.0).rgba(), vec![0, 255, 0, 90]);
+    let muted = Color::from_rgb(150, 110, 100);
+    assert!(muted.with_least_saturation(0.9).0.hsv().1 > 0.88);
+    assert!(muted.with_least_value(0.95).0.hsv().2 > 0.94);
+  }
+
+  #[test]
+  fn a_color_is_mixed_in_a_space_and_read_in_oklab() {
+    let middle = Color::from_rgb(0, 0, 0).mix(
+      Arc::new(Color::from_rgb(255, 255, 255)),
+      0.5,
+      ColorInterpolation { space: ColorSpace::Oklab, hue: HueDirection::Shorter },
+    );
+    assert_eq!(middle.rgb(), vec![99, 99, 99]);
+    let red = Color::from_rgb(255, 0, 0);
+    let (l, a, b) = red.0.oklab();
+    assert_eq!(red.oklab(), vec![l, a, b]);
+    assert_eq!(Color::from_oklab(l, a, b).rgb(), vec![255, 0, 0]);
+    let [l, c, h]: [f32; 3] = red.oklch().try_into().unwrap();
+    assert_eq!(Color::from_oklch(l, c, h).rgb(), vec![255, 0, 0]);
+    let [l, c, h]: [f32; 3] = red.lch().try_into().unwrap();
+    assert_eq!(Color::from_lch(l, c, h).rgb(), vec![255, 0, 0]);
   }
 
   #[test]

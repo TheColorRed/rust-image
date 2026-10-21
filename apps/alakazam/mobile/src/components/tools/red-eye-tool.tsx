@@ -1,4 +1,3 @@
-import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
@@ -26,21 +25,17 @@ const message$ = message.asObservable();
 const MESSAGE_MS = 4000;
 
 export interface RedEyeControlsProps {
-  onBack: () => void;
   onAuto: () => void;
 }
 
-/** The controls-row UI shown while the red-eye tool is focused: a back chip, a hint, and the button for automatic removal. */
-export function RedEyeControls({ onBack, onAuto }: RedEyeControlsProps) {
+/** The controls-row UI shown while the red-eye tool is focused: a hint, and the button for automatic removal. */
+export function RedEyeControls({ onAuto }: RedEyeControlsProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const said = useObservable(message$, null);
   return (
     <View style={styles.controlRow}>
       <View style={styles.topRow}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.backChip}>
-          <ChevronLeft color={colors.textPrimary} size={18} />
-        </Pressable>
         <Text style={said ? styles.message : styles.hint}>
           {said ?? 'Tap each red eye, or let the AI find them. Pinch to zoom in first for a closer tap.'}
         </Text>
@@ -137,14 +132,6 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     controlRow: { alignItems: 'center', gap: 8, paddingHorizontal: 16 },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch' },
-    backChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.chip,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     hint: { flex: 1, color: colors.textSecondary, fontSize: 12 },
     message: { flex: 1, color: colors.danger, fontSize: 12, fontWeight: '600' },
     autoButton: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 18, backgroundColor: colors.accent },

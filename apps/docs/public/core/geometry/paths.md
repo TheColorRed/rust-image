@@ -111,4 +111,21 @@ use abra::abra_core::{LineCap, LineJoin};
 let outline = path.stroke(12.0).with_join(LineJoin::Round).with_cap(LineCap::Round).to_path();
 ```
 
-See [Strokes](./strokes) for cap and join styles.
+See [Strokes](./strokes) for cap and join styles, and for a width that changes along the path.
+
+## Clean up a traced outline
+
+An outline found on a grid of pixels, such as the ones `Mask::contours` gives (see [Masks](../mask/masks)), has a point for every step of the grid. `simplify_points` drops the points the shape does not need, and `smoothed_area` draws smooth curves through the rest:
+
+```rust
+use abra::abra_core::{simplify_points, smoothed_area};
+
+// No point of the result is more than 1.5 pixels from the outline. The last point joins the first.
+let simple = simplify_points(&outline, 1.5, true);
+// Smooth at every point, except where the outline turns by more than 50 degrees: those stay corners.
+let shape = smoothed_area(&simple, 50.0);
+```
+
+`simplify_points` (Ramer-Douglas-Peucker) turns a staircase along a diagonal into a line and a straight edge into its two end points. Pass `false` for `closed` for a line that does not join up, which keeps its first and last point. A tolerance of `0` drops only the points on a straight line.
+
+`smoothed_area` goes through every point it is given, leaves each one along the line from the point before to the point after, and shapes each curve by its own length, so uneven points do not make bulges and a long straight edge stays straight. A corner is a point where the outline turns by more than the limit, from `0` (every point is a corner, so the shape is straight lines) to `180` (none is). Simplify first, so the curves go through the points that matter and not through every step of the grid.

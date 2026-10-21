@@ -39,12 +39,13 @@ pub use abra::canvas::prelude::{
 pub use adjustments::{
   AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
   Grayscale, HighlightsShadows, Hue, Invert, Levels, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment,
-  Posterize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
-  gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, reduce_opacity, saturation,
+  Posterize, Quantize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
+  gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, quantize, reduce_opacity, saturation,
   selective_color, threshold, vibrance, curves,
 };
 pub use ai::{
-  AiListening, AiModel, AiOutput, AiOutputKind, ImageModel, Instance, LabelMap, Listening, ProgressListener,
+  AiListening, AiModel, AiOutput, AiOutputKind, BodyParser, BodySegments, ImageModel, Instance, LabelMap, Listening,
+  ProgressListener,
 };
 pub use beauty::{SkinSmooth, SkinTan, SkinTone, skin_smooth, skin_tan, skin_tone};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};
@@ -52,21 +53,21 @@ pub use canvas::{
   AddCanvasOptions, Canvas, CanvasTransform, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
   add_canvas_options, new_layer_options,
 };
-pub use color::{Bins, Color, Harmony, Histogram, luma, luma_weights};
-pub use drawing::{Brush, max_stroke_points, stroke_overlay, stroke_overlay_deferred};
+pub use color::{Bins, Color, Harmony, Histogram, Palette, luma, luma_weights};
+pub use drawing::{Brush, Painter, max_stroke_points, stroke_overlay, stroke_overlay_deferred};
 pub use fill::{Fill, FillArea, ImageRepeat, fill_area};
 pub use filters::{
-  Blur, BlurType, BoxBlur, Despeckle, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, Guided, LensBlur, Median,
+  Blur, BlurType, BoxBlur, ColorEdges, Despeckle, Displace, FocusBlur, FocusGeometry, GaussianBlur, GlowingEdges, Guided, Halftone, LensBlur, Median,
   MotionBlur, Morphology, Noise, Pinch, Ripple, Sharpen, Smooth, Sobel, SurfaceBlur, blur, box_blur, despeckle,
-  dilate, erode, focus_blur, gaussian_blur, glowing_edges, guided, guided_filter, lens_blur, median, motion_blur, noise, pinch,
+  color_edges, dilate, displace, erode, focus_blur, gaussian_blur, glowing_edges, guided, guided_filter, halftone, lens_blur, median, motion_blur, noise, pinch,
   ripple, sharpen, smooth, sobel, sobel_magnitude, surface_blur,
 };
 pub use geometry::{
-  Area, AreaStroke, Curve, Homography, LineSegment, Path, PathStroke, Shape, aspect_ratio_meet, aspect_ratio_new,
+  Area, AreaStroke, Curve, Homography, LineSegment, Path, PathStroke, OpacityStop, Shape, StrokeOpacity, StrokeWidth, WidthStop, aspect_ratio_meet, aspect_ratio_new,
   aspect_ratio_none, aspect_ratio_slice, bresenham, curve_cubic_bezier, curve_from_path, homography_from_points, homography_from_quads, point_f_add,
   point_f_angle, point_f_cross, point_f_distance_to, point_f_div, point_f_dot, point_f_length, point_f_length_squared,
   point_f_lerp, point_f_mul, point_f_new, point_f_normalize, point_f_perpendicular, point_f_sub, point_f_zero,
-  polygon_contains, polygon_difference, polygon_union, quad_bounds, quad_corners, quad_flattened_aspect, quad_flattened_size, quad_from_rect, quad_new,
+  polygon_contains, polygon_difference, polygon_union, simplify_points, smoothed_area, quad_bounds, quad_corners, quad_flattened_aspect, quad_flattened_size, quad_from_rect, quad_new,
   quad_rect, rect_bottom, rect_center, rect_contains, rect_corners, rect_edges, rect_from_edges, rect_from_points,
   rect_from_size, rect_intersect, rect_is_empty, rect_left, rect_map_point, rect_new, rect_origin, rect_right,
   rect_size, rect_top, segment_end, size_add, size_add_scalar, size_aspect_ratio, size_div,

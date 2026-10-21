@@ -3,6 +3,7 @@
 pub mod blur;
 pub mod distort;
 pub mod edges;
+pub mod halftone;
 pub mod morphology;
 pub mod noise;
 pub mod repair;

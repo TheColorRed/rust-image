@@ -1,4 +1,3 @@
-import { ChevronLeft } from 'lucide-react-native';
 import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { useObservable } from 'react-rx';
 import { combineLatest } from 'rxjs';
@@ -455,21 +454,17 @@ function aspectShapeSize(ratio: number | null): { width: number; height: number 
 }
 
 export interface CropControlsProps {
-  onBack: () => void;
   onApply: () => void;
 }
 
-/** The controls-row UI while the Crop tool is open: a back chip, the aspect swatches, and the button that cuts the photo. */
-export function CropControls({ onBack, onApply }: CropControlsProps) {
+/** The controls-row UI while the Crop tool is open: the aspect swatches, and the button that cuts the photo. */
+export function CropControls({ onApply }: CropControlsProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const aspect = useObservable(cropAspect$, cropAspect.value);
   return (
     <View style={styles.controlRow}>
       <View style={styles.topRow}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.backChip}>
-          <ChevronLeft color={colors.textPrimary} size={18} />
-        </Pressable>
         <Text numberOfLines={1} style={styles.hint}>
           Drag corners to resize, pinch to zoom
         </Text>
@@ -693,14 +688,6 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     controlRow: { alignItems: 'center', gap: 8, paddingHorizontal: 16 },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch' },
-    backChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.chip,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     aspectScroll: { alignSelf: 'stretch', flexGrow: 0 },
     aspectRow: { gap: 8, paddingVertical: 4, paddingHorizontal: 4 },
     aspectSwatch: { alignItems: 'center', gap: 3, width: 64 },

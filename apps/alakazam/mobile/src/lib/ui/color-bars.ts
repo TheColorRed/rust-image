@@ -58,6 +58,14 @@ export const infraredGradient = once(() =>
   Gradient.evenly(INFRARED_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
 );
 
+/** The neon tints of the vaporwave grid, from teal through blue and violet to hot pink. */
+export const NEON_COLORS = [
+  [90, 240, 255],
+  [60, 140, 255],
+  [150, 80, 255],
+  [255, 60, 200],
+];
+
 /** The tan scale, from no tan to the darkest: white, tan, light brown, brown, dark brown and black. */
 export const TAN_COLORS = [
   [255, 255, 255],

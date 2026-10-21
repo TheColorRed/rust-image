@@ -33,7 +33,10 @@ export const activeSectionKey$ = activeSectionKey.asObservable();
 export const focusedControlKey = new BehaviorSubject<string | null>(null);
 export const focusedControlKey$ = focusedControlKey.asObservable();
 /** The slider a tabulated control has open (for example Color 2 of Color Splash), so the gesture bar can act on it. */
-export const openSliderState = new BehaviorSubject<{ key: string; index: number }>({ key: '', index: 0 });
+export const openSliderState = new BehaviorSubject<{ key: string; index: number; extra?: string }>({
+  key: '',
+  index: 0,
+});
 export const openSliderState$ = openSliderState.asObservable();
 /** True while a slider is being dragged, so drawn areas are hidden and come back on release. */
 export const areaOutlinesHidden = new BehaviorSubject(false);

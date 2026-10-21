@@ -1,6 +1,8 @@
 package com.alakazam.mobile
 
+import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -36,6 +38,49 @@ class MediaFileModule(private val context: ReactApplicationContext) : ReactConte
       promise.resolve(Uri.fromFile(destination).toString())
     } catch (error: Exception) {
       promise.reject("MEDIA_COPY_FAILED", "Could not copy media into the app cache", error)
+    }
+  }
+
+  /**
+   * Makes a new folder for a file to share and returns the `file://` URI of a file with this name in it, which does not exist
+   * yet. The receiving app reads the file after the share sheet opens, so it cannot be deleted then: the previous shared
+   * photos are cleared here instead, and Android clears the cache when it needs the space.
+   */
+  @ReactMethod
+  fun newCacheFile(fileName: String, promise: Promise) {
+    try {
+      val safeName = File(fileName).name.ifBlank { "image" }
+      File(context.cacheDir, "media/shared").deleteRecursively()
+      val folder = File(context.cacheDir, "media/shared/${UUID.randomUUID()}")
+      if (!folder.mkdirs()) throw IOException("Could not create the media cache directory")
+      promise.resolve(Uri.fromFile(File(folder, safeName)).toString())
+    } catch (error: Exception) {
+      promise.reject("MEDIA_CACHE_FAILED", "Could not make a file in the app cache", error)
+    }
+  }
+
+  /** Opens the system share sheet with an image from the cache. Only files in `cacheDir/media` can be shared. */
+  @ReactMethod
+  fun shareImage(uriString: String, promise: Promise) {
+    try {
+      val mediaRoot = File(context.cacheDir, "media").canonicalFile
+      val file = File(Uri.parse(uriString).path ?: "").canonicalFile
+      if (!file.path.startsWith(mediaRoot.path + File.separator) || !file.exists()) throw IOException("Not a shareable file: $uriString")
+      val shared = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+      val send = Intent(Intent.ACTION_SEND).apply {
+        type = when (file.extension.lowercase()) {
+          "webp" -> "image/webp"
+          "png" -> "image/png"
+          else -> "image/jpeg"
+        }
+        putExtra(Intent.EXTRA_STREAM, shared)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      (context.currentActivity ?: context).startActivity(chooser)
+      promise.resolve(null)
+    } catch (error: Exception) {
+      promise.reject("MEDIA_SHARE_FAILED", "Could not open the share sheet", error)
     }
   }
 

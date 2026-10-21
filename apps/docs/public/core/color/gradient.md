@@ -79,6 +79,26 @@ let gradient = Gradient::new(vec![
 ]);
 ```
 
+## Color interpolation
+
+The colors between two stops are mixed in sRGB unless you say otherwise, which is the plain average of the red, green and blue values and goes dull between colors that are far apart: blue to yellow passes through gray. `with_interpolation` chooses another color space, and for a polar space which way round the color wheel the hue goes:
+
+```rust
+use abra::abra_core::{Color, ColorInterpolation, ColorSpace, Gradient, HueDirection};
+
+let ramp = Gradient::from_to(Color::blue(), Color::yellow()).with_interpolation(ColorSpace::Oklab);
+
+// Two colors make a rainbow by going the long way round the wheel.
+let rainbow = Gradient::from_to(Color::red(), Color::blue())
+  .with_interpolation(ColorInterpolation::new(ColorSpace::Oklch).with_hue(HueDirection::Increasing));
+```
+
+The mixing is [`Color::mix`](./color#mixing-colors), so alpha is premultiplied and the hue of a gray is taken from its neighbor. A gradient that is `reverse`d goes the same way back: its colors are reversed and so is the way the hue goes.
+
+Every way of drawing a gradient uses it: a fill, a gradient map, and the linear and radial gradient effects. On the GPU, gradient maps and the gradient effects use a table of colors made with this mixing, so they work in every space. A gradient **fill** is drawn by a shader that mixes in sRGB, so a fill whose gradient mixes in another space is drawn on the CPU.
+
+The default is sRGB. It was chosen to keep existing gradients looking as they did; a looks-first choice such as `Oklab` is a one-line setting on the gradient.
+
 ## Direction
 
 The direction is optional. Set it with `with_direction`, which takes any value convertible to a `Path`:
@@ -155,5 +175,6 @@ pub fn main() {
 | `Gradient::rainbow()`         | Create a red-to-violet rainbow gradient.            |
 | `Gradient::hue()`             | Create a hue-based gradient.                        |
 | `.with_direction(path)`       | Set the start and end points of the gradient.       |
+| `.with_interpolation(space)`  | Mix the colors in a color space (default sRGB).     |
 | `.color_at(time)`             | Sample a `Color` at a normalized position.          |
 | `.reverse()`                  | Return a gradient with its progression reversed.    |

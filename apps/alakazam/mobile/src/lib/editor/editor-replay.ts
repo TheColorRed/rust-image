@@ -2,20 +2,25 @@ import { personIn } from '@/src/lib/ai/analysis';
 import { batch } from '@/src/lib/utils/batch';
 import {
   applyAction,
+  applyJoint,
   applySlider,
   areaPoints,
   EDIT_SECTIONS,
   findSection,
   layerSheet,
+  controlsWith,
   leafControls,
   isSliderApplied,
   scaleBetween,
   sliderContext,
   sliderDefault,
   sliderValues,
+  thumbnailControls,
   type AdjustmentValue,
   type ActionControl,
   type EditSection,
+  type PickerControl,
+  type SliderControl,
 } from '@/src/lib/project/edit-sections';
 import { releasePictures, setShown, shrunkOf } from '@/src/lib/editor/editor-pictures';
 import { withLayers, type Sheet } from '@/src/lib/beauty/layers';
@@ -156,9 +161,30 @@ function appliedSteps(
       run: (image, scale) => applyAction(control, image, scale),
     });
   }
+  const jointsDone = new Set<string>();
   for (const section of EDIT_SECTIONS) {
     for (const control of leafControls(section.controls)) {
       if (control.kind !== 'slider') continue;
+      const { joint } = control;
+      if (joint) {
+        // The sliders of a mixed control with one tool are one edit, made once at the first of them.
+        if (jointsDone.has(joint.key)) continue;
+        jointsDone.add(joint.key);
+        const committedOf = (each: SliderControl) =>
+          slider?.key === each.key ? slider.value : recipe.adjustments[each.key];
+        const inJoint = joint.sliders.some(each => each.key === slider?.key);
+        if (inJoint && slider?.value === undefined) continue;
+        if (!joint.sliders.some(each => each.key === slider?.key || isSliderApplied(each, committedOf(each)))) continue;
+        const values = joint.sliders.map(each => sliderValues(each, committedOf(each)));
+        steps.push({
+          key: control.key,
+          stage: stageOf(section.key, false),
+          deferred: false,
+          signature: JSON.stringify([joint.key, values]),
+          run: (image, scale) => applyJoint(joint, image, values, scale),
+        });
+        continue;
+      }
       if (isPersonAdjustment(control.key)) {
         if (!control.tool && !control.layer) throw new Error(`Person control has no effect definition: ${control.key}`);
         const activeKey = adjustmentKey(control.key, personSelection.value.selectedId);
@@ -432,28 +458,36 @@ let replayedBase: AbraImage | null = null;
 let preloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Makes what the controls of the open section preload, from the screen-size photo, for each that has a `preload` and has not made it
- * for this photo. A section is preloaded when it is opened and not before, so nothing is made for sections that are never used. A
- * slow preload (the face models of Beauty) runs in the background, and the edit is drawn again when it is made.
+ * Makes what the focused control (and the controls worked together with it, such as the tabs of Pop Art) preloads, from the screen-size photo, when it has a `preload` and has not made it for this photo.
+ * Only the control in use is preloaded, never the rest of its section: a section can hold a control with a slow AI preload (Pop Art in
+ * Special Effects) that a user working with another control never asked for. An edit that is already applied preloads when it is
+ * replayed. A slow preload (the face models of Beauty) runs in the background, and the edit is drawn again when it is made.
  */
 function preloadSection() {
   const base = editBaseImage.value;
   if (!base) return;
-  const controls = leafControls(findSection(activeSectionKey.value).controls).flatMap(control =>
-    control.kind === 'slider' && control.preload ? [control] : [],
-  );
+  const focused = focusedControlKey.value;
+  const controls = focused
+    ? controlsWith(findSection(activeSectionKey.value).controls, focused).filter(control => control.preload)
+    : [];
   if (controls.length === 0) return;
   if (preloadedBase && preloadedBase !== base) clearPreloads();
   preloadedBase = base;
   const shrunk = shrunkOf('base', base);
-  for (const control of controls) preloadFor(control, shrunk.width(), shrunk);
+  for (const control of controls) preloadFor(control, shrunk, shrunk);
 }
 
 let thumbnailBuild: ReturnType<typeof buildControlThumbnails> | undefined;
 let thumbnailFrame: number | undefined;
 let thumbnailTimer: ReturnType<typeof setTimeout> | undefined;
+/** Starts the pictures of the pickers inside a mixed control, by the control's key, for when the control is opened. */
+const lazyPickerBuilds = new Map<string, () => void>();
+/** The picker builds that have started, so a change of the edit stops them like the rest. */
+const openedPickerBuilds: ReturnType<typeof buildControlThumbnails>[] = [];
 
 function cancelThumbnailBuild() {
+  lazyPickerBuilds.clear();
+  openedPickerBuilds.splice(0).forEach(each => each.cancel());
   if (thumbnailFrame !== undefined) cancelAnimationFrame(thumbnailFrame);
   if (thumbnailTimer !== undefined) clearTimeout(thumbnailTimer);
   thumbnailFrame = undefined;
@@ -530,9 +564,59 @@ function sectionThumbnails(section: EditSection, base: AbraImage) {
       },
       base,
     );
-    thumbnailBuild = build;
-    void build.done.then(succeeded => {
-      if (thumbnailBuild !== build) return;
+    // The pictures of a picker inside a mixed control show the effect with and without a part, so each starts from the edit without
+    // the sliders the picker saves to, or the effect would be drawn twice.
+    // They are only seen once the control is open, so they are made then (see `lazyPickerBuilds`) and not slowing the cards of the row.
+    const builds = [build];
+    for (const control of thumbnailControls(section.controls)) {
+      if (control.kind !== 'mixed') continue;
+      const pickers = leafControls(control.controls).filter(
+        (inner): inner is PickerControl => inner.kind === 'picker' && !!inner.commitTo,
+      );
+      if (pickers.length === 0) continue;
+      let started = false;
+      const start = () => {
+        if (started) return;
+        started = true;
+        for (const sliderKey of new Set(pickers.map(picker => picker.commitTo!.slider))) {
+          const rest = shrunkOf('thumbnail', shrunkOf('base', base), thumbnailPixels()).clone() as AbraImage;
+          try {
+            runSteps(rest, appliedSteps(undefined, { key: sliderKey }), base);
+          } catch (error) {
+            rest.uniffiDestroy();
+            throw error;
+          }
+          const own = { ...section, controls: pickers.filter(picker => picker.commitTo!.slider === sliderKey) };
+          const slider = leafControls(section.controls).find(
+            (inner): inner is SliderControl => inner.kind === 'slider' && inner.key === sliderKey,
+          );
+          openedPickerBuilds.push(
+            buildControlThumbnails(
+              rest,
+              own,
+              {},
+              (controlKey, preview) => {
+                batch(() => replaceThumbnails({ ...controlThumbnails.value, [controlKey]: preview }));
+              },
+              base,
+              slider && sliderValues(slider, adjustments.value[sliderKey]),
+              build.done,
+            ),
+          );
+        }
+      };
+      // What is focused when the control is open is one of its sliders, not the mixed control, so any of them starts the build.
+      const keys = [control.key, ...leafControls(control.controls).flatMap(inner => (inner.kind === 'slider' ? [inner.key] : []))];
+      if (keys.includes(focusedControlKey.value ?? '')) start();
+      else for (const each of keys) lazyPickerBuilds.set(each, start);
+    }
+    const all = {
+      done: Promise.all(builds.map(each => each.done)).then(results => results.every(Boolean)),
+      cancel: () => builds.forEach(each => each.cancel()),
+    };
+    thumbnailBuild = all;
+    void all.done.then(succeeded => {
+      if (thumbnailBuild !== all) return;
       thumbnailBuild = undefined;
       cachedThumbnailKey = succeeded ? key : '';
     });
@@ -608,6 +692,7 @@ export function startReplay(): Subscription {
           clearRenderCache();
         }
         cancelThumbnailBuild();
+        if (__DEV__) console.debug('[replay] change received', activeSectionKey.value);
         busy.next(!replayHidden.value);
       }),
       switchMap(
@@ -634,7 +719,10 @@ export function startReplay(): Subscription {
     .subscribe();
   // Clicking a control preloads it, after a frame so the control's own UI is drawn first.
   subscription.add(
-    focusedControlKey$.subscribe(() => {
+    focusedControlKey$.subscribe(key => {
+      const start = key ? lazyPickerBuilds.get(key) : undefined;
+      if (key) lazyPickerBuilds.delete(key);
+      start?.();
       clearTimeout(preloadTimer);
       preloadTimer = setTimeout(preloadSection, 0);
     }),

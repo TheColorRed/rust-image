@@ -10,7 +10,7 @@ pub use crate::abra_core::LoadedImages;
 pub use crate::abra_core::Settings;
 pub use crate::abra_core::WriterOptions;
 pub use crate::abra_core::image::image_ext::*;
-pub use crate::abra_core::{BlendMode, Color, ColorStat, Harmony};
+pub use crate::abra_core::{BlendMode, Color, ColorStat, Harmony, Palette};
 pub use crate::abra_core::{Channel, Channels};
 
 // Commonly used transform traits (brought into prelude for ergonomics)

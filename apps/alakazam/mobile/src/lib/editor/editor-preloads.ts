@@ -94,13 +94,21 @@ const resizedTo = (held: Preloaded, width: number, height: number): Preloaded | 
 };
 
 /**
- * What the control's `preload` made for a photo `width` pixels wide. The function is run once for a photo, on a copy of the
- * `source` photo that is no wider than `ANALYSIS_WIDTH`, and what it made is kept; every other size is that resized, which is
- * quick. Without a `source`, a size that is not held and cannot be made from one that is gives nothing.
+ * What the control's `preload` made for a photo of this size (the photo itself, or anything with its width and height). The function is
+ * run once for a photo, on a copy of the `source` photo that is no wider than `ANALYSIS_WIDTH`, and what it made is kept; every other
+ * size is that resized to exactly this width and height, which is quick, so a mask always fits the photo it is used on. Without a
+ * `source`, a size that is not held and cannot be made from one that is gives nothing.
  */
-export const preloadFor = (control: SliderControl, width: number, source?: AbraImageLike): Preloaded | undefined => {
+export const preloadFor = (
+  control: SliderControl,
+  size: { width(): number; height(): number },
+  source?: AbraImageLike,
+): Preloaded | undefined => {
   const preload = control.preload;
   if (!preload) return undefined;
+  // Read now: the photo can be let go of before a preload that is waiting for a free slot runs.
+  const width = size.width();
+  const height = size.height();
   const controlKey = `${control.key}:${width}`;
   const previous = controlPreloads.get(controlKey);
   if (previous && previous !== preload) {
@@ -127,10 +135,8 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
   if (!held && byWidth?.size) {
     const sizes = [...byWidth.entries()].sort(([a], [b]) => a - b);
     const [otherWidth, other] = sizes.find(([otherWidth]) => otherWidth >= width) ?? sizes[sizes.length - 1];
-    const sample = values(other)[0] as unknown as MaskLike | undefined;
-    const height = source ? source.height() : sample ? Math.round((sample.height() * width) / otherWidth) : 0;
     const resizeStarted = Date.now();
-    if (height > 0) held = resizedTo(other, width, height);
+    held = resizedTo(other, width, height);
     if (held) byWidth.set(width, held);
     if (__DEV__) console.debug(`[preload] ${control.key} ${width}px from ${otherWidth}px, ms:`, Date.now() - resizeStarted);
   }
@@ -138,7 +144,7 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
   // Not made yet: run it, once, on a photo that is not too large for it. One that is running in the background is waited for.
   if (!held && source && !running.has(preload)) {
     if (running.size >= MAX_BACKGROUND_PRELOADS) {
-      waiting.push(() => preloadFor(control, width, source));
+      waiting.push(() => preloadFor(control, { width: () => width, height: () => height }, source));
       return undefined;
     }
     // A copy, shrunk when it is wider than the analysis needs. Both are the tool's to change.
@@ -181,7 +187,7 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
       held = analysis;
       if (analysedWidth !== width) {
         // What was made is held at its own size; the size asked for is a resized copy, or the same thing when it cannot be.
-        const resized = resizedTo(analysis, width, source.height());
+        const resized = resizedTo(analysis, width, height);
         if (resized) byWidth.set(width, (held = resized));
       }
     } finally {
@@ -190,6 +196,31 @@ export const preloadFor = (control: SliderControl, width: number, source?: AbraI
     }
   }
   return held;
+};
+
+/**
+ * Runs `preload` on the photo and keeps what it makes, like a control that needs it would, and gives back when it is done. It does
+ * nothing for one that is made or running already. It is for building the analyses one after another, because their models are large
+ * and the device runs out of memory when several are loaded at once.
+ */
+export const buildAnalysis = async (preload: PreloadFunction, source: AbraImageLike): Promise<void> => {
+  if (analyses.has(preload) || running.has(preload)) return;
+  const photo = fitted(source as AbraImage, ANALYSIS_WIDTH, ANALYSIS_WIDTH * 4) as AbraImageLike;
+  running.add(preload);
+  const started = session;
+  try {
+    const result = await preload(photo);
+    // Nothing means it could not run (a missing model), and that is not an answer to keep.
+    if (!result) return;
+    const analysis = asPreloaded(result);
+    if (started !== session) return free(analysis);
+    provideAnalysis(preload, analysis);
+    analysisVersion.next(analysisVersion.value + 1);
+  } finally {
+    running.delete(preload);
+    (photo as AbraPixels).uniffiDestroy();
+    startWaiting();
+  }
 };
 
 /** What a preload gave back, as the set the tools get: an empty one when it gave nothing. */

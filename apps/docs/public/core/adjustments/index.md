@@ -40,7 +40,7 @@ exposure.apply(&mut second_image);
 | Guide                                 | Covers                                                                                |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
 | [Levels and color controls](./levels) | Brightness, contrast, exposure, saturation, vibrance, hue, and photo filters.         |
-| [Color operations](./color)           | Grayscale, invert, threshold, posterize, opacity, auto tone/color, and gradient maps. |
+| [Color operations](./color)           | Grayscale, invert, threshold, posterize, quantize, opacity, auto tone/color, and gradient maps. |
 
 ## Important behavior
 

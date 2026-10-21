@@ -21,7 +21,79 @@ use abra_ai_core::{
   ImageModel as ImgModel, Instance as FoundInstance, LabelMap as Labels, Landmark, Landmarks, ReportsProgress,
 };
 
+use abra::abra_core::Rect;
+// The enum is redeclared below for uniffi, which needs the library's own type in scope under its own name.
+use abra_body_segmentation::{BodyParser as Parser, BodyRegion, BodySegments as Segments};
+
 use crate::{Image, Mask};
+
+// The regions the body model tells apart.
+#[uniffi::remote(Enum)]
+pub enum BodyRegion {
+  Background,
+  Hair,
+  BodySkin,
+  FaceSkin,
+  Clothes,
+  Accessories,
+}
+
+/// The region of every pixel of a picture, from a [`BodyParser`]. Where no region was found, such as outside the part of a picture the
+/// parser was run on, a pixel has none.
+#[derive(uniffi::Object)]
+pub struct BodySegments(Segments);
+
+impl BodySegments {
+  /// The handle for the library's regions.
+  pub fn from_core(segments: Segments) -> Self {
+    Self(segments)
+  }
+}
+
+#[uniffi::export]
+impl BodySegments {
+  /// The region at a pixel, or nothing outside the picture and where none was found.
+  pub fn region_at(&self, x: u32, y: u32) -> Option<BodyRegion> {
+    self.0.region_at(x, y)
+  }
+
+  /// A hard mask that is `255` where the region is and `0` elsewhere.
+  pub fn mask(&self, region: BodyRegion) -> Arc<Mask> {
+    Arc::new(Mask::from_core(self.0.mask(region)))
+  }
+
+  /// A hard mask that is `255` where any of the regions is and `0` elsewhere, such as the body skin and the face skin together.
+  pub fn mask_of(&self, regions: Vec<BodyRegion>) -> Arc<Mask> {
+    Arc::new(Mask::from_core(self.0.mask_of(&regions)))
+  }
+}
+
+/// Labels the regions of a person in a picture: the background, the hair, the skin of the body and of the face, the clothes and the
+/// accessories. Made from the `.onnx` of the MediaPipe selfie model, which the library describes with a manifest of its own.
+#[derive(uniffi::Object)]
+pub struct BodyParser(Parser);
+
+#[uniffi::export]
+impl BodyParser {
+  /// Loads the model from its `.onnx` file. The library never looks for models, so the caller gives the path.
+  #[uniffi::constructor]
+  pub fn load(onnx_path: String) -> Result<Self, AiError> {
+    Ok(Self(Parser::load(onnx_path)?))
+  }
+
+  /// Labels every pixel of the picture with its region.
+  pub fn process(&self, image: Arc<Image>) -> Result<Arc<BodySegments>, AiError> {
+    Ok(Arc::new(BodySegments(self.0.process(&image.core())?)))
+  }
+
+  /// Labels only a part of the picture, and gives the result as if the model had been run on the whole picture: pixels outside the
+  /// part have no region. The model sees a small copy of what it is given, so a person who is a small part of a photo is only a few
+  /// pixels to it; give it the part with the person in it, such as the bounds of a matte, with a `margin` of more on each side, as a
+  /// share of the part's larger side.
+  pub fn process_within(&self, image: Arc<Image>, region: Rect, margin: f32) -> Result<Arc<BodySegments>, AiError> {
+    Ok(Arc::new(BodySegments(self.0.process_within(&image.core(), region, margin)?)))
+  }
+}
 
 // Why an AI model could not load or run. Each case carries a message.
 #[uniffi::remote(Error)]
@@ -403,6 +475,25 @@ mod tests {
 
   fn photo(side: u32) -> Arc<Image> {
     Arc::new(Image::new(side, side))
+  }
+
+  #[test]
+  fn the_body_parser_labels_regions_and_runs_on_a_part_of_a_picture() {
+    let Some(path) = bundled("body-segmentation", "selfie_multiclass_256x256.onnx") else {
+      return;
+    };
+    let parser = BodyParser::load(path).expect("model should load");
+    let image = photo(64);
+    let whole = parser.process(image.clone()).expect("parsing should succeed");
+    assert!(whole.region_at(0, 0).is_some());
+    assert_eq!(whole.mask_of(vec![BodyRegion::Background, BodyRegion::Hair]).width(), 64);
+    // Run on a part, the pixels outside it have no region.
+    let part = parser
+      .process_within(image, Rect::new((16, 16), (32, 32)), 0.0)
+      .expect("parsing a part should succeed");
+    assert!(part.region_at(20, 20).is_some());
+    assert_eq!(part.region_at(0, 0), None);
+    assert_eq!(part.mask(BodyRegion::Background).bounds(0).map(|bounds| bounds.edges::<u32>()).map(|(left, top, _, _)| (left >= 16, top >= 16)), Some((true, true)));
   }
 
   #[test]

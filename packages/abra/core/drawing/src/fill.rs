@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use abra_core::image::gpu::{GpuAux, GpuPass, Hardware, ready_gpu_provider};
 use abra_core::image::recipe::{Generator, blended, generated};
-use abra_core::{Area, BlendMode, Fill, Image, ImageRepeat, Path, PointF};
+use abra_core::{Area, BlendMode, ColorSpace, Fill, Image, ImageRepeat, Path, PointF};
 use rayon::prelude::*;
 
 use crate::core::shader::gradient_path;
@@ -215,6 +215,10 @@ impl<'a> FillArea<'a> {
       Fill::Gradient(gradient) => {
         kind = 1;
         if gradient.stops().len() > MAX_GRADIENT_STOPS {
+          return None;
+        }
+        // The shader mixes the stops in sRGB. A gradient that mixes in another space is drawn on the CPU, which can.
+        if gradient.interpolation().space != ColorSpace::Srgb {
           return None;
         }
         for stop in gradient.stops() {
@@ -493,6 +497,28 @@ mod gpu_tests {
     let points: Vec<[f32; 2]> = (0..=MAX_FILL_POINTS).map(|i| [i as f32, (i % 2) as f32 * 5.0]).collect();
     let jagged = fill(Area::from_points(&points), Color::from_rgba(0, 0, 0, 255));
     assert!(jagged.gpu_passes().is_none());
+  }
+
+  #[test]
+  fn a_gradient_mixed_in_another_space_is_left_to_the_cpu_which_draws_it() {
+    use abra_core::{ColorSpace, Gradient};
+
+    let (blue, yellow) = (Color::from_rgb(0, 0, 255), Color::from_rgb(255, 255, 0));
+    let area = Area::rect((0.0, 0.0), (16.0, 4.0));
+    let in_srgb = fill(area.clone(), Gradient::from_to(blue, yellow));
+    let in_oklab = fill(area.clone(), Gradient::from_to(blue, yellow).with_interpolation(ColorSpace::Oklab));
+    // The shader mixes in sRGB, so the default gradient is its to draw and the other is not.
+    assert!(in_srgb.gpu_passes().is_some());
+    assert!(in_oklab.gpu_passes().is_none());
+    // On the CPU the Oklab one has color in the middle where the sRGB one is a gray.
+    let (srgb, oklab) = (in_srgb.to_image(), in_oklab.to_image());
+    // How far apart the channels of the middle pixel are: a gray has none.
+    let spread = |image: &Image| {
+      let (r, g, b, _) = image.get_pixel(8, 2).unwrap();
+      r.max(g).max(b) - r.min(g).min(b)
+    };
+    assert!(spread(&srgb) < 25, "sRGB is nearly a gray: {}", spread(&srgb));
+    assert!(spread(&oklab) > 60, "Oklab has color: {}", spread(&oklab));
   }
 }
 

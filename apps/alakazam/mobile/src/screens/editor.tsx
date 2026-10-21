@@ -1,4 +1,5 @@
 import { AiModelPrompt } from '@/src/components/editor/ai-model-prompt';
+import { AiPendingNotice } from '@/src/components/editor/ai-pending-notice';
 import { AiProgressBar } from '@/src/components/editor/ai-progress-bar';
 import { EditorPanel } from '@/src/components/editor/editor-panel';
 import { EditorPreview } from '@/src/components/editor/editor-preview';
@@ -57,6 +58,7 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
       <EditorToolbar photo={photo} onClose={onClose} />
       <AiProgressBar />
       <EditorPanel />
+      <AiPendingNotice />
       <AiModelPrompt />
     </View>
   );

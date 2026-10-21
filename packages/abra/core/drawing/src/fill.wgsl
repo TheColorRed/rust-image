@@ -120,7 +120,8 @@ fn gradient_time(p: vec2<f32>) -> f32 {
   return time;
 }
 
-// The color of the gradient at `time`: the stops around it blended, or the first or last stop's color past the ends.
+// The color of the gradient at `time`: the stops around it mixed in sRGB, or the first or last stop's color past the ends. A gradient
+// that mixes in another color space is not drawn here (see `GpuFill` in fill.rs): it is drawn on the CPU.
 fn gradient_color(time: f32) -> vec4<f32> {
   if (params.stop_count == 0u) {
     return vec4<f32>(0.0);
@@ -141,7 +142,16 @@ fn gradient_color(time: f32) -> vec4<f32> {
   let start = params.stops[after - 1u];
   let end = params.stops[after];
   let t = (time - start.time.x) / (end.time.x - start.time.x);
-  return floor(start.color + (end.color - start.color) * t);
+  // The same mix as `Color::mix` in sRGB (see `Gradient::color_at`): the colors count for as much as they are opaque, and the result is
+  // rounded half up, as the CPU rounds. Colors and alpha are 0 to 255 here.
+  let alpha = start.color.a + (end.color.a - start.color.a) * t;
+  var rgb = start.color.rgb + (end.color.rgb - start.color.rgb) * t;
+  if (alpha > 0.0) {
+    let start_light = start.color.rgb * start.color.a;
+    let end_light = end.color.rgb * end.color.a;
+    rgb = (start_light + (end_light - start_light) * t) / alpha;
+  }
+  return floor(vec4<f32>(rgb, alpha) + 0.5);
 }
 
 // The color of the fill at `p` (local), 0 to 255 each.

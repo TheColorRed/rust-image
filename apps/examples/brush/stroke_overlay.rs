@@ -1,3 +1,4 @@
+use abra::abra_core::{OpacityStop, StrokeOpacity, StrokeWidth, WidthStop};
 use abra::drawing::prelude::*;
 use abra::prelude::*;
 use std::time::Instant;
@@ -8,8 +9,9 @@ const POINTS_PER_FRAME: usize = 3;
 const FRAMES: usize = 120;
 
 /// Simulates a finger drawing a loop around the middle of the photo, one frame at a time. Each frame the line gains a few points
-/// and the photo with the line over it has to be made again. It times that two ways: the shader (the line is a picture made by
-/// the GPU when its pixels are read) and the CPU (the same picture made by the processor).
+/// and the photo with the line over it (a stroke overlay) has to be made again. It times that two ways: the shader (the line is a
+/// picture made by the GPU when its pixels are read) and the CPU (the same picture made by the processor). It ends by drawing the
+/// whole loop with a brush whose width tapers and whose opacity fades, to see a line that gets thinner and clearer along its length.
 pub fn main() {
   let photo = Image::read(FILE).expect("Failed to load image");
   let (width, height): (u32, u32) = photo.dimensions();
@@ -26,7 +28,7 @@ pub fn main() {
   let brush = Brush::new().with_size((width.min(height) / 60).max(6)).with_color(&red).with_hardness(0.6).with_opacity(0.9);
   println!("photo {width}x{height}, {FRAMES} frames, {POINTS_PER_FRAME} new points each");
 
-  // How live drawing would really run: the photo stays on the GPU and each frame sends only the line's new points. Nothing is
+  // How drawing under a moving finger would really run: the photo stays on the GPU and each frame sends only the line's new points. Nothing is
   // copied back until the end, apart from one pixel each frame to wait for the GPU to finish, so the time is the drawing itself.
   {
     use abra::abra_core::image::recipe::{blended, gpu_run};
@@ -48,7 +50,7 @@ pub fn main() {
     let rest = &times[1..];
     let mean = rest.iter().sum::<f64>() / rest.len() as f64;
     let worst = rest.iter().cloned().fold(0.0, f64::max);
-    println!("GPU resident (live): first frame {:.1} ms, then {mean:.1} ms on average (worst {worst:.1} ms)", times[0]);
+    println!("GPU resident: first frame {:.1} ms, then {mean:.1} ms on average (worst {worst:.1} ms)", times[0]);
     println!("  with a short line (frames 2-6): {:.1} ms, with the whole loop (last 10): {:.1} ms", rest[..5].iter().sum::<f64>() / 5.0, rest[rest.len() - 10..].iter().sum::<f64>() / 10.0);
   }
 
@@ -66,7 +68,7 @@ pub fn main() {
       let pixels = shown.rgba().len();
       times.push(started.elapsed().as_secs_f64() * 1000.0);
       if frame == FRAMES {
-        shown.write(format!("assets/out/live-stroke-{}.png", if on_gpu { "gpu" } else { "cpu" }), None).expect("Failed to save image");
+        shown.write(format!("assets/out/stroke-overlay-{}.png", if on_gpu { "gpu" } else { "cpu" }), None).expect("Failed to save image");
       }
       assert!(pixels > 0);
     }
@@ -77,4 +79,16 @@ pub fn main() {
     let worst = rest.iter().cloned().fold(0.0, f64::max);
     println!("{name}: first frame {first:.1} ms, then {mean:.1} ms on average (worst {worst:.1} ms)");
   }
+
+  // The same loop with a width that swells and then ends in a point, drawn the way each frame is: the brush's width is read along the line.
+  let thick = (width.min(height) / 25).max(10) as f32;
+  let tapered = brush.clone().with_width(StrokeWidth::new(vec![
+    WidthStop::new(thick * 0.1, 0.0),
+    WidthStop::new(thick, 0.35),
+    WidthStop::new(0.0, 1.0),
+  ]))
+  // It also fades: solid over most of its length and clear at the end.
+  .with_opacity(StrokeOpacity::new(vec![OpacityStop::new(0.9, 0.0), OpacityStop::new(0.9, 0.55), OpacityStop::new(0.0, 1.0)]));
+  let shown = abra::abra_core::image::recipe::blended(&photo, &stroke_overlay(width, height, &touches, &tapered), BlendMode::Normal, 1.0);
+  shown.write("assets/out/stroke-overlay-taper.png", None).expect("Failed to save image");
 }

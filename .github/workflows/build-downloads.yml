@@ -91,6 +91,9 @@ jobs:
     name: Mobile (Android release)
     if: github.event_name != 'workflow_dispatch' || inputs.android
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v7
@@ -138,10 +141,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload Android APK to S3
+        run: aws s3 cp release/Alakazam-android-release.apk "s3://${{ vars.S3_BUCKET }}/releases/${{ github.run_number }}/Alakazam-android-release.apk"
+
   ios-mobile:
     name: Mobile (iOS unsigned IPA)
     if: github.event_name != 'workflow_dispatch' || inputs.ios
     runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       IPHONEOS_DEPLOYMENT_TARGET: '15.1'
 
@@ -210,3 +224,11 @@ jobs:
           path: release/Alakazam-ios-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload iOS IPA to S3
+        run: aws s3 cp release/Alakazam-ios-unsigned.ipa "s3://${{ vars.S3_BUCKET }}/releases/${{ github.run_number }}/Alakazam-ios-unsigned.ipa"

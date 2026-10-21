@@ -28,6 +28,23 @@ sobel(SobelDirection::Horizontal).apply(&mut horizontal);
 sobel(SobelDirection::Vertical).apply(&mut vertical);
 ```
 
+## Color edges
+
+`color_edges` draws a line wherever the color of an image changes, as the outline of a comic book is drawn between the flat areas of color. A pixel is on a line when its color differs from the pixel a thickness to the left of it, or the one a thickness above it, by more than the tolerance. The result is ink on paper, black on white unless you set them:
+
+```rust
+use abra::filters::prelude::edges::color_edges;
+
+let mut lines = image.clone();
+color_edges(3).with_tolerance(1).apply(&mut lines);
+// Multiply the lines over the picture to outline it.
+blend(&lines).with_mode(BlendMode::Multiply).apply(&mut image);
+```
+
+The difference between two colors is the mean difference of their red, green and blue levels, from `0` to `255`, and `with_tolerance` sets how much counts. The default of 16 is clearly different. A picture of flat colors, where any change is an edge, wants a small one such as `1`, and a photograph, where grain makes small changes everywhere, wants a larger one. The lines are as wide as the thickness and sit on the right of an upright change and below a flat one.
+
+Unlike a Sobel of the brightness, it looks at the colors, so a red next to a green of the same brightness is an edge. `with_ink` and `with_paper` set the colors, and the alpha of the image is kept. It runs on the GPU as well as the CPU, and the two draw the same lines.
+
 ## Glowing edges
 
 `glowing_edges` builds a soft glowing-edge effect:

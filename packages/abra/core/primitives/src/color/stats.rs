@@ -58,23 +58,17 @@ impl Color {
 }
 
 /// The value bins of the red, green, and blue channels.
+///
+/// It counts the pixels in one pass. Counting them is cheaper than splitting the work: each split of a parallel fold would need bins of its
+/// own (three of 256 counts, 6 KB) and the splits nest, which on a thread with a small stack, as a phone's, is a stack overflow.
 fn rgb_bins(p_pixels: &[u8], p_stride: usize) -> [Bins; 3] {
-  p_pixels
-    .par_chunks_exact(p_stride)
-    .fold(
-      || [Bins::new(), Bins::new(), Bins::new()],
-      |mut bins, px| {
-        bins.iter_mut().zip(px).for_each(|(bins, &value)| bins.add(value));
-        bins
-      },
-    )
-    .reduce(
-      || [Bins::new(), Bins::new(), Bins::new()],
-      |mut a, b| {
-        a.iter_mut().zip(b.iter()).for_each(|(bins_a, bins_b)| bins_a.merge(bins_b));
-        a
-      },
-    )
+  let mut bins = [Bins::new(), Bins::new(), Bins::new()];
+  for pixel in p_pixels.chunks_exact(p_stride) {
+    for (bins, &value) in bins.iter_mut().zip(pixel) {
+      bins.add(value);
+    }
+  }
+  bins
 }
 
 #[cfg(test)]
@@ -86,6 +80,15 @@ mod tests {
     // 4 RGB pixels = 12 bytes, which used to be misread as 3 RGBA pixels.
     let pixels = [0, 0, 0, 100, 100, 100, 200, 200, 200, 100, 100, 100];
     assert_eq!(Color::from_pixels(&pixels, Channels::RGB, ColorStat::Average).rgb(), (100, 100, 100));
+  }
+
+  #[test]
+  fn the_median_and_mode_of_a_large_buffer_are_found_without_deep_recursion() {
+    // Four million pixels: reds of 10 for three quarters of them and 200 for the rest. A parallel fold with bins for each split overflowed the
+    // stack of a worker thread on a phone for a buffer far smaller than this.
+    let pixels: Vec<u8> = (0..4_000_000u32).flat_map(|at| [if at % 4 == 0 { 200 } else { 10 }, 5, 5, 255]).collect();
+    assert_eq!(Color::from_pixels(&pixels, Channels::RGBA, ColorStat::Median).rgb(), (10, 5, 5));
+    assert_eq!(Color::from_pixels(&pixels, Channels::RGBA, ColorStat::Mode).rgb(), (10, 5, 5));
   }
 
   #[test]

@@ -8,11 +8,11 @@
 
 use std::sync::{Arc, RwLock};
 
-use abra::abra_core::{PointF, Rect, Size, TransformAlgorithm};
+use abra::abra_core::{ColorStat, PointF, Rect, Size, TransformAlgorithm};
 use abra::mask::prelude as library;
 use abra::mask::prelude::{Blob, Falloff};
 
-use crate::{Area, Color, Image};
+use crate::{Area, Color, Fill, Image};
 
 // Algorithms for transforming images such as resizing or rotating.
 #[uniffi::remote(Enum)]
@@ -107,6 +107,14 @@ impl Mask {
     ))
   }
 
+  /// A mask of the pixels of an image that are between two brightnesses: `255` where a pixel is no darker than `darkest` and no
+  /// lighter than `lightest` (each `0` to `255`), `0` where it is not, and values between along the edge when `feather` (a number of
+  /// levels of brightness) is more than `0`. Use it to pick out the shadows, the highlights or the midtones of a picture.
+  #[uniffi::constructor]
+  pub fn from_brightness_range(image: Arc<Image>, darkest: u8, lightest: u8, feather: u8) -> Self {
+    Self::from_core(library::Mask::from_brightness_range(&image.core(), darkest, lightest, feather))
+  }
+
   /// A mask of how much of each pixel of `image` is a foreground color rather than a background color, taking each pixel's color as a
   /// mix of the two: `255` for exactly the foreground color, `0` for exactly the background color and half for halfway. The two colors are
   /// pictures, one color for each pixel, the same size as `image`; a picture of another size panics. Where they are closer together than
@@ -160,6 +168,25 @@ impl Mask {
     self.0.read().unwrap().bounds(threshold)
   }
 
+  /// The outlines of the shapes in the mask: each is a closed loop of points in the mask's pixels (the last joins the first). A pixel is inside a
+  /// shape when its value is at or above `level`, and an outline crosses between two neighbors in proportion to their values. An outer outline
+  /// runs counterclockwise on the screen and a hole runs clockwise.
+  pub fn contours(&self, level: u8) -> Vec<Vec<PointF>> {
+    self.0.read().unwrap().contours(level)
+  }
+
+  /// The shapes in the mask as smooth areas: each outline with the points it does not need dropped to within `tolerance` pixels, and curves
+  /// through the rest that keep a corner where the outline turns by more than `corner_degrees`.
+  pub fn traced(&self, level: u8, tolerance: f32, corner_degrees: f32) -> Vec<Arc<Area>> {
+    self.0.read().unwrap().traced(level, tolerance, corner_degrees).into_iter().map(|area| Arc::new(Area::from_core(area))).collect()
+  }
+
+  /// A mask of lines `width` pixels thick along the edges of the shapes in this mask, the size of this mask: `255` on a line and `0`
+  /// elsewhere. The lines follow `traced`. It is made in one go, so the points of the outlines never cross over one by one.
+  pub fn outlined(&self, level: u8, tolerance: f32, corner_degrees: f32, width: f32) -> Arc<Mask> {
+    Arc::new(Self::from_core(self.0.read().unwrap().outlined(level, tolerance, corner_degrees, width)))
+  }
+
   /// The fraction, from `0` to `1`, of the mask's pixels with a value above `threshold`.
   pub fn coverage(&self, threshold: u8) -> f32 {
     self.0.read().unwrap().coverage(threshold)
@@ -194,6 +221,30 @@ impl Mask {
     Arc::new(Self::from_core(self.0.read().unwrap().eroded(radius)))
   }
 
+  /// A copy of the mask opened: shrunk and then grown by `radius`, so that specks and thin spurs smaller than the window are taken
+  /// away while larger regions keep their size.
+  pub fn opened(&self, radius: u32) -> Arc<Mask> {
+    Arc::new(Self::from_core(self.0.read().unwrap().opened(radius)))
+  }
+
+  /// A copy of the mask closed: grown and then shrunk by `radius`, so that holes and gaps smaller than the window are filled in while
+  /// the outside of a region stays where it was.
+  pub fn closed(&self, radius: u32) -> Arc<Mask> {
+    Arc::new(Self::from_core(self.0.read().unwrap().closed(radius)))
+  }
+
+  /// The brightness (`0` to `255`) below which the share `fraction` (`0` to `1`) of the pixels this mask covers fall in `image`, or `0`
+  /// when the mask covers nothing. Pixels of the mask above `threshold` are covered. The image must be the size of the mask.
+  pub fn brightness_percentile(&self, image: Arc<Image>, fraction: f32, threshold: u8) -> u8 {
+    self.0.read().unwrap().brightness_percentile(&image.core(), fraction, threshold)
+  }
+
+  /// The one color that stands for the part of `image` this mask covers: the average, median or mode of those pixels, or nothing when the
+  /// mask covers nothing. Pixels of the mask above `threshold` are covered. The image must be the size of the mask.
+  pub fn color_in(&self, image: Arc<Image>, stat: ColorStat, threshold: u8) -> Option<Arc<Color>> {
+    self.0.read().unwrap().color_in(&image.core(), stat, threshold).map(|color| Arc::new(Color(color)))
+  }
+
   /// The two masks added, up to `255`. The result is the size of this mask; a mask of another size is scaled to it.
   pub fn added(&self, other: Arc<Mask>) -> Arc<Mask> {
     Arc::new(Self::from_core(self.0.read().unwrap().added(&other.core())))
@@ -223,6 +274,14 @@ impl Mask {
   /// must be the size of the image.
   pub fn apply_to_image(&self, image: Arc<Image>) {
     image.edit(|image| self.0.read().unwrap().apply_to_image(image));
+  }
+
+  /// Paints a fill onto the image only where this mask is on: a color, a gradient or a picture, as strong as the mask is. Where the mask
+  /// is `255` the image gets the fill, where it is `0` it is as it was, and in between they are mixed. The fill starts at the top left
+  /// corner of the image. The mask must be the size of the image.
+  pub fn fill_image(&self, image: Arc<Image>, fill: Arc<Fill>) {
+    let mask = self.0.read().unwrap().clone();
+    image.edit(|image| mask.fill_image(image, fill.0.clone()));
   }
 
   /// Draws a filled area onto the mask in this color, which is averaged to a gray, with the area's origin at `at` (the
@@ -261,6 +320,60 @@ pub fn apply_mask_to_pixels_rgba(mut pixels: Vec<u8>, mask: Vec<u8>) -> Vec<u8> 
 mod tests {
   use super::*;
   use crate::Color;
+
+  #[test]
+  fn a_mask_gives_the_color_of_the_part_of_an_image_it_covers() {
+    let image = Arc::new(Image::new_from_color(2, 1, Arc::new(Color::from_rgba(10, 20, 30, 255))));
+    let covers_first = Mask::from_values(2, 1, vec![255, 0]);
+    assert_eq!(covers_first.color_in(image.clone(), ColorStat::Average, 0).map(|color| color.rgba()), Some(vec![10, 20, 30, 255]));
+    assert!(Mask::empty(2, 1).color_in(image, ColorStat::Median, 0).is_none());
+  }
+
+  #[test]
+  fn a_mask_is_traced_and_outlined_in_one_call() {
+    let values: Vec<u8> = (0..40 * 40).map(|at| if (10..30).contains(&(at % 40)) && (10..30).contains(&(at / 40)) { 255 } else { 0 }).collect();
+    let mask = Mask::from_values(40, 40, values);
+    let areas = mask.traced(128, 1.5, 50.0);
+    assert_eq!(areas.len(), 1);
+    assert!(areas[0].contains(crate::point_f_new(20.0, 20.0)));
+    let lines = mask.outlined(128, 1.5, 50.0, 3.0);
+    assert_eq!((lines.width(), lines.height()), (40, 40));
+    assert_eq!(lines.get(10, 20), Some(255));
+    assert_eq!(lines.get(20, 20), Some(0));
+  }
+
+  #[test]
+  fn a_mask_gives_the_outlines_of_its_shapes() {
+    let mask = Mask::from_values(4, 4, vec![0, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0]);
+    let outlines = mask.contours(128);
+    assert_eq!(outlines.len(), 1);
+    assert_eq!(outlines[0].len(), 8);
+    assert!(Mask::empty(4, 4).contours(128).is_empty());
+  }
+
+  #[test]
+  fn a_fill_is_painted_through_the_mask_onto_the_image() {
+    let image = Arc::new(Image::new_from_pixels(2, 1, vec![10, 10, 10, 255, 10, 10, 10, 255], abra::abra_core::Channels::RGBA));
+    Mask::from_values(2, 1, vec![0, 255]).fill_image(image.clone(), Arc::new(Fill::solid(Arc::new(Color::from_rgb(255, 0, 0)))));
+    assert_eq!(image.rgba(), vec![10, 10, 10, 255, 255, 0, 0, 255]);
+  }
+
+  #[test]
+  fn a_mask_is_made_from_a_brightness_range_cleaned_and_asked_for_a_percentile() {
+    let grays: Vec<u8> = [0u8, 60, 120, 180, 240].iter().flat_map(|gray| [*gray, *gray, *gray, 255]).collect();
+    let image = Arc::new(Image::new_from_pixels(5, 1, grays, abra::abra_core::Channels::RGBA));
+    let midtones = Mask::from_brightness_range(image.clone(), 100, 200, 0);
+    assert_eq!(midtones.values(), vec![0, 0, 255, 255, 0]);
+    // Through the five grays from the darkest to the lightest: the start is the darkest, the middle the middle gray, the end the lightest.
+    let everything = Mask::from_values(5, 1, vec![255; 5]);
+    assert_eq!(everything.brightness_percentile(image.clone(), 0.0, 0), 0);
+    assert_eq!(everything.brightness_percentile(image.clone(), 0.5, 0), 120);
+    assert_eq!(everything.brightness_percentile(image, 1.0, 0), 240);
+    // A speck is taken away by opening and a hole is filled by closing.
+    let speck = Mask::from_values(9, 1, vec![0, 255, 0, 0, 255, 255, 255, 255, 255]);
+    assert_eq!(speck.opened(1).values()[1], 0);
+    assert_eq!(speck.closed(1).values()[2], 255);
+  }
 
   #[test]
   fn a_mask_grows_and_shrinks_as_the_librarys_does() {

@@ -1,13 +1,22 @@
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
-import { leafControls, scaleBetween, type EditSection } from '@/src/lib/project/edit-sections';
+import {
+  leafControls,
+  scaleBetween,
+  thumbnailControls,
+  type EditControl,
+  type EditSection,
+  type GroupControl,
+} from '@/src/lib/project/edit-sections';
+import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { ownedImage } from '@/src/lib/native/native-image';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
 export const THUMBNAIL_WIDTH = 112;
 export const THUMBNAIL_HEIGHT = 80;
-const THUMBNAIL_WORKERS = 2;
+/** How long thumbnails are built before the JS thread is let go to draw the cards made so far. */
+const FRAME_BUDGET_MS = 16;
 
 /** The pixel size of a preview card at this screen's density: what the cached thumbnail-size photo is made at. */
 export function thumbnailPixels() {
@@ -16,7 +25,7 @@ export function thumbnailPixels() {
 }
 
 /**
- * Keeps pixels in Rust, requests at most two effects at once, and publishes each completed card.
+ * Keeps pixels in Rust, builds one effect at a time, and publishes each completed card as soon as it is ready.
  * Cancellation stops scheduling and prevents retired native components from being updated.
  */
 export function buildControlThumbnails(
@@ -27,10 +36,15 @@ export function buildControlThumbnails(
   publish: (key: string, preview: ThumbnailPreview) => void,
   /** The full-size photo the thumbnails are edits of, so a thumb can be told how much smaller its copy is. */
   full: AbraImage | null = null,
+  /** The values of the slider that picker items save to, given to their thumbs (see `ToolContext.values`). */
+  values?: number[],
+  /** Builds start once this settles, so the cards that matter most are not slowed by these on the same thread. */
+  after: Promise<unknown> = Promise.resolve(),
 ) {
   let cancelled = false;
   const { width, height } = thumbnailPixels();
   const done = (async () => {
+    await after;
     const started = Date.now();
     let firstCardMs: number | undefined;
     let firstEffectMs: number | undefined;
@@ -38,26 +52,38 @@ export function buildControlThumbnails(
     let completed = 0;
     const cards: string[] = [];
     let next = 0;
+    let lastYield = started;
     let succeeded = true;
     try {
       if (cancelled) return false;
       const thumbnailSource = source;
       const render = async () => {
-        const controls = leafControls(section.controls);
+        // A picker's items with a `thumb` are drawn like one-tap controls, each under its own key.
+        const controls = thumbnailControls(section.controls).flatMap((control): Exclude<EditControl, GroupControl>[] =>
+          control.kind === 'picker'
+            ? control.items.flatMap(item => (item.thumb ? [{ kind: 'action', key: item.key, label: item.label, thumb: item.thumb }] : []))
+            : [control],
+        );
         while (!cancelled && next < controls.length) {
           const control = controls[next++];
           let pixels: AbraImage | undefined;
           let created: ThumbnailPreview | undefined;
           try {
             const effectStarted = Date.now();
-            const make = control.thumb ?? (control.kind === 'action' ? control.tool : undefined);
+            const make = control.kind === 'picker' ? undefined : (control.thumb ?? (control.kind === 'action' ? control.tool : undefined));
             if (make) {
               // The control makes its own thumbnail (its thumb, else its tool), on a copy of the thumbnail-size photo that is its own to change.
               const target = ownedImage(thumbnailSource.clone());
               const photo = target.clone();
               let returned: ImageLike | undefined;
               try {
-                returned = make.call(control, photo, { scale: scaleBetween(photo, full ?? source) }) as ImageLike | undefined;
+                // What the control's first slider preloaded (the cutout of the people, say), at the thumbnail's size, so the thumb
+                // shows the effect the photo gets. It is only read, never made here, so a thumbnail never starts a model.
+                const preloader = leafControls([control]).find(inner => inner.kind === 'slider' && inner.preload);
+                const preloaded = preloader?.kind === 'slider' ? preloadFor(preloader, photo) : undefined;
+                returned = make.call(control, photo, { scale: scaleBetween(photo, full ?? source), preloaded, values }) as
+                  | ImageLike
+                  | undefined;
                 target.replaceWith(returned ?? photo);
                 pixels = target;
               } catch (error) {
@@ -97,9 +123,15 @@ export function buildControlThumbnails(
             created?.uniffiDestroy();
             pixels?.uniffiDestroy();
           }
+          // Effects run synchronously on the JS thread, so once a frame's worth of them has built up, let the cards published so far
+          // draw. Cheap effects share a frame; a slow one gets its own.
+          if (Date.now() - lastYield >= FRAME_BUDGET_MS) {
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            lastYield = Date.now();
+          }
         }
       };
-      await Promise.all(Array.from({ length: THUMBNAIL_WORKERS }, render));
+      await render();
       return !cancelled && succeeded;
     } catch (error) {
       if (!cancelled) console.warn('[edit] preparing native thumbnail source threw:', error);

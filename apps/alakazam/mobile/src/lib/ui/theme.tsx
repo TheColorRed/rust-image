@@ -1,5 +1,7 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { themePreference, themePreference$ } from '@/src/state/settings';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
+import { useObservable } from 'react-rx';
 
 export type ColorScheme = 'light' | 'dark';
 /** The user's choice in Settings; 'system' follows the OS setting. */
@@ -73,12 +75,13 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme();
-  // Not persisted across app restarts — add @react-native-async-storage/async-storage to do that.
-  const [preference, setPreference] = useState<ThemePreference>('system');
+  const preference = useObservable(themePreference$, themePreference.value);
+  const setPreference = (next: ThemePreference) => themePreference.next(next);
   const colorScheme: ColorScheme = preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
   const colors = colorScheme === 'dark' ? darkColors : lightColors;
 
   const value = useMemo(() => ({ colorScheme, preference, setPreference, colors }), [colorScheme, preference, colors]);
+
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

@@ -14,6 +14,9 @@ export const selectSectionRequested = new Subject<string>();
 export const selectSectionRequested$ = selectSectionRequested.asObservable();
 export const sliderCommitRequested = new Subject<{ control: SliderControl; value: AdjustmentValue }>();
 export const sliderCommitRequested$ = sliderCommitRequested.asObservable();
+/** The reset button of the open control with several sliders was pressed. */
+export const sliderResetRequested = new Subject<void>();
+export const sliderResetRequested$ = sliderResetRequested.asObservable();
 export const undoRequested = new Subject<void>();
 export const undoRequested$ = undoRequested.asObservable();
 export const redoRequested = new Subject<void>();

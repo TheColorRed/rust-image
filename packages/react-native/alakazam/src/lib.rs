@@ -40,3 +40,12 @@ impl std::fmt::Display for AbraError {
 }
 
 impl std::error::Error for AbraError {}
+
+impl From<abra_body_segmentation::prelude::AiError> for AbraError {
+  /// A model that cannot load or run is an AI error, so a worker can use `?` on anything an Abra AI crate returns.
+  fn from(error: abra_body_segmentation::prelude::AiError) -> Self {
+    AbraError::Ai {
+      message: error.to_string(),
+    }
+  }
+}

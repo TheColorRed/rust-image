@@ -1,0 +1,13 @@
+[package]
+name = "quantize-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+abra-body-segmentation = { workspace = true }
+abra-matting = { workspace = true }
+
+[[bin]]
+name = "quantize-test"
+path = "main.rs"

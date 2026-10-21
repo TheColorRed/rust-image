@@ -26,7 +26,7 @@
 use std::sync::{Arc, RwLock};
 
 use abra::abra_core::{
-  self, Alignment, AspectRatio, LineCap, LineJoin, Orientation, PointF, PreserveAspectRatio, Quad, Rect, Segment, Size,
+  self, Alignment, AspectRatio, LineCap, LineJoin, Orientation, PointF, PreserveAspectRatio, Quad, Rect, Segment, Size, StrokeEasing,
 };
 
 use crate::Image;
@@ -116,6 +116,21 @@ pub enum Shape {
   /// A regular polygon with the given number of sides, with a corner at the top. Fewer than three sides produces an empty
   /// area.
   Polygon(u32),
+  /// An equilateral triangle with a corner at the top.
+  Triangle,
+  /// A cut gem: flat on top, with wide shoulders that angle out to the full width and then in to a point at the bottom. It
+  /// is about 100 wide and 80 tall.
+  Diamond,
+  /// An arrow pointing upwards, with a flat base and a pointed triangle at the top wider than the base.
+  Arrow,
+  /// A half moon shape, with the curved side on the left and the flat side on the right.
+  HalfMoon,
+  /// A crescent moon shape, with the curved outer side on the left the concave side on the right.
+  CrescentMoon,
+  /// A cross shape, with equal arms extending from the center.
+  Cross,
+  /// A bow tie: two triangles, tall at the outer ends and meeting in a narrow waist at the center.
+  BowTie,
 }
 
 impl From<Shape> for abra_core::Shape {
@@ -124,6 +139,13 @@ impl From<Shape> for abra_core::Shape {
       Shape::Heart => abra_core::Shape::Heart,
       Shape::Star => abra_core::Shape::Star,
       Shape::Polygon(sides) => abra_core::Shape::Polygon(sides as usize),
+      Shape::Triangle => abra_core::Shape::Triangle,
+      Shape::Diamond => abra_core::Shape::Diamond,
+      Shape::Arrow => abra_core::Shape::Arrow,
+      Shape::HalfMoon => abra_core::Shape::HalfMoon,
+      Shape::CrescentMoon => abra_core::Shape::CrescentMoon,
+      Shape::Cross => abra_core::Shape::Cross,
+      Shape::BowTie => abra_core::Shape::BowTie,
     }
   }
 }
@@ -860,11 +882,18 @@ impl Path {
     Arc::new(Self::from_core(self.0.read().unwrap().fit(size, aspect_ratio)))
   }
 
-  /// Starts a stroke of this path as an open line, which has a join, a cap and a miter limit to set.
+  /// Starts a stroke of this path as an open line that is this wide the whole way, which has a join, a cap and a miter limit to set. The
+  /// library's `stroke` takes a number or a `StrokeWidth`; a stroke that changes along the path is [`stroke_along`](Path::stroke_along).
   pub fn stroke(&self, width: f32) -> Arc<PathStroke> {
+    self.stroke_along(Arc::new(StrokeWidth::constant(width)))
+  }
+
+  /// Starts a stroke of this path as an open line, as wide at each place along it as the `StrokeWidth` says: `0` is the start of the path
+  /// and `1` is its end.
+  pub fn stroke_along(&self, width: Arc<StrokeWidth>) -> Arc<PathStroke> {
     Arc::new(PathStroke {
       path: self.core(),
-      width,
+      width: width.0.clone(),
       join: None,
       cap: None,
       miter_limit: None,
@@ -971,7 +1000,7 @@ impl Area {
 #[derive(Debug, uniffi::Object)]
 pub struct PathStroke {
   path: abra_core::Path,
-  width: f32,
+  width: abra_core::StrokeWidth,
   join: Option<LineJoin>,
   cap: Option<LineCap>,
   miter_limit: Option<f32>,
@@ -983,7 +1012,7 @@ impl PathStroke {
   pub fn with_join(&self, join: LineJoin) -> Arc<PathStroke> {
     Arc::new(PathStroke {
       path: self.path.clone(),
-      width: self.width,
+      width: self.width.clone(),
       join: Some(join),
       cap: self.cap,
       miter_limit: self.miter_limit,
@@ -994,7 +1023,7 @@ impl PathStroke {
   pub fn with_cap(&self, cap: LineCap) -> Arc<PathStroke> {
     Arc::new(PathStroke {
       path: self.path.clone(),
-      width: self.width,
+      width: self.width.clone(),
       join: self.join,
       cap: Some(cap),
       miter_limit: self.miter_limit,
@@ -1005,7 +1034,7 @@ impl PathStroke {
   pub fn with_miter_limit(&self, limit: f32) -> Arc<PathStroke> {
     Arc::new(PathStroke {
       path: self.path.clone(),
-      width: self.width,
+      width: self.width.clone(),
       join: self.join,
       cap: self.cap,
       miter_limit: Some(limit),
@@ -1014,7 +1043,7 @@ impl PathStroke {
 
   /// The outline of the stroke as a closed path.
   pub fn to_path(&self) -> Arc<Path> {
-    let mut stroke = self.path.stroke(self.width);
+    let mut stroke = self.path.stroke(self.width.clone());
     if let Some(join) = self.join {
       stroke = stroke.with_join(join);
     }
@@ -1026,6 +1055,173 @@ impl PathStroke {
     }
     Arc::new(Path::from_core(stroke.to_path()))
   }
+}
+
+// How the width or the opacity of a stroke changes between two stops.
+#[uniffi::remote(Enum)]
+pub enum StrokeEasing {
+  Linear,
+  Smooth,
+}
+
+/// How wide a stroke is at one place along its path.
+#[derive(Debug, uniffi::Object)]
+pub struct WidthStop(pub abra_core::WidthStop);
+
+#[uniffi::export]
+impl WidthStop {
+  /// A stop with this width at `time`: `0` is the start of the path and `1` is its end.
+  #[uniffi::constructor]
+  pub fn new(width: f32, time: f32) -> Self {
+    Self(abra_core::WidthStop::new(width, time))
+  }
+
+  /// The width of the stroke at the stop.
+  pub fn width(&self) -> f32 {
+    self.0.width
+  }
+
+  /// The position of the stop along the path, from 0 to 1.
+  pub fn time(&self) -> f32 {
+    self.0.time
+  }
+}
+
+/// How wide a stroke is along its path, set at stops the way a gradient sets color: `0` is the start of the path and `1` is its end.
+#[derive(Debug, uniffi::Object)]
+pub struct StrokeWidth(pub abra_core::StrokeWidth);
+
+#[uniffi::export]
+impl StrokeWidth {
+  /// A stroke through these stops, in any order.
+  #[uniffi::constructor]
+  pub fn new(stops: Vec<Arc<WidthStop>>) -> Self {
+    Self(abra_core::StrokeWidth::new(stops.into_iter().map(|stop| stop.0).collect()))
+  }
+
+  /// A stroke that is the same width the whole way.
+  #[uniffi::constructor]
+  pub fn constant(width: f32) -> Self {
+    Self(abra_core::StrokeWidth::constant(width))
+  }
+
+  /// A stroke that goes from one width at the start of the path to another at its end. A width of `0` at one end is a taper to a point.
+  #[uniffi::constructor]
+  pub fn from_to(from: f32, to: f32) -> Self {
+    Self(abra_core::StrokeWidth::from_to(from, to))
+  }
+
+  /// A copy with this easing between stops. The library's default is linear.
+  pub fn with_easing(&self, easing: StrokeEasing) -> Arc<StrokeWidth> {
+    Arc::new(Self(self.0.clone().with_easing(easing)))
+  }
+
+  /// How the width between two stops changes.
+  pub fn easing(&self) -> StrokeEasing {
+    self.0.easing()
+  }
+
+  /// The stops, in order of their position.
+  pub fn stops(&self) -> Vec<Arc<WidthStop>> {
+    self.0.stops().iter().map(|stop| Arc::new(WidthStop(*stop))).collect()
+  }
+
+  /// The width `time` of the way along the path, from `0` at its start to `1` at its end.
+  pub fn width_at(&self, time: f32) -> f32 {
+    self.0.width_at(time)
+  }
+
+  /// The widest the stroke gets, at any of its stops.
+  pub fn widest(&self) -> f32 {
+    self.0.widest()
+  }
+}
+
+/// How opaque a stroke is at one place along its path.
+#[derive(Debug, uniffi::Object)]
+pub struct OpacityStop(pub abra_core::OpacityStop);
+
+#[uniffi::export]
+impl OpacityStop {
+  /// A stop with this opacity, from 0 (clear) to 1 (solid), at `time`: `0` is the start of the path and `1` is its end.
+  #[uniffi::constructor]
+  pub fn new(opacity: f32, time: f32) -> Self {
+    Self(abra_core::OpacityStop::new(opacity, time))
+  }
+
+  /// The opacity of the stroke at the stop.
+  pub fn opacity(&self) -> f32 {
+    self.0.opacity
+  }
+
+  /// The position of the stop along the path, from 0 to 1.
+  pub fn time(&self) -> f32 {
+    self.0.time
+  }
+}
+
+/// How opaque a stroke is along its path, set at stops the way `StrokeWidth` sets width: `0` is the start of the path and `1` is its end. A
+/// stroke with no stops is solid.
+#[derive(Debug, uniffi::Object)]
+pub struct StrokeOpacity(pub abra_core::StrokeOpacity);
+
+#[uniffi::export]
+impl StrokeOpacity {
+  /// A stroke through these stops, in any order.
+  #[uniffi::constructor]
+  pub fn new(stops: Vec<Arc<OpacityStop>>) -> Self {
+    Self(abra_core::StrokeOpacity::new(stops.into_iter().map(|stop| stop.0).collect()))
+  }
+
+  /// A stroke that is the same opacity the whole way.
+  #[uniffi::constructor]
+  pub fn constant(opacity: f32) -> Self {
+    Self(abra_core::StrokeOpacity::constant(opacity))
+  }
+
+  /// A stroke that goes from one opacity at the start of the path to another at its end. `from_to(1, 0)` fades out.
+  #[uniffi::constructor]
+  pub fn from_to(from: f32, to: f32) -> Self {
+    Self(abra_core::StrokeOpacity::from_to(from, to))
+  }
+
+  /// A copy with this easing between stops. The library's default is linear.
+  pub fn with_easing(&self, easing: StrokeEasing) -> Arc<StrokeOpacity> {
+    Arc::new(Self(self.0.clone().with_easing(easing)))
+  }
+
+  /// How the opacity between two stops changes.
+  pub fn easing(&self) -> StrokeEasing {
+    self.0.easing()
+  }
+
+  /// The stops, in order of their position.
+  pub fn stops(&self) -> Vec<Arc<OpacityStop>> {
+    self.0.stops().iter().map(|stop| Arc::new(OpacityStop(*stop))).collect()
+  }
+
+  /// The opacity `time` of the way along the path, from `0` at its start to `1` at its end, from 0 to 1.
+  pub fn opacity_at(&self, time: f32) -> f32 {
+    self.0.opacity_at(time)
+  }
+
+  /// The opacity when it is the same all the way along, or nothing when it changes.
+  pub fn constant_opacity(&self) -> Option<f32> {
+    self.0.constant_opacity()
+  }
+}
+
+/// Drops the points of an outline that the shape does not need, so that no point is more than `tolerance` from the line that replaces it.
+/// `closed` is whether the last point joins the first, as the outlines of `Mask::contours` do.
+#[uniffi::export]
+pub fn simplify_points(points: Vec<PointF>, tolerance: f32, closed: bool) -> Vec<PointF> {
+  abra_core::simplify_points(&points, tolerance, closed)
+}
+
+/// A closed shape through the points as smooth curves, with a sharp corner kept wherever the outline turns by more than `corner_degrees`.
+#[uniffi::export]
+pub fn smoothed_area(points: Vec<PointF>, corner_degrees: f32) -> Arc<Area> {
+  Arc::new(Area::from_core(abra_core::smoothed_area(&points, corner_degrees)))
 }
 
 /// A stroke along the boundary of an area that is described but not yet built. Each `with_` function gives a changed copy.
@@ -1277,6 +1473,44 @@ mod tests {
     let ring = Area::rect(point_f_new(0.0, 0.0), size_new(10.0, 10.0)).stroke(2.0).with_join(LineJoin::Bevel).to_area();
     assert!(!ring.contains(point_f_new(5.0, 5.0)));
     assert!(ring.contains(point_f_new(0.0, 5.0)));
+  }
+
+  #[test]
+  fn a_stroke_that_tapers_is_wide_at_the_start_and_a_point_at_the_end() {
+    let line = Path::line(point_f_new(0.0, 0.0), point_f_new(10.0, 0.0));
+    let width = Arc::new(StrokeWidth::from_to(4.0, 0.0));
+    assert_eq!(width.width_at(0.5), 2.0);
+    assert_eq!(width.widest(), 4.0);
+    assert_eq!(rect_edges(line.stroke_along(width.clone()).to_path().bounds()), vec![0.0, -2.0, 10.0, 2.0]);
+    let eased = width.with_easing(StrokeEasing::Smooth);
+    assert_eq!(eased.easing(), StrokeEasing::Smooth);
+    assert_eq!(width.easing(), StrokeEasing::Linear);
+    let stops = StrokeWidth::new(vec![Arc::new(WidthStop::new(6.0, 1.0)), Arc::new(WidthStop::new(1.0, 0.0))]).stops();
+    assert_eq!((stops[0].time(), stops[0].width(), stops[1].time()), (0.0, 1.0, 1.0));
+  }
+
+  #[test]
+  fn an_opacity_is_a_number_or_stops_along_the_path() {
+    let fade = StrokeOpacity::from_to(1.0, 0.0);
+    assert_eq!((fade.opacity_at(0.0), fade.opacity_at(0.5), fade.constant_opacity()), (1.0, 0.5, None));
+    assert_eq!(StrokeOpacity::constant(0.4).constant_opacity(), Some(0.4));
+    assert_eq!(StrokeOpacity::new(Vec::new()).opacity_at(0.7), 1.0);
+    let stops = StrokeOpacity::new(vec![Arc::new(OpacityStop::new(0.0, 1.0)), Arc::new(OpacityStop::new(1.0, 0.2))]).stops();
+    assert_eq!((stops[0].time(), stops[0].opacity()), (0.2, 1.0));
+    assert_eq!(fade.with_easing(StrokeEasing::Smooth).easing(), StrokeEasing::Smooth);
+  }
+
+  #[test]
+  fn an_outline_is_simplified_and_smoothed() {
+    let stairs: Vec<PointF> = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (3.0, 2.0), (3.0, 3.0)]
+      .iter()
+      .map(|(x, y)| point_f_new(*x, *y))
+      .collect();
+    assert_eq!(simplify_points(stairs, 0.8, false), vec![point_f_new(0.0, 0.0), point_f_new(3.0, 3.0)]);
+    let square: Vec<PointF> = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)].iter().map(|(x, y)| point_f_new(*x, *y)).collect();
+    let area = smoothed_area(square, 60.0);
+    assert!(area.contains(point_f_new(5.0, 5.0)));
+    assert!(!area.contains(point_f_new(12.0, 5.0)));
   }
 
   #[test]

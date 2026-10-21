@@ -21,6 +21,18 @@ pinch(&mut image, -0.35, None);
 
 Positive amounts pinch inward; negative amounts bulge outward. The amount is clamped to `-1.0..=1.0`.
 
+## Displace
+
+`displace` moves pixels by the brightness of another image, like Photoshop's Displace filter. A height map bends whatever is drawn on the image so it follows the map:
+
+```rust
+use abra::filters::prelude::distort::displace;
+
+displace(&map, 0.0, 40.0).apply(&mut image);
+```
+
+Where the map is mid gray nothing moves. Where it is white the content moves by the full amount along each axis, and where it is black it moves the same distance the other way. The amounts are in pixels; a positive `amount_x` moves content right and a positive `amount_y` moves it down where the map is bright. A map of a different size is stretched over the image, and pixels pulled in from past an edge take the nearest edge pixel.
+
 ## Ripple
 
 `ripple` displaces pixels with a periodic wave:

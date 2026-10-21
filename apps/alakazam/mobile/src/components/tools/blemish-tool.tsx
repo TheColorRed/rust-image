@@ -1,5 +1,4 @@
 import type { AbraImageLike } from '@alakazam/mobile';
-import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo } from 'react';
 import { useObservable } from 'react-rx';
 import { PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -71,21 +70,17 @@ export function BlemishReticle() {
 }
 
 export interface BlemishControlsProps {
-  onBack: () => void;
   onApply: () => void;
 }
 
-/** The controls-row UI shown while the blemish tool is focused: a back chip, a hint, and the
+/** The controls-row UI shown while the blemish tool is focused: a hint, and the
  * button that actually runs the removal at the reticle's current spot. */
-export function BlemishControls({ onBack, onApply }: BlemishControlsProps) {
+export function BlemishControls({ onApply }: BlemishControlsProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.controlRow}>
       <View style={styles.topRow}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.backChip}>
-          <ChevronLeft color={colors.textPrimary} size={18} />
-        </Pressable>
         <Text style={styles.hint}>Pinch to fit the blemish in the inner circle, or double-tap it</Text>
       </View>
       <Pressable style={styles.applyButton} onPress={onApply}>
@@ -215,14 +210,6 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     controlRow: { alignItems: 'center', gap: 8, paddingHorizontal: 16 },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch' },
-    backChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.chip,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     hint: { flex: 1, color: colors.textSecondary, fontSize: 12 },
     applyButton: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 18, backgroundColor: colors.accent },
     applyButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },

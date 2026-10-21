@@ -59,11 +59,24 @@ pub trait CoverageMask: Sync {
 /// This implementation stores a flat vector of vertices and performs a
 /// point-in-polygon test for `contains`. It also computes a bounding box
 /// that can be used by the rasterizer to optimize pixel iteration.
+///
+/// The edges are also sorted into the whole-pixel rows they reach into, so a sample only tests the few edges that cross its row and not
+/// every edge of the polygon. A ring around a large shape has thousands of edges and a few of them in any one row, so what a sample costs
+/// does not grow with the size of the shape.
 pub struct PolygonCoverage {
   /// Pre-flattened polygon vertices.
   polygon: Vec<(f32, f32)>,
   bounds: Option<(f32, f32, f32, f32)>,
+  /// The whole-pixel row that `rows[0]` is for: the row of the top of the polygon.
+  first_row: i32,
+  /// For each whole-pixel row from `first_row`, the places of the edges that reach into it, an edge being named by the place of the vertex it
+  /// ends at (it starts at the one before). Edges that are level cross nothing and are left out. Empty when the polygon reaches over too many
+  /// rows to list, which is then tested edge by edge.
+  rows: Vec<Vec<u32>>,
 }
+
+/// The most rows a polygon may reach over and still have its edges sorted into them.
+const MAX_INDEXED_ROWS: i64 = 1 << 16;
 
 impl PolygonCoverage {
   /// Creates a new `PolygonCoverage` from a vector of `PointF` vertices.
@@ -91,7 +104,34 @@ impl PolygonCoverage {
       });
       polygon.push((point.x, point.y));
     }
-    PolygonCoverage { polygon, bounds }
+    let mut coverage = PolygonCoverage { polygon, bounds, first_row: 0, rows: Vec::new() };
+    coverage.sort_edges_into_rows();
+    coverage
+  }
+
+  /// Lists, for each whole-pixel row the polygon reaches over, the edges that reach into it.
+  fn sort_edges_into_rows(&mut self) {
+    let Some((_, min_y, _, max_y)) = self.bounds else {
+      return;
+    };
+    if !(min_y.is_finite() && max_y.is_finite()) || (max_y.floor() as i64 - min_y.floor() as i64) >= MAX_INDEXED_ROWS {
+      return;
+    }
+    self.first_row = min_y.floor() as i32;
+    let last_row = max_y.floor() as i32;
+    let mut rows = vec![Vec::new(); (last_row - self.first_row + 1) as usize];
+    let count = self.polygon.len();
+    for end in 0..count {
+      let (start_y, end_y) = (self.polygon[(end + count - 1) % count].1, self.polygon[end].1);
+      if start_y == end_y {
+        continue;
+      }
+      let (low, high) = (start_y.min(end_y).floor() as i32, start_y.max(end_y).floor() as i32);
+      for row in low..=high {
+        rows[(row - self.first_row) as usize].push(end as u32);
+      }
+    }
+    self.rows = rows;
   }
 
   /// Ray-casting point-in-polygon test using the non-zero winding rule.
@@ -102,11 +142,23 @@ impl PolygonCoverage {
     if self.polygon.is_empty() {
       return false;
     }
+    if self.rows.is_empty() {
+      return self.winding_over(p_point, 0..self.polygon.len());
+    }
+    // Only the edges that reach into this row can cross it; a point above or below the polygon is not in it.
+    let row = p_point.1.floor();
+    if !(row >= self.first_row as f32 && row < (self.first_row as usize + self.rows.len()) as f32) {
+      return false;
+    }
+    self.winding_over(p_point, self.rows[(row as i32 - self.first_row) as usize].iter().map(|end| *end as usize))
+  }
 
+  /// Whether the point is inside the polygon, counting the crossings of the edges ending at the given vertices, by the non-zero winding rule.
+  fn winding_over(&self, p_point: (f32, f32), p_ends: impl Iterator<Item = usize>) -> bool {
     // Non-zero winding rule
     let mut winding = 0i32;
-    let mut j = self.polygon.len() - 1;
-    for i in 0..self.polygon.len() {
+    for i in p_ends {
+      let j = if i == 0 { self.polygon.len() - 1 } else { i - 1 };
       let (xi, yi) = self.polygon[i];
       let (xj, yj) = self.polygon[j];
       if yi <= p_point.1 {
@@ -126,9 +178,14 @@ impl PolygonCoverage {
           }
         }
       }
-      j = i;
     }
     winding != 0
+  }
+
+  /// [`point_in_polygon`](Self::point_in_polygon) by testing every edge, which a test compares the rows with.
+  #[cfg(test)]
+  fn point_in_polygon_by_every_edge(&self, p_point: (f32, f32)) -> bool {
+    !self.polygon.is_empty() && self.winding_over(p_point, 0..self.polygon.len())
   }
 }
 
@@ -222,6 +279,52 @@ fn bounds_of(p_points: &[PointF]) -> Option<(f32, f32, f32, f32)> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A ring of `p_count` points around `(50, 50)` with a hole in it: out around an irregular outline and back round a smaller one.
+  fn ring_with_a_hole(p_count: usize) -> Vec<PointF> {
+    let around = |radius: f32, at: usize, reverse: bool| {
+      let angle = at as f32 / p_count as f32 * std::f32::consts::TAU * if reverse { -1.0 } else { 1.0 };
+      let wobble = 1.0 + 0.2 * (angle * 7.0).sin();
+      PointF::new(50.0 + radius * wobble * angle.cos(), 50.0 + radius * wobble * angle.sin())
+    };
+    let mut points: Vec<PointF> = (0..p_count).map(|at| around(40.0, at, false)).collect();
+    points.push(points[0]);
+    points.extend((0..p_count).map(|at| around(20.0, at, true)));
+    points
+  }
+
+  #[test]
+  fn the_rows_give_the_same_answer_as_testing_every_edge() {
+    for polygon in [ring_with_a_hole(500), ring_with_a_hole(7), vec![PointF::new(10, 10), PointF::new(60, 10), PointF::new(35, 55)]] {
+      let coverage = PolygonCoverage::new(polygon.clone());
+      // Over a grid that crosses the polygon's own corners as well as the places between.
+      let mut inside = 0;
+      for yi in -20..=240 {
+        for xi in -20..=240 {
+          let point = (xi as f32 * 0.5, yi as f32 * 0.5);
+          let expected = coverage.point_in_polygon_by_every_edge(point);
+          assert_eq!(coverage.point_in_polygon(point), expected, "{point:?}");
+          inside += expected as usize;
+        }
+      }
+      assert!(inside > 0);
+      for vertex in &polygon {
+        for dy in [-0.001, 0.0, 0.001] {
+          let point = (vertex.x + 0.3, vertex.y + dy);
+          assert_eq!(coverage.point_in_polygon(point), coverage.point_in_polygon_by_every_edge(point));
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn a_polygon_far_off_the_picture_still_gives_the_right_answer() {
+    // So tall that its edges are not sorted into rows, and they are tested one by one.
+    let tall = PolygonCoverage::new(vec![PointF::new(0, 0), PointF::new(10, 0), PointF::new(10, 1_000_000), PointF::new(0, 1_000_000)]);
+    assert!(tall.contains(5.0, 500_000.0));
+    assert!(!tall.contains(15.0, 500_000.0));
+    assert!(!PolygonCoverage::new(Vec::new()).contains(0.0, 0.0));
+  }
 
   #[test]
   fn a_stroke_covers_everything_near_its_path() {

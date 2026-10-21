@@ -9,6 +9,7 @@ use abra::abra_core;
 use abra::adjustments::prelude::color;
 
 use crate::{Color, Harmony, Image};
+use abra_core::ColorInterpolation;
 
 /// A color at a position along a gradient.
 #[derive(Debug, uniffi::Object)]
@@ -75,7 +76,18 @@ impl Gradient {
     Self(abra_core::Gradient::hue())
   }
 
-  /// The color at `time`, from 0 to 1, blending the two stops around it.
+  /// A copy of the gradient whose colors between two stops are mixed in this color space, and for a polar space this way round the wheel.
+  /// The default is `{ space: ColorSpace.Srgb, hue: HueDirection.Shorter }`.
+  pub fn with_interpolation(&self, interpolation: ColorInterpolation) -> Arc<Gradient> {
+    Arc::new(Gradient(self.0.clone().with_interpolation(interpolation)))
+  }
+
+  /// How the colors between two stops are mixed.
+  pub fn interpolation(&self) -> ColorInterpolation {
+    self.0.interpolation()
+  }
+
+  /// The color at `time`, from 0 to 1, mixing the two stops around it as the interpolation says.
   pub fn color_at(&self, time: f32) -> Arc<Color> {
     Arc::new(Color(self.0.color_at(time)))
   }
@@ -107,6 +119,19 @@ mod tests {
 
   fn rgb(r: u8, g: u8, b: u8) -> Arc<Color> {
     Arc::new(Color::from_rgb(r, g, b))
+  }
+
+  #[test]
+  fn a_gradient_mixes_in_the_space_it_is_given() {
+    use abra_core::{ColorSpace, HueDirection};
+    let plain = Gradient::from_to(rgb(0, 0, 255), rgb(255, 255, 0));
+    assert_eq!(plain.interpolation(), ColorInterpolation::default());
+    assert_eq!(plain.color_at(0.5).rgb(), vec![128, 128, 128]);
+    let oklab = ColorInterpolation { space: ColorSpace::Oklab, hue: HueDirection::Shorter };
+    let clean = plain.with_interpolation(oklab);
+    assert_eq!(clean.interpolation(), oklab);
+    assert_eq!(clean.color_at(0.5).0, abra_core::Color::from_rgb(0, 0, 255).mix(abra_core::Color::from_rgb(255, 255, 0), 0.5, ColorSpace::Oklab));
+    assert_eq!(clean.reverse().interpolation().space, ColorSpace::Oklab);
   }
 
   #[test]

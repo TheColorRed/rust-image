@@ -1,10 +1,11 @@
 import { AiModel } from '@abra/core';
 import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTranslated, type Rect } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
-import { aiModelPath, runAiModelAsync } from '@alakazam/mobile';
+import { aiModelPath, runAiModelAsync, unloadAiModels } from '@alakazam/mobile';
+import { debounceTime, filter } from 'rxjs/operators';
 import { personIn } from '@/src/lib/ai/analysis';
 import { owning } from '@/src/lib/native/native-handles';
-import { aiProgress } from '@/src/state/ai-progress';
+import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { faceBoxes, people } from '@/src/state/analysis';
 
 export const PERSON_DETECTION = 'person-detection';
@@ -63,6 +64,30 @@ export const unloadModel = (role: string): void => {
   (models[role] as unknown as { uniffiDestroy(): void } | undefined)?.uniffiDestroy();
   delete models[role];
 };
+
+/** Frees every model, in this file and in the library, and the memory they hold. Each is loaded again the next time it is used. */
+export const unloadAllModels = (): void => {
+  Object.keys(models).forEach(unloadModel);
+  unloadAiModels();
+};
+
+/**
+ * Frees every model when no AI task is running, which is when every task listed in `aiProgress` is done. A task that is running keeps
+ * what it uses, because a model freed under a running task would crash it.
+ */
+export const unloadModelsWhenIdle = (): void => {
+  if (Object.values(aiProgress.value).every(progress => progress === 1)) unloadAllModels();
+};
+
+// A model is loaded when an analysis needs it and let go of when the AI work is done, so the large models do not stay in memory. The
+// wait lets a task that follows straight on start before they are freed and loaded again; work that runs steps one after another
+// frees its models between the steps itself (see `buildMasks`).
+aiProgress$
+  .pipe(
+    debounceTime(300),
+    filter(tasks => Object.keys(tasks).length > 0),
+  )
+  .subscribe(unloadModelsWhenIdle);
 
 /** The part of `box` that is on whole pixels inside `frame`, or nothing when it is smaller than `side` across. */
 export const inside = (box: Rect, frame: Rect, side = MIN_CROP_SIDE): Rect | undefined => {

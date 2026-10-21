@@ -1,5 +1,6 @@
 import { formatBytes } from '@/src/lib/utils/format-bytes';
 import { useTheme } from '@/src/lib/ui/theme';
+import { people$, people as peopleState } from '@/src/state/analysis';
 import { timeline$ } from '@/src/state/history';
 import { previewSize$ } from '@/src/state/preview';
 import { type EditablePhoto } from '@/src/lib/editor/edit-source';
@@ -25,6 +26,7 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
   const editBase = useObservable(editBaseImage$, null);
   const drawn = useObservable(previewSize$, null);
   const edits = useObservable(timeline$, { entries: [], cursor: 0 }).cursor;
+  const found = useObservable(people$, peopleState.value);
   const [copied, setCopied] = useState(false);
   // The notice is for the last tap, so it is gone when the dialog is opened again.
   useEffect(() => setCopied(false), [visible]);
@@ -96,6 +98,8 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
     if (size && current && (current.width !== size.width || current.height !== size.height)) {
       list.push(['Size now', `${current.width} × ${current.height} px`]);
     }
+    // Null until the people have been looked for.
+    list.push(['People', found === null ? 'Not found yet' : found.length === 0 ? 'None' : String(found.length)]);
     list.push(['Edits', edits === 0 ? 'None' : edits === 1 ? '1 edit' : `${edits} edits`]);
     if (drawn && current) {
       const full = drawn.width === current.width && drawn.height === current.height;
@@ -105,7 +109,7 @@ export function ImageInfoDialog({ photo, visible, onClose }: ImageInfoDialogProp
       ]);
     }
     return list;
-  }, [visible, photo, original, editBase, drawn, edits]);
+  }, [visible, photo, original, editBase, drawn, edits, found]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>

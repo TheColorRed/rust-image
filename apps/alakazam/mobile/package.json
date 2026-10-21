@@ -12,6 +12,7 @@
   "dependencies": {
     "@abra/core": "1.0.0",
     "@alakazam/mobile": "1.0.0",
+    "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-camera-roll/camera-roll": "^7.10.2",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@react-native-community/slider": "^5.2.1",

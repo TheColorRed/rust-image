@@ -76,6 +76,34 @@ impl LabelMap {
     )
   }
 
+  /// The class that a pixel has outside the part of a picture a model was run on (see [`LabelMap::placed`]): no class, since it is
+  /// not one of the model's classes, so a mask of any class leaves it out.
+  pub const NO_CLASS: u8 = u8::MAX;
+
+  /// These labels, of a part of a picture, put back where the part was in a picture of this size. The pixels outside the part have no
+  /// class ([`LabelMap::NO_CLASS`]).
+  /// - `p_width`, `p_height`: The size of the whole picture.
+  /// - `p_x`, `p_y`: Where the top left corner of the part is in the whole picture.
+  pub fn placed(&self, p_width: u32, p_height: u32, p_x: u32, p_y: u32) -> LabelMap {
+    let mut labels = vec![Self::NO_CLASS; p_width as usize * p_height as usize];
+    for row in 0..self.height {
+      let y = p_y as usize + row as usize;
+      if y >= p_height as usize || p_x >= p_width {
+        continue;
+      }
+      let columns = (self.width as usize).min((p_width - p_x) as usize);
+      let from = row as usize * self.width as usize;
+      let to = y * p_width as usize + p_x as usize;
+      labels[to..to + columns].copy_from_slice(&self.labels[from..from + columns]);
+    }
+    LabelMap {
+      width: p_width,
+      height: p_height,
+      labels,
+      classes: self.classes.clone(),
+    }
+  }
+
   /// A hard mask that is `255` on the pixels of any of the named classes and `0` elsewhere. A name that is not one of
   /// the model's [`LabelMap::classes`] selects nothing.
   /// - `p_names`: The class names to select, as the manifest lists them.

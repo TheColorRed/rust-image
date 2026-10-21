@@ -1,10 +1,18 @@
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{
+  Arc, Mutex, OnceLock,
+  atomic::{AtomicUsize, Ordering},
+  mpsc,
+};
 
+use abra::abra_core::Rect;
 use abra::prelude::{Image as CoreImage, ImageExt};
 use abra_body_segmentation::prelude::ImageAi;
-use abra_uniffi::{AiModel, AiOutput, Image, Mask};
+use abra_uniffi::{AiModel, AiOutput, BodySegments, Image, Mask};
 
-use crate::{AbraError, models};
+use crate::{
+  AbraError,
+  models::{BODY_PARSER, PERSON_SEGMENTER, SKIN_SEGMENTER},
+};
 
 /// One person found in a photo: where they are in the photo's pixels, how sure the model is, and the mask of their body.
 #[derive(uniffi::Record)]
@@ -19,6 +27,23 @@ pub struct PersonDetection {
 }
 
 type Job = Box<dyn FnOnce() + Send>;
+
+/// The stack of each worker thread, in megabytes, unless the app chose another size (see [`set_worker_stack_megabytes`]). The default
+/// (2 MB) is too small for the AI jobs: a deep call chain in a model run overflowed it and crashed the app with a stack overflow. The
+/// memory is only reserved, and used as far as a job goes.
+const DEFAULT_WORKER_STACK_MEGABYTES: usize = 16;
+/// The smallest and largest stack the app may choose, in megabytes.
+const WORKER_STACK_RANGE: std::ops::RangeInclusive<u32> = 2..=256;
+
+static WORKER_STACK_MEGABYTES: AtomicUsize = AtomicUsize::new(DEFAULT_WORKER_STACK_MEGABYTES);
+
+/// Chooses the stack of each image worker thread, in megabytes (kept between 2 and 256). The workers are made once, when the first image
+/// job starts, so this has to be called before then: a size chosen after that takes effect the next time the app starts.
+#[uniffi::export]
+pub fn set_worker_stack_megabytes(megabytes: u32) {
+  let megabytes = megabytes.clamp(*WORKER_STACK_RANGE.start(), *WORKER_STACK_RANGE.end());
+  WORKER_STACK_MEGABYTES.store(megabytes as usize, Ordering::Relaxed);
+}
 
 /// How many image jobs (decoding, thumbnails, downloads) run at the same time: half of the threads this device
 /// offers, and at least one. Each job also uses Abra's own parallel threads and holds a whole photo in memory.
@@ -36,6 +61,7 @@ fn workers() -> Result<&'static mpsc::Sender<Job>, AbraError> {
         let receiver = Arc::clone(&receiver);
         std::thread::Builder::new()
           .name(format!("abra-image-{index}"))
+          .stack_size(WORKER_STACK_MEGABYTES.load(Ordering::Relaxed) * 1024 * 1024)
           .spawn(move || {
             loop {
               let job = receiver.lock().unwrap().recv();
@@ -78,28 +104,50 @@ pub(crate) async fn run<T: Send + 'static>(
   })?
 }
 
-#[uniffi::export]
-pub async fn read_image_async(path: String) -> Result<Arc<Image>, AbraError> {
-  run(move || CoreImage::read(path).map(Image::from_core).map(Arc::new).map_err(|message| AbraError::Io { message })).await
+/// Defines a function that JavaScript calls with `await`, whose body runs on a worker thread, so the app keeps drawing while it works.
+/// This is the whole of what a worker is: its name, its arguments and its body. The pool, the hand-off back to the caller, a panic that
+/// becomes an error and the export to JavaScript are done here, once.
+///
+/// The body returns a `Result<_, AbraError>`, and `?` works on anything an Abra AI crate returns. The arguments are moved onto the
+/// worker, so an image arrives as the handle and is turned into pixels with `.core()`, which only shares them.
+///
+/// ```ignore
+/// worker! {
+///   /// The mask of the skin in the photo.
+///   detect_skin_async(image: Arc<Image>) -> Arc<Mask> {
+///     Ok(Arc::new(Mask::from_core(SKIN_SEGMENTER.get()?.process(&image.core())?)))
+///   }
+/// }
+/// ```
+macro_rules! worker {
+  ($(#[$meta:meta])* $name:ident($($arg:ident: $ty:ty),* $(,)?) -> $out:ty $body:block) => {
+    $(#[$meta])*
+    #[uniffi::export]
+    pub async fn $name($($arg: $ty),*) -> Result<$out, AbraError> {
+      run(move || $body).await
+    }
+  };
 }
 
-/// The mask of the skin in the photo.
-#[uniffi::export]
-pub async fn detect_skin_async(image: Arc<Image>) -> Result<Arc<Mask>, AbraError> {
-  let pixels = image.core();
-  run(move || {
-    let mask = models::skin_segmenter()?.process(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
-    Ok(Arc::new(Mask::from_core(mask)))
-  }).await
+worker! {
+  /// Reads an image file on a worker thread.
+  read_image_async(path: String) -> Arc<Image> {
+    CoreImage::read(path).map(Image::from_core).map(Arc::new).map_err(|message| AbraError::Io { message })
+  }
 }
 
-/// The people in the photo, each with the mask of their body.
-#[uniffi::export]
-pub async fn find_people_async(image: Arc<Image>) -> Result<Vec<PersonDetection>, AbraError> {
-  let pixels = image.core();
-  let (width, height) = (image.width(), image.height());
-  run(move || {
-    let people = models::person_segmenter()?.process(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+worker! {
+  /// The mask of the skin in the photo.
+  detect_skin_async(image: Arc<Image>) -> Arc<Mask> {
+    Ok(Arc::new(Mask::from_core(SKIN_SEGMENTER.get()?.process(&image.core())?)))
+  }
+}
+
+worker! {
+  /// The people in the photo, each with the mask of their body.
+  find_people_async(image: Arc<Image>) -> Vec<PersonDetection> {
+    let (width, height) = (image.width(), image.height());
+    let people = PERSON_SEGMENTER.get()?.process(&image.core())?;
     Ok(people.iter().enumerate().map(|(id, person)| {
       let bounds = person.bounds_in(width, height);
       PersonDetection {
@@ -107,30 +155,39 @@ pub async fn find_people_async(image: Arc<Image>) -> Result<Vec<PersonDetection>
         confidence: person.confidence as f64, mask: Arc::new(Mask::from_core(person.mask.clone())),
       }
     }).collect())
-  }).await
+  }
 }
 
-/// Runs an AI model on a picture on a worker thread, so the app keeps drawing while it runs. The same as `AiModel.run`.
-#[uniffi::export]
-pub async fn run_ai_model_async(model: Arc<AiModel>, image: Arc<Image>) -> Result<Arc<AiOutput>, AbraError> {
-  let pixels = image.core();
-  run(move || {
-    let output = model.core().run(&pixels).map_err(|error| AbraError::Ai { message: error.to_string() })?;
-    Ok(Arc::new(AiOutput::from_core(output)))
-  }).await
+worker! {
+  /// Labels the hair, skin, clothes and accessories of the person in the photo.
+  parse_body_async(image: Arc<Image>) -> Arc<BodySegments> {
+    Ok(Arc::new(BodySegments::from_core(BODY_PARSER.get()?.process(&image.core())?)))
+  }
 }
 
-/// Runs an AI model that takes a guide mask (a matting model and its trimap) on a worker thread. The same as `AiModel.run_guided`.
-#[uniffi::export]
-pub async fn run_ai_model_guided_async(
-  model: Arc<AiModel>, image: Arc<Image>, guide: Arc<Mask>,
-) -> Result<Arc<AiOutput>, AbraError> {
-  let (pixels, guide) = (image.core(), guide.core());
-  run(move || {
-    let output =
-      model.core().run_guided(&pixels, Some(&guide), &|_| {}).map_err(|error| AbraError::Ai { message: error.to_string() })?;
-    Ok(Arc::new(AiOutput::from_core(output)))
-  }).await
+worker! {
+  /// Labels the body in only a part of the photo, the rectangle at `x`, `y` of `width` by `height` pixels (the person's bounds, say), with
+  /// a `margin` of more on each side as a share of the part's
+  /// larger side. The model sees a small copy of what it is given, so a person who is small in the photo is far better found this way.
+  /// Pixels outside the part have no region.
+  parse_body_within_async(image: Arc<Image>, x: u32, y: u32, width: u32, height: u32, margin: f32) -> Arc<BodySegments> {
+    let region = Rect::new((x, y), (width, height));
+    Ok(Arc::new(BodySegments::from_core(BODY_PARSER.get()?.process_within(&image.core(), region, margin)?)))
+  }
+}
+
+worker! {
+  /// Runs an AI model on a picture on a worker thread, so the app keeps drawing while it runs. The same as `AiModel.run`.
+  run_ai_model_async(model: Arc<AiModel>, image: Arc<Image>) -> Arc<AiOutput> {
+    Ok(Arc::new(AiOutput::from_core(model.core().run(&image.core())?)))
+  }
+}
+
+worker! {
+  /// Runs an AI model that takes a guide mask (a matting model and its trimap) on a worker thread. The same as `AiModel.run_guided`.
+  run_ai_model_guided_async(model: Arc<AiModel>, image: Arc<Image>, guide: Arc<Mask>) -> Arc<AiOutput> {
+    Ok(Arc::new(AiOutput::from_core(model.core().run_guided(&image.core(), Some(&guide.core()), &|_| {})?)))
+  }
 }
 
 #[cfg(test)]

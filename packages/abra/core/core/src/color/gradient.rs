@@ -3,7 +3,7 @@ use std::{
   fmt::{self, Display, Formatter},
 };
 
-use crate::{Color, Harmony};
+use crate::{Color, Harmony, ColorInterpolation};
 
 #[derive(Clone, Debug, Copy, Default, PartialEq)]
 /// The color stops for a gradient.
@@ -31,6 +31,8 @@ pub struct Gradient {
   stops: Vec<ColorStop>,
   /// The path defining the gradient direction (optional).
   direction: Option<crate::geometry::Path>,
+  /// How the colors between two stops are mixed.
+  interpolation: ColorInterpolation,
 }
 
 impl Display for ColorStop {
@@ -46,7 +48,11 @@ impl Gradient {
   pub fn new(p_stops: Vec<ColorStop>) -> Gradient {
     let mut stops = p_stops;
     stops.sort_by(|a, b| a.time.total_cmp(&b.time));
-    Gradient { stops, direction: None }
+    Gradient {
+      stops,
+      direction: None,
+      interpolation: ColorInterpolation::default(),
+    }
   }
 
   /// Creates a new gradient that goes from one color to another.
@@ -54,6 +60,7 @@ impl Gradient {
     Gradient {
       stops: vec![ColorStop::new(p_from, 0.0), ColorStop::new(p_to, 1.0)],
       direction: None,
+      interpolation: ColorInterpolation::default(),
     }
   }
 
@@ -62,7 +69,11 @@ impl Gradient {
     // A single color sits at 0 instead of dividing by zero.
     let step = if p_colors.len() > 1 { 1.0 / (p_colors.len() - 1) as f32 } else { 0.0 };
     let stops = p_colors.into_iter().enumerate().map(|(i, color)| ColorStop::new(color, i as f32 * step)).collect();
-    Gradient { stops, direction: None }
+    Gradient {
+      stops,
+      direction: None,
+      interpolation: ColorInterpolation::default(),
+    }
   }
 
   /// Creates an evenly spaced gradient from a color harmony of the given color.
@@ -83,6 +94,26 @@ impl Gradient {
       Harmony::SplitComplementary => Gradient::evenly(vec![colors[3], colors[0], colors[2], colors[1], colors[4]]),
       _ => Gradient::evenly(colors),
     }
+  }
+
+  /// Sets how the colors between two stops are mixed: the color space, and for a polar space which way round the color wheel the hue goes.
+  /// The default is sRGB, the red, green and blue values as stored, which is the plain average of the channels and goes dull between
+  /// colors far apart (blue to yellow passes through gray). A space built to follow what the eye sees, such as
+  /// [`ColorSpace::Oklab`](crate::ColorSpace::Oklab), keeps the colors clean, and a polar space such as `Oklch` goes round the wheel,
+  /// which is how a rainbow is made from two colors. See [`Color::mix`] for how the mixing is done.
+  /// - `p_interpolation`: The space to mix in. A [`ColorSpace`](crate::ColorSpace) mixes the shorter way round the wheel.
+  ///
+  /// ```ignore
+  /// let ramp = Gradient::from_to(Color::blue(), Color::yellow()).with_interpolation(ColorSpace::Oklab);
+  /// ```
+  pub fn with_interpolation(mut self, p_interpolation: impl Into<ColorInterpolation>) -> Self {
+    self.interpolation = p_interpolation.into();
+    self
+  }
+
+  /// How the colors between two stops are mixed.
+  pub fn interpolation(&self) -> ColorInterpolation {
+    self.interpolation
   }
 
   /// Sets the length of the gradient using a path where the first point is the start and the last point is the end.
@@ -126,8 +157,8 @@ impl Gradient {
     ])
   }
 
-  /// The color of the gradient at `p_time`, blending the two stops around it. Times before the first stop or after
-  /// the last take that stop's color; a gradient with no stops is transparent.
+  /// The color of the gradient at `p_time`, mixing the two stops around it as [`Gradient::with_interpolation`] says. Times before the
+  /// first stop or after the last take that stop's color; a gradient with no stops is transparent.
   pub fn color_at(&self, p_time: f32) -> Color {
     let after = self.stops.iter().position(|stop| stop.time > p_time);
     let (start, end) = match after {
@@ -136,13 +167,7 @@ impl Gradient {
       None => return self.stops.last().map_or(Color::transparent(), |stop| stop.color),
     };
     let t = (p_time - start.time) / (end.time - start.time);
-    let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * t) as u8;
-    Color::from_rgba(
-      channel(start.color.r, end.color.r),
-      channel(start.color.g, end.color.g),
-      channel(start.color.b, end.color.b),
-      channel(start.color.a, end.color.a),
-    )
+    start.color.mix(end.color, t, self.interpolation)
   }
 
   /// Reverses the gradient.
@@ -155,6 +180,8 @@ impl Gradient {
     Gradient {
       stops,
       direction: self.direction.clone(),
+      // Going from the last stop to the first, a hue that grew now shrinks.
+      interpolation: self.interpolation.reversed(),
     }
   }
 }
@@ -190,14 +217,61 @@ impl<'a> From<Gradient> for Cow<'a, Gradient> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::{ColorSpace, HueDirection};
 
   #[test]
   fn color_at_blends_between_stops_and_holds_past_the_ends() {
     let gradient = Gradient::from_to(Color::black(), Color::white());
     assert_eq!(gradient.color_at(-1.0), Color::black());
-    assert_eq!(gradient.color_at(0.5).rgb(), (127, 127, 127));
+    // The channels' average, rounded: a half is 127.5, which is 128.
+    assert_eq!(gradient.color_at(0.5).rgb(), (128, 128, 128));
     assert_eq!(gradient.color_at(2.0), Color::white());
     assert_eq!(Gradient::new(vec![]).color_at(0.5), Color::transparent());
+  }
+
+  #[test]
+  fn the_space_the_colors_are_mixed_in_is_the_gradients_to_set() {
+    let (blue, yellow) = (Color::from_rgb(0, 0, 255), Color::from_rgb(255, 255, 0));
+    let plain = Gradient::from_to(blue, yellow);
+    assert_eq!(plain.interpolation(), ColorInterpolation::default());
+    assert_eq!(plain.color_at(0.5).rgb(), (128, 128, 128), "sRGB goes through a gray");
+    let clean = Gradient::from_to(blue, yellow).with_interpolation(ColorSpace::Oklab);
+    let (_, chroma, _) = clean.color_at(0.5).oklch();
+    assert!(chroma > 0.05, "Oklab keeps the color: {chroma}");
+    // The ends are the stops in any space, and the middle is the mix of the two colors.
+    assert_eq!((clean.color_at(0.0), clean.color_at(1.0)), (blue, yellow));
+    assert_eq!(clean.color_at(0.3), blue.mix(yellow, 0.3, ColorSpace::Oklab));
+    // Black to white in Oklab has a darker middle than the average.
+    assert_eq!(Gradient::default().with_interpolation(ColorSpace::Oklab).color_at(0.5).rgb(), (99, 99, 99));
+  }
+
+  #[test]
+  fn a_polar_gradient_goes_round_the_wheel_the_way_it_is_told() {
+    let (red, blue) = (Color::from_rgb(255, 0, 0), Color::from_rgb(0, 0, 255));
+    let short = Gradient::from_to(red, blue).with_interpolation(ColorInterpolation::new(ColorSpace::Hsl));
+    let long = Gradient::from_to(red, blue)
+      .with_interpolation(ColorInterpolation::new(ColorSpace::Hsl).with_hue(HueDirection::Longer));
+    assert!((short.color_at(0.5).hsl().0 - 300.0).abs() < 1.0, "through magenta");
+    assert!((long.color_at(0.5).hsl().0 - 120.0).abs() < 1.0, "through green");
+  }
+
+  #[test]
+  fn a_gradient_fading_in_from_transparent_does_not_tint() {
+    let fade = Gradient::from_to(Color::from_rgba(255, 0, 0, 0), Color::from_rgba(0, 0, 255, 255));
+    let middle = fade.color_at(0.5);
+    assert_eq!((middle.rgb(), middle.a), ((0, 0, 255), 128));
+  }
+
+  #[test]
+  fn reversing_a_gradient_reverses_the_colors_and_the_way_the_hue_goes() {
+    let (red, blue) = (Color::from_rgb(255, 0, 0), Color::from_rgb(0, 0, 255));
+    let up = Gradient::from_to(red, blue)
+      .with_interpolation(ColorInterpolation::new(ColorSpace::Oklch).with_hue(HueDirection::Increasing));
+    let down = up.reverse();
+    assert_eq!(down.interpolation().hue, HueDirection::Decreasing);
+    for time in [0.0, 0.2, 0.5, 0.8, 1.0] {
+      assert_eq!(down.color_at(time), up.color_at(1.0 - time), "at {time}");
+    }
   }
 
   #[test]

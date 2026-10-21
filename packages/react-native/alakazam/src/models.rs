@@ -15,8 +15,8 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use abra_body_segmentation::BodySegmentation;
 use abra_body_segmentation::prelude::ImageAi;
+use abra_body_segmentation::{BodyParser, BodySegmentation};
 use abra_find_person::PersonSegmenter;
 use sha2::{Digest, Sha256};
 
@@ -42,8 +42,64 @@ pub struct AiModelFile {
 }
 
 static DOWNLOAD_LOCK: Mutex<()> = Mutex::new(());
-static SKIN_SEGMENTER: Mutex<Option<Arc<BodySegmentation>>> = Mutex::new(None);
-static PERSON_SEGMENTER: Mutex<Option<Arc<PersonSegmenter>>> = Mutex::new(None);
+
+/// A model that is loaded the first time it is used, from the file downloaded for its role, and kept for every use after. It is the
+/// whole of what a model needs here: any type that is an [`ImageAi`] (every Abra AI crate's model is) fits in one, so adding a model is
+/// one `static` line and a worker in `image_workers.rs`, with no loader of its own.
+///
+/// ```ignore
+/// pub(crate) static BODY_PARSER: ModelSlot<BodyParser> = ModelSlot::new(SKIN_SEGMENTATION_ROLE);
+/// let parts = BODY_PARSER.get()?.process(&image)?;
+/// ```
+pub(crate) struct ModelSlot<T> {
+  role: &'static str,
+  cached: Mutex<Option<Arc<T>>>,
+}
+
+impl<T: ImageAi> ModelSlot<T> {
+  /// A slot for the model downloaded for this role. Nothing is loaded until [`ModelSlot::get`].
+  pub(crate) const fn new(p_role: &'static str) -> Self {
+    Self {
+      role: p_role,
+      cached: Mutex::new(None),
+    }
+  }
+
+  /// The model, loaded on first use from the downloaded file. Fails if the model is not downloaded or cannot be loaded. A failure is not
+  /// cached, so the next call tries again, which is what is wanted when the download finishes in between.
+  pub(crate) fn get(&self) -> Result<Arc<T>, AbraError> {
+    let mut cached = self.cached.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(model) = cached.as_ref() {
+      return Ok(Arc::clone(model));
+    }
+    let model = Arc::new(T::load(find_downloaded(self.role)?)?);
+    *cached = Some(Arc::clone(&model));
+    Ok(model)
+  }
+
+  /// Lets go of the loaded model and the memory it holds, so the next [`ModelSlot::get`] loads it again. A job that is using it keeps
+  /// it until that job ends.
+  pub(crate) fn unload(&self) {
+    self.cached.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+  }
+}
+
+/// The skin segmenter, which gives the skin of the photo as one mask.
+pub(crate) static SKIN_SEGMENTER: ModelSlot<BodySegmentation> = ModelSlot::new(SKIN_SEGMENTATION_ROLE);
+/// The body parser, which labels the hair, skin, clothes and accessories. It is the same model file as the skin segmenter, read with
+/// another manifest, so it is downloaded once.
+pub(crate) static BODY_PARSER: ModelSlot<BodyParser> = ModelSlot::new(SKIN_SEGMENTATION_ROLE);
+/// The person segmenter, which finds each person in the photo and their body.
+pub(crate) static PERSON_SEGMENTER: ModelSlot<PersonSegmenter> = ModelSlot::new(PERSON_DETECTION_ROLE);
+
+/// Lets go of every loaded model, and the memory they hold, once the work that needed them is done. Each is loaded again the next
+/// time it is used.
+#[uniffi::export]
+pub fn unload_ai_models() {
+  SKIN_SEGMENTER.unload();
+  BODY_PARSER.unload();
+  PERSON_SEGMENTER.unload();
+}
 
 /// Android: the app's private `files` folder, found from the process name (the package id).
 #[cfg(target_os = "android")]
@@ -239,36 +295,6 @@ fn hex(p_bytes: &[u8]) -> String {
   p_bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// The skin segmenter, loaded on first use from the downloaded model. Fails if the model is not downloaded. A failure
-/// is not cached, so the next call tries again.
-pub(crate) fn skin_segmenter() -> Result<Arc<BodySegmentation>, AbraError> {
-  let mut cached = SKIN_SEGMENTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-  if let Some(segmenter) = cached.as_ref() {
-    return Ok(Arc::clone(segmenter));
-  }
-  let segmenter =
-    Arc::new(BodySegmentation::load(find_downloaded(SKIN_SEGMENTATION_ROLE)?).map_err(|error| AbraError::Ai {
-      message: error.to_string(),
-    })?);
-  *cached = Some(Arc::clone(&segmenter));
-  Ok(segmenter)
-}
-
-/// The person segmenter, loaded on first use from the downloaded model. Fails if the model is not downloaded. A failure
-/// is not cached.
-pub(crate) fn person_segmenter() -> Result<Arc<PersonSegmenter>, AbraError> {
-  let mut cached = PERSON_SEGMENTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-  if let Some(segmenter) = cached.as_ref() {
-    return Ok(Arc::clone(segmenter));
-  }
-  let segmenter =
-    Arc::new(PersonSegmenter::load(find_downloaded(PERSON_DETECTION_ROLE)?).map_err(|error| AbraError::Ai {
-      message: error.to_string(),
-    })?);
-  *cached = Some(Arc::clone(&segmenter));
-  Ok(segmenter)
-}
-
 /// Whether the model that finds people in a photo is on this device. Works offline.
 #[uniffi::export]
 pub fn person_detection_downloaded() -> bool {
@@ -337,6 +363,57 @@ mod tests {
       manifest_url: Some("https://example.com/models/a.yml".to_string()),
       manifest_sha256: Some("fedcba9876543210".repeat(4)),
     }
+  }
+
+  /// A model that counts how many times it was loaded, to see what a [`ModelSlot`] does.
+  struct Counted;
+
+  static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+  impl ImageAi for Counted {
+    type Output = ();
+
+    fn load(p_model_path: impl AsRef<Path>) -> Result<Self, abra_body_segmentation::prelude::AiError> {
+      LOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      // A file with nothing in it is a model that cannot be loaded.
+      if fs::metadata(p_model_path).map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+        return Err(abra_body_segmentation::prelude::AiError::model_load_failed("empty file"));
+      }
+      Ok(Counted)
+    }
+
+    fn process(&self, _p_image: &abra::prelude::Image) -> Result<(), abra_body_segmentation::prelude::AiError> {
+      Ok(())
+    }
+  }
+
+  #[test]
+  fn a_model_slot_loads_on_first_use_keeps_the_model_and_does_not_keep_a_failure() {
+    const ROLE: &str = "slot-test-model";
+    static SLOT: ModelSlot<Counted> = ModelSlot::new(ROLE);
+    let file = model_dir().join(format!("{ROLE}-0123456789ab.onnx"));
+    fs::create_dir_all(model_dir()).unwrap();
+    let _ = fs::remove_file(&file);
+    let loads = || LOADS.load(std::sync::atomic::Ordering::SeqCst);
+    let before = loads();
+
+    // Not downloaded: an error that says so, and nothing is loaded.
+    let missing = SLOT.get().err().expect("no file yet");
+    assert!(matches!(&missing, AbraError::Ai { message } if message.contains("not downloaded")), "{missing}");
+    assert_eq!(loads(), before);
+
+    // A file that is not a model: the load fails, and the failure is not kept.
+    fs::write(&file, b"").unwrap();
+    assert!(matches!(SLOT.get().err(), Some(AbraError::Ai { .. })));
+    assert_eq!(loads(), before + 1);
+
+    // The download finishes: the next call loads it, and every call after gets the same model without loading again.
+    fs::write(&file, b"a model").unwrap();
+    let first = SLOT.get().expect("loads now");
+    let second = SLOT.get().expect("is kept");
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(loads(), before + 2);
+    let _ = fs::remove_file(&file);
   }
 
   #[test]

@@ -36,21 +36,13 @@ export interface Project {
   /** The final image's file name, once the project has been edited. It is shown before the edits are replayed. */
   resultFile?: string;
   /**
-   * The skin mask the AI model made for the original, saved as a lossless gray WebP. Opening the project loads it instead of running
-   * the model, so the edits replay with the same mask (even when the model is not on this device) and open faster.
+   * Every mask the AI models made for the original, one lossless gray WebP each, by name (see `saved-masks.ts`). Opening the project
+   * loads them instead of running the models, so the edits replay with the same masks, even when the models are not on this device.
    */
-  skinMaskFile?: string;
-  /**
-   * The masks the face models made for the original, one saved WebP each, by the name the makeup controls know them by. Opening
-   * the project loads them instead of running the models. Left out until the models have found a face.
-   */
-  makeupMasks?: { name: string; file: string }[];
-  /** Which set of masks `makeupMasks` holds (see `MAKEUP_MASKS_VERSION`). Projects saved before it have none, and are made again once. */
-  makeupMasksVersion?: number;
-  /** The masks the hair analysis made (see `hairMasks`), saved like `makeupMasks`, and the set they are (`HAIR_MASKS_VERSION`). */
-  hairMasks?: { name: string; file: string }[];
-  hairMasksVersion?: number;
-  /** Metadata for the person masks in `people/`. An empty array means detection ran and found nobody. */
+  masks?: { name: string; file: string }[];
+  /** The groups of masks (`makeup`, `hair`, `subject`) whose models have run, including ones that found nothing. */
+  maskGroups?: string[];
+  /** Metadata for the people, whose masks are in `masks` as `person:<id>`. An empty array means detection ran and found nobody. */
   people?: SavedPersonDetection[];
   /**
    * The square around each person's face, by the person's id, in the pixels the people were found in. Opening the project loads them

@@ -1,7 +1,6 @@
 import type { AbraImageLike } from '@alakazam/mobile';
 import { Color } from '@abra/core/color';
 import { Brush } from '@abra/core/drawing';
-import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo, useRef } from 'react';
 import { useObservable } from 'react-rx';
 import { PanResponder, PixelRatio, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -32,16 +31,13 @@ export const removeSelectionPoints$ = removeSelectionPoints.asObservable();
 const MIN_SELECTION_AREA = 64;
 
 /** The controls beneath a freehand removal: redraw to replace the loop, then remove what it contains. */
-export function RemoveControls({ onBack, onApply }: { onBack: () => void; onApply: () => void }) {
+export function RemoveControls({ onApply }: { onApply: () => void }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const selection = useObservable(removeSelectionPoints$, removeSelectionPoints.value);
   return (
     <View style={styles.controlRow}>
       <View style={styles.topRow}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.backChip}>
-          <ChevronLeft color={colors.textPrimary} size={18} />
-        </Pressable>
         <Text style={styles.hint}>
           {selection ? 'Draw again to change the outline' : 'Draw around what you want to remove'}
         </Text>
@@ -200,14 +196,6 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     controlRow: { alignItems: 'center', gap: 8, paddingHorizontal: 16 },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch' },
-    backChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.chip,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     hint: { flex: 1, color: colors.textSecondary, fontSize: 12 },
     applyButton: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 18, backgroundColor: colors.accent },
     applyDisabled: { opacity: 0.45 },

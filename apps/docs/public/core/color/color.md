@@ -92,6 +92,21 @@ let (r, g, b, a) = color.rgba();
 
 `rgb` and `rgba` return the original 8-bit channel values. `rgb` omits alpha; `rgba` includes it.
 
+## Turning the hue, raising saturation and value
+
+These give a changed copy of a color and keep its alpha. They work in HSV, so the part you do not name stays as it was:
+
+```rust
+let red = Color::red();
+let green = red.with_hue_rotated(120.0); // turn the hue 120 degrees
+let bolder = Color::from_rgb(150, 110, 100).with_least_saturation(0.9).with_least_value(0.95);
+```
+
+- `with_hue_rotated(degrees)` turns the hue around the color wheel. It wraps, so any number of degrees works and a negative one turns the other way. A gray has no hue, so turning it changes nothing.
+- `with_least_saturation(s)` and `with_least_value(v)` raise a color to at least that saturation or value, from 0 to 1, and leave a color that already has more as it is. A gray has no hue, so raising its saturation tints it as a hue of 0 (red) would; to leave grays alone, check their saturation first.
+
+Use them to recolor each color of a picture one by one, for instance with [quantize](../adjustments/color#quantize) and `with_sources`.
+
 ## Converting color spaces
 
 Convert an RGB color to HSL, HSV, or Lab. The alpha-preserving variants return the alpha channel as a normalized value:
@@ -104,9 +119,61 @@ let (h, s, v) = color.hsv();
 let (h, s, l, alpha) = color.hsla();
 let (h, s, v, alpha) = color.hsva();
 let (l, a, b) = color.lab();
+let (l, c, h) = color.lch();
+let (l, a, b) = color.oklab();
+let (l, c, h) = color.oklch();
 ```
 
+`lch` and `oklch` are the polar forms of `lab` and `oklab`: lightness, chroma (how colorful) and hue in degrees from 0 to 360. The hue of a gray is 0. Each has a matching constructor: `Color::from_lch`, `from_oklab` and `from_oklch`. A color outside the sRGB gamut, which Oklab and Lab can describe, is clipped to it channel by channel.
+
 To convert between two non-RGB spaces, go through `Color`, for example `Color::from_hsl(h, s, l).hsv()`.
+
+[Oklab](https://bottosson.github.io/posts/oklab/) is built so that equal steps look equal: its lightness follows how bright a color looks, and its color axes follow how red-green and yellow-blue it looks. Turning the hue in Oklch does not change how bright the color looks, which turning the hue in HSV does (a yellow is brighter than a blue of the same HSV value).
+
+## Mixing colors
+
+`mix` blends this color with another. The color space it blends in matters: halfway between a blue and a yellow is a dull gray if the red, green and blue values are averaged, and a clean green in Oklab.
+
+```rust
+use abra::abra_core::{Color, ColorInterpolation, ColorSpace, HueDirection};
+
+let blue = Color::from_rgb(0, 0, 255);
+let yellow = Color::from_rgb(255, 255, 0);
+
+blue.mix(yellow, 0.5, ColorSpace::Srgb);  // (128, 128, 128), a gray
+blue.mix(yellow, 0.5, ColorSpace::Oklab); // a green with color in it
+
+// In a polar space, which way round the wheel the hue goes can be chosen.
+let way_round = ColorInterpolation::new(ColorSpace::Oklch).with_hue(HueDirection::Longer);
+Color::red().mix(Color::blue(), 0.5, way_round);
+```
+
+`amount` is how far from this color to the other: `0` is this color and `1` is the other, as a gradient's position is. Sass's `color.mix` weight is the share of the *first* color, so it is `1 - amount`. The amount is not limited to 0 to 1; alpha is, so going past either end gives colors further along the same line.
+
+`mix` follows CSS Color 4 (`color-mix()`), so its results are what a designer expects:
+
+- **Alpha is premultiplied.** A color that is mostly transparent counts for less, so a red fading in from transparent does not tint what it fades from. (In a polar space only the channels other than the hue are premultiplied.)
+- **The hue of a gray is powerless.** In a polar space a gray, or a color too pale to have a hue, takes the hue of the color it is mixed with, so a gray mixed with a red does not sweep through the whole wheel.
+- **It is rounded once, at the end.** A mix outside the sRGB gamut, which Oklab, Lab and their polar forms can produce, is clipped to it.
+
+| `ColorSpace`  | Mixes in                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `Srgb`        | The channels as stored. The plain average, and the default.                               |
+| `LinearSrgb`  | The channels as light. Halfway between black and white is brighter.                       |
+| `Hsl`, `Hsv`  | Polar. The hue is an angle.                                                               |
+| `Lab`         | CIE Lab. Close to how the eye sees, but blues drift toward purple.                        |
+| `Lch`         | Lab as lightness, chroma and hue. Polar.                                                  |
+| `Oklab`       | Smooth, and keeps the brightness of the mix between the two colors.                       |
+| `Oklch`       | Oklab as lightness, chroma and hue. Polar, and turning the hue keeps the brightness.      |
+
+| `HueDirection` | The hue goes                                                                  |
+| -------------- | ----------------------------------------------------------------------------- |
+| `Shorter`      | The shorter of the two ways round. The default.                               |
+| `Longer`       | The longer way round.                                                         |
+| `Increasing`   | The way the hue grows (red to yellow to green), once round if it has to.      |
+| `Decreasing`   | The way the hue shrinks (red to magenta to blue), once round if it has to.    |
+
+A `ColorSpace` converts into a `ColorInterpolation` that goes the shorter way, which is why `ColorSpace::Oklab` can be passed where an interpolation is asked for. A [gradient](./gradient#color-interpolation) takes the same setting.
 
 `hsl` and `hsv` return three components. `hsla` and `hsva` return alpha as `f32` in the `0.0` to `1.0` range.
 
@@ -172,6 +239,8 @@ let shades = Color::royal_blue().harmony(Harmony::Shades(5));
 
 `Gradient::harmony(color, harmony)` builds an evenly spaced gradient from the same schemes.
 
+To pick the nearest color of a list of colors, or to use a ready made palette, see [Palette](./palette).
+
 ## Using colors as fills
 
 A `Color` can be passed directly anywhere Abra accepts a `Fill`:
@@ -195,6 +264,10 @@ See [Fill](./fill) for solid, gradient, and image fill workflows.
 | `Color::from_hex(0xRRGGBB)`         | Create an opaque color from hexadecimal RGB. |
 | `Color::from_hsl(h, s, l)`          | Create a color from HSL values.              |
 | `Color::from_hsv(h, s, v)`          | Create a color from HSV values.              |
+| `color.with_hue_rotated(degrees)`   | Turn the hue around the color wheel.         |
+| `color.mix(other, amount, space)`   | Mix two colors in a color space.             |
+| `color.oklab()` / `oklch()` / `lch()` | Read a color in Oklab, Oklch or Lch.       |
+| `color.with_least_saturation(s)` / `with_least_value(v)` | Raise saturation or value to at least this much. |
 | `Color::from_lab(l, a, b)`          | Create a color from CIE Lab values.          |
 | `rgb`, `rgba`                       | Read channel values.                         |
 | `hsl`, `hsla`, `hsv`, `hsva`, `lab` | Convert to color-space components.           |
