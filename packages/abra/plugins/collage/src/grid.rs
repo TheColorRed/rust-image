@@ -3,9 +3,9 @@ use std::sync::Arc;
 use abra::canvas::prelude::*;
 use abra::prelude::*;
 
-use crate::{CollagePlugin, CollageStyle};
+use crate::{Collage, CollageStyle};
 
-impl<'a> CollagePlugin<'a> {
+impl<'a> Collage<'a> {
   pub(crate) fn grid_collage(&mut self) -> Canvas<'a> {
     // Get the total number of cells in the grid.
     let mut cell_count = 0;

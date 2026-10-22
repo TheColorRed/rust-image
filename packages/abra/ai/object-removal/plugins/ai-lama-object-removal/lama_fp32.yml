@@ -1,0 +1,37 @@
+# LaMa (big-lama), float32, fixed 512 x 512
+#
+# Purpose: Object removal. Fills the masked part of a photo with what belongs there, and leaves the rest as it is. Larger and slower
+#   than MI-GAN, and better on big holes and repeating patterns.
+# Origin: https://github.com/advimman/lama (Suvorov et al., "Resolution-robust Large Mask Inpainting with Fourier Convolutions",
+#   WACV 2022); ONNX export from https://github.com/Carve-Photos/lama
+# Inputs: image [1, 3, 512, 512] RGB float32 from 0 to 1; mask [1, 1, 512, 512] float32, 1 on the hole
+# Outputs: output [1, 3, 512, 512] RGB float32 from 0 to 255
+# The model only fills 512 x 512, so Abra cuts a square round the mask, fills it, scales it back and pastes only the filled part.
+
+name: lama_fp32
+description: Fills the masked part of a photo with LaMa
+source: https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx
+license: Apache-2.0
+sha256: 1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6
+
+# How Abra feeds the model (see abra-ai-core, graph.rs). `window` is the part of the photo the model sees, round the mask: the mask's
+# bounds with `margin` more on each side (a share of the larger side of the mask), made square. `composite` pastes only the masked pixels
+# of the answer back.
+decoder: image
+inputs:
+  - name: image
+    from: image
+    type: f32
+    size: 512
+  - name: mask
+    from: mask
+    type: f32
+    size: 512
+    on: 1
+    off: 0
+window:
+  margin: 0.5
+  square: 1
+params:
+  composite: 1
+  output_scale: 255

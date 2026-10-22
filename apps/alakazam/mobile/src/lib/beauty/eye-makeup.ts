@@ -11,7 +11,7 @@ import { aiModelPath, runAiModelAsync } from '@alakazam/mobile';
 import { aiProgress } from '@/src/state/ai-progress';
 import { EDGE_REFINEMENT, HAIR_MODELS, MAKEUP_MODELS, SKIN_SEGMENTATION, belongsTo, boxKey, findFacesAsync, model, unloadModel } from '@/src/lib/ai/faces';
 import { edgeMatte } from '@/src/lib/ai/edge-matte';
-import { owning } from '@/src/lib/native/native-handles';
+import { owning, release } from '@/src/lib/native/native-handles';
 
 const LIPS = ['upper lip', 'lower lip'];
 
@@ -315,10 +315,10 @@ export const makeupMasks = async (photo: ImageLike): Promise<Record<string, Mask
     });
   } catch (error) {
     // A model that failed part of the way leaves nothing behind.
-    Object.values(made).forEach(mask => (mask as unknown as { uniffiDestroy(): void }).uniffiDestroy());
+    Object.values(made).forEach(mask => release(mask));
     throw error;
   } finally {
-    (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+    release(mine);
   }
   // No masks is still an answer (no face was found), so it is kept and saved and the models are not run for this photo again.
   return made;
@@ -345,12 +345,12 @@ export const hairMasks = async (photo: ImageLike): Promise<Record<string, MaskLi
         try {
           found = keep(await runAiModelAsync(segmenter, mine as Parameters<typeof runAiModelAsync>[1]));
         } finally {
-          (segmenter as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+          release(segmenter);
         }
         // Kept in `made`, so it is not freed with the rest; one with nothing in it is.
         const segment = found.mask();
         if (segment.bounds(0)) made[key] = segment;
-        else (segment as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+        else release(segment);
       }
       // With the edge refinement model on this device, it decides the pixels along the hair's edge (see `applyHairColor`).
       const refiner = model(EDGE_REFINEMENT);
@@ -374,10 +374,10 @@ export const hairMasks = async (photo: ImageLike): Promise<Record<string, MaskLi
     // A task that fails takes itself off the bar, because it did no work to count.
     const { hair: _failed, ...others } = aiProgress.value;
     aiProgress.next(others);
-    Object.values(made).forEach(mask => (mask as unknown as { uniffiDestroy(): void }).uniffiDestroy());
+    Object.values(made).forEach(mask => release(mask));
     throw error;
   } finally {
-    (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+    release(mine);
   }
   return made;
 };

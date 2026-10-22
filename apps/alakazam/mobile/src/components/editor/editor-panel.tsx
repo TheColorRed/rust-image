@@ -3,7 +3,9 @@ import { ColorBarPicker } from '@/src/components/editor/color-bar-picker';
 import { RangeSlider } from '@/src/components/range-slider';
 import { Slider } from '@/src/components/slider';
 import { BlemishControls, BlemishToolController } from '@/src/components/tools/blemish-tool';
+import { ColorAreaToolController } from '@/src/components/tools/color-area-tool';
 import { CropControls, CropToolController } from '@/src/components/tools/crop-tool';
+import { ObjectRemovalControls, ObjectRemovalToolController } from '@/src/components/tools/object-removal-tool';
 import { RedEyeControls, RedEyeToolController } from '@/src/components/tools/red-eye-tool';
 import { PersonEveryoneButton, PersonSelectionToolController } from '@/src/components/tools/person-selection-tool';
 import {
@@ -31,6 +33,7 @@ import {
   HAIR_COLOR_KEY,
   LIPSTICK_KEY,
   UNDER_EYE_KEY,
+  OBJECT_REMOVAL_TOOL_KEY,
 } from '@/src/lib/project/edit-sections/keys';
 import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
@@ -67,6 +70,7 @@ import { useTheme } from '@/src/lib/ui/theme';
 import {
   actionPreviewRequested,
   blemishApplyRequested,
+  objectRemovalRequested,
   cropApplyRequested,
   redEyeAutoRequested,
   redoRequested,
@@ -303,6 +307,8 @@ export function EditorPanel() {
     >
       <BlemishToolController />
       <RedEyeToolController />
+      <ObjectRemovalToolController />
+      <ColorAreaToolController />
       <PersonSelectionToolController />
       <CropToolController />
       <View style={styles.history}>
@@ -394,6 +400,8 @@ export function EditorPanel() {
           <BlemishControls onApply={() => blemishApplyRequested.next()} />
         ) : focusedControl?.kind === 'tool' && focusedControl.key === RED_EYE_TOOL_KEY ? (
           <RedEyeControls onAuto={() => redEyeAutoRequested.next()} />
+        ) : focusedControl?.kind === 'tool' && focusedControl.key === OBJECT_REMOVAL_TOOL_KEY ? (
+          <ObjectRemovalControls onRemove={() => objectRemovalRequested.next()} />
         ) : focusedControl?.kind === 'tool' && focusedControl.key === CROP_TOOL_KEY ? (
           <CropControls onApply={() => cropApplyRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (

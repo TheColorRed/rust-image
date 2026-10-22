@@ -15,7 +15,7 @@ import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
 import { FACE_MODELS, findFaces, inside, model } from '@/src/lib/ai/faces';
-import { owning } from '@/src/lib/native/native-handles';
+import { owning, release } from '@/src/lib/native/native-handles';
 
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */
 export const RED_EYE_MODELS = FACE_MODELS;
@@ -234,6 +234,6 @@ export function applyRedEyeStep(image: AbraImageLike, change: RedEyeChange): boo
     return fixed;
   } finally {
     // It is a native image the garbage collector cannot see the size of.
-    (photo as AbraPixels).uniffiDestroy();
+    release(photo);
   }
 }

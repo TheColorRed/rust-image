@@ -2,6 +2,7 @@ import { BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import {
   BLEMISH_TOOL_KEY,
+  OBJECT_REMOVAL_TOOL_KEY,
   BROW_BONE_KEY,
   CROP_TOOL_KEY,
   EYELINER_KEY,
@@ -55,6 +56,10 @@ export const historyVersion$ = historyVersion.asObservable();
 export const isBlemishToolFocused = () => focusedControlKey.value === BLEMISH_TOOL_KEY;
 export const isBlemishToolFocused$ = focusedControlKey$.pipe(
   map(key => key === BLEMISH_TOOL_KEY),
+  distinctUntilChanged(),
+);
+export const isObjectRemovalFocused$ = focusedControlKey$.pipe(
+  map(key => key === OBJECT_REMOVAL_TOOL_KEY),
   distinctUntilChanged(),
 );
 export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOOL_KEY;

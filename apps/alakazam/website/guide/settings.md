@@ -54,6 +54,6 @@ You can leave this alone. If the app closes by itself while it prepares a photo,
 
 The change doesn't happen right away. It starts working the next time you open the app, so close Alakazam completely and open it again. After you pick a new size, a yellow note, **Reopen the app to apply**, appears beside the **?** icon. If you change your mind and pick the size the app is already using, the note goes away.
 
-## AI models are in Storage
+## AI models are in Plugins
 
-The smart models aren't managed here. Use the **Storage** tab to see them, download them and delete them. See [Smart features](/guide/smart-features#managing-storage).
+The smart models aren't managed here. Use the **Plugins** tab to see them, download them and delete them. See [Smart features](/guide/smart-features#managing-plugins).

@@ -15,7 +15,7 @@ Three tabs along the bottom of the home screen take you around the app. They're 
 
 - **Home:** your projects, and the way to add photos. See [Projects](/guide/projects).
 - **Settings:** light or dark, and the file you get when you share. See [Settings](/guide/settings).
-- **Storage:** the smart models stored on your phone. See [Smart features](/guide/smart-features#managing-storage).
+- **Plugins:** the smart models and other add-ons stored on your phone. See [Smart features](/guide/smart-features#managing-plugins).
 
 ## Find an edit
 

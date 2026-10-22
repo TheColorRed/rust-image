@@ -1,6 +1,7 @@
 import { type Image as AbraPixels } from '@abra/core/image';
 import { RemoverShape, ShapePosition, Units, remover } from '@abra/core/tools';
 import { type AbraImageLike } from '@alakazam/mobile';
+import { release } from '@/src/lib/native/native-handles';
 
 /**
  * Removes a blemish centered at `(x, y)` (image pixels), blending in texture borrowed from nearby. `radius` is the size of the
@@ -17,6 +18,6 @@ export function removeBlemish(image: AbraImageLike, x: number, y: number, radius
     image.replaceWith(photo);
   } finally {
     // It is a native image the garbage collector cannot see the size of.
-    (photo as AbraPixels).uniffiDestroy();
+    release(photo);
   }
 }

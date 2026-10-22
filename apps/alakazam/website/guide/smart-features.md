@@ -26,9 +26,9 @@ The models aren't in the app, because they're large. You download each one once,
 - **When you need one:** if an edit needs a model you don't have, Alakazam asks **Download AI models?**, tells you which one and how big it is, and offers **Download**. If you choose **Cancel**, the edit doesn't run. It never opens and silently does nothing.
 - **Better body detection:** skin edits work without a model by finding skin by its color. When you open one, Alakazam may suggest **Improve body detection?**, which downloads a model to find bodies more precisely. You can choose **Not now**.
 
-## Managing storage
+## Managing plugins
 
-Open the **Storage** tab at the bottom of the home screen and look under **AI models**. Models are grouped by what they find, and each one shows its size and whether it's downloaded.
+Open the **Plugins** tab at the bottom of the home screen and look under **AI models**. Models are grouped by what they find, and each one shows its size and whether it's downloaded.
 
 - **Download** or **Delete** a single model with the button beside it. While one downloads, its button says **Downloading**, and **Waiting** if it's queued.
 - **Download all** (down arrow) gets every model you don't have. It shows the total size and asks you to confirm. If one fails, it stops and tells you why.

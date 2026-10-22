@@ -17,9 +17,13 @@ typography = { workspace = true }
 tools = { workspace = true }
 gpu = { workspace = true, optional = true }
 
+saphyr = { workspace = true }
 rayon = { workspace = true }
 ndarray = { workspace = true }
 ctor = { workspace = true }
+
+[dev-dependencies]
+sha2 = { version = "0.11.0" }
 
 [build-dependencies]
 regex = "1.9"

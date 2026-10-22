@@ -6,6 +6,11 @@ export type TimelineChange =
   | { type: 'slider'; key: string; /** `null` when the slider was turned off. */ value: AdjustmentValue | null }
   | { type: 'action'; key: string; on: boolean; group?: string }
   | { type: 'blemish'; x: number; y: number; radius: number }
+  /**
+   * Objects removed by the AI model. `area` is what was circled, as rings of `[x, y]` fractions of the photo, so it holds at any size.
+   * `spots` are round parts of the photo, in its pixels, that cover it, for telling which people are gone (see `replacedSpots`).
+   */
+  | { type: 'object-removal'; area: number[][][]; spots: Spot[] }
   /** A tapped eye fixed of red-eye, at this spot of the photo, in pixels. */
   | { type: 'red-eye'; x: number; y: number }
   /** Red-eye fixed on every face the models found. */
@@ -49,11 +54,15 @@ export function recipeAt(entries: readonly TimelineEntry[], cursor: number): Pro
 }
 
 /** The steps that change pixels, which become the base that the edits after them are rendered on. */
-export type PixelChange = Extract<TimelineChange, { type: 'blemish' | 'red-eye' | 'red-eye-auto' | 'crop' }>;
+export type PixelChange = Extract<TimelineChange, { type: 'blemish' | 'red-eye' | 'red-eye-auto' | 'crop' | 'object-removal' }>;
 
 /** Whether a step changes pixels, as a blemish fix, a red-eye fix, or a crop does, and not just the edit state. */
 export const changesPixels = (change: TimelineChange): change is PixelChange =>
-  change.type === 'blemish' || change.type === 'red-eye' || change.type === 'red-eye-auto' || change.type === 'crop';
+  change.type === 'blemish' ||
+  change.type === 'red-eye' ||
+  change.type === 'red-eye-auto' ||
+  change.type === 'crop' ||
+  change.type === 'object-removal';
 
 /** A round part of the photo, in its pixels. A brush stroke is a row of these. */
 export type Spot = { x: number; y: number; radius: number };
@@ -68,6 +77,8 @@ export function replacedSpots(entries: readonly TimelineEntry[], cursor: number)
     switch (change.type) {
       case 'blemish':
         return [{ x: change.x, y: change.y, radius: change.radius }];
+      case 'object-removal':
+        return change.spots;
       default:
         return [];
     }

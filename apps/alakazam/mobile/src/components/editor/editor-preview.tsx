@@ -1,7 +1,10 @@
+// @refresh reset
 import { PersonDetectionNotice, PersonDetectionOverlay, personOverlayShown } from '@/src/components/editor/person-detection-overlay';
 import { ViewControls } from '@/src/components/editor/view-controls';
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
-import { AreaOutlines, ColorAreaOverlay, areaDrawKey$ } from '@/src/components/tools/color-area-tool';
+import { AreaOutlines } from '@/src/components/tools/color-area-tool';
+import { DrawAreaOverlay } from '@/src/components/tools/draw-area';
+import { areaDrawKey$, areaDrawMode, areaTarget$ } from '@/src/state/draw-area';
 import { CropGizmos } from '@/src/components/tools/crop-tool';
 import { useBasePreview } from '@/src/hooks/useBasePreview';
 import { usePreviewBox } from '@/src/hooks/usePreviewBox';
@@ -34,6 +37,7 @@ import { busy$, currentImage, currentImage$, editBaseImage, editBaseImage$, load
 import { personOutlinesVisible$, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { Gizmos } from '@alakazam/mobile';
 import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
+import { useOwning } from '@/src/lib/native/native-handles';
 import { VesselView } from '@vessel/react-native';
 import { useEffect, useMemo, useRef, type ElementRef } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -57,6 +61,7 @@ export function EditorPreview() {
   const busy = useObservable(busy$, false);
   const blemishFocused = useObservable(isBlemishToolFocused$, false);
   const drawingArea = useObservable(areaDrawKey$, null);
+  const areaTarget = useObservable(areaTarget$, null);
   const cropFocused = useObservable(isCropToolFocused$, false);
   const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const personSelectionState = useObservable(personSelection$, personSelection.value);
@@ -90,14 +95,11 @@ export function EditorPreview() {
   }, []);
 
   // The gizmos over the photo: made once, shared by every control that draws on the preview (see `state/gizmos.ts`).
+  const made = useOwning(keep => keep(new Gizmos()), []);
   useEffect(() => {
-    const made = new Gizmos();
     editorGizmos.next(made);
-    return () => {
-      editorGizmos.next(null);
-      made.uniffiDestroy();
-    };
-  }, []);
+    return () => editorGizmos.next(null);
+  }, [made]);
 
   // The live view is shown and hidden straight on the native view. Going through React state took around 100 ms to reach
   // the screen, which is what tapping a mood felt like; a slider never paid it because its view stays visible while dragged.
@@ -195,7 +197,14 @@ export function EditorPreview() {
           />
         )}
         {blemishFocused && <BlemishReticle />}
-        {drawingArea !== null && <ColorAreaOverlay />}
+        {areaTarget && drawingArea === areaTarget.key ? (
+          <DrawAreaOverlay
+            gizmo={areaTarget.key}
+            opacity={areaTarget.opacity}
+            minShare={areaTarget.minShare}
+            onDrawn={loop => areaTarget.onDrawn(loop, areaDrawMode.value)}
+          />
+        ) : null}
         {cropFocused && <CropGizmos />}
         <ViewControls />
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}

@@ -20,7 +20,7 @@ const GUESS_LIMIT = 0.9;
 const GUESS_MS = 3000;
 
 /**
- * A thin bar that shows while AI work runs, such as under the editor's photo or on the Storage screen while models download: a gradient that keeps flowing sideways. It always starts
+ * A thin bar that shows while AI work runs, such as under the editor's photo or on the Plugins screen while models download: a gradient that keeps flowing sideways. It always starts
  * empty at the left and fills toward the right. It fills as far as the tasks say they have got; a task that does not say is guessed
  * from the time it has been running, and the bar pulses while any of it is a guess. It always takes its height, empty when nothing runs,
  * so the photo does not change size when it appears (a new size would draw the photo again).

@@ -47,12 +47,13 @@ import { AbraImage, personDetectionDownloaded, readImageAsync, type PersonDetect
 import { Alert, AppState } from 'react-native';
 import { merge, type BehaviorSubject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
+import { release } from '@/src/lib/native/native-handles';
 
 /** Nulls the subject before destroying its Rust object so no subscriber can read a dangling pointer. */
-function destroy<T extends { uniffiDestroy(): void }>(subject: BehaviorSubject<T | null>) {
+function destroy<T>(subject: BehaviorSubject<T | null>) {
   const value = subject.value;
   subject.next(null);
-  value?.uniffiDestroy();
+  release(value);
 }
 
 function resetSessionState() {
@@ -211,7 +212,7 @@ function saveOpenProject() {
           final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: JPEG_FALLBACK_QUALITY });
         }
       } finally {
-        rendered?.uniffiDestroy();
+        release(rendered);
       }
     }
     const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
@@ -264,7 +265,7 @@ export async function shareEditedPhoto() {
     uri = await cacheFileUri(`${openProject.value?.name || 'photo'}.${exportFormat.value}`);
     final.write(toLocalPath(uri), { quality: EXPORT_QUALITIES.find(option => option.value === exportQuality.value)!.encoder });
   } finally {
-    rendered?.uniffiDestroy();
+    release(rendered);
   }
   // Not deleted here: the app picked in the share sheet reads the file later. The next share clears it.
   await shareImageFile(uri);
@@ -291,7 +292,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       if (project?.resultFile) {
         const result = ownedImage(await readImageAsync(toLocalPath(projectImageUri(project))));
         if (cancelled) {
-          result.uniffiDestroy();
+          release(result);
           return;
         }
         // The saved picture is shown, and edits can be made on it right away, while the history rebuilds below. Those
@@ -311,12 +312,12 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       // A saved skin mask is loaded as it was, rather than running the skin model again.
       const original = ownedImage(await readImageAsync(path));
       if (cancelled) {
-        original.uniffiDestroy();
+        release(original);
         return;
       }
       if (project) await loadSavedMasks(project, original, () => cancelled);
       if (cancelled) {
-        original.uniffiDestroy();
+        release(original);
         return;
       }
       if (__DEV__) console.debug('[image] decode and skin mask ms:', Date.now() - started);
@@ -338,8 +339,8 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         // The editor may have been left while this was decoding: the session's maps are already cleared, so a picture kept now would
         // stay in memory with no owner.
         if (cancelled) {
-          checkpoint.uniffiDestroy();
-          original.uniffiDestroy();
+          release(checkpoint);
+          release(original);
           return;
         }
         keepBlemishBase(entry, checkpoint);
@@ -360,14 +361,14 @@ export function openEditorSession(photo: EditablePhoto): () => void {
             } else {
               await nextFrame();
               if (cancelled) {
-                base.uniffiDestroy();
-                original.uniffiDestroy();
+                release(base);
+                release(original);
                 return;
               }
               healed = healBlemish(base, entry);
               keepBlemishBase(entry, healed.clone() as AbraImage);
             }
-            base.uniffiDestroy();
+            release(base);
             base = healed;
           }
           rebuilt.push(entry);
@@ -381,7 +382,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
 
       batch(() => {
         // Swap the saved picture, which was only a stand-in base, for the real one.
-        editBaseImage.value?.uniffiDestroy();
+        release(editBaseImage.value);
         originalImage.next(original);
         editBaseImage.next(base);
         // Edits made while this was loading are pending work. They go on top of the saved edits, and win where both set

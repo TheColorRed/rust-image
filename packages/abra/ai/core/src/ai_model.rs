@@ -14,6 +14,7 @@
 
 use crate::{
   decode::{AiOutput, Decoder},
+  graph::Graph,
   error::AiError,
   image_ai::ImageAi,
   input::InputSpec,
@@ -29,8 +30,14 @@ use std::path::Path;
 pub struct AiModel {
   session: OnnxSession,
   manifest: Manifest,
-  input: InputSpec,
-  decoder: Decoder,
+  feed: Feed,
+}
+
+/// How a model is fed and read. A model with `inputs` in its manifest is run from them (see the `graph` module); any other takes one
+/// picture, with the named decoder reading what it returns.
+enum Feed {
+  Single { input: InputSpec, decoder: Decoder },
+  Graph(Graph),
 }
 
 impl AiModel {
@@ -51,13 +58,17 @@ impl AiModel {
   }
 
   fn with_manifest(p_onnx_path: impl AsRef<Path>, p_manifest: Manifest) -> Result<Self, AiError> {
-    let input = InputSpec::from_manifest(&p_manifest)?;
-    let decoder = Decoder::from_manifest(&p_manifest)?;
+    let feed = match Graph::from_manifest(&p_manifest)? {
+      Some(graph) => Feed::Graph(graph),
+      None => Feed::Single {
+        input: InputSpec::from_manifest(&p_manifest)?,
+        decoder: Decoder::from_manifest(&p_manifest)?,
+      },
+    };
     Ok(Self {
       session: OnnxSession::from_file(p_onnx_path, None)?,
       manifest: p_manifest,
-      input,
-      decoder,
+      feed,
     })
   }
 
@@ -89,8 +100,12 @@ impl AiModel {
   pub fn run_guided(
     &self, p_image: &Image, p_guide: Option<&Mask>, p_progress: &dyn Fn(f32),
   ) -> Result<AiOutput, AiError> {
-    if self.input.guide != p_guide.is_some() {
-      return Err(AiError::invalid_input(if self.input.guide {
+    let needs_guide = match &self.feed {
+      Feed::Single { input, .. } => input.guide,
+      Feed::Graph(graph) => graph.needs_guide(),
+    };
+    if needs_guide != p_guide.is_some() {
+      return Err(AiError::invalid_input(if needs_guide {
         "This model needs a guide mask with the picture"
       } else {
         "This model takes no guide mask"
@@ -101,11 +116,17 @@ impl AiModel {
       return Err(AiError::invalid_input("Cannot run a model on an empty image"));
     }
     p_progress(0.0);
-    let prepared = self.input.prepare_guided(p_image, p_guide);
-    p_progress(PREPARED);
-    let outputs = self.session.run_multiple(&prepared.data, &prepared.shape)?;
-    p_progress(RAN);
-    let output = self.decoder.decode(&outputs, width, height, &prepared.placement)?;
+    let output = match &self.feed {
+      Feed::Single { input, decoder } => {
+        let prepared = input.prepare_guided(p_image, p_guide);
+        p_progress(PREPARED);
+        let outputs = self.session.run_multiple(&prepared.data, &prepared.shape)?;
+        p_progress(RAN);
+        decoder.decode(&outputs, width, height, &prepared.placement)?
+      }
+      // The inputs are made, the model runs and the picture is read in one piece, so only the ends are reported.
+      Feed::Graph(graph) => AiOutput::Image(graph.run(&self.session, p_image, p_guide)?),
+    };
     p_progress(1.0);
     Ok(output)
   }

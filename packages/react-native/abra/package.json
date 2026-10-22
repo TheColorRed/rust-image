@@ -21,6 +21,7 @@
     "./gradient": "./entries/gradient.ts",
     "./image": "./entries/image.ts",
     "./mask": "./entries/mask.ts",
+    "./plugins": "./entries/plugins.ts",
     "./tools": "./entries/tools.ts",
     "./transform": "./entries/transform.ts"
   },

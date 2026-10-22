@@ -6,65 +6,64 @@ outline: deep
 
 # Plugins Overview
 
-Abra plugins extend the library with higher-level image generation and processing workflows. A plugin implements the `Plugin` trait and returns a `PluginResult` containing canvases, images, or layers.
+A plugin is something an app gains by adding a folder. Nothing is compiled into the app: the app scans a folder of plugins when it starts, and a plugin that is there just works. The app's code is not changed to add one.
 
-## Plugin lifecycle
+A plugin is a folder with a `plugin.yml` that says what it adds. What it adds are _contributions_, and each contribution lists the _capabilities_ it provides. A feature of the app asks for a capability (for example `inpaint`, to fill a masked part of a photo) and offers whatever plugins provide it, so a new plugin shows up in the features that can use it.
 
-A plugin exposes a name, a description, and an `apply` method:
+## What a plugin can add
+
+| Contribution | What it is                                                             | Run by                                                  |
+| ------------ | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| `models`     | An AI model and its manifest.                                          | The AI runtime (`AiModel`), from the manifest alone.    |
+| `pipelines`  | A list of library operations, each with its settings.                  | The host, which maps each `op` to the library.          |
+| `scripts`    | A TypeScript module that uses the same bindings as the app itself.     | The host's JavaScript engine.                           |
+
+## A plugin
+
+```yaml
+id: lama-object-removal
+name: LaMa object removal
+version: 1.0.0
+description: Removes objects from a photo with LaMa.
+contributes:
+  models:
+    - id: object-removal-large
+      title: Object removal (best quality)
+      capabilities: [inpaint]
+      subjects: [objects]
+      model: lama_fp32.onnx
+      manifest: lama_fp32.yml
+```
+
+See [Writing a plugin](./writing-plugins) for every field, and for how a model's manifest says how it is fed.
+
+A plugin can depend on other plugins by id, so it does not carry what another already has. The app finds and installs them from its catalog. See [Writing a plugin](./writing-plugins#dependencies).
+
+## Finding plugins
+
+`PluginRegistry::scan(folder)` reads every plugin in a folder. A plugin that cannot be used (a bad manifest, a file it names that is missing, an id that is already taken) is listed in `problems()` and does not stop the others.
 
 ```rust
-use abra::plugin::{Plugin, PluginError, PluginResult};
+use abra::plugin::PluginRegistry;
 
-fn run_plugin<'a>(plugin: &mut impl Plugin<'a>) -> Result<PluginResult<'a>, PluginError> {
-  println!("{}: {}", plugin.name(), plugin.description());
-  plugin.apply()
+let registry = PluginRegistry::scan("plugins");
+
+for problem in registry.problems() {
+  eprintln!("{}: {}", problem.dir.display(), problem.error);
+}
+
+// What a feature offers: everything that can fill a masked part of a photo.
+for contribution in registry.with_capability("inpaint") {
+  println!("{} (from {})", contribution.title(), contribution.plugin().manifest.name);
 }
 ```
 
-`apply` is the plugin's execution entry point. It may return an error when parameters or required resources are invalid.
+The same scan is available to the apps as `scanPlugins(folder)` in the bindings.
 
-## Plugin results
+## Included code
 
-`PluginResult` can contain canvases, images, and layers:
+These are libraries, not runtime plugins. They are Rust crates that an app links in:
 
-```rust
-let mut result = plugin.apply()?;
-
-if let Some(canvas) = result.take_canvas_at(0) {
-  canvas.save("out/plugin-result.png", None);
-}
-```
-
-Use `canvas_at`, `image_at`, and `layer_at` to borrow outputs. Use the `take_*` methods when the output should be owned and removed from the result.
-
-## Included plugins
-
-| Plugin                     | Purpose                                                                     | Status    |
-| -------------------------- | --------------------------------------------------------------------------- | --------- |
-| [Collage](./collage)       | Compose multiple images into grid, layered-grid, or random layouts.         | Available |
-| [Tilt-shift](./tilt-shift) | Intended to simulate a miniature scene with blur, saturation, and contrast. | API stub  |
-
-## Collage workflow
-
-The Collage plugin accepts loaded images, creates a canvas, and returns it through a `PluginResult`:
-
-```rust
-use abra::prelude::*;
-use abra_collage::prelude::*;
-
-let images = ImageLoader::FromPaths(vec![
-  "assets/one.jpg",
-  "assets/two.jpg",
-  "assets/three.jpg",
-  "assets/four.jpg",
-]).load(LoadMode::Parallel { threads: 4 });
-
-let mut collage = CollagePlugin::new((1200, 800), images)
-  .with_style(CollageStyle::Grid(2, 2));
-
-let mut result = collage.apply()?;
-let canvas = result.take_canvas_at(0).unwrap();
-canvas.save("out/collage.png", None);
-```
-
-See [Collage](./collage) for layout and styling options.
+| Crate                | Purpose                                                             |
+| -------------------- | ------------------------------------------------------------------- |
+| [Collage](./collage) | Compose multiple images into grid, layered-grid, or random layouts. |

@@ -1,0 +1,29 @@
+# MI-GAN inpainting pipeline, uint8
+#
+# Purpose: Object removal. Fills the masked part of a photo with what belongs there, and leaves the rest as it is.
+# Origin: https://github.com/Picsart-AI-Research/MI-GAN (Sargsyan et al., "MI-GAN: A Simple Baseline for Image
+#   Inpainting on Mobile Devices", ICCV 2023); pipeline export from https://github.com/andraniksargsyan/migan
+# Inputs: image [1, 3, height, width] RGB uint8 in 0..255, any size; mask [1, 1, height, width] uint8, same size, 0 on the hole
+# Outputs: result [1, 3, height, width] RGB uint8, the size of the input
+# The pipeline crops around the masked area, fills it at 512 x 512 and pastes it back, so Abra gives it the whole picture.
+
+name: migan_pipeline_v2
+description: Fills the masked part of a photo with MI-GAN
+source: https://huggingface.co/CardAnvilModels/MI-GAN-ONNX/resolve/main/migan_pipeline_v2.onnx
+license: MIT
+sha256: 6f1f3530a1a2324b19752018ce756088b07973cda8d7d890034ace5c8a48c40b
+
+# How Abra feeds the model (see abra-ai-core, graph.rs). The mask given with the picture is 255 on what to remove; this model reads
+# 0 as the hole (checked by the tests), so a covered pixel is 0 and an uncovered one is 255.
+decoder: image
+inputs:
+  - name: image
+    from: image
+    type: u8
+  - name: mask
+    from: mask
+    type: u8
+    on: 0
+    off: 255
+params:
+  output_scale: 255

@@ -9,7 +9,7 @@ import { type ToolContext } from '@/src/lib/project/edit-sections';
 import { derivedFor } from '@/src/lib/editor/editor-preloads';
 import { MATTE_UNKNOWN } from '@/src/lib/ai/edge-matte';
 import { owning } from '@/src/lib/native/native-handles';
-import { people } from '@/src/state/analysis';
+import { framedPeople } from '@/src/lib/ai/analysis';
 import { type Painting } from '@/src/lib/beauty/layers';
 
 /**
@@ -151,7 +151,7 @@ export const applyHairColor = (
       owning(own => {
         const bodies = (ids: number[]) =>
           ids.flatMap(id => {
-            const body = people.value?.find(found => found.id === id)?.mask;
+            const body = framedPeople()?.find(found => found.id === id)?.mask;
             return body ? [own(body.resized(hair.width(), hair.height(), TransformAlgorithm.Bilinear))] : [];
           });
         let wanted = hair;
@@ -159,7 +159,7 @@ export const applyHairColor = (
           for (const body of bodies([person.id])) wanted = own(wanted.multiplied(body));
         } else {
           // With no people found there is nothing to keep the hair on, so it stands as the model found it.
-          const everyone = bodies((people.value ?? []).map(found => found.id)).reduce<MaskLike | undefined>(
+          const everyone = bodies((framedPeople() ?? []).map(found => found.id)).reduce<MaskLike | undefined>(
             (all, body) => (all ? own(all.maximum(body)) : body),
             undefined,
           );

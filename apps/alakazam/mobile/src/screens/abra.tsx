@@ -8,6 +8,7 @@ import { FilePicker, type PickedImage } from '@/src/components/file-picker';
 import { Slider } from '@/src/components/slider';
 import { VesselView } from '@vessel/react-native';
 import { useLiveSession } from '@/src/hooks/useLiveSession';
+import { release } from '@/src/lib/native/native-handles';
 
 /** An edit made by a tool written against the library on a copy of the photo's pixels. */
 type Operation = { label: string; tool: (photo: ImageLike) => void };
@@ -44,17 +45,17 @@ export default function AbraScreen() {
       tool(photo);
       session.show(photo as AbraImage);
     } finally {
-      (photo as AbraPixels).uniffiDestroy();
+      release(photo);
     }
   };
 
   // The JS garbage collector can't see the Rust-side pixels behind a handle, so free them explicitly.
-  useEffect(() => () => imageRef.current?.uniffiDestroy(), []);
+  useEffect(() => () => release(imageRef.current), []);
 
   function load(asset: PickedImage) {
     try {
       const started = Date.now();
-      imageRef.current?.uniffiDestroy();
+      release(imageRef.current);
       imageRef.current = AbraImage.read(toPath(asset.uri)) as AbraImage;
       const image = imageRef.current;
       setSource(asset);
@@ -75,7 +76,7 @@ export default function AbraScreen() {
         operation.tool(photo);
         image.replaceWith(photo);
       } finally {
-        (photo as AbraPixels).uniffiDestroy();
+        release(photo);
       }
       const t1 = Date.now();
       setRevision((r) => r + 1);

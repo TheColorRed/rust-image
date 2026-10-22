@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { ensureBase, editorPreview, showTool } from '@/src/lib/editor/editor-preview';
 import { isStackDeferred, restForAction } from '@/src/lib/editor/editor-replay';
+import { owning } from '@/src/lib/native/native-handles';
 import { actionPreviewRequested$ } from '@/src/state/commands';
 import { editBaseImage } from '@/src/state/session';
 
@@ -20,25 +21,21 @@ export function useActionPreview() {
       const base = editBaseImage.value;
       if (control.deferred && base && isStackDeferred(undefined, control)) {
         if (!ensureBase()) return;
-        const rest = restForAction(control, true)?.();
-        try {
+        owning(keep => {
+          const rest = keep(restForAction(control, true)?.());
           showTool(tool, rest ?? base);
-        } finally {
-          rest?.uniffiDestroy();
-        }
+        });
         return;
       }
-      const rest = restForAction(control);
-      // A repeatable action builds on what is already applied, so its tool runs on the rest of the stack.
-      const start = control.repeatable && rest ? rest() : undefined;
-      try {
+      owning(keep => {
+        const rest = restForAction(control);
+        // A repeatable action builds on what is already applied, so its tool runs on the rest of the stack.
+        const start = keep(control.repeatable && rest ? rest() : undefined);
         // The CPU-rendered rest is different every time, so it always opens a new preview.
         const ready = rest ? editorPreview.ensure(`action:${++restCount}`, () => start ?? rest(), !start) : ensureBase();
         if (!ready) return;
         showTool(tool, start);
-      } finally {
-        start?.uniffiDestroy();
-      }
+      });
     });
     return () => subscription.unsubscribe();
   }, []);

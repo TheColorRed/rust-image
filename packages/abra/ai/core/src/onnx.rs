@@ -46,6 +46,22 @@ impl OnnxConfig {
   }
 }
 
+/// The numbers of a tensor, in the order of its shape.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TensorData {
+  /// Floating point numbers.
+  F32(Vec<f32>),
+  /// Whole numbers from 0 to 255, such as the pixels of a model that works on bytes.
+  U8(Vec<u8>),
+}
+
+/// A tensor of either type, with its shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnyTensor {
+  pub shape: Vec<usize>,
+  pub data: TensorData,
+}
+
 /// A thread-safe wrapper around an ONNX Runtime session.
 ///
 /// Provides convenient methods for loading models and running inference
@@ -188,6 +204,44 @@ impl OnnxSession {
         .try_extract_tensor::<f32>()
         .map_err(|e| AiError::inference_failed(format!("Failed to extract output tensor: {}", e)))?;
       tensors.push((out_shape.iter().map(|&dimension| dimension as usize).collect(), out_view.to_vec()));
+    }
+    Ok(tensors)
+  }
+
+  /// Runs inference with any number of named input tensors of any supported type, and returns every output with its name, in model
+  /// order. It is what a model described by its manifest's `inputs` is run with: the inputs can mix numbers and whole-number
+  /// pixels, and a result can be either.
+  ///
+  /// - `p_inputs`: Each input as its name in the model and its tensor.
+  pub fn run_tensors(&self, p_inputs: &[(&str, &AnyTensor)]) -> Result<Vec<(String, AnyTensor)>, AiError> {
+    use ort::session::SessionInputValue;
+    use ort::value::TensorRef;
+    use std::borrow::Cow;
+
+    let mut inputs: Vec<(Cow<str>, SessionInputValue)> = Vec::with_capacity(p_inputs.len());
+    for (name, tensor) in p_inputs {
+      let failed = |e: ort::Error| AiError::inference_failed(format!("Failed to create input tensor `{name}`: {e}"));
+      let value: SessionInputValue = match &tensor.data {
+        TensorData::F32(data) => TensorRef::from_array_view((tensor.shape.as_slice(), data.as_slice())).map_err(failed)?.into(),
+        TensorData::U8(data) => TensorRef::from_array_view((tensor.shape.as_slice(), data.as_slice())).map_err(failed)?.into(),
+      };
+      inputs.push((Cow::Borrowed(*name), value));
+    }
+
+    let mut session =
+      self.session.lock().map_err(|e| AiError::inference_failed(format!("Session lock poisoned: {}", e)))?;
+    let outputs = session.run(inputs).map_err(|e| AiError::inference_failed(format!("Inference failed: {}", e)))?;
+
+    let mut tensors = Vec::with_capacity(outputs.len());
+    for (name, output) in outputs.iter() {
+      let tensor = if let Ok((shape, data)) = output.try_extract_tensor::<f32>() {
+        AnyTensor { shape: shape.iter().map(|&dimension| dimension as usize).collect(), data: TensorData::F32(data.to_vec()) }
+      } else if let Ok((shape, data)) = output.try_extract_tensor::<u8>() {
+        AnyTensor { shape: shape.iter().map(|&dimension| dimension as usize).collect(), data: TensorData::U8(data.to_vec()) }
+      } else {
+        return Err(AiError::inference_failed(format!("The output `{name}` is not a float or byte tensor")));
+      };
+      tensors.push((name.to_string(), tensor));
     }
     Ok(tensors)
   }

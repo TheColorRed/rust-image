@@ -6,9 +6,9 @@ outline: deep
 
 # Collage
 
-`CollagePlugin` creates a canvas from multiple source images. It supports regular grids, overlapping layered grids, and random placement.
+`Collage` creates a canvas from multiple source images. It supports regular grids, overlapping layered grids, and random placement.
 
-The plugin is provided by the `abra_collage` crate:
+Collage is a library crate, `abra_collage`. It is not a runtime plugin (see [Plugins](./index)): it is Rust code that an app links in.
 
 ```rust
 use abra::prelude::*;
@@ -17,7 +17,7 @@ use abra_collage::prelude::*;
 
 ## Basic collage
 
-Load images with `ImageLoader`, create the plugin with an output size, apply it, and save the returned canvas:
+Load images with `ImageLoader`, create the collage with an output size, build it, and save the returned canvas:
 
 ```rust
 let images = ImageLoader::FromPaths(vec![
@@ -27,15 +27,11 @@ let images = ImageLoader::FromPaths(vec![
   "assets/four.jpg",
 ]).load(LoadMode::Parallel { threads: 4 });
 
-let mut plugin = CollagePlugin::new((1200, 800), images);
-let mut result = plugin.apply().unwrap();
-
-if let Some(canvas) = result.take_canvas_at(0) {
-  canvas.save("out/collage.png", None);
-}
+let mut collage = Collage::new((1200, 800), images);
+collage.build().save("out/collage.png", None);
 ```
 
-`CollagePlugin::new` defaults to `CollageStyle::Grid(2, 2)`. Images are selected randomly without repetition until all provided images have been used; if the layout has more cells than images, selection starts over.
+`Collage::new` defaults to `CollageStyle::Grid(2, 2)`. Images are selected randomly without repetition until all provided images have been used; if the layout has more cells than images, selection starts over.
 
 ## Layout styles
 
@@ -44,7 +40,7 @@ if let Some(canvas) = result.take_canvas_at(0) {
 `Grid(columns, rows)` places images into evenly sized cells. Images use a cover resize strategy, so an image may be cropped to fill its cell:
 
 ```rust
-let plugin = CollagePlugin::new((1200, 800), images)
+let collage = Collage::new((1200, 800), images)
   .with_style(CollageStyle::Grid(3, 2));
 ```
 
@@ -53,7 +49,7 @@ let plugin = CollagePlugin::new((1200, 800), images)
 `LayeredGrid(columns, rows)` places image canvases in a grid with overlap-friendly transforms. Rotation and scale ranges are useful with this style:
 
 ```rust
-let plugin = CollagePlugin::new((1200, 800), images)
+let collage = Collage::new((1200, 800), images)
   .with_style(CollageStyle::LayeredGrid(3, 2))
   .with_options(
     CollageOptions::new()
@@ -67,7 +63,7 @@ let plugin = CollagePlugin::new((1200, 800), images)
 `Random(count)` places the requested number of images at random positions within the collage bounds:
 
 ```rust
-let plugin = CollagePlugin::new((1200, 800), images)
+let collage = Collage::new((1200, 800), images)
   .with_style(CollageStyle::Random(12));
 ```
 
@@ -91,7 +87,7 @@ let options = CollageOptions::new()
   .with_rotation_range(-15.0, 15.0);
 ```
 
-The plugin samples a value from the inclusive range for each selected image where the layout supports rotation.
+The collage samples a value from the inclusive range for each selected image where the layout supports rotation.
 
 ### Scale
 
@@ -140,7 +136,7 @@ let effects = LayerEffects::new()
       .with_size(24.0),
   );
 
-let plugin = CollagePlugin::new((1200, 800), images)
+let collage = Collage::new((1200, 800), images)
   .with_options(CollageOptions::new().with_effects(effects));
 ```
 
@@ -154,7 +150,7 @@ use abra_collage::prelude::*;
 pub fn main() {
   let images = ImageLoader::FromGlob(vec!["assets/photos/*.jpg"]).load(LoadMode::Parallel { threads: 4 });
 
-  let mut plugin = CollagePlugin::new((1600, 1000), images)
+  let mut collage = Collage::new((1600, 1000), images)
     .with_style(CollageStyle::LayeredGrid(4, 2))
     .with_options(
       CollageOptions::new()
@@ -163,9 +159,7 @@ pub fn main() {
         .with_background(Color::from_hex(0x20252B)),
     );
 
-  let mut result = plugin.apply().unwrap();
-  let canvas = result.take_canvas_at(0).unwrap();
-  canvas.save("out/collage.png", None);
+  collage.build().save("out/collage.png", None);
 }
 ```
 
@@ -173,7 +167,8 @@ pub fn main() {
 
 | API                                        | Purpose                                             |
 | ------------------------------------------ | --------------------------------------------------- |
-| `CollagePlugin::new(size, images)`         | Create a collage generator.                         |
+| `Collage::new(size, images)`               | Create a collage generator.                         |
+| `build()`                                  | Make the collage and return it as a canvas.         |
 | `with_style(CollageStyle)`                 | Select the layout.                                  |
 | `with_options(CollageOptions)`             | Configure rotation, scale, background, and effects. |
 | `CollageStyle::Grid(columns, rows)`        | Create an evenly partitioned grid.                  |

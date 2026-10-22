@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use abra::canvas::prelude::*;
 use abra::drawing::prelude::*;
-use abra::plugin::{Plugin, PluginError, PluginResult};
 use abra::prelude::*;
 
 use rand::prelude::{IndexedRandom, Rng, RngExt};
@@ -14,7 +13,7 @@ mod layered_grid;
 mod random;
 
 pub mod prelude {
-  pub use super::{CollageOptions, CollagePlugin, CollageStyle};
+  pub use super::{CollageOptions, Collage, CollageStyle};
 }
 
 #[derive(Clone)]
@@ -89,7 +88,7 @@ pub enum CollageStyle {
 }
 
 /// A plugin that creates collages from multiple images.
-pub struct CollagePlugin<'a> {
+pub struct Collage<'a> {
   /// The size of the collage canvas.
   size: (u32, u32),
   /// The style of the collage.
@@ -104,8 +103,8 @@ pub struct CollagePlugin<'a> {
   rng: ThreadRng,
 }
 
-impl<'a> CollagePlugin<'a> {
-  /// Creates a new CollagePlugin instance from already loaded images.
+impl<'a> Collage<'a> {
+  /// Creates a new Collage instance from already loaded images.
   pub fn new<I: Into<LoadedImages>>(p_size: (u32, u32), p_images: I) -> Self {
     let loaded = p_images.into();
     Self {
@@ -194,38 +193,16 @@ impl<'a> CollagePlugin<'a> {
   }
 }
 
-impl<'a> Plugin<'a> for CollagePlugin<'a> {
-  fn name(&self) -> &str {
-    "Collage"
-  }
-
-  fn description(&self) -> &str {
-    "A plugin that creates collages from multiple images."
-  }
-
-  fn apply(&mut self) -> Result<PluginResult<'a>, PluginError> {
+impl<'a> Collage<'a> {
+  /// Makes the collage in the style that was chosen and returns it as a canvas.
+  pub fn build(&mut self) -> Canvas<'a> {
     let start = std::time::Instant::now();
-    let mut plugin_result = PluginResult::new();
-    match &self.style {
-      CollageStyle::Grid(_columns, _rows) => {
-        let collage_result = self.grid_collage();
-        plugin_result.add_canvas(collage_result);
-      }
-      CollageStyle::LayeredGrid(_columns, _rows) => {
-        let collage_result = self.layered_grid_collage();
-        plugin_result.add_canvas(collage_result);
-      }
-      CollageStyle::Random(_count) => {
-        let collage_result = self.random_collage();
-        plugin_result.add_canvas(collage_result);
-      }
+    let canvas = match &self.style {
+      CollageStyle::Grid(_columns, _rows) => self.grid_collage(),
+      CollageStyle::LayeredGrid(_columns, _rows) => self.layered_grid_collage(),
+      CollageStyle::Random(_count) => self.random_collage(),
     };
-
-    if plugin_result.is_empty() {
-      return Err(PluginError::execution_failed("CollagePlugin produced no canvases"));
-    }
-
-    println!("CollagePlugin created in {:?}", start.elapsed());
-    Ok(plugin_result)
+    println!("Collage created in {:?}", start.elapsed());
+    canvas
   }
 }

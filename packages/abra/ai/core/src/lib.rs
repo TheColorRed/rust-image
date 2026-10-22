@@ -9,6 +9,8 @@
 //! - `AiModel`: Any model, described by its manifest: it feeds the picture in, runs the model and reads the result with
 //!   the decoder the manifest names. A new model of a known kind needs only its `.onnx` and `.yml`.
 //! - `Manifest`, `InputSpec` and `Decoder`: what an `AiModel` is made of (`manifest`, `input` and `decode`).
+//! - A model with more than one input, bytes instead of numbers, or a picture for an answer lists its `inputs` in the manifest and
+//!   needs no Rust at all (the `graph` module); the object removal models (MI-GAN, LaMa) are two such manifests.
 //! - `ImageAi` and `ImageAiWithControl`: what the models that take a picture share, `load` and `process`.
 //! - `ReportsProgress`: `model.on(|progress| ..).process(&image)` tells how far along a run is, from `0.0` to `1.0`.
 //! - `ImageModel`: Unified model that loads any ONNX model with a YAML manifest.
@@ -63,6 +65,7 @@
 mod ai_model;
 pub mod decode;
 mod error;
+mod graph;
 pub mod input;
 pub mod manifest;
 pub mod tensor;
@@ -78,7 +81,7 @@ pub use ai_model::AiModel;
 pub use decode::{AiOutput, Bounds, Decoder, Instance, LabelMap, Landmark, Landmarks};
 pub use error::AiError;
 pub use input::{Fit, InputSpec, Layout, Placement};
-pub use manifest::Manifest;
+pub use manifest::{Entry, Manifest};
 
 pub use image_ai::{ImageAi, ImageAiWithControl, Placeable};
 pub use image_model::{ControlParameter, ControlParams, ControlSpec, ImageModel, ModelSpec, discover_models};

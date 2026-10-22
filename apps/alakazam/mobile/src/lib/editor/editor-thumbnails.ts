@@ -11,6 +11,7 @@ import {
 } from '@/src/lib/project/edit-sections';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
 import { ownedImage } from '@/src/lib/native/native-image';
+import { release } from '@/src/lib/native/native-handles';
 
 /** Display dimensions (dp) of a one-tap control's preview thumbnail. */
 export const THUMBNAIL_WIDTH = 112;
@@ -87,12 +88,12 @@ export function buildControlThumbnails(
                 target.replaceWith(returned ?? photo);
                 pixels = target;
               } catch (error) {
-                target.uniffiDestroy();
+                release(target);
                 throw error;
               } finally {
                 // They are native images the garbage collector cannot see the size of.
-                (photo as AbraPixels).uniffiDestroy();
-                if (returned) (returned as AbraPixels).uniffiDestroy();
+                release(photo);
+                if (returned) release(returned);
               }
             } else {
               throw new Error(`Thumbnail control "${control.key}" needs a tool or thumb`);
@@ -120,8 +121,8 @@ export function buildControlThumbnails(
             succeeded = false;
             if (!cancelled) console.warn(`[edit] building thumbnail for "${control.key}" threw:`, error);
           } finally {
-            created?.uniffiDestroy();
-            pixels?.uniffiDestroy();
+            release(created);
+            release(pixels);
           }
           // Effects run synchronously on the JS thread, so once a frame's worth of them has built up, let the cards published so far
           // draw. Cheap effects share a frame; a slow one gets its own.
@@ -137,7 +138,7 @@ export function buildControlThumbnails(
       if (!cancelled) console.warn('[edit] preparing native thumbnail source threw:', error);
       return false;
     } finally {
-      source.uniffiDestroy();
+      release(source);
       if (__DEV__ && !cancelled) {
         console.debug('[thumbnails]', section.key, {
           firstCardMs,

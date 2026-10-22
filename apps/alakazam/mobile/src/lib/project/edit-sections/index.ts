@@ -17,6 +17,7 @@ import { colorization } from '@/src/lib/project/edit-sections/mood';
 import { sharpen } from '@/src/lib/project/edit-sections/sharpen';
 import { specialEffects } from '@/src/lib/project/edit-sections/special-effects';
 import { transform } from '@/src/lib/project/edit-sections/transform';
+import { release } from '@/src/lib/native/native-handles';
 
 /**
  * What a tool, a thumb or an `apply` is told besides the photo. The editor draws a photo shrunk to the screen and makes the
@@ -403,8 +404,8 @@ export const applyAction = (control: ActionControl, image: AbraImageLike, scale 
     const returned = control.tool(photo, context) as ImageLike | undefined;
     image.replaceWith(returned ?? photo);
     // They are native images the garbage collector cannot see the size of.
-    (photo as AbraPixels).uniffiDestroy();
-    if (returned) (returned as AbraPixels).uniffiDestroy();
+    release(photo);
+    if (returned) release(returned);
   }
 };
 
@@ -604,7 +605,7 @@ export const applySlider = (
   if (control.layer) {
     const laid = withLayers(image, [layerSheet(control, values, context)]);
     image.replaceWith(laid);
-    (laid as AbraPixels).uniffiDestroy();
+    release(laid);
   } else if (control.apply) control.apply(image, values[0], context);
   else if (control.tool) {
     const photo = image.clone();
@@ -612,8 +613,8 @@ export const applySlider = (
     const returned = control.tool(photo, values, context) as ImageLike | undefined;
     image.replaceWith(returned ?? photo);
     // They are native images the garbage collector cannot see the size of.
-    (photo as AbraPixels).uniffiDestroy();
-    if (returned) (returned as AbraPixels).uniffiDestroy();
+    release(photo);
+    if (returned) release(returned);
   }
 };
 
@@ -627,8 +628,8 @@ export const applyJoint = (
   const photo = image.clone();
   const returned = joint.tool(photo, values, sliderContext(joint.sliders[0], image, scale)) as ImageLike | undefined;
   image.replaceWith(returned ?? photo);
-  (photo as AbraPixels).uniffiDestroy();
-  if (returned) (returned as AbraPixels).uniffiDestroy();
+  release(photo);
+  if (returned) release(returned);
 };
 
 /** Whether a slider's effect is on, given its committed value (undefined when it has none). */

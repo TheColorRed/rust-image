@@ -1,4 +1,4 @@
-use crate::{CollagePlugin, CollageStyle};
+use crate::{Collage, CollageStyle};
 
 use abra::canvas::prelude::*;
 use abra::prelude::*;
@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use std::sync::Arc;
 
-impl<'a> CollagePlugin<'a> {
+impl<'a> Collage<'a> {
   pub(crate) fn random_collage(&mut self) -> Canvas<'a> {
     // Get the total number of images to include in the collage.
     // The ColorStyle::Random will always be true here.

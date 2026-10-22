@@ -3,7 +3,7 @@ import { Canvas, type LayerLike } from '@abra/core/canvas';
 import { type ColorLike } from '@abra/core/color';
 import { Image, type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
-import { owning } from '@/src/lib/native/native-handles';
+import { owning, release } from '@/src/lib/native/native-handles';
 
 /**
  * What a makeup tool paints on: the size of the photo it is for, and, once `paintSheet` has been called, the picture it painted. A
@@ -36,9 +36,6 @@ export type Sheet = {
   paint: (painting: Painting) => void;
 };
 
-/** A native object, which the garbage collector cannot see the size of and so is freed by hand. */
-type Owned = { uniffiDestroy(): void };
-
 /**
  * The photo with the sheets laid over it, as a new image the caller owns. The photo is the canvas's `base` layer and each sheet
  * is a layer above it, in order, placed where it was painted, so the photo itself is never changed and a sheet can be redrawn
@@ -46,7 +43,7 @@ type Owned = { uniffiDestroy(): void };
  */
 export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
   const root = Canvas.newBlank('root', photo.width(), photo.height());
-  const owned: Owned[] = [root as unknown as Owned];
+  const owned: unknown[] = [root];
   const laid: string[] = [];
   const started = Date.now();
   let paintMs = 0;
@@ -55,13 +52,13 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
     // group passes through, so its layers blend with what is under the group and not with an empty canvas of their own.
     const group = (name: string) => {
       const blank = Canvas.newBlank(name, photo.width(), photo.height());
-      owned.push(blank as unknown as Owned);
+      owned.push(blank);
       const child = root.addCanvas(blank, { position: [0, 0] });
       child.setPassThrough(true);
-      owned.push(child as unknown as Owned);
+      owned.push(child);
       return child;
     };
-    owned.push(group('base').addLayerFromImage('photo', photo, undefined) as unknown as Owned);
+    owned.push(group('base').addLayerFromImage('photo', photo, undefined));
     // Groups stack in this order, and one with no sheets is not made.
     const groups = new Map<NonNullable<Sheet['group']>, ReturnType<typeof group>>();
     for (const name of ['skin', 'makeup'] as const) {
@@ -75,9 +72,9 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
       paintMs += Date.now() - paintStarted;
       if (!painting.painted) continue;
       const { image, x, y } = painting.painted;
-      owned.push(image as unknown as Owned);
+      owned.push(image);
       const layer: LayerLike = canvas.addLayerFromImage(sheet.name, image, undefined);
-      owned.push(layer as unknown as Owned);
+      owned.push(layer);
       layer.setPosition(x, y);
       layer.setBlendMode(sheet.blend);
       layer.setOpacity(sheet.opacity);
@@ -98,7 +95,7 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
     let freed = 0;
     for (const item of owned) {
       try {
-        item.uniffiDestroy();
+        release(item);
         freed++;
       } catch (error) {
         console.warn('[layers] could not free an item:', error);

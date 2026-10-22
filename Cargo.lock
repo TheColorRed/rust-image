@@ -35,6 +35,8 @@ dependencies = [
  "options",
  "rayon",
  "regex",
+ "saphyr",
+ "sha2",
  "tools",
  "typography",
 ]
@@ -115,6 +117,16 @@ dependencies = [
 name = "abra-matting"
 version = "1.0.0"
 dependencies = [
+ "abra-ai-core",
+ "abra-core",
+ "mask",
+]
+
+[[package]]
+name = "abra-object-removal"
+version = "1.0.0"
+dependencies = [
+ "abra",
  "abra-ai-core",
  "abra-core",
  "mask",
@@ -4428,14 +4440,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "tilt-shift"
-version = "1.0.0"
-dependencies = [
- "abra",
- "rayon",
 ]
 
 [[package]]

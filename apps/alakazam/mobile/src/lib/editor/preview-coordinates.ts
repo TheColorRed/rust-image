@@ -17,7 +17,7 @@ export function unrotatePreviewPoint(point: PreviewPoint, box: PreviewBox, rotat
 
 /**
  * Maps a preview-local point through its zoom/pan and contained photo size into source-image pixels. `rotation` is how far the
- * photo is turned clockwise on the screen, in radians.
+ * photo is turned clockwise on the screen, in radians. A point off the photo is `null`, or with `clamp` the nearest point on its edge.
  */
 export function computePreviewImagePoint(
   imageWidth: number,
@@ -27,6 +27,7 @@ export function computePreviewImagePoint(
   translate: PreviewPoint,
   screenPoint: PreviewPoint,
   rotation = 0,
+  clamp = false,
 ): PreviewPoint | null {
   if (imageWidth <= 0 || imageHeight <= 0 || scale <= 0) return null;
 
@@ -40,6 +41,10 @@ export function computePreviewImagePoint(
   const offsetY = (box.height - displayedHeight) / 2;
   const u = (localX - offsetX) / displayedWidth;
   const v = (localY - offsetY) / displayedHeight;
+  if (clamp) {
+    const edge = 1 - Number.EPSILON;
+    return { x: Math.min(Math.max(u, 0), edge) * imageWidth, y: Math.min(Math.max(v, 0), edge) * imageHeight };
+  }
   if (u < 0 || u >= 1 || v < 0 || v >= 1) return null;
   return { x: u * imageWidth, y: v * imageHeight };
 }

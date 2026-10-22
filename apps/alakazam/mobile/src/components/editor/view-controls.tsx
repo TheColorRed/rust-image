@@ -1,3 +1,4 @@
+// @refresh reset
 import { useTheme } from '@/src/lib/ui/theme';
 import {
   MAX_PREVIEW_ZOOM,
@@ -21,15 +22,15 @@ import {
   previewScaleSettled$,
   springPreview,
 } from '@/src/state/gestures';
-import { Grab, Hand, Lock, Maximize, Minus, Pencil, Plus, Pointer, RotateCw, Undo2, ZoomIn } from 'lucide-react-native';
+import { Grab, Hand, Lock, Maximize, Minus, Plus, Pointer, RotateCw, Undo2, ZoomIn } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useOwning } from '@/src/lib/native/native-handles';
 import { PanResponder, PixelRatio, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Color } from '@abra/core/color';
 import { Brush } from '@abra/core/drawing';
 import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
 import { useObservable } from 'react-rx';
-import { merge } from 'rxjs';
-import { debounceTime, skip } from 'rxjs/operators';
+import { debounceTime } from 'rxjs/operators';
 import {
   activeSectionKey,
   activeSectionKey$,
@@ -40,8 +41,7 @@ import {
   openSliderState,
   openSliderState$,
 } from '@/src/state/edits';
-import { areaDrawKey, areaDrawKey$, areaDrawMode, areaDrawMode$ } from '@/src/components/tools/color-area-tool';
-import { areaPoints, findSection, leafControls, sliderSpecs, sliderValues } from '@/src/lib/project/edit-sections';
+import { DrawAreaButtons, useDrawAreaHint } from '@/src/components/area-tool';
 
 const ICON = '#fff';
 
@@ -72,42 +72,9 @@ export function ViewControls() {
   const move = panOverride ? { label: `Pan: locked by ${panOverride.tool}`, icon: Lock } : MOVE_MODES[moveMode];
   const MoveIcon = move.icon;
   const [circling, setCircling] = useState(false);
-  const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
-  const edits = useObservable(adjustments$, adjustments.value);
-  const focusedKey = useObservable(focusedControlKey$, focusedControlKey.value);
-  const openSlider = useObservable(openSliderState$, openSliderState.value);
-  const drawing = useObservable(areaDrawKey$, areaDrawKey.value);
-  const drawMode = useObservable(areaDrawMode$, areaDrawMode.value);
-  // A tool that paints an area (today only Color Splash) gets the Draw area button. It targets the slider tab that is open.
-  const focusedSlider = focusedKey ? leafControls(findSection(sectionKey).controls).find(control => control.key === focusedKey) : undefined;
-  const drawable = focusedSlider?.kind === 'slider' && focusedSlider.areaKeys ? focusedSlider : null;
-  const drawIndex = drawable && openSlider.key === drawable.key ? openSlider.index : 0;
-  const drawKey = drawable?.areaKeys?.[drawIndex] ?? null;
-  // A color must be on before an area can attach to it.
-  const drawValue = drawable ? sliderValues(drawable, edits[drawable.key])[drawIndex] : 0;
-  const canDraw = drawKey !== null && drawValue > (drawable ? sliderSpecs(drawable)[drawIndex]?.min ?? 0 : 0);
-  // "+" and "−" only edit an area that is already drawn. "Draw area" starts the first one.
-  const hasArea = drawKey !== null && (areaPoints(edits[drawKey]) ?? []).length > 0;
-  const drawActive = drawKey !== null && drawing === drawKey;
-  // "+" draws to add to the color's area and "−" draws to take away from it. Tapping the one that is on turns drawing off.
-  const toggleDraw = (mode: 'add' | 'subtract') => {
-    if (drawActive && areaDrawMode.value === mode) {
-      areaDrawKey.next(null);
-      return;
-    }
-    areaDrawMode.next(mode);
-    areaDrawKey.next(drawKey);
-  };
+  const drawHint = useDrawAreaHint();
   const zoomed = zoom > 1.01;
   const turned = Math.abs(turn) > 0.01;
-
-  useEffect(() => {
-    // Changing the tool or the open color ends the drawing, so an area never lands on the wrong color.
-    const subscription = merge(focusedControlKey$, openSliderState$)
-      .pipe(skip(1))
-      .subscribe(() => areaDrawKey.next(null));
-    return () => subscription.unsubscribe();
-  }, []);
 
   const wholeTurns = () => Math.round(previewRotationValue.value / (2 * Math.PI)) * 2 * Math.PI;
   return (
@@ -120,9 +87,7 @@ export function ViewControls() {
       onLayout={event => previewControlsCover.next(event.nativeEvent.layout.height + 12)}
     >
       {circling ? <Text style={styles.hint}>Draw a circle around what to zoom into</Text> : null}
-      {!circling && drawActive ? (
-        <Text style={styles.hint}>{drawMode === 'add' ? 'Draw to add to this color' : 'Draw to take away from this color'}</Text>
-      ) : null}
+      {!circling && drawHint ? <Text style={styles.hint}>{drawHint}</Text> : null}
       {!circling && !locked && !turned ? <Text style={styles.hint}>Twist with two fingers to turn the photo</Text> : null}
       <View style={styles.barRow}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rowScroll} contentContainerStyle={styles.row}>
@@ -214,46 +179,7 @@ export function ViewControls() {
           </Pressable>
         ) : null}
       </ScrollView>
-      {drawable ? (
-        <View style={styles.group}>
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: drawActive, disabled: !canDraw }}
-            accessibilityLabel="Draw area"
-            disabled={!canDraw}
-            style={[styles.segment, drawActive && styles.pillOn, !canDraw && styles.pillLocked]}
-            hitSlop={8}
-            onPress={() => toggleDraw('add')}
-          >
-            <Pencil color={ICON} size={16} />
-            <Text style={styles.label}>Draw area</Text>
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Draw to add to this color"
-            accessibilityState={{ checked: drawActive && drawMode === 'add', disabled: !canDraw || !hasArea }}
-            disabled={!canDraw || !hasArea}
-            style={[styles.segment, drawActive && drawMode === 'add' && styles.pillOn, (!canDraw || !hasArea) && styles.pillLocked]}
-            hitSlop={8}
-            onPress={() => toggleDraw('add')}
-          >
-            <Plus color={ICON} size={16} />
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Draw to take away from this color"
-            accessibilityState={{ checked: drawActive && drawMode === 'subtract', disabled: !canDraw || !hasArea }}
-            disabled={!canDraw || !hasArea}
-            style={[styles.segment, drawActive && drawMode === 'subtract' && styles.pillOn, (!canDraw || !hasArea) && styles.pillLocked]}
-            hitSlop={8}
-            onPress={() => toggleDraw('subtract')}
-          >
-            <Minus color={ICON} size={16} />
-          </Pressable>
-        </View>
-      ) : null}
+      <DrawAreaButtons />
       </View>
     </View>
     </>
@@ -275,27 +201,26 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
   const points = useRef<{ x: number; y: number }[]>([]);
   // The library draws the loop: a soft glow under a crisp line, on the gizmos view over the photo. Its sizes are in the view's pixels.
   const gizmos = useObservable(editorGizmos$, editorGizmos.value);
-  const { glow, line } = useMemo(() => {
+  const brushes = useOwning(keep => {
     const density = PixelRatio.get();
     return {
-      glow: new Brush().withColor(Color.white()).withSize(Math.round(5 * density)).withHardness(0).withOpacity(0.5) as Brush,
-      line: new Brush().withColor(Color.white()).withSize(Math.round(1 * density)).withHardness(1) as Brush,
+      glow: keep(new Brush().withColor(Color.white()).withSize(Math.round(5 * density)).withHardness(0).withOpacity(0.5) as Brush),
+      line: keep(new Brush().withColor(Color.white()).withSize(Math.round(1 * density)).withHardness(1) as Brush),
     };
   }, []);
-  // The loop goes away with the mode, and the brushes are let go of.
+  // The loop goes away with the mode.
   useEffect(
     () => () => {
       gizmos?.remove('glow');
       gizmos?.remove('line');
-      glow.uniffiDestroy();
-      line.uniffiDestroy();
     },
-    [gizmos, glow, line],
+    [gizmos],
   );
   const draw = (x: number, y: number) => {
+    if (!brushes) return;
     const density = PixelRatio.get();
-    gizmos?.addPoint('glow', x * density, y * density, glow);
-    gizmos?.addPoint('line', x * density, y * density, line);
+    gizmos?.addPoint('glow', x * density, y * density, brushes.glow);
+    gizmos?.addPoint('line', x * density, y * density, brushes.line);
   };
   const finish = useRef(onDone);
   finish.current = onDone;
@@ -353,7 +278,7 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
         },
         onPanResponderTerminate: () => finish.current(),
       }),
-    [gizmos, glow, line],
+    [gizmos, brushes],
   );
 
   return (

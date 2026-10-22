@@ -7,6 +7,7 @@ import { editBaseImage, editBaseImage$ } from '@/src/state/session';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { PixelRatio } from 'react-native';
 import { combineLatest, type Subscription } from 'rxjs';
+import { release } from '@/src/lib/native/native-handles';
 
 /** The editor photo's live renderer: effects drawn over the committed photo while a control is tapped or dragged. */
 export const editorPreview = new LiveRenderer(liveSurface);
@@ -30,8 +31,8 @@ export function showTool(tool: (photo: ImageLike, context: ToolContext) => Image
     editorPreview.showImage(returned ?? photo);
   } finally {
     // They are native images the garbage collector cannot see the size of, so they are freed even when the tool throws.
-    (photo as AbraPixels).uniffiDestroy();
-    if (returned) (returned as AbraPixels).uniffiDestroy();
+    release(photo);
+    if (returned) release(returned);
   }
 }
 

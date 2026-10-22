@@ -7,23 +7,67 @@ import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { adjustments } from '@/src/state/edits';
 import { personSelection } from '@/src/state/person-selection';
 import type { Spot } from '@/src/lib/project/timeline';
+import { cropKey, maskInEditFrame } from '@/src/lib/editor/editor-pictures';
+import { release } from '@/src/lib/native/native-handles';
 
 // The masks made from the skin and the people, kept until either changes: making one takes as long as a pass over the photo.
-let made: { skin: MaskLike | null; list: PersonDetection[] | null; full: Map<number | null, MaskLike | undefined>; sized: Map<string, MaskLike> } | undefined;
+// The skin and the people are found in the uncropped original, so what the edits use is those cut by the crops that are applied.
+// Those copies are made once for a set of crops, and are the original masks themselves while nothing is cropped.
+let made:
+  | {
+      skin: MaskLike | null;
+      list: PersonDetection[] | null;
+      crops: string;
+      /** The skin and the people as they lie on the cropped photo. */
+      framedSkin: MaskLike | null;
+      framedList: PersonDetection[] | null;
+      full: Map<number | null, MaskLike | undefined>;
+      sized: Map<string, MaskLike>;
+    }
+  | undefined;
 
 const cache = () => {
-  if (made?.skin !== skinMask.value || made.list !== people.value) {
-    made = { skin: skinMask.value, list: people.value, full: new Map(), sized: new Map() };
+  const crops = cropKey();
+  if (made?.skin !== skinMask.value || made.list !== people.value || made.crops !== crops) {
+    freeFramed();
+    const skin = skinMask.value;
+    const list = people.value;
+    made = {
+      skin,
+      list,
+      crops,
+      framedSkin: crops && skin ? maskInEditFrame(skin) : skin,
+      framedList: crops && list ? list.map(framePerson) : list,
+      full: new Map(),
+      sized: new Map(),
+    };
   }
   return made;
 };
+
+/** A person with their mask cut by the applied crops, and their box where that mask is. */
+const framePerson = (person: PersonDetection): PersonDetection => {
+  const mask = maskInEditFrame(person.mask);
+  const box = mask.bounds(127);
+  return { ...person, mask, ...(box ? { x: box.x, y: box.y, width: box.width, height: box.height } : {}) };
+};
+
+/** Frees the cut copies in the cache, which are only copies when the photo is cropped. */
+const freeFramed = () => {
+  if (!made?.crops) return;
+  release(made.framedSkin);
+  for (const person of made.framedList ?? []) release(person.mask);
+};
+
+/** The people as they lie on the cropped photo, or null until they are found. Do not free them. */
+export const framedPeople = (): PersonDetection[] | null => cache().framedList;
 
 /**
  * The mask of the skin of the person with this id, or of everyone, at the size of the photo the skin was found in. It is nothing
  * while the skin has not been found. The same mask is handed out until the skin or the people change, so do not free it.
  */
 export const skinMaskOf = (personId: number | null | undefined): MaskLike | undefined => {
-  const { full, skin, list } = cache();
+  const { full, framedSkin: skin, framedList: list } = cache();
   const id = personId ?? null;
   if (!full.has(id)) {
     const person = id === null ? undefined : list?.find(found => found.id === id);
@@ -54,12 +98,12 @@ export const skinMaskSized = (
   let result = held.resized(width, height, TransformAlgorithm.Bilinear);
   // The people with a value of their own are left out, so theirs replaces this one for them.
   for (const id of except) {
-    const person = people.value?.find(found => found.id === id);
+    const person = framedPeople()?.find(found => found.id === id);
     if (!person) continue;
     const there = person.mask.resized(width, height, TransformAlgorithm.Bilinear);
     const rest = result.subtracted(there);
-    (there as unknown as { uniffiDestroy(): void }).uniffiDestroy();
-    (result as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+    release(there);
+    release(result);
     result = rest;
   }
   return result;
@@ -70,7 +114,7 @@ export const selectedSkinMask = (): MaskLike | undefined => skinMaskOf(personSel
 
 /** The box of the person with this id, in the pixels of a photo that is `width` wide. Nothing when there is no such person. */
 export const personIn = (width: number, id: number | null | undefined) => {
-  const person = id == null ? undefined : people.value?.find(found => found.id === id);
+  const person = id == null ? undefined : framedPeople()?.find(found => found.id === id);
   if (!person) return undefined;
   const scale = width / person.mask.width();
   return {
@@ -90,7 +134,7 @@ export const personIn = (width: number, id: number | null | undefined) => {
 export const personAt = (x: number, y: number, width: number, height: number): number | undefined => {
   let found: PersonDetection | undefined;
   let surest = 0;
-  for (const person of people.value ?? []) {
+  for (const person of framedPeople() ?? []) {
     const value = person.mask.get(
       Math.floor((x * person.mask.width()) / width),
       Math.floor((y * person.mask.height()) / height),
@@ -145,7 +189,7 @@ export const detectSkin = (photo: Parameters<typeof detectSkinAsync>[0]): Promis
   detecting ??= detectSkinAsync(photo)
     .then(mask => {
       aiProgress.next({ ...aiProgress.value, skin: 1 });
-      (skinMask.value as unknown as AbraPixels | null)?.uniffiDestroy();
+      release(skinMask.value);
       skinMask.next(mask);
       adjustments.next({ ...adjustments.value });
     })
@@ -180,7 +224,7 @@ export const detectPeople = (
     findingPeople = findPeopleAsync(photo)
       .then(found => {
         if (!silent) aiProgress.next({ ...aiProgress.value, people: 1 });
-        if (isCancelled()) found.forEach(person => (person.mask as unknown as AbraPixels).uniffiDestroy());
+        if (isCancelled()) found.forEach(person => release(person.mask));
         else people.next(found);
         return found;
       })
@@ -203,10 +247,11 @@ export const detectPeople = (
 export const clearAnalysis = () => {
   const skin = skinMask.value;
   const list = people.value;
+  freeFramed();
   made = undefined;
   skinMask.next(null);
   people.next(null);
   faceBoxes.next(null);
-  (skin as unknown as AbraPixels | null)?.uniffiDestroy();
-  for (const person of list ?? []) (person.mask as unknown as AbraPixels).uniffiDestroy();
+  release(skin);
+  for (const person of list ?? []) release(person.mask);
 };

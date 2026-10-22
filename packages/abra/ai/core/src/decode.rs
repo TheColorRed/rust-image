@@ -11,13 +11,14 @@
 //! | `label-map` | a score for every class at every pixel | [`AiOutput::Labels`]: the best class at every pixel |
 //! | `instance-segmentation` | detections and mask prototypes (YOLO) | [`AiOutput::Instances`]: a box and mask for each |
 //! | `landmarks` | points and a presence score | [`AiOutput::Landmarks`] |
+//! | `image` | a picture (inpainting; read by the `graph` module) | [`AiOutput::Image`] |
 
 use crate::{
   error::AiError,
   input::{Layout, Placement},
   manifest::Manifest,
 };
-use abra_core::{PointF, TransformAlgorithm};
+use abra_core::{Image, PointF, TransformAlgorithm};
 use mask::Mask;
 
 /// One output tensor: its shape and its values.
@@ -141,6 +142,8 @@ pub enum AiOutput {
   Instances(Vec<Instance>),
   Labels(LabelMap),
   Landmarks(Landmarks),
+  /// A picture, from a model that answers with one (`decoder: image`, read by the `graph` module).
+  Image(Image),
 }
 
 /// Reads the class scores at each pixel of a model's output.

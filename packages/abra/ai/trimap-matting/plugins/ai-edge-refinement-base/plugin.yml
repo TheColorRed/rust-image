@@ -1,0 +1,18 @@
+id: edge-refinement-base
+name: Edge refinement (large)
+version: 1.0.0
+description: Finds the exact edge of hair, fur and other fine detail along a rough selection. Larger download and slower.
+contributes:
+  models:
+    - id: edge-refinement-base
+      title: Edge refinement (large)
+      description: Finds the exact edge of hair, fur and other fine detail along a rough selection. Larger download and slower.
+      capabilities: [refine-edges]
+      subjects: [edges]
+      model: vitmatte-base-composition-1k.onnx
+      manifest: vitmatte-base-composition-1k.yml
+files:
+  - path: vitmatte-base-composition-1k.onnx
+    sha256: fafacae424df98b6c849b269d8973929419765058863da5e6500290ac2f50406
+  - path: vitmatte-base-composition-1k.yml
+    sha256: c936b3ffdef35a9d60b04a15e7c18bc8ddb352dfb5472f9a805e8aaa5490d079

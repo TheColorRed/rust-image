@@ -1,5 +1,7 @@
 import type { AbraImage } from '@alakazam/mobile';
 import type { PreviewBox } from '@/src/state/gestures';
+import { rotate } from '@abra/core/transform';
+import { release } from '@/src/lib/native/native-handles';
 
 /** The part of the photo to keep, as fractions of its size: 0 is the left or top edge, 1 the right or bottom edge. */
 export interface CropRect {
@@ -29,6 +31,18 @@ export function cropPixels(rect: CropRect, width: number, height: number) {
 export function cropImage(image: AbraImage, rect: CropRect): AbraImage {
   const { x, y, width, height } = cropPixels(rect, image.width(), image.height());
   return image.cropped(x, y, width, height) as AbraImage;
+}
+
+/** Cuts `image` to `rect`, turning the picture by `turn` radians first when it is tilted. The image given is left as it was. */
+export function cropPicture(image: AbraImage, rect: CropRect, turn = 0): AbraImage {
+  if (!turn) return cropImage(image, rect);
+  const turned = image.clone() as AbraImage;
+  try {
+    rotate(turnDegrees(turn)).apply(turned);
+    return cropImage(turned, rect);
+  } finally {
+    release(turned);
+  }
 }
 
 export type Photo = { width: number; height: number };

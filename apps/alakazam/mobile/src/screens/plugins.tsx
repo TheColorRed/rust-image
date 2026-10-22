@@ -5,15 +5,14 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { formatBytes } from '@/src/lib/utils/format-bytes';
 import { useCommonStyles } from '@/src/lib/ui/styles';
 import { useTheme } from '@/src/lib/ui/theme';
-import { refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
+import { deleteModel, downloadModel, refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
-import { deleteAiModel, downloadAiModel } from '@alakazam/mobile';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from 'lucide-react-native';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 
-export function StorageScreen() {
+export function PluginsScreen() {
   const { colors } = useTheme();
   const commonStyles = useCommonStyles();
   const models = useObservable(aiModelList$, aiModelList.value);
@@ -116,7 +115,7 @@ export function StorageScreen() {
     setDownloading(model.id);
     setDownloadTasks({ [model.id]: null });
     try {
-      await downloadAiModel(model.file, downloadListener(model));
+      await downloadModel(model, downloadListener(model));
       setDownloadTasks({ [model.id]: 1 });
       clearWhenDone();
     } catch (e) {
@@ -130,7 +129,7 @@ export function StorageScreen() {
   const remove = (model: AiModelListing) => {
     setError(null);
     try {
-      deleteAiModel(model.id);
+      deleteModel(model);
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -158,7 +157,7 @@ export function StorageScreen() {
             setDownloading(model.id);
             setDownloadTasks(current => ({ ...current, [model.id]: null }));
             try {
-              await downloadAiModel(model.file, downloadListener(model));
+              await downloadModel(model, downloadListener(model));
             } catch (e) {
               setError(errorMessage(e));
               setDownloadTasks({});
@@ -187,7 +186,7 @@ export function StorageScreen() {
             setError(null);
             for (const model of shown.filter(listing => listing.downloaded)) {
               try {
-                deleteAiModel(model.id);
+                deleteModel(model);
               } catch (e) {
                 setError(errorMessage(e));
                 break;
@@ -203,7 +202,7 @@ export function StorageScreen() {
     <View style={styles.container}>
       <View style={commonStyles.header}>
         <AppText size="heading" bold>
-          Storage
+          Plugins
         </AppText>
       </View>
 

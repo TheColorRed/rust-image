@@ -1,10 +1,12 @@
 import { despeckle, median } from '@abra/core/filters';
 import { EditSection, SliderControl } from "@/src/lib/project/edit-sections";
+import { OBJECT_REMOVAL_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 
 export const cleanup: EditSection = {
   key: 'section-cleanup',
   label: 'Cleanup',
   controls: [
+    { kind: 'tool', key: OBJECT_REMOVAL_TOOL_KEY, label: 'Remove Objects' },
     {
       kind: 'slider',
       key: 'action-median',

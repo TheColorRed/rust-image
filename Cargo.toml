@@ -8,6 +8,7 @@ members = [
   "packages/abra/ai/body-segmentation",
   "packages/abra/ai/find-person",
   "packages/abra/ai/matting",
+  "packages/abra/ai/object-removal",
   "packages/abra/ai/trimap-matting",
   "packages/abra/ai/face-landmarks",
   "packages/abra/ai/face-parsing",
@@ -110,6 +111,7 @@ abra-super-resolution = { path = "./packages/abra/ai/super-resolution" }
 abra-body-segmentation = { path = "./packages/abra/ai/body-segmentation" }
 abra-find-person = { path = "./packages/abra/ai/find-person" }
 abra-matting = { path = "./packages/abra/ai/matting" }
+abra-object-removal = { path = "./packages/abra/ai/object-removal" }
 abra-trimap-matting = { path = "./packages/abra/ai/trimap-matting" }
 abra-face-landmarks = { path = "./packages/abra/ai/face-landmarks" }
 abra-face-parsing = { path = "./packages/abra/ai/face-parsing" }

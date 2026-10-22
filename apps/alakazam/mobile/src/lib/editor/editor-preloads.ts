@@ -1,9 +1,11 @@
-import { fitted } from '@/src/lib/editor/editor-pictures';
+import { fitted, maskInEditFrame } from '@/src/lib/editor/editor-pictures';
 import type { AbraImage, AbraImageLike } from '@alakazam/mobile';
 import type { Image as AbraPixels } from '@abra/core/image';
-import { TransformAlgorithm, type MaskLike } from '@abra/core/mask';
+import type { MaskLike } from '@abra/core/mask';
+import { originalImage } from '@/src/state/session';
 import type { DataLike, Preloaded, Preloading, SliderControl } from '@/src/lib/project/edit-sections';
 import { analysisVersion } from '@/src/state/analysis';
+import { isHandle, release } from '@/src/lib/native/native-handles';
 
 // This module holds native images, so it imports nothing but types from the controls: saving a control or a tool re-runs
 // the controls and everything that imports them, and what is held here must survive that.
@@ -54,8 +56,8 @@ const derived = new Map<Preloaded, Map<string, { variant: string; data: DataLike
 const values = (held: Preloaded): DataLike[] => (Array.isArray(held) ? held : Object.values(held));
 
 const free = (held: Preloaded) => {
-  for (const data of values(held)) (data as AbraPixels).uniffiDestroy();
-  for (const { data } of derived.get(held)?.values() ?? []) (data as AbraPixels | undefined)?.uniffiDestroy();
+  for (const data of values(held)) release(data);
+  for (const { data } of derived.get(held)?.values() ?? []) release(data);
   derived.delete(held);
 };
 
@@ -74,7 +76,7 @@ export const derivedFor = (
   if (!groups) derived.set(owner, (groups = new Map()));
   const held = groups.get(group);
   if (held?.variant === variant) return held.data;
-  (held?.data as AbraPixels | undefined)?.uniffiDestroy();
+  release(held?.data);
   const data = make();
   groups.set(group, { variant, data });
   return data;
@@ -87,7 +89,8 @@ export const derivedFor = (
  */
 const resizedTo = (held: Preloaded, width: number, height: number): Preloaded | undefined => {
   if (!values(held).every(data => 'resized' in data)) return undefined;
-  const resize = (data: DataLike) => (data as MaskLike).resized(width, height, TransformAlgorithm.Bilinear) as DataLike;
+  // The masks were found in the uncropped original, so they are cut by the applied crops on the way.
+  const resize = (data: DataLike) => maskInEditFrame(data as MaskLike, width, height) as DataLike;
   return Array.isArray(held)
     ? held.map(resize)
     : Object.fromEntries(Object.entries(held).map(([name, data]) => [name, resize(data)]));
@@ -125,20 +128,21 @@ export const preloadFor = (
   const provided = analyses.get(preload);
   // It ran and made nothing (no face), which is the same at every size.
   if (provided && values(provided).length === 0) return provided;
-  if (provided && !byWidth) {
-    preloads.set(preload, (byWidth = new Map([[analysisWidth(provided), provided]])));
-  }
   let held = byWidth?.get(width);
 
-  // Made before, at another size: this is that, resized. From the smallest copy that is as wide as this one, so a small size is
-  // not made by shrinking the largest, which costs a pass over every pixel of it; or from the widest when none is.
-  if (!held && byWidth?.size) {
-    const sizes = [...byWidth.entries()].sort(([a], [b]) => a - b);
-    const [otherWidth, other] = sizes.find(([otherWidth]) => otherWidth >= width) ?? sizes[sizes.length - 1];
+  // Made before, in the original: this is that, cut by the crops and resized. Masks are always made this way (even at the size
+  // they were found at, which a crop changes), and anything that cannot be resized is handed out as it was.
+  if (!held && provided) {
     const resizeStarted = Date.now();
-    held = resizedTo(other, width, height);
-    if (held) byWidth.set(width, held);
-    if (__DEV__) console.debug(`[preload] ${control.key} ${width}px from ${otherWidth}px, ms:`, Date.now() - resizeStarted);
+    held = resizedTo(provided, width, height);
+    if (held) {
+      if (!byWidth) preloads.set(preload, (byWidth = new Map()));
+      byWidth.set(width, held);
+    } else if (!byWidth?.size) {
+      preloads.set(preload, (byWidth = new Map([[width, provided]])));
+      held = provided;
+    }
+    if (__DEV__) console.debug(`[preload] ${control.key} ${width}px from the analysis, ms:`, Date.now() - resizeStarted);
   }
 
   // Not made yet: run it, once, on a photo that is not too large for it. One that is running in the background is waited for.
@@ -147,8 +151,9 @@ export const preloadFor = (
       waiting.push(() => preloadFor(control, { width: () => width, height: () => height }, source));
       return undefined;
     }
-    // A copy, shrunk when it is wider than the analysis needs. Both are the tool's to change.
-    const photo = fitted(source as AbraImage, ANALYSIS_WIDTH, ANALYSIS_WIDTH * 4) as AbraImageLike;
+    // A copy, shrunk when it is wider than the analysis needs. Both are the tool's to change. It is of the original even when the
+    // edit base is cropped: the masks are cut by the crops when they are used, so they must all be found in the same frame.
+    const photo = fitted((originalImage.value ?? source) as AbraImage, ANALYSIS_WIDTH, ANALYSIS_WIDTH * 4) as AbraImageLike;
     const analysedWidth = photo.width();
     const analysisStarted = Date.now();
     try {
@@ -176,23 +181,19 @@ export const preloadFor = (
         return undefined;
       }
       if (__DEV__) {
-        const count = !made ? 0 : Array.isArray(made) ? made.length : 'uniffiDestroy' in made ? 1 : Object.keys(made).length;
+        const count = !made ? 0 : Array.isArray(made) ? made.length : isHandle(made) ? 1 : Object.keys(made).length;
         console.debug(`[preload] ${control.key} analysed at ${analysedWidth}px, ms:`, Date.now() - analysisStarted, 'found:', count);
       }
       const analysis = asPreloaded(made);
       if (!byWidth) preloads.set(preload, (byWidth = new Map()));
-      byWidth.set(analysedWidth, analysis);
       // A preload that gave nothing back could not run (a missing model), so it is run again later. One that gave an empty set ran.
       if (made) analyses.set(preload, analysis);
-      held = analysis;
-      if (analysedWidth !== width) {
-        // What was made is held at its own size; the size asked for is a resized copy, or the same thing when it cannot be.
-        const resized = resizedTo(analysis, width, height);
-        if (resized) byWidth.set(width, (held = resized));
-      }
+      // What was made is of the original; the size asked for is that cut by the crops and resized, or the same thing when it cannot be.
+      held = resizedTo(analysis, width, height) ?? analysis;
+      byWidth.set(width, held);
     } finally {
       // They are native images the garbage collector cannot see the size of.
-      (photo as AbraPixels).uniffiDestroy();
+      release(photo);
     }
   }
   return held;
@@ -218,7 +219,7 @@ export const buildAnalysis = async (preload: PreloadFunction, source: AbraImageL
     analysisVersion.next(analysisVersion.value + 1);
   } finally {
     running.delete(preload);
-    (photo as AbraPixels).uniffiDestroy();
+    release(photo);
     startWaiting();
   }
 };
@@ -228,11 +229,8 @@ const asPreloaded = (made: Preloading): Preloaded => {
   // One image or mask has methods to free it; an object of them does not.
   if (!made) return [];
   if (Array.isArray(made)) return made;
-  return 'uniffiDestroy' in made ? [made as unknown as DataLike] : (made as Record<string, DataLike>);
+  return isHandle(made) ? [made as unknown as DataLike] : (made as Record<string, DataLike>);
 };
-
-/** The width of the photo a set of masks was made from. */
-const analysisWidth = (analysis: Preloaded): number => (values(analysis)[0] as unknown as MaskLike).width();
 
 /**
  * What `preload` made when it ran on the photo, or nothing if it has not. It can be saved with the project and given back with

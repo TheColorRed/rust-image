@@ -141,6 +141,8 @@ pub enum AiOutputKind {
   Labels,
   /// Points, such as the mesh of a face.
   Landmarks,
+  /// A picture, from a model that answers with one, such as an inpainting model.
+  Image,
 }
 
 /// One thing the model found: what it is, where, how sure the model is, and its soft silhouette.
@@ -267,6 +269,7 @@ impl AiOutput {
       Output::Instances(_) => AiOutputKind::Instances,
       Output::Labels(_) => AiOutputKind::Labels,
       Output::Landmarks(_) => AiOutputKind::Landmarks,
+      Output::Image(_) => AiOutputKind::Image,
     }
   }
 
@@ -283,6 +286,14 @@ impl AiOutput {
     match &self.0 {
       Output::Instances(found) => Ok(found.iter().map(|instance| Arc::new(Instance(instance.clone()))).collect()),
       _ => Err(self.wrong_kind("instances")),
+    }
+  }
+
+  /// The picture, when the kind is `Image`.
+  pub fn image(&self) -> Result<Arc<Image>, AiError> {
+    match &self.0 {
+      Output::Image(image) => Ok(Arc::new(Image::from_core(image.clone()))),
+      _ => Err(self.wrong_kind("a picture")),
     }
   }
 
@@ -469,7 +480,9 @@ mod tests {
 
   /// A model of the library by its folder and file name, or nothing when the file is only a Git LFS pointer.
   fn bundled(folder: &str, file: &str) -> Option<String> {
-    let path = format!("{}/../../abra/ai/{folder}/models/{file}", env!("CARGO_MANIFEST_DIR"));
+    // A model is in its crate's `models` folder, or in a `plugins/<name>` folder when the file is given with the folder.
+    let sub = if file.contains('/') { "" } else { "models/" };
+    let path = format!("{}/../../abra/ai/{folder}/{sub}{file}", env!("CARGO_MANIFEST_DIR"));
     (std::fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0) > 1_000_000).then_some(path)
   }
 
@@ -503,6 +516,21 @@ mod tests {
   }
 
   #[test]
+  fn a_model_that_answers_with_a_picture_returns_it_through_the_bridge() {
+    let Some(path) = bundled("object-removal", "plugins/ai-migan-object-removal/migan_pipeline_v2.onnx") else {
+      return;
+    };
+    let model = AiModel::load(path).expect("the manifest names a picture model");
+    let mut covered = vec![0u8; 64 * 64];
+    covered[30 * 64 + 30..30 * 64 + 34].fill(255);
+    let output = model.run_guided(photo(64), Arc::new(Mask::from_values(64, 64, covered))).expect("removal should succeed");
+    assert_eq!(output.kind(), AiOutputKind::Image);
+    assert_eq!((output.image().unwrap().width(), output.image().unwrap().height()), (64, 64));
+    assert!(output.mask().is_err(), "asking for the wrong kind fails");
+    assert!(model.run(photo(64)).is_err(), "a model that needs a mask fails without one");
+  }
+
+  #[test]
   fn each_kind_of_model_returns_its_kind_through_the_bridge() {
     let cases = [
       ("body-segmentation", "selfie_multiclass_256x256.onnx", AiOutputKind::Mask),
@@ -519,6 +547,7 @@ mod tests {
         AiOutputKind::Instances => assert!(output.instances().is_ok()),
         AiOutputKind::Labels => assert_eq!(output.labels().unwrap().labels().len(), 64 * 64),
         AiOutputKind::Landmarks => assert_eq!(output.landmarks().unwrap().landmarks.len(), 478),
+        AiOutputKind::Image => unreachable!("none of these models answers with a picture"),
       }
       assert!(
         output.landmarks().is_err() || kind == AiOutputKind::Landmarks,

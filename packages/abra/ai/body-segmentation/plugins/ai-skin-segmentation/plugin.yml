@@ -1,0 +1,18 @@
+id: skin-segmentation
+name: Body detail
+version: 1.0.0
+description: Maps faces, skin, hair and clothes on a body so beauty adjustments land in the right places.
+contributes:
+  models:
+    - id: skin-segmentation
+      title: Body detail
+      description: Maps faces, skin, hair and clothes on a body so beauty adjustments land in the right places.
+      capabilities: [segment-skin]
+      subjects: [people]
+      model: selfie_multiclass_256x256.onnx
+      manifest: selfie_multiclass_256x256.yml
+files:
+  - path: selfie_multiclass_256x256.onnx
+    sha256: 35ec1ecd9ee7f85073c99c00020b7f6751b69506eeacf683bc8665f6117f85b0
+  - path: selfie_multiclass_256x256.yml
+    sha256: 00db419d11caf0a271c93a3917fe17f274b2e668eff7637466baa375afbbb541

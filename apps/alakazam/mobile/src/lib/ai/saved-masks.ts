@@ -13,6 +13,7 @@ import type { Project } from '@/src/lib/project/project-store';
 import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { updateProject } from '@/src/state/projects';
+import { release } from '@/src/lib/native/native-handles';
 
 // Every mask an AI model makes for the original is kept in one list on the project (`Project.masks`), one lossless gray WebP each, so
 // a project opens and replays with no model run. A mask has one name, and the name is the whole of how it is found: `skin`,
@@ -27,11 +28,11 @@ const writeMask = (mask: MaskLike, file: string) => {
   try {
     image.write(file, undefined);
   } finally {
-    (image as AbraPixels).uniffiDestroy();
+    release(image);
   }
 };
 
-const destroy = (mask: MaskLike) => (mask as unknown as AbraPixels).uniffiDestroy();
+const destroy = (mask: MaskLike) => release(mask);
 
 /** The project without the masks of one group (`makeup`), so the group is made again and saved over, like `rescanFaceMasks`. */
 export const withoutGroup = (project: Project, group: keyof typeof GROUPS): Project => ({
@@ -53,7 +54,7 @@ export async function loadSavedMasks(project: Project, photo: AbraImage, isCance
   const readMask = async (file: string, sameSize: boolean) => {
     const image = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${file}`)));
     const mask = Mask.fromImage(image);
-    image.uniffiDestroy();
+    release(image);
     if (sameSize && (mask.width() !== photo.width() || mask.height() !== photo.height())) {
       throw new Error(`The saved mask ${file} does not match the project image`);
     }

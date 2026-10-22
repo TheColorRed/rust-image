@@ -25,7 +25,7 @@ impl Word {
   }
 }
 
-pub struct WordCloudPlugin<'a> {
+pub struct WordCloud<'a> {
   words: Vec<Word>,
   size: Size,
   options: Option<WordCloudOptions<'a>>,
@@ -42,9 +42,9 @@ pub struct WordCloudOptions<'a> {
   text_appearance: Option<TextAppearance>,
 }
 
-impl<'a> WordCloudPlugin<'a> {
+impl<'a> WordCloud<'a> {
   pub fn new<I: Into<WordCloudOptions<'a>>>(p_size: Size) -> Self {
-    WordCloudPlugin {
+    WordCloud {
       words: Vec::new(),
       size: p_size,
       options: None,
@@ -79,21 +79,5 @@ impl<'a> WordCloudPlugin<'a> {
     };
 
     TextSize::points(smallest_weight + weight_ratio * (largest_weight - smallest_weight))
-  }
-}
-
-impl<'a> Plugin<'a> for WordCloudPlugin<'a> {
-  fn name(&self) -> &str {
-    "WordCloud"
-  }
-
-  fn description(&self) -> &str {
-    "Generates a word cloud from the input text."
-  }
-
-  fn apply(&mut self) -> Result<PluginResult<'a>, PluginError> {
-    let result = PluginResult::new();
-    self.generate_cloud();
-    Ok(result)
   }
 }

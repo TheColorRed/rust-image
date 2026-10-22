@@ -12,6 +12,7 @@ import { personSelection$, personSelection } from '@/src/state/person-selection'
 import { appliedActions$, adjustments$ } from '@/src/state/edits';
 import { editBaseImage } from '@/src/state/session';
 import { previewBox$, previewMoving$ } from '@/src/state/gestures';
+import { release } from '@/src/lib/native/native-handles';
 
 /**
  * Preview for a slider drag. Returns the change handler to give the slider, or undefined when the control has no tool or
@@ -76,7 +77,7 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
   useEffect(
     () => () => {
       if (waiting.current.frame !== null) cancelAnimationFrame(waiting.current.frame);
-      rest.current.image?.uniffiDestroy();
+      release(rest.current.image);
       rest.current = { key: '', image: null };
     },
     [],
@@ -94,7 +95,7 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
         // A control that makes the photo remember effects is dragged on the full-size photo, so what is drawn is sharp when zoomed in.
         const full = !!p_control.deferred && isStackDeferred(key);
         if (rest.current.key !== others) {
-          rest.current.image?.uniffiDestroy();
+          release(rest.current.image);
           rest.current = { key: others, image: hasOtherSteps(key) ? renderStackWithoutSlider(key, true, full) : null };
         }
         showTool((photo, context) => {

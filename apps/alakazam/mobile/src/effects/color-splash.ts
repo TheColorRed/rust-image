@@ -1,9 +1,9 @@
 import { grayscale } from '@abra/core/adjustments';
 import { blend } from '@abra/core/blend';
 import { Color } from '@abra/core/color';
-import { Area } from '@abra/core/geometry';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
+import { areaMask } from '@/src/lib/native/area-mask';
 import { type AbraImageLike } from '@alakazam/mobile';
 import { owning } from '@/src/lib/native/native-handles';
 
@@ -15,28 +15,6 @@ export interface SplashColor {
   hue: number;
   area?: number[][][];
 }
-
-/**
- * The mask of an area: every counter-clockwise ring is filled, and every clockwise ring is a hole cut out of that fill. Rings come
- * from the boolean ops, so their winding says which they are.
- */
-const areaMask = (rings: number[][][], width: number, height: number, keep: <V>(value: V) => V): MaskLike => {
-  let fill: MaskLike | undefined;
-  let holes: MaskLike | undefined;
-  for (const ring of rings) {
-    const outline = keep(Area.fromPoints(ring.map(([x, y]) => [x * width, y * height])));
-    const part = keep(Mask.empty(width, height));
-    part.drawArea(outline, keep(Color.white()), undefined);
-    const winding = ring.reduce((sum, [x, y], index) => {
-      const [nextX, nextY] = ring[(index + 1) % ring.length];
-      return sum + x * nextY - nextX * y;
-    }, 0);
-    if (winding >= 0) fill = fill ? keep(fill.maximum(part)) : part;
-    else holes = holes ? keep(holes.maximum(part)) : part;
-  }
-  if (!fill) return keep(Mask.empty(width, height));
-  return holes ? keep(fill.subtracted(holes)) : fill;
-};
 
 /**
  * Keeps the colors in `colors` in `photo` and turns everything else black and white. A color is kept only inside its own area,

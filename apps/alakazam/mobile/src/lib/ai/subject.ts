@@ -7,13 +7,14 @@ import { detectPeople } from '@/src/lib/ai/analysis';
 import { edgeMatte } from '@/src/lib/ai/edge-matte';
 import { EDGE_REFINEMENT, SKIN_SEGMENTATION, model, unloadModel } from '@/src/lib/ai/faces';
 import { aiProgress } from '@/src/state/ai-progress';
+import { release } from '@/src/lib/native/native-handles';
 
 /** How much of the photo around the people the body model is given, as a share of their size: a person who is small in the photo is only a few pixels to a model that sees a small copy. */
 const PARTS_MARGIN = 0.1;
 /** How far each part follows the edges of the photo, as a share of the people's size. */
 const PARTS_FOLLOW = 0.012;
 
-const destroy = (mask: MaskLike) => (mask as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+const destroy = (mask: MaskLike) => release(mask);
 
 /**
  * The cutout of the people in a photo, as a mask of the whole photo (`subject`): white on the people, black elsewhere. With the body model on
@@ -98,6 +99,6 @@ export const subjectMask = async (photo: ImageLike): Promise<Record<string, Mask
     throw error;
   } finally {
     temporary.forEach(destroy);
-    (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+    release(mine);
   }
 };

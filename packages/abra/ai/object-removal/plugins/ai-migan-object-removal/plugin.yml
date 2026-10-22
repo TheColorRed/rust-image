@@ -1,0 +1,18 @@
+id: migan-object-removal
+name: MI-GAN object removal
+version: 1.0.0
+description: Removes objects from a photo with MI-GAN. Small and fast.
+contributes:
+  models:
+    - id: object-removal
+      title: Object removal (fast)
+      description: Small download and quick. A good first choice.
+      capabilities: [inpaint]
+      subjects: [objects]
+      model: migan_pipeline_v2.onnx
+      manifest: migan_pipeline_v2.yml
+files:
+  - path: migan_pipeline_v2.onnx
+    sha256: 6f1f3530a1a2324b19752018ce756088b07973cda8d7d890034ace5c8a48c40b
+  - path: migan_pipeline_v2.yml
+    sha256: 90925e3621820313261da09d559d08e8108f5aa1996149d68bd4ba7245f1484e

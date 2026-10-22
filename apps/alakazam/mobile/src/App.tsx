@@ -3,7 +3,7 @@ import { ThemeProvider, useTheme } from '@/src/lib/ui/theme';
 import { EditScreen, type EditablePhoto } from '@/src/screens/editor';
 import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';
-import { StorageScreen } from '@/src/screens/storage';
+import { PluginsScreen } from '@/src/screens/plugins';
 import { restoreProjects } from '@/src/state/projects';
 import BootSplash from 'react-native-bootsplash';
 import { useEffect, useState } from 'react';
@@ -13,7 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 const TABS: TabItem[] = [
   { name: 'home', label: 'Home' },
   { name: 'settings', label: 'Settings' },
-  { name: 'storage', label: 'Storage' },
+  { name: 'plugins', label: 'Plugins' },
 ];
 
 export default function App() {
@@ -56,7 +56,7 @@ function AppContent() {
           <View style={styles.screen}>
             {activeTab === 'home' && <HomeScreen onOpenPhoto={setEditingPhoto} />}
             {activeTab === 'settings' && <SettingsScreen />}
-            {activeTab === 'storage' && <StorageScreen />}
+            {activeTab === 'plugins' && <PluginsScreen />}
           </View>
           <BottomTabBar tabs={TABS} activeTab={activeTab} onTabPress={setActiveTab} />
         </SafeAreaView>

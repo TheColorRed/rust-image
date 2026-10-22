@@ -11,6 +11,7 @@ pub mod components;
 mod consts;
 mod image_workers;
 pub mod models;
+mod plugins;
 
 /// Errors surfaced to JavaScript as thrown exceptions.
 #[derive(Debug, uniffi::Error)]

@@ -1,0 +1,18 @@
+id: lama-object-removal
+name: LaMa object removal
+version: 1.0.0
+description: Removes objects from a photo with LaMa. Larger and slower, cleaner on big areas.
+contributes:
+  models:
+    - id: object-removal-large
+      title: Object removal (best quality)
+      description: Larger download and slower, cleaner on big areas and repeating patterns.
+      capabilities: [inpaint]
+      subjects: [objects]
+      model: lama_fp32.onnx
+      manifest: lama_fp32.yml
+files:
+  - path: lama_fp32.onnx
+    sha256: 1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6
+  - path: lama_fp32.yml
+    sha256: fa17e3898e35c3558d948fc6eb141ae73bcc566f677a2ef4d1a08d59c400a18f

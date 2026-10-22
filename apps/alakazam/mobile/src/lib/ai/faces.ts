@@ -3,8 +3,8 @@ import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTr
 import { type ImageLike } from '@abra/core/image';
 import { aiModelPath, runAiModelAsync, unloadAiModels } from '@alakazam/mobile';
 import { debounceTime, filter } from 'rxjs/operators';
-import { personIn } from '@/src/lib/ai/analysis';
-import { owning } from '@/src/lib/native/native-handles';
+import { personIn } from '@/src/lib/ai/analysis';
+import { owning, release } from '@/src/lib/native/native-handles';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { faceBoxes, people } from '@/src/state/analysis';
 
@@ -61,7 +61,7 @@ export const model = (role: string): ReturnType<typeof AiModel.load> | undefined
  * again by `model` the next time it is wanted.
  */
 export const unloadModel = (role: string): void => {
-  (models[role] as unknown as { uniffiDestroy(): void } | undefined)?.uniffiDestroy();
+  release(models[role]);
   delete models[role];
 };
 
@@ -285,7 +285,7 @@ export const findFaceBoxes = (photo: ImageLike): Promise<void> => {
       // The photo may have been closed while the models ran, and then what they found is for a photo that is gone.
       if (people.value === found) faceBoxes.next(boxes);
     } finally {
-      (mine as unknown as { uniffiDestroy(): void }).uniffiDestroy();
+      release(mine);
       findingFaceBoxes = undefined;
     }
   })();

@@ -9,8 +9,7 @@ import {
 } from '@/src/lib/project/edit-sections';
 import { renderRecipe } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/utils/error-message';
-import { rotate } from '@abra/core/transform';
-import { type CropRect, cropImage, turnDegrees } from '@/src/lib/tools/crop';
+import { type CropRect, cropPicture } from '@/src/lib/tools/crop';
 import type { ProjectRecipe } from '@/src/lib/project/project-store';
 import { type EditPreset } from '@/src/lib/project/presets';
 import { applyRedEyeStep } from '@/src/lib/beauty/red-eye';
@@ -33,6 +32,7 @@ import { historyReady, openProject } from '@/src/state/project-session';
 import { currentImage, editBaseImage, originalImage, replayHidden } from '@/src/state/session';
 import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
 import { Alert } from 'react-native';
+import { release } from '@/src/lib/native/native-handles';
 
 /**
  * The picture each pixel-changing step left (a blemish, red-eye, or crop), by step: the base that the edits after it are rendered on.
@@ -46,7 +46,7 @@ let lastGroup: string | null = null;
 
 export const PERSON_MODEL_MISSING =
   'Edits made to a specific person need the person-detection AI model, which is not on this device. ' +
-  'Download the AI models from the Storage tab, then reopen the project.';
+  'Download the AI models from the Plugins tab, then reopen the project.';
 
 /** Whether a recipe has an adjustment aimed at one detected person (keys like `skin-smooth:person:1`). */
 export const editsAPerson = (recipe: ProjectRecipe) =>
@@ -54,26 +54,29 @@ export const editsAPerson = (recipe: ProjectRecipe) =>
 
 /**
  * The picture a step that changes pixels leaves: the edits it baked in rendered on `base`, with the blemish removed or the
- * red-eye fixed. The caller owns it.
+ * red-eye fixed. The caller owns it. A step that removed objects has no way to be made again here, so it fails.
  */
 export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
   const change = entry.change;
   if (!changesPixels(change) || !entry.before) {
     throw new Error('A saved retouch step is damaged.');
   }
+  // The model that removes objects runs on a worker thread and cannot be waited for here, so its picture is only ever made once,
+  // when the tool is used, and kept (see `commitRetouch`). A saved project keeps it as the step's checkpoint.
+  if (change.type === 'object-removal') throw new Error('The picture after removing objects is missing, and cannot be made again.');
   const healed = renderRecipe(base, entry.before);
   if (change.type === 'crop') {
     try {
       return cropPicture(healed, change, change.turn);
     } finally {
-      healed.uniffiDestroy();
+      release(healed);
     }
   }
   try {
     if (change.type === 'blemish') removeBlemish(healed, change.x, change.y, change.radius);
     else applyRedEyeStep(healed, change);
   } catch (error) {
-    healed.uniffiDestroy();
+    release(healed);
     throw error;
   }
   return healed;
@@ -89,7 +92,7 @@ export const checkpointFor = (entry: TimelineEntry): AbraImage | undefined => bl
 
 /** Frees every kept picture and empties the timeline, when the editor session ends. */
 export function clearTimeline() {
-  for (const image of blemishBases.values()) image.uniffiDestroy();
+  for (const image of blemishBases.values()) release(image);
   blemishBases.clear();
   lastGroup = null;
   timeline.next(emptyTimeline);
@@ -105,7 +108,7 @@ function record(entry: TimelineEntry, replaceLast = false) {
   if (!historyReady.value) return;
   const result = pushEntry(timeline.value, entry, replaceLast);
   for (const dropped of result.dropped) {
-    blemishBases.get(dropped)?.uniffiDestroy();
+    release(blemishBases.get(dropped));
     blemishBases.delete(dropped);
   }
   timeline.next(result.timeline);
@@ -240,23 +243,11 @@ function commitRetouch(change: PixelChange) {
   };
   record(entry);
   blemishBases.set(entry, image.clone() as AbraImage);
-  editBaseImage.value?.uniffiDestroy();
+  release(editBaseImage.value);
   editBaseImage.next(image.clone() as AbraImage);
   lastGroup = null;
   adjustments.next({});
   appliedActions.next([]);
-}
-
-/** Cuts `image` to `rect`, turning the picture by `turn` radians first when it is tilted. The image given is left as it was. */
-function cropPicture(image: AbraImage, rect: CropRect, turn = 0): AbraImage {
-  if (!turn) return cropImage(image, rect);
-  const turned = image.clone() as AbraImage;
-  try {
-    rotate(turnDegrees(turn)).apply(turned);
-    return cropImage(turned, rect);
-  } finally {
-    turned.uniffiDestroy();
-  }
 }
 
 /**
@@ -283,9 +274,9 @@ function commitCrop(rect: CropRect, turn = 0) {
   };
   record(entry);
   blemishBases.set(entry, cropped.clone() as AbraImage);
-  editBaseImage.value?.uniffiDestroy();
+  release(editBaseImage.value);
   editBaseImage.next(cropped.clone() as AbraImage);
-  image.uniffiDestroy();
+  release(image);
   currentImage.next(cropped);
   lastGroup = null;
   adjustments.next({});
@@ -324,7 +315,7 @@ function moveTo(cursor: number) {
   lastGroup = null;
   timeline.next(after);
   if (source) {
-    editBaseImage.value?.uniffiDestroy();
+    release(editBaseImage.value);
     editBaseImage.next(source.clone() as AbraImage);
   }
   const recipe = recipeAt(after.entries, after.cursor);
@@ -342,7 +333,7 @@ export function resetEdits() {
   if (!original) return;
   batch(() => {
     clearTimeline();
-    editBaseImage.value?.uniffiDestroy();
+    release(editBaseImage.value);
     editBaseImage.next(original.clone() as AbraImage);
     focusedControlKey.next(null);
     replayHidden.next(false);

@@ -1,5 +1,6 @@
 import { type HighlightsShadows, highlightsShadows as toneAdjustment } from '@abra/core/adjustments';
 import { ImageLike } from '@abra/core/image';
+import { release } from '@/src/lib/native/native-handles';
 
 /** Neighborhood radius as a fraction of photo width, shared by preview and export. */
 const RADIUS = 0.04;
@@ -15,8 +16,8 @@ export const highlightsShadows = (photo: ImageLike, highlights: number, shadows:
   try {
     effect.apply(photo);
   } finally {
-    (effect as HighlightsShadows).uniffiDestroy();
-    (tones as HighlightsShadows).uniffiDestroy();
-    (base as HighlightsShadows).uniffiDestroy();
+    release(effect);
+    release(tones);
+    release(base);
   }
 };

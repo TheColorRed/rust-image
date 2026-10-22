@@ -34,6 +34,45 @@ enum Param {
   List(Vec<f64>),
 }
 
+/// One entry of a list (or one section) in a manifest, such as one of its `inputs`: names with a number, a text or a list of numbers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Entry {
+  values: HashMap<String, Param>,
+}
+
+impl Entry {
+  fn from_yaml(p_value: &Yaml) -> Option<Self> {
+    let mapping = p_value.as_mapping()?;
+    Some(Self {
+      values: mapping.iter().filter_map(|(key, value)| Some((key.as_str()?.to_string(), param(value)?))).collect(),
+    })
+  }
+
+  /// A number in the entry.
+  pub fn number(&self, p_key: &str) -> Option<f64> {
+    match self.values.get(p_key) {
+      Some(Param::Number(value)) => Some(*value),
+      _ => None,
+    }
+  }
+
+  /// A text in the entry.
+  pub fn text(&self, p_key: &str) -> Option<&str> {
+    match self.values.get(p_key) {
+      Some(Param::Text(value)) => Some(value),
+      _ => None,
+    }
+  }
+
+  /// A list of numbers in the entry.
+  pub fn list(&self, p_key: &str) -> Option<&[f64]> {
+    match self.values.get(p_key) {
+      Some(Param::List(values)) => Some(values),
+      _ => None,
+    }
+  }
+}
+
 /// What a model's `.yml` says about it.
 #[derive(Clone, Debug, Default)]
 pub struct Manifest {
@@ -42,11 +81,22 @@ pub struct Manifest {
   decoder: Option<String>,
   classes: Vec<String>,
   params: HashMap<String, Param>,
+  sections: HashMap<String, Vec<Entry>>,
   control: Option<ControlSpec>,
 }
 
 fn number(p_value: &Yaml) -> Option<f64> {
   p_value.as_floating_point().or_else(|| p_value.as_integer().map(|integer| integer as f64))
+}
+
+fn param(p_value: &Yaml) -> Option<Param> {
+  if let Some(value) = number(p_value) {
+    Some(Param::Number(value))
+  } else if let Some(value) = p_value.as_str() {
+    Some(Param::Text(value.to_string()))
+  } else {
+    p_value.as_vec().map(|items| Param::List(items.iter().filter_map(number).collect()))
+  }
 }
 
 impl Manifest {
@@ -79,16 +129,20 @@ impl Manifest {
     if let Some(mapping) = mapping {
       for (key, value) in mapping.iter() {
         let Some(key) = key.as_str() else { continue };
-        let param = if let Some(value) = number(value) {
-          Param::Number(value)
-        } else if let Some(value) = value.as_str() {
-          Param::Text(value.to_string())
-        } else if let Some(items) = value.as_vec() {
-          Param::List(items.iter().filter_map(number).collect())
-        } else {
-          continue;
-        };
+        let Some(param) = param(value) else { continue };
         params.insert(key.to_string(), param);
+      }
+    }
+    // Lists of mappings (`inputs`) and mappings (`window`) at the top are sections, whose entries have their own settings.
+    let mut sections = HashMap::new();
+    for (key, value) in p_doc.as_mapping().into_iter().flat_map(|mapping| mapping.iter()) {
+      let Some(key) = key.as_str().filter(|key| !matches!(*key, "params" | "control")) else { continue };
+      let entries: Vec<Entry> = match value.as_vec() {
+        Some(items) => items.iter().filter_map(Entry::from_yaml).collect(),
+        None => Entry::from_yaml(value).into_iter().collect(),
+      };
+      if !entries.is_empty() {
+        sections.insert(key.to_string(), entries);
       }
     }
     Self {
@@ -101,6 +155,7 @@ impl Manifest {
         .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
         .unwrap_or_default(),
       params,
+      sections,
       control: Self::control_from_yaml(p_doc),
     }
   }
@@ -163,6 +218,12 @@ impl Manifest {
   /// The extra numbers an image model takes beside the picture, from the `control` block. `None` when it has none.
   pub fn control(&self) -> Option<&ControlSpec> {
     self.control.as_ref()
+  }
+
+  /// The entries of a list in the manifest, such as its `inputs`, or the one entry of a mapping such as its `window`. Empty when the
+  /// manifest has none.
+  pub fn section(&self, p_key: &str) -> &[Entry] {
+    self.sections.get(p_key).map(Vec::as_slice).unwrap_or_default()
   }
 
   /// A number in `params`.

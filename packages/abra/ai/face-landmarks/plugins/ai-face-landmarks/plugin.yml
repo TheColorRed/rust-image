@@ -1,0 +1,18 @@
+id: face-landmarks
+name: Face landmarks
+version: 1.0.0
+description: Locates 478 facial landmarks, including the eyes, lips, irises, and facial contour.
+contributes:
+  models:
+    - id: face-landmarks
+      title: Face landmarks
+      description: Locates 478 facial landmarks, including the eyes, lips, irises, and facial contour.
+      capabilities: [face-landmarks]
+      subjects: [face]
+      model: face_landmarks_detector.onnx
+      manifest: face_landmarks_detector.yml
+files:
+  - path: face_landmarks_detector.onnx
+    sha256: 7d6e82dee82a1dca5fbddb282b3cc74571833a530de317fc22ae325c3358beeb
+  - path: face_landmarks_detector.yml
+    sha256: 0d90bc67c497754d1a43aade1f8d79276d8de0e96338c5801a828b27fc7150c7

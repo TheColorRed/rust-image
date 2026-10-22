@@ -1,6 +1,7 @@
 import { type ImageLike } from '@abra/core/image';
 import { ImagePreview, type AbraImage } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
+import { release } from '@/src/lib/native/native-handles';
 
 type Open = {
   sourceKey: string;
@@ -65,7 +66,7 @@ export class LiveRenderer {
       console.warn(`[live] could not open a preview:`, error);
       return false;
     } finally {
-      if (ownsSource) image.uniffiDestroy();
+      if (ownsSource) release(image);
     }
   }
 
@@ -110,8 +111,8 @@ export class LiveRenderer {
     this.open = null;
     this.view.next(null);
     this.surface.next(null);
-    open?.preview.uniffiDestroy();
-    open?.display.uniffiDestroy();
+    release(open?.preview);
+    release(open?.display);
   }
 
   private publish(open: Open) {

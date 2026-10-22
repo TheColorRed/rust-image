@@ -14,14 +14,8 @@ export type AiModelListing = {
   subjects: string[];
   /** What the model gives back and how it works (`mask`, `instances`, `labels`, `landmarks`, `guided`...), from `categories.kind`. */
   kinds: string[];
-  /** What the app tells the native side to download, and to look for on this device. */
-  file: {
-    role: string;
-    url: string;
-    sha256: string;
-    manifestUrl: string | undefined;
-    manifestSha256: string | undefined;
-  };
+  /** Where the model comes from, which is what the app tells the native side to download, and to look for on this device. */
+  source: AiModelSource;
   /** Size of the file to download in bytes, from the server. 0 when it did not say. */
   downloadSizeBytes: number;
   /** Whether the model, and its manifest, are on this device. */
@@ -31,7 +25,18 @@ export type AiModelListing = {
 };
 
 /**
- * The AI models from the last catalog read, kept here so the storage screen shows them as soon as it opens and then
+ * Where a model comes from. A `file` is one model file with its manifest. A `plugin` is a plugin that adds the model: installing it
+ * downloads every file the plugin lists (see `abra::plugin`), and deleting it removes them all, including the other models it adds.
+ */
+export type AiModelSource =
+  | {
+      type: 'file';
+      file: { role: string; url: string; sha256: string; manifestUrl: string | undefined; manifestSha256: string | undefined };
+    }
+  | { type: 'plugin'; pluginId: string; version: string; manifestUrl: string; manifestSha256: string };
+
+/**
+ * The AI models from the last catalog read, kept here so the plugins screen shows them as soon as it opens and then
  * refreshes them. Empty until the catalog has been read once in this run of the app.
  */
 export const aiModelList = new BehaviorSubject<AiModelListing[]>([]);

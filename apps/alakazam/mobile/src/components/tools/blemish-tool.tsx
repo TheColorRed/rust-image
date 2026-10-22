@@ -6,6 +6,7 @@ import { Color } from '@abra/core/color';
 import { Brush } from '@abra/core/drawing';
 import { Area } from '@abra/core/geometry';
 import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
+import { owning } from '@/src/lib/native/native-handles';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import { computePreviewImagePoint, unrotatePreviewPoint, type PreviewPoint } from '@/src/lib/editor/preview-coordinates';
 import { removeBlemish } from '@/src/lib/beauty/blemish';
@@ -49,21 +50,20 @@ export function BlemishReticle() {
     const density = PixelRatio.get();
     const center = { x: (box.width * density) / 2, y: (box.height * density) / 2 };
     const width = Math.round(RETICLE_LINE * density);
-    const outer = new Brush().withColor(Color.white()).withSize(width).withHardness(1).withOpacity(0.5) as Brush;
-    const inner = new Brush().withColor(Color.fromHexString(colors.accent)).withSize(width).withHardness(1) as Brush;
-    const rings = [
-      ['blemish-outer', BLEMISH_OUTER_RADIUS, outer],
-      ['blemish-inner', BLEMISH_INNER_RADIUS, inner],
-    ] as const;
-    for (const [name, radius, brush] of rings) {
-      const area = Area.circle(center, radius * density - width / 2) as Area;
-      gizmos.setOutline(name, area, brush);
-      area.uniffiDestroy();
-    }
-    outer.uniffiDestroy();
-    inner.uniffiDestroy();
+    const names = owning(keep => {
+      const outer = keep(new Brush().withColor(Color.white()).withSize(width).withHardness(1).withOpacity(0.5) as Brush);
+      const inner = keep(new Brush().withColor(Color.fromHexString(colors.accent)).withSize(width).withHardness(1) as Brush);
+      const rings = [
+        ['blemish-outer', BLEMISH_OUTER_RADIUS, outer],
+        ['blemish-inner', BLEMISH_INNER_RADIUS, inner],
+      ] as const;
+      for (const [name, radius, brush] of rings) {
+        gizmos.setOutline(name, keep(Area.circle(center, radius * density - width / 2) as Area), brush);
+      }
+      return rings.map(([name]) => name);
+    });
     return () => {
-      for (const [name] of rings) gizmos.remove(name);
+      for (const name of names) gizmos.remove(name);
     };
   }, [gizmos, box, colors.accent]);
   return null;

@@ -1,9 +1,8 @@
-import { downloadAiModel } from '@alakazam/mobile';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { detectSkin } from '@/src/lib/ai/analysis';
-import { refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
+import { downloadModel, refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { formatBytes } from '@/src/lib/utils/format-bytes';
 import { useTheme } from '@/src/lib/ui/theme';
@@ -97,7 +96,7 @@ export function AiModelPrompt() {
     setDownloading(true);
     try {
       for (const [index, model] of missing.entries()) {
-        await downloadAiModel(model.file, { update: share => setProgress((index + share) / missing.length) });
+        await downloadModel(model, { update: share => setProgress((index + share) / missing.length) });
       }
       syncAiModels();
       if (request) {

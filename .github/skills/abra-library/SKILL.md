@@ -52,7 +52,8 @@ The root crate of the Abra library is located in the root of the workspace. It i
 - `/packages/vessel/vessel`: The standalone view engine, package `vessel` (no abra dependency, so it can be published on its own). `Engine` runs `View`s on its own thread and decides when to draw them; each view shows a `MediaSource` (a canvas, a video, a camera, a game...). It uses `pub-sub`.
 - `/packages/vessel/gpu-passes`: Compute shader passes over RGBA pixels (`GpuPass`, `GpuAux`, `GpuSession`) and, with its `runtime` feature, the wgpu runtime that runs them (`GpuContext`, `LiveRenderer`, `Presenter`). No abra dependency. Abra supplies passes as data; it never runs the GPU itself.
 - `/packages/vessel/surface`: Surfaces that frames are drawn on, looked up by id (`Surface` trait; a native Android window is the first kind). No abra dependency.
-- `/packages/abra/plugins`: This module contains functions and types related to plugins that can extend the functionality of the Abra library.
+- `abra::plugin` (`/packages/abra/abra/src/plugin`): runtime plugins. A plugin is a folder with a `plugin.yml` that adds AI models, pipelines or scripts, found by `PluginRegistry::scan` and asked for by capability, so an app gains one by adding a folder. See `apps/docs/public/plugins`. `/packages/abra/ai/object-removal/plugins` holds two real ones (MI-GAN, LaMa).
+- `/packages/abra/plugins`: Rust library add-ons that an app links in (`collage`, `word-cloud`). They are not runtime plugins.
 
 ## Images That Wait, and Parts of Images
 

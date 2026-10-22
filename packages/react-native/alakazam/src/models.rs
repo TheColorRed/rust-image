@@ -50,7 +50,8 @@ pub trait DownloadListener: Send + Sync {
   fn update(&self, progress: f32);
 }
 
-static DOWNLOAD_LOCK: Mutex<()> = Mutex::new(());
+/// Held while a model or a plugin is being downloaded or removed, so two never write the same files.
+pub(crate) static DOWNLOAD_LOCK: Mutex<()> = Mutex::new(());
 
 /// A model that is loaded the first time it is used, from the file downloaded for its role, and kept for every use after. It is the
 /// whole of what a model needs here: any type that is an [`ImageAi`] (every Abra AI crate's model is) fits in one, so adding a model is
@@ -112,7 +113,7 @@ pub fn unload_ai_models() {
 
 /// Android: the app's private `files` folder, found from the process name (the package id).
 #[cfg(target_os = "android")]
-fn model_dir() -> PathBuf {
+pub(crate) fn model_dir() -> PathBuf {
   let package = fs::read("/proc/self/cmdline")
     .ok()
     .and_then(|bytes| String::from_utf8(bytes).ok())
@@ -126,7 +127,7 @@ fn model_dir() -> PathBuf {
 
 /// iOS: the app sandbox's Caches folder.
 #[cfg(target_os = "ios")]
-fn model_dir() -> PathBuf {
+pub(crate) fn model_dir() -> PathBuf {
   match std::env::var_os("HOME") {
     Some(home) => PathBuf::from(home).join("Library/Caches/abra-models"),
     None => std::env::temp_dir().join("abra-models"),
@@ -134,7 +135,7 @@ fn model_dir() -> PathBuf {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn model_dir() -> PathBuf {
+pub(crate) fn model_dir() -> PathBuf {
   std::env::temp_dir().join("abra-models")
 }
 
@@ -153,12 +154,14 @@ fn downloaded_files(p_role: &str) -> Vec<fs::DirEntry> {
     .collect()
 }
 
-/// The downloaded file for `p_role`. When several versions exist the newest wins.
+/// The file for `p_role` on this device: a downloaded model (the newest when several versions exist), or else the model an installed
+/// plugin adds with that id. Everything that looks for a model goes through here, so a model is found the same way whichever way it came.
 fn find_downloaded(p_role: &str) -> Result<PathBuf, AbraError> {
   downloaded_files(p_role)
     .into_iter()
     .max_by_key(|entry| entry.metadata().and_then(|metadata| metadata.modified()).ok())
     .map(|entry| entry.path())
+    .or_else(|| crate::plugins::plugin_model_path(p_role))
     .ok_or_else(|| AbraError::Ai {
       message: format!("The model for {p_role} is not downloaded"),
     })
@@ -216,12 +219,13 @@ impl AiModelFile {
     self.check()?;
     let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = self.local_path();
+    let label = format!("the {} model", self.role);
 
     let result = fs::create_dir_all(model_dir())
       .map_err(|e| format!("Cannot create the model folder: {e}"))
-      .and_then(|_| self.ensure_file(&self.url, &self.sha256, &path, p_listener))
+      .and_then(|_| Self::ensure_file(&label, &self.url, &self.sha256, &path, p_listener))
       .and_then(|_| match (&self.manifest_url, &self.manifest_sha256) {
-        (Some(url), Some(sha256)) => self.ensure_file(url, sha256, &self.local_manifest_path(), None),
+        (Some(url), Some(sha256)) => Self::ensure_file(&label, url, sha256, &self.local_manifest_path(), None),
         _ => Ok(()),
       });
     match result {
@@ -243,9 +247,9 @@ impl AiModelFile {
   }
 
   /// Makes sure `p_path` holds the file at `p_url` with hash `p_sha256`: keeps a file that already matches, otherwise
-  /// downloads it, telling `p_listener` how far it has got.
-  fn ensure_file(
-    &self,
+  /// downloads it, telling `p_listener` how far it has got. `p_label` names what is downloaded in an error, such as `the skin model`.
+  pub(crate) fn ensure_file(
+    p_label: &str,
     p_url: &str,
     p_sha256: &str,
     p_path: &Path,
@@ -260,10 +264,12 @@ impl AiModelFile {
       }
     }
 
-    let partial = p_path.with_extension("part");
-    let result = self
-      .download(p_url, p_sha256, &partial, p_listener)
-      .and_then(|_| fs::rename(&partial, p_path).map_err(|e| format!("Cannot save the {} model: {e}", self.role)));
+    // The whole name and then `.part`, so two files that differ only by their extension never share one.
+    let mut partial_name = p_path.as_os_str().to_owned();
+    partial_name.push(".part");
+    let partial = PathBuf::from(partial_name);
+    let result = Self::download(p_label, p_url, p_sha256, &partial, p_listener)
+      .and_then(|_| fs::rename(&partial, p_path).map_err(|e| format!("Cannot save {p_label}: {e}")));
     if result.is_err() {
       let _ = fs::remove_file(&partial);
     }
@@ -273,13 +279,13 @@ impl AiModelFile {
   /// Downloads the file at `p_url` to `p_partial` and checks its hash. `p_listener` hears the share downloaded, once for each
   /// whole percent, when the server says how big the file is.
   fn download(
-    &self,
+    p_label: &str,
     p_url: &str,
     p_sha256: &str,
     p_partial: &Path,
     p_listener: Option<&dyn DownloadListener>,
   ) -> Result<(), String> {
-    let response = ureq::get(p_url).call().map_err(|e| format!("Failed to download the {} model: {e}", self.role))?;
+    let response = ureq::get(p_url).call().map_err(|e| format!("Failed to download {p_label}: {e}"))?;
     let total = response.body().content_length().filter(|total| *total > 0);
     let mut reader = response.into_body().into_reader();
     let mut file = fs::File::create(p_partial).map_err(|e| format!("Cannot create {p_partial:?}: {e}"))?;
@@ -289,7 +295,7 @@ impl AiModelFile {
     let mut reported = u64::MAX;
     loop {
       let read =
-        reader.read(&mut buffer).map_err(|e| format!("Download of the {} model was interrupted: {e}", self.role))?;
+        reader.read(&mut buffer).map_err(|e| format!("Download of {p_label} was interrupted: {e}"))?;
       if read == 0 {
         break;
       }
@@ -302,13 +308,13 @@ impl AiModelFile {
         }
       }
       hasher.update(&buffer[..read]);
-      file.write_all(&buffer[..read]).map_err(|e| format!("Cannot write the {} model: {e}", self.role))?;
+      file.write_all(&buffer[..read]).map_err(|e| format!("Cannot write {p_label}: {e}"))?;
     }
-    file.flush().map_err(|e| format!("Cannot write the {} model: {e}", self.role))?;
+    file.flush().map_err(|e| format!("Cannot write {p_label}: {e}"))?;
 
     let hash = hex(&hasher.finalize());
     if hash != p_sha256 {
-      return Err(format!("The downloaded {} model does not match its hash (got {hash})", self.role));
+      return Err(format!("The download of {p_label} does not match its hash (got {hash})"));
     }
     Ok(())
   }
@@ -355,7 +361,8 @@ pub async fn download_ai_model(model: AiModelFile, listener: Arc<dyn DownloadLis
   image_workers::run(move || model.ensure(Some(listener.as_ref())).map(|_| ())).await
 }
 
-/// Where a downloaded AI model is on this device, for `AiModel.load`. Its manifest is beside it. Works offline. Fails when
+/// Where an AI model is on this device, for `AiModel.load`: a downloaded model, or one an installed plugin adds. Its manifest is beside it.
+/// Works offline. Fails when
 /// the model is not downloaded, or only its `.onnx` is (an older download): `AiModel.load` needs the manifest, and
 /// `download_ai_model` fetches it.
 #[uniffi::export]

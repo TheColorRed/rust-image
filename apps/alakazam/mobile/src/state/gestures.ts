@@ -73,6 +73,8 @@ const panIsHeld = (fingers: number) => {
 };
 /** Whether "Circle to zoom" is drawing. The preview's pan and pinch leave every touch alone meanwhile, so the loop is not taken as a pan. */
 export const previewCircling = new BehaviorSubject(false);
+/** Whether an area is being drawn on the photo (see `DrawAreaOverlay`). One finger draws, so it does not pan; two fingers still pinch and pan. */
+export const previewDrawing = new BehaviorSubject(false);
 /** Maps a zoom and pan to the ones the preview should use, e.g. to keep a crop frame covered by the photo. `null` leaves them alone. */
 export type PreviewLimit = (scale: number, translate: { x: number; y: number }) => { scale: number; x: number; y: number };
 export const previewLimit = new BehaviorSubject<PreviewLimit | null>(null);
@@ -349,6 +351,7 @@ export function createPreviewPanResponder() {
     onMoveShouldSetPanResponderCapture: (event, gestureState) => {
       if (previewCircling.value) return false;
       if (event.nativeEvent.touches.length === 2) return true;
+      if (previewDrawing.value) return false;
       const moved = Math.hypot(gestureState.dx, gestureState.dy) > PAN_START_THRESHOLD;
       // While crop is open, a finger on a corner handle belongs to that handle; any other finger moves the photo under the frame.
       if (isCropToolFocused()) return moved && !cropHandleGrabbed.value;

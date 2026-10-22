@@ -1,0 +1,18 @@
+id: face-parsing
+name: Face regions
+version: 1.0.0
+description: Creates masks for facial regions such as eyes, ears, nose, mouth, lips, skin, hair, and brows.
+contributes:
+  models:
+    - id: face-parsing
+      title: Face regions
+      description: Creates masks for facial regions such as eyes, ears, nose, mouth, lips, skin, hair, and brows.
+      capabilities: [parse-face]
+      subjects: [face]
+      model: resnet18.onnx
+      manifest: resnet18.yml
+files:
+  - path: resnet18.onnx
+    sha256: 0d9bd318e46987c3bdbfacae9e2c0f461cae1c6ac6ea6d43bbe541a91727e33f
+  - path: resnet18.yml
+    sha256: aafa9d8c9d27e1a3c14736aabbefe67a9adbda8c4ba4adbb828f644c96eb71c3

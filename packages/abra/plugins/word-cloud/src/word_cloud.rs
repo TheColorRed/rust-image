@@ -4,9 +4,9 @@ use abra::{
   typography::prelude::{FontLoader, Text},
 };
 
-use crate::WordCloudPlugin;
+use crate::WordCloud;
 
-impl<'a> WordCloudPlugin<'a> {
+impl<'a> WordCloud<'a> {
   pub(crate) fn generate_cloud(&self) -> Canvas<'a> {
     let (width, height) = self.size.into();
     let resolution = self.options.as_ref().map(|opts| opts.resolution.unwrap()).unwrap_or(Resolution::SCREEN);

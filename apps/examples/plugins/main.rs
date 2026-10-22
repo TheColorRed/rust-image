@@ -23,8 +23,8 @@ pub fn main() {
   let path = Path::new().line_to((1024 * 3, 1024 * 2)).clone();
   let mut colors = img.unwrap().as_ref().clone();
   let colors = colors.colors().as_slice().unwrap();
-  let mut collage_plugin =
-    CollagePlugin::new((1024 * 3, 1024 * 2), loader).with_style(CollageStyle::LayeredGrid(2, 10)).with_options(
+  let mut collage =
+    Collage::new((1024 * 3, 1024 * 2), loader).with_style(CollageStyle::LayeredGrid(2, 10)).with_options(
       CollageOptions::new()
         .with_rotation_range(-15, 15)
         .with_scale_range(1.25, 1.5)
@@ -57,8 +57,5 @@ pub fn main() {
 
   println!("Images loaded in {:?}", load_start.elapsed());
 
-  let mut result = collage_plugin.apply().unwrap();
-  if let Some(canvas) = result.take_canvas_at(0) {
-    canvas.save("assets/out/collage_result.png", None);
-  }
+  collage.build().save("assets/out/collage_result.png", None);
 }

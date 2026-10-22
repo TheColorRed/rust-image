@@ -47,6 +47,7 @@ import { type Image as AbraPixels } from '@abra/core/image';
 import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { filter, switchMap, tap } from 'rxjs/operators';
+import { release } from '@/src/lib/native/native-handles';
 
 // #region: The full-size picture, which is not shown
 
@@ -64,7 +65,7 @@ function runFullReplay() {
   if (!base) return;
   const started = Date.now();
   const next = renderEditStack(base, undefined, true);
-  currentImage.value?.uniffiDestroy();
+  release(currentImage.value);
   currentImage.next(next);
   if (__DEV__) console.debug('[edit] full-size replay ms (not shown):', Date.now() - started);
 }
@@ -278,7 +279,7 @@ let renderCache: RenderCache | undefined;
 
 /** Frees the pictures the rendered stack kept, so the next render starts from the base. */
 function clearRenderCache() {
-  renderCache?.snaps.forEach(snap => snap?.uniffiDestroy());
+  renderCache?.snaps.forEach(snap => release(snap));
   renderCache = undefined;
 }
 
@@ -312,7 +313,7 @@ function renderCachedStack(base: AbraImage, full: boolean): AbraImage {
     while (!kept.snaps[from]) from--;
     kept.snaps.forEach((snap, index) => {
       if (index > from) {
-        snap?.uniffiDestroy();
+        release(snap);
         kept.snaps[index] = undefined;
       }
     });
@@ -355,7 +356,7 @@ function runSteps(
     const laid = withLayers(image, sheets);
     image.replaceWith(laid);
     // They are native images the garbage collector cannot see the size of.
-    (laid as AbraPixels).uniffiDestroy();
+    release(laid);
     sheets = [];
   };
   const timings: string[] = [];
@@ -505,7 +506,7 @@ function replaceThumbnails(thumbnails: Record<string, ThumbnailPreview>) {
   // renders and when a refresh runs its effects again, so they are freed after that, not now.
   requestAnimationFrame(() => {
     setTimeout(() => {
-      for (const [, thumbnail] of retired) thumbnail.uniffiDestroy();
+      for (const [, thumbnail] of retired) release(thumbnail);
     }, 0);
   });
 }
@@ -583,7 +584,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage) {
           try {
             runSteps(rest, appliedSteps(undefined, { key: sliderKey }), base);
           } catch (error) {
-            rest.uniffiDestroy();
+            release(rest);
             throw error;
           }
           const own = { ...section, controls: pickers.filter(picker => picker.commitTo!.slider === sliderKey) };
@@ -621,7 +622,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage) {
       cachedThumbnailKey = succeeded ? key : '';
     });
   } catch (error) {
-    source.uniffiDestroy();
+    release(source);
     throw error;
   }
 }
@@ -647,7 +648,7 @@ function replay() {
   setShown(next);
   if (deferred) {
     fullReplayPending = false;
-    currentImage.value?.uniffiDestroy();
+    release(currentImage.value);
     currentImage.next(next.clone() as AbraImage);
   } else fullReplayPending = true;
   if (__DEV__) console.debug(`[preview] ${deferred ? 'full-size deferred' : 'screen-size'} replay ms:`, Date.now() - started);

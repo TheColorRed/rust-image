@@ -6,9 +6,9 @@ use abra::prelude::*;
 use rand::prelude::{RngExt, SliceRandom};
 use rayon::prelude::*;
 
-use crate::{CollagePlugin, CollageStyle};
+use crate::{Collage, CollageStyle};
 
-impl<'a> CollagePlugin<'a> {
+impl<'a> Collage<'a> {
   pub(crate) fn layered_grid_collage(&mut self) -> Canvas<'a> {
     // Get grid dimensions (columns, rows) and total number of cells.
     let (columns, rows, cell_count) =
