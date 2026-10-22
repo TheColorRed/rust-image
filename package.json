@@ -29,5 +29,13 @@
   },
   "overrides": {
     "react-native": "0.87.1"
+  },
+  "allowScripts": {
+    "core-js@2.6.12": true,
+    "core-js-pure@3.47.0": true,
+    "electron@39.8.10": true,
+    "esbuild@0.27.2": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.21.5": true
   }
 }
