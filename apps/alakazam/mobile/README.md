@@ -65,7 +65,7 @@ node --test apps/alakazam/mobile/tests/skin-adjustments.test.cjs apps/alakazam/m
 Run the **Build downloadable apps** GitHub Actions workflow with iOS enabled.
 The iOS job builds the Rust XCFramework, generates the native app project with
 XcodeGen, installs CocoaPods, and archives the React Native app with signing
-disabled. It uploads `Alakazam-ios-unsigned.ipa` directly, without an extra ZIP
+disabled. It uploads `alakazam.ipa` directly, without an extra ZIP
 wrapper. No Apple signing certificate or provisioning profile is needed to build
 this artifact.
 

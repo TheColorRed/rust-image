@@ -86,7 +86,7 @@ function Permissions({
       {permission === 'denied' && (
         <View style={commonStyles.centered}>
           <Text style={commonStyles.emptyTitle}>Photo access needed</Text>
-          <Text style={commonStyles.emptyBody}>Grant access to your Camera photos to see them here.</Text>
+          <Text style={commonStyles.emptyBody}>Grant access to your Camera Roll to see your photos here.</Text>
           <TouchableOpacity style={[commonStyles.button, styles.settingsButton]} onPress={() => Linking.openSettings()}>
             <Text style={commonStyles.buttonText}>Open Settings</Text>
           </TouchableOpacity>
@@ -151,7 +151,7 @@ function CameraRoll({ onAddPhotos }: { onAddPhotos: (photos: EditablePhoto[]) =>
   return (
     <View style={styles.albumSection}>
       <View style={styles.albumHeader}>
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Camera album</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Camera Roll</Text>
         {permission === 'granted' && (
           <Text style={[styles.albumCount, { color: colors.textMuted }]}>
             {photos.length} photo{photos.length === 1 ? '' : 's'}
@@ -281,6 +281,15 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
   const { colors } = useTheme();
   const [showCameraRoll, setShowCameraRoll] = useState(false);
 
+  /** Makes a project of each photo, from the Camera Roll or the file chooser. One photo opens right away; several stay on the home page. */
+  const addPhotos = async (photos: EditablePhoto[]) => {
+    const added = (await Promise.all(photos.map(addProject))).filter(project => project !== undefined);
+    setShowCameraRoll(false);
+    if (photos.length === 1 && added[0]) {
+      onOpenPhoto({ uri: projectSourceUri(added[0]), fileName: added[0].name, project: added[0] });
+    }
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* <View style={commonStyles.header}>
@@ -304,26 +313,14 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
             variant="card"
             showPreview={false}
             style={{ width: 280 }}
-            onPick={async asset => {
-              const project = await addProject({ uri: asset.uri, fileName: asset.name ?? null });
-              if (project) onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project });
-            }}
+            onPick={assets => addPhotos(assets.map(asset => ({ uri: asset.uri, fileName: asset.name ?? null })))}
           />
         </ScrollView>
       </View>
 
       {!showCameraRoll && <LoadedImages onOpenPhoto={onOpenPhoto} />}
       {showCameraRoll && (
-        <CameraRoll
-          onAddPhotos={async photos => {
-            const added = (await Promise.all(photos.map(addProject))).filter(project => project !== undefined);
-            setShowCameraRoll(false);
-            // One photo opens right away; several stay on the home page.
-            if (photos.length === 1 && added[0]) {
-              onOpenPhoto({ uri: projectSourceUri(added[0]), fileName: added[0].name, project: added[0] });
-            }
-          }}
-        />
+        <CameraRoll onAddPhotos={addPhotos} />
       )}
     </View>
   );

@@ -1,4 +1,5 @@
 import { AppText } from '@/src/components/app-text';
+import { AiProgressBar } from '@/src/components/editor/ai-progress-bar';
 import { Card, CardHeader } from '@/src/components/card';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { formatBytes } from '@/src/lib/utils/format-bytes';
@@ -8,8 +9,8 @@ import { refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
 import { deleteAiModel, downloadAiModel } from '@alakazam/mobile';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react-native';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from 'lucide-react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 
 export function StorageScreen() {
@@ -17,6 +18,8 @@ export function StorageScreen() {
   const commonStyles = useCommonStyles();
   const models = useObservable(aiModelList$, aiModelList.value);
   const [downloading, setDownloading] = useState<string | null>(null);
+  /** The downloads the bar shows, by model: 0 waiting, null on its way, 1 done. Kept apart from the editor's AI work, which the editor reacts to. */
+  const [downloadTasks, setDownloadTasks] = useState<Record<string, number | null>>({});
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -53,6 +56,9 @@ export function StorageScreen() {
         download: { backgroundColor: colors.accent },
         remove: { borderWidth: 1, borderColor: colors.danger },
         buttonText: { fontSize: 14, fontWeight: '600' },
+        actions: { flexDirection: 'row', alignItems: 'center' },
+        progressButton: { height: 36, paddingVertical: 0, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: colors.accent, overflow: 'hidden' },
+        progressFill: { ...StyleSheet.absoluteFill, opacity: 0.45 },
         refresh: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },
         note: { fontSize: 13, color: colors.textSecondary },
         error: { fontSize: 13, color: colors.danger },
@@ -93,13 +99,29 @@ export function StorageScreen() {
       return next;
     });
 
+  /** Clears the bar a moment after every download is done, so a short one is seen. */
+  const clearWhenDone = () =>
+    setTimeout(
+      () => setDownloadTasks(current => (Object.values(current).every(progress => progress === 1) ? {} : current)),
+      500,
+    );
+
+  /** Moves a model's share of the bar as the download reports how far it has got. */
+  const downloadListener = (model: AiModelListing) => ({
+    update: (progress: number) => setDownloadTasks(current => ({ ...current, [model.id]: progress })),
+  });
+
   const download = async (model: AiModelListing) => {
     setError(null);
     setDownloading(model.id);
+    setDownloadTasks({ [model.id]: null });
     try {
-      await downloadAiModel(model.file);
+      await downloadAiModel(model.file, downloadListener(model));
+      setDownloadTasks({ [model.id]: 1 });
+      clearWhenDone();
     } catch (e) {
       setError(errorMessage(e));
+      setDownloadTasks({});
     }
     setDownloading(null);
     syncAiModels();
@@ -115,6 +137,68 @@ export function StorageScreen() {
     syncAiModels();
   };
 
+  /** Smallest first, so more models are ready sooner and little is lost if the connection drops. */
+  const notDownloaded = shown
+    .filter(model => model.enabled && !model.downloaded)
+    .sort((a, b) => a.downloadSizeBytes - b.downloadSizeBytes);
+  const downloaded = shown.filter(model => model.downloaded);
+  const notDownloadedBytes = notDownloaded.reduce((total, model) => total + model.downloadSizeBytes, 0);
+  const downloadedBytes = downloaded.reduce((total, model) => total + model.sizeBytes, 0);
+
+  /** Every shown model that is not on this device yet, one after another, stopping at the first that fails. */
+  const downloadAll = () =>
+    Alert.alert('Download all AI models?', `This downloads ${formatBytes(notDownloadedBytes)}.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Download all',
+        onPress: async () => {
+          setError(null);
+          setDownloadTasks(Object.fromEntries(notDownloaded.map(model => [model.id, 0])));
+          for (const model of notDownloaded) {
+            setDownloading(model.id);
+            setDownloadTasks(current => ({ ...current, [model.id]: null }));
+            try {
+              await downloadAiModel(model.file, downloadListener(model));
+            } catch (e) {
+              setError(errorMessage(e));
+              setDownloadTasks({});
+              break;
+            }
+            setDownloadTasks(current => ({ ...current, [model.id]: 1 }));
+            syncAiModels();
+          }
+          clearWhenDone();
+          setDownloading(null);
+          syncAiModels();
+        },
+      },
+    ]);
+
+  const removeAll = () =>
+    Alert.alert(
+      'Delete all AI models?',
+      `This frees ${formatBytes(downloadedBytes)}. They download again when an edit needs them, and saved projects still open without them.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete all',
+          style: 'destructive',
+          onPress: () => {
+            setError(null);
+            for (const model of shown.filter(listing => listing.downloaded)) {
+              try {
+                deleteAiModel(model.id);
+              } catch (e) {
+                setError(errorMessage(e));
+                break;
+              }
+            }
+            syncAiModels();
+          },
+        },
+      ],
+    );
+
   return (
     <View style={styles.container}>
       <View style={commonStyles.header}>
@@ -128,22 +212,49 @@ export function StorageScreen() {
           <CardHeader
             title="AI models"
             action={
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh AI models"
-                disabled={refreshing}
-                hitSlop={8}
-                onPress={reload}
-                style={styles.refresh}
-              >
-                {refreshing ? (
-                  <ActivityIndicator color={colors.accent} />
-                ) : (
-                  <RefreshCw size={22} color={colors.accent} strokeWidth={1.8} />
+              <View style={styles.actions}>
+                {notDownloaded.length > 0 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Download all AI models"
+                    disabled={downloading !== null}
+                    hitSlop={8}
+                    onPress={downloadAll}
+                    style={[styles.refresh, downloading !== null && { opacity: 0.4 }]}
+                  >
+                    <Download size={22} color={colors.success} strokeWidth={1.8} />
+                  </Pressable>
                 )}
-              </Pressable>
+                {downloaded.length > 0 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete all AI models"
+                    disabled={downloading !== null}
+                    hitSlop={8}
+                    onPress={removeAll}
+                    style={[styles.refresh, downloading !== null && { opacity: 0.4 }]}
+                  >
+                    <Trash2 size={22} color={colors.danger} strokeWidth={1.8} />
+                  </Pressable>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh AI models"
+                  disabled={refreshing}
+                  hitSlop={8}
+                  onPress={reload}
+                  style={styles.refresh}
+                >
+                  {refreshing ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : (
+                    <RefreshCw size={22} color={colors.accent} strokeWidth={1.8} />
+                  )}
+                </Pressable>
+              </View>
             }
           />
+          <AiProgressBar tasks={downloadTasks} label="Downloading AI models" pulse={false} />
           {[...groups].map(([subject, members]) => (
             <View key={subject}>
               <Pressable
@@ -172,9 +283,21 @@ export function StorageScreen() {
                           : `Not downloaded · ${formatBytes(model.downloadSizeBytes)}`}
                       </Text>
                     </View>
-                    {downloading === model.id ? (
-                      <View style={styles.button}>
-                        <ActivityIndicator color={colors.accent} />
+                    {model.id in downloadTasks && !model.downloaded ? (
+                      <View style={[styles.button, styles.progressButton]}>
+                        <View pointerEvents="none" style={styles.progressFill}>
+                          <AiProgressBar
+                            tasks={{ [model.id]: downloadTasks[model.id] }}
+                            label={`Downloading ${model.title}`}
+                            height={36}
+                            radius={8}
+                            bare
+                            pulse={false}
+                          />
+                        </View>
+                        <Text style={[styles.buttonText, { color: colors.textPrimary }]}>
+                          {downloading === model.id ? 'Downloading' : 'Waiting'}
+                        </Text>
                       </View>
                     ) : model.downloaded ? (
                       <Pressable
@@ -201,10 +324,6 @@ export function StorageScreen() {
             </View>
           ))}
         </Card>
-        <Text style={styles.note}>
-          AI features download their models the first time you use them. Delete one to free space; it downloads again
-          when needed.
-        </Text>
         {error && <Text style={styles.error}>{error}</Text>}
       </ScrollView>
     </View>

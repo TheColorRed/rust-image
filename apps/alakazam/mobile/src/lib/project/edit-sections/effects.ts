@@ -50,7 +50,7 @@ export const effects: EditSection = {
     {
       kind: 'slider',
       key: 'action-vignette',
-      label: 'Dark Corners',
+      label: 'Vignette',
       applyOnSelect: false,
       tool: (photo, [value]) => vignette(photo, value / 100),
       thumb: photo => vignette(photo, 1),

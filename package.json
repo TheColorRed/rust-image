@@ -16,6 +16,7 @@
   "workspaces": [
     "apps/alakazam/desktop",
     "apps/alakazam/mobile",
+    "apps/alakazam/website",
     "apps/docs",
     "packages/node/*",
     "packages/react-native/*"

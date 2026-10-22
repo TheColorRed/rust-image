@@ -15,6 +15,10 @@ on:
         description: Build the iOS mobile app
         type: boolean
         default: true
+      website:
+        description: Build and publish the website
+        type: boolean
+        default: true
   push:
     tags:
       - 'v*'
@@ -77,13 +81,13 @@ jobs:
           $packagedApp = (Resolve-Path release/desktop/Alakazam-win32-x64).Path
           npx --yes electron-builder@26.15.3 --projectDir release/desktop-source --config $config --config.electronVersion=$electronVersion --prepackaged $packagedApp --win portable --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path release/Alakazam-windows-x64.exe)) { throw 'Portable Windows executable was not generated' }
+          if (-not (Test-Path release/alakazam.exe)) { throw 'Portable Windows executable was not generated' }
 
       - name: Upload desktop build
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: release/Alakazam-windows-x64.exe
+          path: release/alakazam.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -131,13 +135,13 @@ jobs:
       - name: Stage Android APK
         run: |
           mkdir -p release
-          cp apps/alakazam/mobile/android/app/build/outputs/apk/release/app-release.apk release/Alakazam-android-release.apk
+          cp apps/alakazam/mobile/android/app/build/outputs/apk/release/app-release.apk release/alakazam.apk
 
       - name: Upload mobile build (release)
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: release/Alakazam-android-release.apk
+          path: release/alakazam.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -147,7 +151,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Upload Android APK to S3
-        run: aws s3 cp release/Alakazam-android-release.apk "s3://${{ vars.S3_BUCKET }}/releases/${{ github.run_number }}/Alakazam-android-release.apk"
+        run: aws s3 cp release/alakazam.apk "s3://${{ vars.S3_BUCKET }}/releases/alakazam.apk"
 
   ios-mobile:
     name: Mobile (iOS unsigned IPA)
@@ -215,13 +219,13 @@ jobs:
           test -f release/Payload/Alakazam.app/Info.plist
           test -f release/Payload/Alakazam.app/main.jsbundle
           cd release
-          ditto -c -k --keepParent Payload Alakazam-ios-unsigned.ipa
+          ditto -c -k --keepParent Payload alakazam.ipa
 
       - name: Upload unsigned iOS IPA
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: release/Alakazam-ios-unsigned.ipa
+          path: release/alakazam.ipa
           if-no-files-found: error
           retention-days: 30
 
@@ -231,4 +235,38 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Upload iOS IPA to S3
-        run: aws s3 cp release/Alakazam-ios-unsigned.ipa "s3://${{ vars.S3_BUCKET }}/releases/${{ github.run_number }}/Alakazam-ios-unsigned.ipa"
+        run: aws s3 cp release/alakazam.ipa "s3://${{ vars.S3_BUCKET }}/releases/alakazam.ipa"
+
+  website:
+    name: Website
+    if: github.event_name != 'workflow_dispatch' || inputs.website
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build website
+        run: npm run docs:build -w apps/alakazam/website
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload website to S3
+        run: aws s3 sync apps/alakazam/website/.vitepress/dist "s3://${{ vars.S3_BUCKET }}/website" --delete
+
+      - name: Clear CloudFront cache
+        if: vars.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: aws cloudfront create-invalidation --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" --paths "/*"

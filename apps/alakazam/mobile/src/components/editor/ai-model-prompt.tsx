@@ -1,6 +1,6 @@
 import { downloadAiModel } from '@alakazam/mobile';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 import { detectSkin } from '@/src/lib/ai/analysis';
 import { refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
@@ -31,6 +31,8 @@ export function AiModelPrompt() {
   const request = useObservable(aiModelsRequested$, null);
   const [missing, setMissing] = useState<AiModelListing[]>([]);
   const [downloading, setDownloading] = useState(false);
+  /** How far the download has got, from 0 to 1 across every model being downloaded. */
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const styles = useMemo(
     () =>
@@ -91,9 +93,12 @@ export function AiModelPrompt() {
 
   const download = async () => {
     setError(null);
+    setProgress(0);
     setDownloading(true);
     try {
-      for (const model of missing) await downloadAiModel(model.file);
+      for (const [index, model] of missing.entries()) {
+        await downloadAiModel(model.file, { update: share => setProgress((index + share) / missing.length) });
+      }
       syncAiModels();
       if (request) {
         // Now that the models are here, do what was asked.
@@ -164,7 +169,7 @@ export function AiModelPrompt() {
               onPress={download}
               style={[styles.button, styles.accept]}
             >
-              {downloading ? <ActivityIndicator color="#fff" /> : <Text style={styles.acceptText}>Download</Text>}
+              <Text style={styles.acceptText}>{downloading ? `${Math.round(progress * 100)}%` : 'Download'}</Text>
             </Pressable>
           </View>
         </View>

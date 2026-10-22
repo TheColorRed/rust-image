@@ -215,6 +215,7 @@ function saveOpenProject() {
       }
     }
     const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
+    if (__DEV__) console.debug('[project] saving on close:', savedProject.masks?.length ?? 0, 'masks, groups', savedProject.maskGroups);
     openProject.next(savedProject);
     updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
   } catch (error) {
@@ -282,7 +283,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   // What the models find is saved as soon as it is found, a file at a time without blocking, so closing the editor has little left to
   // write and a crash loses nothing that was found.
   const masksFound = merge(analysisVersion$, people$, skinMask$, faceBoxes$)
-    .pipe(debounceTime(1000))
+    .pipe(debounceTime(300))
     .subscribe(() => saveMasksInBackground());
 
   (async () => {

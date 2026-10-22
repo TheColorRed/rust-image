@@ -44,6 +44,10 @@ export const WORKER_STACK_CHOICES = [4, 8, 16, 32, 64];
 export const workerStackMegabytes = new BehaviorSubject(16);
 export const workerStackMegabytes$ = workerStackMegabytes.asObservable();
 
+/** The stack size the workers were told to use when the app started, or null until the saved settings are read. Changing the setting does not change it. */
+export const workerStackInEffect = new BehaviorSubject<number | null>(null);
+export const workerStackInEffect$ = workerStackInEffect.asObservable();
+
 const STORAGE_KEY = 'settings';
 
 /** Reads the saved settings, then saves every change to them as it happens. A missing or unreadable value keeps its default. */
@@ -59,6 +63,7 @@ const STORAGE_KEY = 'settings';
   }
   // Tells the library before the first image job, which is when the workers are made.
   setWorkerStackMegabytes(workerStackMegabytes.value);
+  workerStackInEffect.next(workerStackMegabytes.value);
   // Starts after the read, and skips the value it starts with, so the defaults never overwrite what was saved.
   combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$])
     .pipe(skip(1))

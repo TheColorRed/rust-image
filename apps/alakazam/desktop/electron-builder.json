@@ -9,6 +9,6 @@
     "signAndEditExecutable": false
   },
   "portable": {
-    "artifactName": "Alakazam-windows-${arch}.exe"
+    "artifactName": "alakazam.exe"
   }
 }

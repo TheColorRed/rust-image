@@ -175,7 +175,11 @@ export async function saveMasksInBackground() {
       }
       const next = { ...project, ...saved, faceBoxes: boxes };
       openProject.next(next);
-      updateProject(next).catch(error => console.warn('[masks] could not save the project:', errorMessage(error)));
+      if (__DEV__) console.debug('[masks] saving the project record:', next.masks?.length ?? 0, 'masks, groups', next.maskGroups, 'people', next.people?.length);
+      updateProject(next).then(
+        () => __DEV__ && console.debug('[masks] project record saved'),
+        error => console.warn('[masks] could not save the project:', errorMessage(error)),
+      );
     } while (saveAgain);
   } finally {
     savingInBackground = false;
@@ -198,6 +202,9 @@ export async function buildMasks(photo: AbraImage, isCancelled: () => boolean) {
     } finally {
       // The next step loads its own models, so this step's are freed first, and only one step's models are in memory at a time.
       unloadModelsWhenIdle();
+      // What this step found goes to disk before the next step starts, because a later step can run the phone out of memory and
+      // close the app, and what was only in memory would be found again.
+      saveMasksInBackground();
     }
   };
   if (!skinMask.value) await step(() => detectSkin(photo));

@@ -41,6 +41,15 @@ pub struct AiModelFile {
   pub manifest_sha256: Option<String>,
 }
 
+/// Hears how far a model download is. uniffi has no bare closures, so this is a one-method interface.
+#[uniffi::export(with_foreign)]
+pub trait DownloadListener: Send + Sync {
+  /// Called with a value from `0` to `1`: the share of the model file downloaded so far, at most once for each whole percent.
+  /// A download whose size the server does not give reports nothing until it ends. The last call is always `1`, once the model
+  /// and its manifest are saved.
+  fn update(&self, progress: f32);
+}
+
 static DOWNLOAD_LOCK: Mutex<()> = Mutex::new(());
 
 /// A model that is loaded the first time it is used, from the file downloaded for its role, and kept for every use after. It is the
@@ -201,17 +210,18 @@ impl AiModelFile {
     self.manifest_url.is_none() || self.local_manifest_path().is_file()
   }
 
-  /// Returns the local path of the model, downloading it and its manifest first if needed.
-  fn ensure(&self) -> Result<PathBuf, AbraError> {
+  /// Returns the local path of the model, downloading it and its manifest first if needed, and telling `p_listener` how far the
+  /// model file has got.
+  fn ensure(&self, p_listener: Option<&dyn DownloadListener>) -> Result<PathBuf, AbraError> {
     self.check()?;
     let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = self.local_path();
 
     let result = fs::create_dir_all(model_dir())
       .map_err(|e| format!("Cannot create the model folder: {e}"))
-      .and_then(|_| self.ensure_file(&self.url, &self.sha256, &path))
+      .and_then(|_| self.ensure_file(&self.url, &self.sha256, &path, p_listener))
       .and_then(|_| match (&self.manifest_url, &self.manifest_sha256) {
-        (Some(url), Some(sha256)) => self.ensure_file(url, sha256, &self.local_manifest_path()),
+        (Some(url), Some(sha256)) => self.ensure_file(url, sha256, &self.local_manifest_path(), None),
         _ => Ok(()),
       });
     match result {
@@ -223,6 +233,9 @@ impl AiModelFile {
             let _ = fs::remove_file(entry.path());
           }
         }
+        if let Some(listener) = p_listener {
+          listener.update(1.0);
+        }
         Ok(path)
       }
       Err(message) => Err(AbraError::Ai { message }),
@@ -230,8 +243,14 @@ impl AiModelFile {
   }
 
   /// Makes sure `p_path` holds the file at `p_url` with hash `p_sha256`: keeps a file that already matches, otherwise
-  /// downloads it.
-  fn ensure_file(&self, p_url: &str, p_sha256: &str, p_path: &Path) -> Result<(), String> {
+  /// downloads it, telling `p_listener` how far it has got.
+  fn ensure_file(
+    &self,
+    p_url: &str,
+    p_sha256: &str,
+    p_path: &Path,
+    p_listener: Option<&dyn DownloadListener>,
+  ) -> Result<(), String> {
     if p_path.exists() {
       match hash_file(p_path) {
         Ok(hash) if hash == p_sha256 => return Ok(()),
@@ -243,7 +262,7 @@ impl AiModelFile {
 
     let partial = p_path.with_extension("part");
     let result = self
-      .download(p_url, p_sha256, &partial)
+      .download(p_url, p_sha256, &partial, p_listener)
       .and_then(|_| fs::rename(&partial, p_path).map_err(|e| format!("Cannot save the {} model: {e}", self.role)));
     if result.is_err() {
       let _ = fs::remove_file(&partial);
@@ -251,18 +270,36 @@ impl AiModelFile {
     result
   }
 
-  /// Downloads the file at `p_url` to `p_partial` and checks its hash.
-  fn download(&self, p_url: &str, p_sha256: &str, p_partial: &Path) -> Result<(), String> {
+  /// Downloads the file at `p_url` to `p_partial` and checks its hash. `p_listener` hears the share downloaded, once for each
+  /// whole percent, when the server says how big the file is.
+  fn download(
+    &self,
+    p_url: &str,
+    p_sha256: &str,
+    p_partial: &Path,
+    p_listener: Option<&dyn DownloadListener>,
+  ) -> Result<(), String> {
     let response = ureq::get(p_url).call().map_err(|e| format!("Failed to download the {} model: {e}", self.role))?;
+    let total = response.body().content_length().filter(|total| *total > 0);
     let mut reader = response.into_body().into_reader();
     let mut file = fs::File::create(p_partial).map_err(|e| format!("Cannot create {p_partial:?}: {e}"))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
+    let mut downloaded = 0u64;
+    let mut reported = u64::MAX;
     loop {
       let read =
         reader.read(&mut buffer).map_err(|e| format!("Download of the {} model was interrupted: {e}", self.role))?;
       if read == 0 {
         break;
+      }
+      downloaded += read as u64;
+      if let (Some(listener), Some(total)) = (p_listener, total) {
+        let percent = (downloaded * 100 / total).min(100);
+        if percent != reported {
+          reported = percent;
+          listener.update(percent as f32 / 100.0);
+        }
       }
       hasher.update(&buffer[..read]);
       file.write_all(&buffer[..read]).map_err(|e| format!("Cannot write the {} model: {e}", self.role))?;
@@ -311,10 +348,11 @@ pub fn downloaded_ai_model_bytes(model: AiModelFile) -> u64 {
   model.size_on_disk().unwrap_or(0)
 }
 
-/// Downloads an AI model, and its manifest, unless they are already on this device.
+/// Downloads an AI model, and its manifest, unless they are already on this device. The listener hears how far the model file
+/// has got. It is not optional: the bindings generator cannot pass a TypeScript object inside an `Option`.
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn download_ai_model(model: AiModelFile) -> Result<(), AbraError> {
-  image_workers::run(move || model.ensure().map(|_| ())).await
+pub async fn download_ai_model(model: AiModelFile, listener: Arc<dyn DownloadListener>) -> Result<(), AbraError> {
+  image_workers::run(move || model.ensure(Some(listener.as_ref())).map(|_| ())).await
 }
 
 /// Where a downloaded AI model is on this device, for `AiModel.load`. Its manifest is beside it. Works offline. Fails when

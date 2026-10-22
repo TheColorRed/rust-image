@@ -14,7 +14,8 @@ export interface PickedImage {
 }
 
 export interface FilePickerProps {
-  onPick?: (asset: PickedImage) => void;
+  /** Called once with every image that was chosen and copied, in the order they were chosen. */
+  onPick?: (assets: PickedImage[]) => void;
   title?: string;
   subtitle?: string;
   variant?: 'default' | 'card';
@@ -67,6 +68,7 @@ export function FilePicker({
         destination: 'cachesDirectory',
       });
       const failures: string[] = [];
+      const assets: PickedImage[] = [];
       [firstCopy, ...restCopies].forEach((copy, index) => {
         const file = files[index];
         if (copy.status !== 'success') {
@@ -80,9 +82,12 @@ export function FilePicker({
           mimeType: file.type,
           fileCopyUri: copy.localUri,
         };
-        setSelected(asset);
-        onPick?.(asset);
+        assets.push(asset);
       });
+      if (assets.length > 0) {
+        setSelected(assets[assets.length - 1]);
+        onPick?.(assets);
+      }
       setError(failures.length > 0 ? `Could not copy ${failures.length} image(s):\n${failures.join('\n')}` : null);
     } catch (e: any) {
       if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {

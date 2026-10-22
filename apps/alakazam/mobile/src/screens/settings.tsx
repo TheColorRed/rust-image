@@ -9,6 +9,8 @@ import {
   exportFormat$,
   exportQuality,
   exportQuality$,
+  workerStackInEffect,
+  workerStackInEffect$,
   workerStackMegabytes,
   workerStackMegabytes$,
 } from '@/src/state/settings';
@@ -30,6 +32,7 @@ export function SettingsScreen() {
   const format = useObservable(exportFormat$, exportFormat.value);
   const quality = useObservable(exportQuality$, exportQuality.value);
   const stack = useObservable(workerStackMegabytes$, workerStackMegabytes.value);
+  const stackInEffect = useObservable(workerStackInEffect$, workerStackInEffect.value);
   const iconRefs = useRef<Record<string, ElementRef<typeof Pressable> | null>>({});
   /** The setting whose tooltip is open and the window point just under its icon, or null. */
   const [tip, setTip] = useState<{ key: string; x: number; y: number } | null>(null);
@@ -87,6 +90,7 @@ export function SettingsScreen() {
           borderColor: colors.border,
           backgroundColor: colors.surface,
         },
+        note: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.warning },
         tooltipText: { fontSize: 14, color: colors.textPrimary },
         segmented: {
           flexDirection: 'row',
@@ -108,6 +112,8 @@ export function SettingsScreen() {
     key: string;
     title: string;
     help: string;
+    /** A notice shown beside the help icon, or nothing when there is none. */
+    note?: string;
     options: { value: string; label: string }[];
     value: string;
     onSelect: (value: any) => void;
@@ -149,6 +155,7 @@ export function SettingsScreen() {
       title: 'Photo processing memory',
       help: 'How much working room each photo job gets. If the app closes by itself while it prepares a photo, try a bigger size. It only takes effect the next time you open the app.',
       options: WORKER_STACK_CHOICES.map(megabytes => ({ value: String(megabytes), label: `${megabytes} MB` })),
+      note: stackInEffect !== null && stack !== stackInEffect ? 'Reopen the app to apply' : undefined,
       value: String(stack),
       onSelect: value => workerStackMegabytes.next(Number(value)),
     },
@@ -187,6 +194,7 @@ export function SettingsScreen() {
                       >
                         <CircleQuestionMark color={colors.textMuted} size={16} />
                       </Pressable>
+                      {setting.note !== undefined && <Text style={styles.note}>{setting.note}</Text>}
                     </View>
                     <View style={styles.segmented}>
                       {setting.options.map(option => {

@@ -9,8 +9,10 @@ import { openEditorSession } from '@/src/lib/editor/editor-session';
 import { useTheme } from '@/src/lib/ui/theme';
 import { closeRequested } from '@/src/state/commands';
 import { bottomInset, topInset } from '@/src/state/preview';
+import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { useEffect, useRef } from 'react';
 import { BackHandler, View } from 'react-native';
+import { useObservable } from 'react-rx';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type { EditablePhoto } from '@/src/lib/editor/edit-source';
@@ -30,6 +32,7 @@ export interface EditScreenProps {
 export function EditScreen({ photo, onClose }: EditScreenProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const aiTasks = useObservable(aiProgress$, aiProgress.value);
 
   useEffect(() => openEditorSession(photo), [photo.uri]);
 
@@ -56,7 +59,7 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <EditorPreview />
       <EditorToolbar photo={photo} onClose={onClose} />
-      <AiProgressBar />
+      <AiProgressBar tasks={aiTasks} />
       <EditorPanel />
       <AiPendingNotice />
       <AiModelPrompt />

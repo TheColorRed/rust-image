@@ -17,6 +17,8 @@ export interface ThemeColors {
   textTertiary: string;
   textMuted: string;
   danger: string;
+  /** A yellow for a notice that is not an error, such as a setting that needs the app to be reopened. */
+  warning: string;
   success: string;
   placeholder: string;
   /** Translucent pill/chip background (e.g. the edit screen's section tabs). */
@@ -40,6 +42,7 @@ const lightColors: ThemeColors = {
   textTertiary: '#9ca3af',
   textMuted: '#888888',
   danger: '#d22',
+  warning: '#b7791f',
   success: '#2a7',
   placeholder: '#eeeeee',
   chip: 'rgba(0,0,0,0.06)',
@@ -57,6 +60,7 @@ const darkColors: ThemeColors = {
   textTertiary: '#8e8e93',
   textMuted: '#98989d',
   danger: '#ff453a',
+  warning: '#ffd60a',
   success: '#32d74b',
   placeholder: '#2c2c2e',
   chip: 'rgba(255,255,255,0.12)',

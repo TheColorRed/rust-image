@@ -102,7 +102,7 @@ export default function AbraScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Alakazam</Text>
-      <FilePicker onPick={load} />
+      <FilePicker onPick={assets => load(assets[assets.length - 1])} />
       {source && (
         <View style={styles.operations}>
           {OPERATIONS.map((operation) => (

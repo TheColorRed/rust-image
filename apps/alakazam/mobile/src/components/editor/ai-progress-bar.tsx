@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
-import { useObservable } from 'react-rx';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '@/src/lib/ui/theme';
-import { aiProgress, aiProgress$, overallProgress } from '@/src/state/ai-progress';
+import { overallProgress } from '@/src/state/ai-progress';
 
+/** How tall the bar is unless the caller says, which a bar that fills a button does. */
 const HEIGHT = 4;
 /** The colors the bar flows through, in the order they follow each other: blue, violet, pink. Stronger than a soft banner so a thin line shows. */
 const FLOW = ['#4F8CFF', '#8B5CF6', '#FF6FB5'];
@@ -20,14 +20,33 @@ const GUESS_LIMIT = 0.9;
 const GUESS_MS = 3000;
 
 /**
- * A thin bar between the photo and the panel that shows while an AI model runs: a gradient that keeps flowing sideways. It always starts
+ * A thin bar that shows while AI work runs, such as under the editor's photo or on the Storage screen while models download: a gradient that keeps flowing sideways. It always starts
  * empty at the left and fills toward the right. It fills as far as the tasks say they have got; a task that does not say is guessed
  * from the time it has been running, and the bar pulses while any of it is a guess. It always takes its height, empty when nothing runs,
  * so the photo does not change size when it appears (a new size would draw the photo again).
  */
-export function AiProgressBar() {
+export function AiProgressBar({
+  tasks,
+  label = 'AI is working',
+  height = HEIGHT,
+  radius = height / 2,
+  bare = false,
+  pulse: isPulse = true,
+}: {
+  /** The work to show, by name, in the form of `aiProgress`: a value from 0 to 1, 1 when finished, or null when it does not say. */
+  tasks: Record<string, number | null>;
+  /** What a screen reader says the bar is for. */
+  label?: string;
+  /** How tall the bar is. */
+  height?: number;
+  /** How round the corners of the bar are. */
+  radius?: number;
+  /** Leaves the part that is not filled yet see-through, instead of tinting it. */
+  bare?: boolean;
+  /** Whether the bar fades down and up while part of what it shows is a guess. On unless a caller turns it off. */
+  pulse?: boolean;
+}) {
   const { colors } = useTheme();
-  const tasks = useObservable(aiProgress$, aiProgress.value);
   const running = Object.keys(tasks).length > 0;
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -49,10 +68,10 @@ export function AiProgressBar() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        track: { height: HEIGHT, borderRadius: HEIGHT / 2, overflow: 'hidden', backgroundColor: running ? colors.chip : 'transparent' },
-        clip: { height: HEIGHT, overflow: 'hidden' },
+        track: { height, borderRadius: radius, overflow: 'hidden', backgroundColor: running && !bare ? colors.chip : 'transparent' },
+        clip: { height, overflow: 'hidden' },
       }),
-    [colors, running],
+    [colors, running, height, radius, bare],
   );
 
   useEffect(() => {
@@ -69,7 +88,7 @@ export function AiProgressBar() {
     return () => loop.stop();
   }, [running, flow]);
 
-  const pulsing = running && unsure;
+  const pulsing = isPulse && running && unsure;
   useEffect(() => {
     pulse.setValue(1);
     if (!pulsing) return;
@@ -94,7 +113,7 @@ export function AiProgressBar() {
         setWidth(event.nativeEvent.layout.width);
       }}
       accessibilityRole="progressbar"
-      accessibilityLabel="AI is working"
+      accessibilityLabel={label}
       accessibilityValue={running ? { min: 0, max: 100, now: Math.round(progress * 100) } : undefined}
     >
       {running && width > 0 ? (
@@ -103,7 +122,7 @@ export function AiProgressBar() {
             <Animated.View
               style={{ width: width * 2, transform: [{ translateX: flow.interpolate({ inputRange: [0, 1], outputRange: [0, -width] }) }] }}
             >
-              <Svg width={width * 2} height={HEIGHT}>
+              <Svg width={width * 2} height={height}>
                 <Defs>
                   <LinearGradient id="ai-flow" x1="0" y1="0" x2="1" y2="0">
                     {stops.map((color, index) => (
@@ -111,7 +130,7 @@ export function AiProgressBar() {
                     ))}
                   </LinearGradient>
                 </Defs>
-                <Rect width={width * 2} height={HEIGHT} fill="url(#ai-flow)" />
+                <Rect width={width * 2} height={height} fill="url(#ai-flow)" />
               </Svg>
             </Animated.View>
           </Animated.View>
