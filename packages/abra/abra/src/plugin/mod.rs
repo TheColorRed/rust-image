@@ -11,12 +11,27 @@
 //! | `models` | an AI model and its manifest (see `abra-ai-core`, `graph`) | the AI runtime (`AiModel`) |
 //! | `pipelines` | a list of library operations with their settings | the host, which maps each `op` to the library |
 //! | `scripts` | a TypeScript module that uses the same bindings as the app | the host's JavaScript engine |
+//! | `controls` | a control for the editor (a slider with the code that paints it), placed by its `root` and its own `path` | the editor |
+//!
+//! A plugin may also declare an ordered settings form with `text` and single-select `option` fields.
 //!
 //! ```yaml
 //! id: lama-object-removal          # lowercase words joined by dashes; names the plugin
 //! name: LaMa object removal
 //! version: 1.0.0
 //! description: Removes objects from a photo with LaMa.
+//! settings:                         # optional settings, shown in this order
+//!   - type: text
+//!     id: api-token
+//!     attributes:
+//!       label: API token
+//!       placeholder: Enter a token
+//!   - type: option
+//!     id: quality
+//!     attributes:
+//!       label: Quality
+//!       options: [fast, balanced, best]
+//!       default: balanced
 //! dependencies:                   # optional: plugins that have to be installed for this one to be used
 //!   - id: ai-face-landmarks
 //! contributes:
@@ -39,6 +54,11 @@
 //!       title: Collage
 //!       capabilities: [generator]
 //!       entry: collage.js
+//!   controls:                      # controls for the editor, under one root or several
+//!     - root: Beauty/Makeup        # the tab and groups they go in, by the names people see; made if they are not there
+//!       items:
+//!         - path: Lipstick         # under the root; `Eyes/Eyeliner` would put it in a group Eyes
+//!           entry: lipstick.js     # its default export is a function that returns the control
 //! files:                           # only for a plugin that is downloaded: what to fetch, beside the plugin.yml
 //!   - path: lama_fp32.onnx
 //!     sha256: 1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6
@@ -60,6 +80,7 @@ mod registry;
 
 pub use error::PluginError;
 pub use manifest::{
-  Dependency, ModelContribution, PipelineContribution, PipelineStep, PluginFile, PluginManifest, ScriptContribution, StepValue,
+  ControlContribution, Dependency, ModelContribution, PipelineContribution, PipelineStep, PluginFile, PluginManifest,
+  PluginSetting, ScriptContribution, StepValue,
 };
 pub use registry::{Contribution, Plugin, PluginProblem, PluginRegistry};

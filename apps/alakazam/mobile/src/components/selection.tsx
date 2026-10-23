@@ -1,5 +1,9 @@
 import { useTheme } from '@/src/lib/ui/theme';
-import { ArrowLeftIcon, CheckIcon, ImageMinusIcon, ImagesIcon, XIcon } from 'lucide-react-native';
+import ArrowLeftIcon from 'lucide-react-native/icons/arrow-left';
+import CheckIcon from 'lucide-react-native/icons/check';
+import ImageMinusIcon from 'lucide-react-native/icons/image-minus';
+import ImagesIcon from 'lucide-react-native/icons/images';
+import XIcon from 'lucide-react-native/icons/x';
 import { useState } from 'react';
 import { FlatList, Image, Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

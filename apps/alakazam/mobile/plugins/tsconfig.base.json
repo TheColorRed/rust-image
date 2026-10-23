@@ -1,0 +1,17 @@
+{
+  // Shared by the plugins of the app. A plugin's script runs in the app's own JavaScript engine and is written against the app's types, so
+  // it is checked with the app's settings. This only type-checks (`node scripts/build-plugins.mjs` builds, and runs this check first).
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // What a plugin can import besides the Abra library: `@alakazam/host`, which is the single list of what the app offers plugins
+    // (`src/lib/plugins/host-api.ts`), and the app's own paths, which that list is written with.
+    "paths": {
+      "@/*": ["../*"],
+      "@alakazam/host": ["../src/lib/plugins/host-api.ts"]
+    }
+  },
+  // Each plugin names its own sources.
+  "include": [],
+  "exclude": ["**/node_modules", "**/*.js"]
+}

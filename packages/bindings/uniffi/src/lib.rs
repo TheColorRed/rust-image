@@ -45,7 +45,8 @@ pub use adjustments::{
   selective_color, threshold, vibrance, curves,
 };
 pub use plugins::{
-  PipelineStep, PluginInfo, PluginModel, PluginPipeline, PluginProblem, PluginScan, PluginScript, StepValue, scan_plugins,
+  PipelineStep, PluginControl, PluginInfo, PluginModel, PluginPipeline, PluginProblem, PluginScan, PluginScript, StepValue,
+  scan_plugins,
 };
 pub use ai::{
   AiListening, AiModel, AiOutput, AiOutputKind, BodyParser, BodySegments, ImageModel, Instance, LabelMap, Listening,

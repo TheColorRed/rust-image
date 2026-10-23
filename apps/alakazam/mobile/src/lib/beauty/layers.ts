@@ -82,13 +82,7 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
     }
     const composeStarted = Date.now();
     const flat = root.asImage();
-    if (__DEV__) {
-      console.debug(
-        `[layers] ${photo.width()}x${photo.height()} canvas, base + ${laid.length} sheets:`,
-        laid.join(', ') || 'none',
-        `| paint ${paintMs.toFixed(0)} ms, compose ${(Date.now() - composeStarted).toFixed(0)} ms, total ${(Date.now() - started).toFixed(0)} ms`,
-      );
-    }
+    if (__DEV__) console.debug(`[layers] ${photo.width()}x${photo.height()} canvas, base + ${laid.length} sheets:`, laid.join(', ') || 'none', `| paint ${paintMs.toFixed(0)} ms, compose ${(Date.now() - composeStarted).toFixed(0)} ms, total ${(Date.now() - started).toFixed(0)} ms`);
     return flat;
   } finally {
     // They are native objects the garbage collector cannot see the size of.

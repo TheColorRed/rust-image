@@ -17,6 +17,9 @@ A plugin is a folder with a `plugin.yml` that says what it adds. What it adds ar
 | `models`     | An AI model and its manifest.                                          | The AI runtime (`AiModel`), from the manifest alone.    |
 | `pipelines`  | A list of library operations, each with its settings.                  | The host, which maps each `op` to the library.          |
 | `scripts`    | A TypeScript module that uses the same bindings as the app itself.     | The host's JavaScript engine.                           |
+| `controls`   | A control for the editor, placed in a tab and group the plugin names.  | The editor, which runs the control's script.            |
+
+A plugin can also declare an optional settings form with `text` and single-select `option` fields. See [Writing a plugin](./writing-plugins#settings).
 
 ## A plugin
 

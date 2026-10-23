@@ -14,7 +14,7 @@ import type { EditablePhoto } from '@/src/screens/editor';
 import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-store';
 import { addProject, projects$, removeProjects } from '@/src/state/projects';
 import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
-import { CameraIcon } from 'lucide-react-native';
+import CameraIcon from 'lucide-react-native/icons/camera';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,

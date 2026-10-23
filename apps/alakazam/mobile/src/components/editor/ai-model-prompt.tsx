@@ -14,7 +14,7 @@ import {
   aiModelsVersion,
   type AiModelListing,
 } from '@/src/state/ai-models';
-import { isPersonControlFocused$ } from '@/src/state/edits';
+import { isSkinControlFocused$ } from '@/src/state/edits';
 import { currentImage, editBaseImage, originalImage } from '@/src/state/session';
 
 /**
@@ -26,7 +26,7 @@ import { currentImage, editBaseImage, originalImage } from '@/src/state/session'
  */
 export function AiModelPrompt() {
   const { colors } = useTheme();
-  const skinControlFocused = useObservable(isPersonControlFocused$, false);
+  const skinControlFocused = useObservable(isSkinControlFocused$, false);
   const request = useObservable(aiModelsRequested$, null);
   const [missing, setMissing] = useState<AiModelListing[]>([]);
   const [downloading, setDownloading] = useState(false);

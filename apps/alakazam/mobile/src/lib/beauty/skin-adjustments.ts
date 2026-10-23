@@ -1,41 +1,9 @@
 import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
-import {
-  BROW_BONE_KEY,
-  EYELINER_KEY,
-  EYESHADOW_KEY,
-  LIPSTICK_KEY,
-  HAIR_COLOR_KEY,
-  SKIN_EVEN_OUT_KEY,
-  SKIN_SMOOTH_KEY,
-  SKIN_TAN_KEY,
-  SKIN_TONE_KEY,
-  UNDER_EYE_KEY,
-  BLUSH_KEY,
-  LIP_LINER_KEY,
-  HIGHLIGHTER_KEY,
-  CONTOUR_KEY,
-  TEETH_WHITENING_KEY,
-} from '@/src/lib/project/edit-sections/keys';
+import { isPersonControlKey } from '@/src/state/control-traits';
 
 /** The controls that can be set for one person, or for everyone. */
 export function isPersonAdjustment(key: string): boolean {
-  return (
-    key === SKIN_EVEN_OUT_KEY ||
-    key === SKIN_SMOOTH_KEY ||
-    key === SKIN_TAN_KEY ||
-    key === SKIN_TONE_KEY ||
-    key === LIPSTICK_KEY ||
-    key === EYELINER_KEY ||
-    key === EYESHADOW_KEY ||
-    key === BROW_BONE_KEY ||
-    key === UNDER_EYE_KEY ||
-      key === BLUSH_KEY ||
-      key === LIP_LINER_KEY ||
-      key === HIGHLIGHTER_KEY ||
-      key === CONTOUR_KEY ||
-      key === TEETH_WHITENING_KEY ||
-      key === HAIR_COLOR_KEY
-  );
+  return isPersonControlKey(key);
 }
 
 export function adjustmentKey(key: string, personId: number | null): string {

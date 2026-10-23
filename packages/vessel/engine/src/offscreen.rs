@@ -1,7 +1,7 @@
 //! Rendering a stream's newest state without a window or a surface.
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use pub_sub::{BehaviorSubject, Observable, Observer, Subscription};
@@ -195,6 +195,28 @@ impl Offscreen {
   }
 }
 
+impl Offscreen {
+  /// A handle to this renderer that does not keep it alive.
+  pub fn downgrade(&self) -> WeakOffscreen {
+    WeakOffscreen { inner: Arc::downgrade(&self.inner) }
+  }
+}
+
+/// A handle to an [`Offscreen`] that does not keep it alive. What the renderer's own drawing code refers back to it through (to
+/// [`wake`](Offscreen::wake) it, say) holds one of these, because the renderer owns that code, and code that held the renderer
+/// itself would keep it alive forever: the engine, the code and the last frame would never be freed.
+#[derive(Clone)]
+pub struct WeakOffscreen {
+  inner: Weak<Inner>,
+}
+
+impl WeakOffscreen {
+  /// The renderer, if it is still alive.
+  pub fn upgrade(&self) -> Option<Offscreen> {
+    self.inner.upgrade().map(|inner| Offscreen { inner })
+  }
+}
+
 impl Observable<RenderedFrame> for Offscreen {
   fn upstream(&self) -> Box<dyn Any + Send + Sync> {
     Box::new(self.clone())
@@ -254,6 +276,33 @@ mod tests {
       }
     }
     drop((subscription, output));
+  }
+
+  #[test]
+  fn a_renderer_whose_drawing_code_holds_a_weak_handle_to_itself_is_freed_when_dropped() {
+    let state = BehaviorSubject::new(1u8);
+    // Held by the drawing code and the renderer's slot, as a component that wakes its own renderer does.
+    let held = Arc::new(Mutex::new(None::<WeakOffscreen>));
+    let output = {
+      let held = Arc::clone(&held);
+      Offscreen::new(&state, move |value| {
+        let _ = &held;
+        frame(*value)
+      })
+    };
+    *held.lock().unwrap() = Some(output.downgrade());
+    assert_eq!(Arc::strong_count(&held), 2, "the drawing code holds it");
+    assert!(held.lock().unwrap().as_ref().unwrap().upgrade().is_some(), "alive while the renderer is held");
+
+    drop(output);
+
+    // The engine frees the drawing code when it closes, which is not instant.
+    let freed = (0..200).any(|_| {
+      std::thread::sleep(Duration::from_millis(10));
+      Arc::strong_count(&held) == 1
+    });
+    assert!(freed, "the drawing code is still alive: the renderer was kept alive by its own handle");
+    assert!(held.lock().unwrap().as_ref().unwrap().upgrade().is_none(), "nothing keeps the renderer alive");
   }
 
   #[test]

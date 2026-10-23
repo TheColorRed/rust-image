@@ -1,4 +1,4 @@
-import { RotateCcw } from 'lucide-react-native';
+import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';

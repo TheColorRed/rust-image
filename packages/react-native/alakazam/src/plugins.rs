@@ -82,7 +82,8 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
       .models
       .iter()
       .flat_map(|model| [&model.model, &model.manifest])
-      .chain(manifest.scripts.iter().map(|script| &script.entry));
+      .chain(manifest.scripts.iter().map(|script| &script.entry))
+      .chain(manifest.controls.iter().map(|control| &control.entry));
     for file in named {
       if !manifest.files.iter().any(|listed| &listed.path == file) {
         return Err(format!("The plugin {} names {file} but does not list it in `files`, so it cannot be downloaded", manifest.id));
@@ -131,6 +132,23 @@ pub async fn install_plugin(
     install(&manifest_url, &manifest_sha256, listener.as_ref()).map_err(|message| AbraError::Ai { message })
   })
   .await
+}
+
+/// The text of a script of an installed plugin, for the app's JavaScript engine to run. `path` is a script path as `scanPlugins` gives it.
+/// Only a `.js` file inside the plugins folder is read: a path that leaves it (with `..` or by a link) or any other kind of file is
+/// refused, so a plugin cannot use this to read what is not its own.
+#[uniffi::export]
+pub fn read_plugin_script(path: String) -> Result<String, AbraError> {
+  let refuse = |message: String| Err(AbraError::Io { message });
+  if !path.ends_with(".js") {
+    return refuse(format!("{path} is not a plugin script"));
+  }
+  let root = fs::canonicalize(plugins_dir()).map_err(|e| AbraError::Io { message: format!("No plugins are installed: {e}") })?;
+  let file = fs::canonicalize(&path).map_err(|e| AbraError::Io { message: format!("Cannot find the plugin script {path}: {e}") })?;
+  if !file.starts_with(&root) {
+    return refuse(format!("{path} is not inside the plugins folder"));
+  }
+  fs::read_to_string(&file).map_err(|e| AbraError::Io { message: format!("Cannot read the plugin script {path}: {e}") })
 }
 
 /// Removes an installed plugin and its files. It does nothing when the plugin is not installed.
@@ -333,6 +351,28 @@ contributes:
     assert!(crate::models::ai_model_path("nothing-has-this-id".to_string()).is_err());
     delete_plugin("model-lookup-test".into()).unwrap();
     assert!(crate::models::ai_model_path("lookup-test-model".to_string()).is_err());
+  }
+
+  #[test]
+  fn only_a_script_inside_the_plugins_folder_can_be_read() {
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dir = plugins_dir().join("script-read-test");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("run.js"), "exports.default = () => 1;").unwrap();
+    fs::write(dir.join("notes.txt"), "not a script").unwrap();
+    let script = dir.join("run.js").to_string_lossy().into_owned();
+    assert_eq!(read_plugin_script(script).unwrap(), "exports.default = () => 1;");
+    // Not a script, outside the folder, a way out by `..`, and a file that is not there are all refused.
+    assert!(read_plugin_script(dir.join("notes.txt").to_string_lossy().into_owned()).is_err());
+    let outside = std::env::temp_dir().join("abra-outside-script.js");
+    fs::write(&outside, "exports.default = () => 2;").unwrap();
+    assert!(read_plugin_script(outside.to_string_lossy().into_owned()).is_err());
+    let climbing = dir.join("..").join("..").join("abra-outside-script.js");
+    assert!(read_plugin_script(climbing.to_string_lossy().into_owned()).is_err());
+    assert!(read_plugin_script(dir.join("missing.js").to_string_lossy().into_owned()).is_err());
+    let _ = fs::remove_file(&outside);
+    delete_plugin("script-read-test".into()).unwrap();
   }
 
   #[test]

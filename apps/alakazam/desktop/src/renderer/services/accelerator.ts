@@ -50,9 +50,8 @@ export const addAccelerator = (action: CommandAction) => {
   });
 
   if (action.id && action.callback) state.handlers.set(action.id, action.callback);
-
-  // For easy debugging
   console.log('addAccelerator:', action.key, 'id=', action.id, 'total=', state.accelerators.length);
+
 };
 
 /**
@@ -109,7 +108,6 @@ const handleKeyDown = (event: KeyboardEvent) => {
   pressedKeys.push(event.key.length === 1 ? event.key.toUpperCase() : event.key);
   const pressedCombination = pressedKeys.join('+');
   console.log('Pressed combination:', pressedCombination);
-
   const state = getState();
   const command = state.accelerators.find(cmd => cmd.key === pressedCombination && (cmd.enabled ?? true));
   console.log('Matched command:', command);

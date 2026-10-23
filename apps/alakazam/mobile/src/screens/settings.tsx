@@ -14,7 +14,7 @@ import {
   workerStackMegabytes,
   workerStackMegabytes$,
 } from '@/src/state/settings';
-import { CircleQuestionMark } from 'lucide-react-native';
+import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
 import { Fragment, useMemo, useRef, useState, type ElementRef } from 'react';
 import { useObservable } from 'react-rx';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';

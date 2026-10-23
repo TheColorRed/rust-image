@@ -22,7 +22,16 @@ import {
   previewScaleSettled$,
   springPreview,
 } from '@/src/state/gestures';
-import { Grab, Hand, Lock, Maximize, Minus, Plus, Pointer, RotateCw, Undo2, ZoomIn } from 'lucide-react-native';
+import Grab from 'lucide-react-native/icons/hand-grab';
+import Hand from 'lucide-react-native/icons/hand';
+import Lock from 'lucide-react-native/icons/lock';
+import Maximize from 'lucide-react-native/icons/maximize';
+import Minus from 'lucide-react-native/icons/minus';
+import Plus from 'lucide-react-native/icons/plus';
+import Pointer from 'lucide-react-native/icons/pointer';
+import RotateCw from 'lucide-react-native/icons/rotate-cw';
+import Undo2 from 'lucide-react-native/icons/undo-2';
+import ZoomIn from 'lucide-react-native/icons/zoom-in';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOwning } from '@/src/lib/native/native-handles';
 import { PanResponder, PixelRatio, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';

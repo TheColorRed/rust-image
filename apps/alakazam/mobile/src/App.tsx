@@ -4,6 +4,7 @@ import { EditScreen, type EditablePhoto } from '@/src/screens/editor';
 import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';
 import { PluginsScreen } from '@/src/screens/plugins';
+import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
 import { restoreProjects } from '@/src/state/projects';
 import BootSplash from 'react-native-bootsplash';
 import { useEffect, useState } from 'react';
@@ -36,6 +37,8 @@ function AppContent() {
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    // The plugins' controls are in the editor before any photo opens.
+    loadPlugins();
     restoreProjects().finally(() => setRestored(true));
   }, []);
 

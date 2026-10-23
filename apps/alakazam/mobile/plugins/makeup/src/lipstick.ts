@@ -1,11 +1,18 @@
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { belongsTo } from '@/src/lib/ai/faces';
-import { owning } from '@/src/lib/native/native-handles';
-import { paintSheet, type Painting } from '@/src/lib/beauty/layers';
-import { type ToolContext } from '@/src/lib/project/edit-sections';
+import {
+  MAKEUP_MODELS,
+  belongsTo,
+  derivedFor,
+  makeupMasks,
+  owning,
+  paintSheet,
+  type EditControl,
+  type Painting,
+  type ToolContext,
+} from '@alakazam/host';
+import { lipBlend, lipSwatches } from './lips';
 
 /**
  * How wide the softest edge is, as a fraction of the width of the mouth: the Softness slider's 1. Lipstick has a fairly hard
@@ -54,3 +61,37 @@ export const applyLipstick = (
     paintSheet(sheet, regions, color);
   });
 };
+
+/** The Lipstick control. Its label is the name in the plugin's `plugin.yml`. */
+export default function (): EditControl {
+  return {
+    kind: 'slider',
+    key: 'slider-lipstick',
+    label: 'Lipstick',
+    person: true,
+    face: true,
+    needsModels: { title: 'Lipstick', roles: MAKEUP_MODELS },
+    // First the color (a swatch or the bar), then how much of it, how soft the edge is, and for a custom color how vivid and bright.
+    display: 'tabulated',
+    sliderLabel: ['Color', 'Strength', 'Softness', 'Colorfulness', 'Brightness'],
+    min: [0, 0, 0, 0, 0],
+    max: [1, 1, 1, 1, 1],
+    step: [0.01, 0.01, 0.01, 0.01, 0.01],
+    // Opening the control puts this lipstick on at once (red, lightly), so there is something to change.
+    defaultValue: [0, 0.8, 1, 0.8, 0.8],
+    picker: ['hue', undefined, undefined, undefined, undefined],
+    // Colors people ask for by name, from a shade chart of real lipsticks (each color is read from the chart; its name is the
+    // plain description of it). Shades that were nearly the same color (a color distance under about 8) are left out, so every
+    // swatch is a choice a person can see. A swatch is a hue on the bar (1 minus its degrees around the wheel over 360, since the bar runs
+    // backwards), how vivid it is and how bright. A "sheer" shade also sets a light strength. Black and white come first.
+    swatches: lipSwatches,
+    // The AI finds the lips once, when the control opens; dragging only changes the color, the strength or the edge.
+    preload: makeupMasks,
+    layer: {
+      blend: lipBlend,
+      opacity: ([, amount]) => amount,
+      paint: (sheet, [hue, , softness, saturation, brightness]: number[], context) =>
+        applyLipstick(sheet, hue, softness, saturation, brightness, context),
+    },
+  };
+}

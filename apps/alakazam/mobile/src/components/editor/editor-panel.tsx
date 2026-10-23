@@ -19,22 +19,10 @@ import {
 } from '@/src/lib/ui/color-bars';
 import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai/ai-analyses';
-import { HAIR_MODELS, MAKEUP_MODELS } from '@/src/lib/ai/faces';
 import { aiModelList, aiModelList$, aiModelsRequested } from '@/src/state/ai-models';
+import { pluginControlsVersion$ } from '@/src/state/plugins';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
-import {
-  CONTOUR_KEY,
-  HIGHLIGHTER_KEY,
-  BLUSH_KEY,
-  LIP_LINER_KEY,
-  BROW_BONE_KEY,
-  EYELINER_KEY,
-  EYESHADOW_KEY,
-  HAIR_COLOR_KEY,
-  LIPSTICK_KEY,
-  UNDER_EYE_KEY,
-  OBJECT_REMOVAL_TOOL_KEY,
-} from '@/src/lib/project/edit-sections/keys';
+import { OBJECT_REMOVAL_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
 import {
@@ -109,7 +97,12 @@ import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/
 import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
 import { replayHidden } from '@/src/state/session';
 import { VesselView } from '@vessel/react-native';
-import { ChevronLeft, Redo2, RotateCcw, ScanFace, Undo2, X } from 'lucide-react-native';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import Redo2 from 'lucide-react-native/icons/redo-2';
+import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
+import ScanFace from 'lucide-react-native/icons/scan-face';
+import Undo2 from 'lucide-react-native/icons/undo-2';
+import X from 'lucide-react-native/icons/x';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
@@ -133,6 +126,8 @@ function useFocusedControl() {
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
 export function EditorPanel() {
+  // A plugin that adds or takes away controls changes what the panel lists, so it reads them again then.
+  useObservable(pluginControlsVersion$, 0);
   const bottomInset = useObservable(bottomInset$, 0);
   const activeKey = useObservable(activeSectionKey$, 'section-colorization');
   const canUndo = useObservable(canUndo$, false);
@@ -244,25 +239,11 @@ export function EditorPanel() {
           selectControlRequested.next(control.controls[0]);
         } else if (control.kind === 'group' || control.kind === 'mixed' || control.kind === 'picker') {
           openGroupKey.next(control.key);
-        } else if (
-          [
-            LIPSTICK_KEY,
-            EYELINER_KEY,
-            EYESHADOW_KEY,
-            BROW_BONE_KEY,
-            UNDER_EYE_KEY,
-            BLUSH_KEY,
-            LIP_LINER_KEY,
-            HIGHLIGHTER_KEY,
-            CONTOUR_KEY,
-            HAIR_COLOR_KEY,
-          ].includes(control.key) &&
-          missingModels(control.key === HAIR_COLOR_KEY ? HAIR_MODELS : MAKEUP_MODELS).length > 0
-        ) {
+        } else if (control.kind === 'slider' && control.needsModels && missingModels(control.needsModels.roles).length > 0) {
           // Finding the lips needs the face models, and the hair the hair model; opening the slider without them would do nothing.
           aiModelsRequested.next({
-            title: control.key === HAIR_COLOR_KEY ? 'Hair color' : 'Lipstick',
-            roles: control.key === HAIR_COLOR_KEY ? HAIR_MODELS : MAKEUP_MODELS,
+            title: control.needsModels.title,
+            roles: control.needsModels.roles,
             onReady: () => selectControlRequested.next(control),
           });
         } else {

@@ -1,11 +1,18 @@
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { type ToolContext } from '@/src/lib/project/edit-sections';
-import { derivedFor } from '@/src/lib/editor/editor-preloads';
-import { belongsTo } from '@/src/lib/ai/faces';
-import { owning } from '@/src/lib/native/native-handles';
-import { paintSheet, type Painting } from '@/src/lib/beauty/layers';
+import {
+  MAKEUP_MODELS,
+  belongsTo,
+  derivedFor,
+  makeupMasks,
+  owning,
+  paintSheet,
+  type EditControl,
+  type Painting,
+  type ToolContext,
+} from '@alakazam/host';
+import { lipBlend, lipSwatches } from './lips';
 
 /** How wide the line is, as a fraction of the width of the mouth: the least (the Width slider's 0) and the most (its 1). */
 const THINNEST = 0.008;
@@ -55,3 +62,32 @@ export const applyLipLiner = (
     paintSheet(sheet, regions, color);
   });
 };
+
+/** The Lip Liner control. Its label is the name in the plugin's `plugin.yml`. */
+export default function (): EditControl {
+  return {
+    kind: 'slider',
+    key: 'slider-lip-liner',
+    label: 'Lip Liner',
+    person: true,
+    face: true,
+    needsModels: { title: 'Lip Liner', roles: MAKEUP_MODELS },
+    display: 'tabulated',
+    sliderLabel: ['Color', 'Strength', 'Width', 'Colorfulness', 'Brightness'],
+    min: [0, 0, 0, 0, 0],
+    max: [1, 1, 1, 1, 1],
+    step: [0.01, 0.01, 0.01, 0.01, 0.01],
+    // Opening the control draws a soft rosy-brown line at once, so there is something to change.
+    defaultValue: [1 - 358 / 360, 0.8, 0.4, 0.8, 0.8],
+    picker: ['hue', undefined, undefined, undefined, undefined],
+    swatches: lipSwatches,
+    // The AI finds the lips once, when the control opens; dragging only changes the line.
+    preload: makeupMasks,
+    layer: {
+      blend: lipBlend,
+      opacity: ([, strength]) => strength,
+      paint: (sheet, [hue, , width, saturation, brightness]: number[], context) =>
+        applyLipLiner(sheet, hue, width, saturation, brightness, context),
+    },
+  };
+}

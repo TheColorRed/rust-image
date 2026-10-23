@@ -10,7 +10,10 @@ import {
   areaTarget,
   areaTarget$,
 } from '@/src/state/draw-area';
-import { Eraser, Minus, Pencil, Plus } from 'lucide-react-native';
+import Eraser from 'lucide-react-native/icons/eraser';
+import Minus from 'lucide-react-native/icons/minus';
+import Pencil from 'lucide-react-native/icons/pencil';
+import Plus from 'lucide-react-native/icons/plus';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';

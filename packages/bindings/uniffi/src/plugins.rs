@@ -61,6 +61,17 @@ pub struct PluginScript {
   pub entry_path: String,
 }
 
+/// A control a plugin adds to the editor.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PluginControl {
+  /// The tab and groups it goes in, as the names a person sees, separated by `/`, like `Beauty/Makeup`.
+  pub root: String,
+  /// Where it goes under the root: its name, or the names of groups and then its name, separated by `/`.
+  pub path: String,
+  /// The control's script, as a path on this device. Its default export is a function that returns the control.
+  pub entry_path: String,
+}
+
 /// A plugin found in the folder, and everything it adds.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct PluginInfo {
@@ -77,6 +88,8 @@ pub struct PluginInfo {
   pub models: Vec<PluginModel>,
   pub pipelines: Vec<PluginPipeline>,
   pub scripts: Vec<PluginScript>,
+  /// The controls the plugin adds, under one root or several, in the order they go in their place.
+  pub controls: Vec<PluginControl>,
 }
 
 /// A plugin that was in the folder but could not be used.
@@ -159,6 +172,15 @@ fn info(p_plugin: &Plugin, p_registry: &PluginRegistry) -> PluginInfo {
         entry_path: path(p_plugin, &script.entry),
       })
       .collect(),
+    controls: manifest
+      .controls
+      .iter()
+      .map(|control| PluginControl {
+        root: control.root.clone(),
+        path: control.path.clone(),
+        entry_path: path(p_plugin, &control.entry),
+      })
+      .collect(),
   }
 }
 
@@ -218,19 +240,46 @@ contributes:
 ",
     )
     .unwrap();
+    // A plugin that adds controls under two roots.
+    let pack = folder.join("pack");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(pack.join("a.js"), b"x").unwrap();
+    std::fs::write(pack.join("b.js"), b"x").unwrap();
+    std::fs::write(
+      pack.join("plugin.yml"),
+      "id: pack
+name: Pack
+version: 1.0.0
+contributes:
+  controls:
+    - root: Beauty/Makeup
+      items:
+        - path: Lipstick
+          entry: a.js
+    - root: Beauty/Hair
+      items:
+        - path: Eyes/Color
+          entry: b.js
+",
+    )
+    .unwrap();
     let broken = folder.join("broken");
     std::fs::create_dir_all(&broken).unwrap();
     std::fs::write(broken.join("plugin.yml"), "id: [").unwrap();
 
     let scan = scan_plugins(folder.to_string_lossy().into_owned());
     let _ = std::fs::remove_dir_all(&folder);
-    assert_eq!(scan.plugins.len(), 2);
+    assert_eq!(scan.plugins.len(), 3);
     assert_eq!(scan.problems.len(), 1);
     let found = scan.plugins.iter().find(|plugin| plugin.id == "remover").unwrap();
     assert!(found.dependencies.is_empty() && found.missing_dependencies.is_empty());
     let needy = scan.plugins.iter().find(|plugin| plugin.id == "beauty").unwrap();
     assert_eq!(needy.dependencies, ["remover", "ghost"]);
     assert_eq!(needy.missing_dependencies, ["ghost"], "what is installed is not missing");
+    let pack = scan.plugins.iter().find(|plugin| plugin.id == "pack").unwrap();
+    let controls: Vec<(&str, &str)> = pack.controls.iter().map(|control| (control.root.as_str(), control.path.as_str())).collect();
+    assert_eq!(controls, [("Beauty/Makeup", "Lipstick"), ("Beauty/Hair", "Eyes/Color")]);
+    assert!(pack.controls[0].entry_path.ends_with("a.js") && pack.controls[0].entry_path.starts_with(&pack.dir));
     assert_eq!((found.id.as_str(), found.models[0].capabilities.clone()), ("remover", vec!["inpaint".to_string()]));
     assert!(found.models[0].model_path.ends_with("m.onnx") && found.models[0].model_path.starts_with(&found.dir));
     assert!(found.models[0].manifest_path.ends_with("m.yml"));

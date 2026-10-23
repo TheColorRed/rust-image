@@ -56,8 +56,9 @@ struct GizmoList {
   version: AtomicU64,
   /// Whether the GPU's canvas no longer matches the lines (one was replaced or taken away), so it is drawn again from the start.
   rebuild: AtomicBool,
-  /// The renderer that makes the pictures, once there is one, so it can be woken when a gizmo changes.
-  renderer: Mutex<Option<Offscreen>>,
+  /// The renderer that makes the pictures, once there is one, so it can be woken when a gizmo changes. Weak, because the renderer's
+  /// drawing code holds this list, and a strong link back would keep the renderer and its last frame alive after the component is gone.
+  renderer: Mutex<Option<WeakOffscreen>>,
 }
 
 impl GizmoList {
@@ -87,7 +88,8 @@ impl GizmoList {
 
   fn changed(&self) {
     self.version.fetch_add(1, Ordering::SeqCst);
-    if let Some(renderer) = self.renderer.lock().unwrap().as_ref() {
+    let renderer = self.renderer.lock().unwrap().as_ref().and_then(WeakOffscreen::upgrade);
+    if let Some(renderer) = renderer {
       renderer.wake();
     }
   }
@@ -142,6 +144,33 @@ impl GizmoList {
   }
 }
 
+impl GizmoList {
+  /// The frame for a view of `size`, or nothing when there is nothing to draw and nothing on screen to clear. `visible` is whether the
+  /// last frame had something on it. A view with no gizmos makes no frame at all, so the view stays empty without a transparent picture
+  /// the size of the screen being made, kept and scaled each time the view changes size. When the last gizmo is taken away, one clear
+  /// frame replaces what was drawn, and the GPU canvas that held it is let go.
+  fn next_frame(&self, size: (u32, u32), held: &mut Option<OnTheGpu>, visible: &mut bool) -> Option<RenderedFrame> {
+    if size.0 == 0 || size.1 == 0 {
+      return None;
+    }
+    if self.gizmos.lock().unwrap().is_empty() {
+      if !*visible {
+        return None;
+      }
+      *visible = false;
+      *held = None;
+      return Some(RenderedFrame::Pixels(Arc::new(self.frame(size.0, size.1))));
+    }
+    *visible = true;
+    if let Some(frame) = self.gpu_frame(size, held) {
+      return Some(frame);
+    }
+    // Drawn on the CPU, so the GPU canvas of an earlier line is not used and is let go (it is made again when only lines are left).
+    *held = None;
+    Some(RenderedFrame::Pixels(Arc::new(self.frame(size.0, size.1))))
+  }
+}
+
 /// What the component's `Image` follows.
 struct GizmoSource(Arc<GizmoList>);
 
@@ -153,16 +182,9 @@ impl Trackable for GizmoSource {
       move || list.version.load(Ordering::SeqCst)
     };
     let mut held: Option<OnTheGpu> = None;
-    let renderer = Offscreen::tracking(size, version, || false, move |size| {
-      if size.0 == 0 || size.1 == 0 {
-        return None;
-      }
-      if let Some(frame) = list.gpu_frame(*size, &mut held) {
-        return Some(frame);
-      }
-      Some(RenderedFrame::Pixels(Arc::new(list.frame(size.0, size.1))))
-    });
-    *self.0.renderer.lock().unwrap() = Some(renderer.clone());
+    let mut visible = false;
+    let renderer = Offscreen::tracking(size, version, || false, move |size| list.next_frame(*size, &mut held, &mut visible));
+    *self.0.renderer.lock().unwrap() = Some(renderer.downgrade());
     renderer.map(|frame| match frame {
       RenderedFrame::Pixels(frame) => Picture::Pixels(Arc::clone(frame)),
       RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
@@ -265,6 +287,51 @@ mod tests {
   fn pixel(frame: &Frame, x: usize, y: usize) -> [u8; 4] {
     let at = (y * frame.width as usize + x) * 4;
     [frame.pixels[at], frame.pixels[at + 1], frame.pixels[at + 2], frame.pixels[at + 3]]
+  }
+
+  #[test]
+  fn a_view_with_no_gizmos_makes_no_frame() {
+    let list = list();
+    let (mut held, mut visible) = (None, false);
+    assert!(list.next_frame((40, 20), &mut held, &mut visible).is_none(), "nothing to draw and nothing to clear");
+    assert!(list.next_frame((80, 40), &mut held, &mut visible).is_none(), "a new size changes nothing");
+    assert!(list.next_frame((0, 20), &mut held, &mut visible).is_none(), "a view with no size has no frame");
+    assert!(!visible);
+  }
+
+  #[test]
+  fn taking_the_last_gizmo_away_makes_one_clear_frame_and_then_none() {
+    let list = list();
+    let (mut held, mut visible) = (None, false);
+    list.set("ring".into(), Gizmo::Outline(abra::prelude::Area::circle((20.0, 10.0), 8.0), brush(&Color::white(), 3)));
+    let Some(RenderedFrame::Pixels(drawn)) = list.next_frame((40, 20), &mut held, &mut visible) else { panic!("a frame of pixels") };
+    assert!(visible);
+    assert!(drawn.pixels.chunks(4).any(|pixel| pixel[3] > 0), "the ring is drawn");
+
+    list.gizmos.lock().unwrap().retain(|(name, _)| name != "ring");
+    let Some(RenderedFrame::Pixels(cleared)) = list.next_frame((40, 20), &mut held, &mut visible) else { panic!("a clear frame") };
+    assert!(!visible);
+    assert!(held.is_none(), "the GPU canvas is let go");
+    assert!(cleared.pixels.chunks(4).all(|pixel| pixel[3] == 0), "nothing is left on the view");
+    assert!(list.next_frame((40, 20), &mut held, &mut visible).is_none(), "and then nothing more is made");
+    assert!(list.next_frame((80, 40), &mut held, &mut visible).is_none(), "not even for a new size");
+  }
+
+  #[test]
+  fn the_gpu_canvas_is_let_go_when_a_shape_makes_the_frame_a_cpu_one_and_made_again_for_lines() {
+    let Some(_) = gpu::context() else { return };
+    let list = list();
+    let (mut held, mut visible) = (None, false);
+    list.set("line".into(), Gizmo::Line { points: vec![(5.0, 10.0), (35.0, 10.0)], brush: brush(&Color::red(), 9), drawn: 0 });
+    assert!(matches!(list.next_frame((40, 20), &mut held, &mut visible), Some(RenderedFrame::Gpu(_))));
+    assert!(held.is_some(), "a line is drawn on a GPU canvas");
+    list.set("ring".into(), Gizmo::Outline(abra::prelude::Area::circle((20.0, 10.0), 8.0), brush(&Color::white(), 3)));
+    assert!(matches!(list.next_frame((40, 20), &mut held, &mut visible), Some(RenderedFrame::Pixels(_))));
+    assert!(held.is_none(), "an outline makes the frame on the CPU, so the canvas is let go");
+    list.gizmos.lock().unwrap().retain(|(name, _)| name != "ring");
+    list.rebuild.store(true, Ordering::SeqCst);
+    assert!(matches!(list.next_frame((40, 20), &mut held, &mut visible), Some(RenderedFrame::Gpu(_))), "lines alone are on the GPU again");
+    assert!(held.is_some());
   }
 
   #[test]

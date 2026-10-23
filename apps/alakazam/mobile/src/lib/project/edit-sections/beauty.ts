@@ -1,4 +1,4 @@
-﻿import { tanGradient } from '@/src/lib/ui/color-bars';
+import { tanGradient } from '@/src/lib/ui/color-bars';
 import { owning } from '@/src/lib/native/native-handles';
 import { paintSheet } from '@/src/lib/beauty/layers';
 import { grayscale, invert, saturation } from '@abra/core/adjustments';
@@ -8,27 +8,17 @@ import { ResizeTarget } from '@abra/core/canvas';
 import { gaussianBlur } from '@abra/core/filters';
 import { TransformAlgorithm } from '@abra/core/mask';
 import { resize } from '@abra/core/transform';
-import { applyBlush } from '@/src/lib/beauty/blush';
-import { applySculpt } from '@/src/lib/beauty/contour';
+import { HAIR_MODELS } from '@/src/lib/ai/faces';
 import { type EditSection } from '@/src/lib/project/edit-sections';
-import { applyEyeMakeup, hairMasks, makeupMasks, skinWithMouthEased } from '@/src/lib/beauty/eye-makeup';
+import { swatchesOf } from '@/src/lib/project/edit-sections/swatches';
+import { makeupMasks, skinWithMouthEased } from '@/src/lib/beauty/makeup-masks';
+import { hairMasks } from '@/src/lib/beauty/hair-masks';
 import { applyHairColor, HAIR_MIDDLE, HAIR_REACH } from '@/src/lib/beauty/hair-color';
-import { applyLipLiner } from '@/src/lib/beauty/lip-liner';
-import { applyLipstick } from '@/src/lib/beauty/lipstick';
 import { applyTeethWhitening } from '@/src/lib/beauty/teeth';
 import {
   BLEMISH_TOOL_KEY,
-  BLUSH_KEY,
-  BROW_BONE_KEY,
-  CONTOUR_KEY,
-  EYELINER_KEY,
-  EYESHADOW_KEY,
   HAIR_COLOR_KEY,
   HAIR_GROUP_KEY,
-  HIGHLIGHTER_KEY,
-  LIP_LINER_KEY,
-  LIPSTICK_KEY,
-  MAKEUP_GROUP_KEY,
   RED_EYE_TOOL_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_GROUP_KEY,
@@ -36,66 +26,8 @@ import {
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
   TEETH_WHITENING_KEY,
-  UNDER_EYE_KEY,
 } from '@/src/lib/project/edit-sections/keys';
 
-/** The colors the lips offer, each once. `lipSwatches` below turns them into the lipstick and lip liner swatches. */
-const lipColors = [
-  { label: 'Black', color: '#000000' },
-  { label: 'White', color: '#FFFFFF' },
-  { label: 'Creamy nude', color: '#EBAD81' },
-  { label: 'Nude peach', color: '#F18E6A' },
-  { label: 'Nude', color: '#DD7C3D' },
-  { label: 'Caramel nude', color: '#B87A74' },
-  { label: 'Dark nude', color: '#D27754' },
-  { label: 'Coffee nude', color: '#B46F4B' },
-  { label: 'Pale pink', color: '#F096BD' },
-  { label: 'Nude pink', color: '#E9A8C6' },
-  { label: 'Pale rose pink', color: '#EC7EAA' },
-  { label: 'Rose pink', color: '#DF4A86' },
-  { label: 'Browny pink', color: '#C06D7E' },
-  { label: 'Dark dusky pink', color: '#AE5373' },
-  { label: 'Dark pink', color: '#BC316A' },
-  { label: 'Deep rose pink', color: '#E32957' },
-  { label: 'Bright fuchsia', color: '#E30274' },
-  { label: 'Sheer coral', color: '#EE8372' },
-  { label: 'Sheer strawberry pink', color: '#E74957' },
-  { label: 'Coral red', color: '#E73C42' },
-  { label: 'Deep mandarin', color: '#E6421A' },
-  { label: 'Bright red', color: '#E0011B' },
-  { label: 'Classic red', color: '#CD0215' },
-  { label: 'Deep red', color: '#BF012F' },
-  { label: 'Sheer plum', color: '#C58396' },
-  { label: 'Golden plum', color: '#9E4776' },
-  { label: 'Plum', color: '#A6315B' },
-  { label: 'Raspberry pink', color: '#B00048' },
-  { label: 'Burgundy', color: '#7F023E' },
-  { label: 'Deep purple plum', color: '#8C0364' },
-];
-
-/** The colors the face makeup offers, each once. A control turns them into its own swatches with `swatchesOf`. */
-const faceColors = [
-  { label: 'Black', color: '#111111' },
-  { label: 'Brown', color: '#553126' },
-  { label: 'Navy', color: '#202C50' },
-  { label: 'Pearl', color: '#F2E8DC' },
-  { label: 'Brighten', color: '#EFD9CA' },
-  { label: 'Champagne', color: '#D8B68A' },
-  { label: 'Soft gold', color: '#D3AD68' },
-  { label: 'Light peach', color: '#EDB79F' },
-  { label: 'Peach', color: '#E89A78' },
-  { label: 'Orange', color: '#D9784D' },
-  { label: 'Soft pink', color: '#E8A0A8' },
-  { label: 'Pink', color: '#DEA1AB' },
-  { label: 'Rose', color: '#B97882' },
-  { label: 'Rose glow', color: '#D6A5A3' },
-  { label: 'Coral', color: '#EE7A66' },
-  { label: 'Berry', color: '#B04A6A' },
-  { label: 'Plum', color: '#70445F' },
-  { label: 'Bronze', color: '#A66B3F' },
-  { label: 'Bronze glow', color: '#AA754D' },
-  { label: 'Smoky', color: '#55515A' },
-];
 
 /** The natural hair colors, each once. How light the hair ends up is worked out from the color itself (see `hairLightness`). */
 const hairColors = [
@@ -126,45 +58,6 @@ const hairLightness = (color: string) => {
 };
 
 /**
- * Makes a control's swatches from a list of colors. `values` lays the color out the way the control's sliders do, from the
- * color's hue (turned the way the color bar runs), vividness and brightness.
- */
-const swatchesOf = (
-  colors: { label: string; color: string }[],
-  values: (hue: number, saturation: number, brightness: number, label: string) => (number | undefined)[],
-) =>
-  colors.map(({ label, color }) => {
-    const [r, g, b] = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16) / 255);
-    const high = Math.max(r, g, b);
-    const range = high - Math.min(r, g, b);
-    const degrees = !range
-      ? 0
-      : high === r
-        ? ((g - b) / range + 6) % 6
-        : high === g
-          ? (b - r) / range + 2
-          : (r - g) / range + 4;
-    return { label, color, values: values((1 - (degrees * 60) / 360) % 1, high ? range / high : 0, high, label) };
-  });
-
-/** The lipstick and lip liner swatches. The sheer ones are lighter. */
-const lipSwatches = swatchesOf(lipColors, (hue, saturation, brightness, label) => [
-  hue,
-  label.startsWith('Sheer') ? 0.45 : undefined,
-  undefined,
-  saturation,
-  brightness,
-]);
-
-/**
- * How lip color is laid over the lips: with the lips' own light and shade showing through (Color), except for black, which darkens
- * them (Multiply), and white, which covers them (Normal). The values are the lipstick's and the lip liner's: the vividness and the
- * brightness are the fourth and the fifth.
- */
-const lipBlend = ([, , , saturation, brightness]: number[]) =>
-  brightness < 0.2 ? BlendMode.Multiply : saturation < 0.1 && brightness > 0.9 ? BlendMode.Normal : BlendMode.Color;
-
-/**
  * How Even Out finds the skin's overall color. The color of the skin changes slowly, so it is worked out on a copy of the skin no
  * longer than this (in pixels) and scaled back up, which is the same colors for far less work. On that copy each pixel becomes the
  * average color of the skin within `EVEN_OUT_REACH` pixels of it, counting only the skin: the hair, the eyes, the lips and the
@@ -190,6 +83,7 @@ export const beauty: EditSection = {
           kind: 'slider',
           key: SKIN_EVEN_OUT_KEY,
           label: 'Even Skin Tone',
+          person: true,
           display: 'tabulated',
           sliderLabel: ['Even Skin Tone', 'Colorfulness'],
           // Even Out: up to 1 is how much of the evened color shows; past 1 the color is evened over a wider reach, up to 3.
@@ -265,6 +159,7 @@ export const beauty: EditSection = {
           kind: 'slider',
           key: SKIN_TAN_KEY,
           label: 'Tan',
+          person: true,
           // Where on the tan scale: none at 0, the darkest at 1.
           min: 0,
           max: 1,
@@ -295,6 +190,7 @@ export const beauty: EditSection = {
           kind: 'slider',
           key: SKIN_TONE_KEY,
           label: 'Lighten / Darken',
+          person: true,
           // Negative lightens the original skin; positive darkens it.
           min: -400,
           max: 400,
@@ -336,6 +232,7 @@ export const beauty: EditSection = {
           kind: 'slider',
           key: SKIN_SMOOTH_KEY,
           label: 'Smooth',
+          person: true,
           display: 'tabulated',
           sliderLabel: ['Smooth', 'Texture'],
           // Smooth: up to 1 is how much of the smoothing shows; past 1 the smoothing itself gets stronger, up to 3. Texture: how much
@@ -391,6 +288,8 @@ export const beauty: EditSection = {
       kind: 'slider',
       key: TEETH_WHITENING_KEY,
       label: 'Teeth Whitening',
+      person: true,
+      face: true,
       display: 'tabulated',
       sliderLabel: ['Whiten', 'Brighten'],
       min: 0,
@@ -412,229 +311,6 @@ export const beauty: EditSection = {
     { kind: 'tool', key: BLEMISH_TOOL_KEY, label: 'Blemish' },
     {
       kind: 'group',
-      key: MAKEUP_GROUP_KEY,
-      label: 'Makeup',
-      controls: [
-        {
-          kind: 'slider',
-          key: EYELINER_KEY,
-          label: 'Eyeliner',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Width'],
-          min: [0, 0, 1.5],
-          max: [1, 1, 3],
-          step: [0.01, 0.01, 0.01],
-          defaultValue: [0, 0.8, 1.5],
-          picker: ['hue', undefined, undefined],
-          swatches: swatchesOf(faceColors, hue => [hue]),
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Multiply,
-            opacity: ([, strength]) => strength,
-            // Projects saved before the width slider have no third value; they get the thinnest width.
-            paint: (sheet, [hue, , width = 1.5]: number[], context) =>
-              applyEyeMakeup('eyeliner', sheet, hue, 0, 0.07, width, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: EYESHADOW_KEY,
-          label: 'Eyeshadow',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
-          min: [0, 0, 0, 0, 0.3],
-          max: [1, 1, 1, 1, 3],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          defaultValue: [1 - 24 / 360, 0.8, 0.8, 0.8, 1],
-          picker: ['hue', undefined, undefined, undefined, undefined],
-          swatches: swatchesOf(faceColors, (hue, saturation, brightness) => [hue, undefined, saturation, brightness]),
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Color,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [hue, , saturation, brightness, fullness]: number[], context) =>
-              applyEyeMakeup('eyeshadow', sheet, hue, saturation, brightness, fullness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: BROW_BONE_KEY,
-          label: 'Brow Highlight',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
-          min: [0, 0, 0, 0, 0.3],
-          max: [1, 1, 1, 1, 3],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          defaultValue: [1 - 38 / 360, 0.8, 0.8, 0.8, 1],
-          picker: ['hue', undefined, undefined, undefined, undefined],
-          swatches: swatchesOf(faceColors, (hue, saturation, brightness) => [hue, undefined, saturation, brightness]),
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.SoftLight,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [hue, , saturation, brightness, fullness]: number[], context) =>
-              applyEyeMakeup('brow-bone', sheet, hue, saturation, brightness, fullness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: UNDER_EYE_KEY,
-          label: 'Concealer',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Brightness', 'Size'],
-          min: [0, 0, 0, 0, 0.3],
-          max: [1, 1, 1, 1, 3],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          defaultValue: [1 - 24 / 360, 0.8, 0.8, 0.8, 1],
-          picker: ['hue', undefined, undefined, undefined, undefined],
-          swatches: swatchesOf(faceColors, (hue, saturation, brightness) => [hue, undefined, saturation, brightness]),
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Color,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [hue, , saturation, brightness, fullness]: number[], context) =>
-              applyEyeMakeup('under-eye', sheet, hue, saturation, brightness, fullness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: BLUSH_KEY,
-          label: 'Blush',
-          // First the color, then how much, how soft it is and how wide, and for a custom color how vivid and bright.
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Colorfulness', 'Brightness'],
-          min: [0, 0, 0, 0.5, 0, 0],
-          max: [1, 1, 1, 3, 1, 1],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01],
-          // Opening the control puts a soft pink on the cheeks at once, so there is something to change.
-          defaultValue: [1 - 350 / 360, 0.4, 1, 2, 0.8, 0.8],
-          picker: ['hue', undefined, undefined, undefined, undefined, undefined],
-          swatches: swatchesOf(faceColors, (hue, saturation, brightness) => [
-            hue,
-            undefined,
-            undefined,
-            undefined,
-            saturation,
-            brightness,
-          ]),
-          // The AI finds the face once, when the control opens; dragging only changes how the blush looks.
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Color,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [hue, , softness, size, saturation, brightness]: number[], context) =>
-              applyBlush(sheet, hue, softness, size, saturation, brightness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: LIPSTICK_KEY,
-          label: 'Lipstick',
-          // First the color (a swatch or the bar), then how much of it, how soft the edge is, and for a custom color how vivid and bright.
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Colorfulness', 'Brightness'],
-          min: [0, 0, 0, 0, 0],
-          max: [1, 1, 1, 1, 1],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          // Opening the control puts this lipstick on at once (red, lightly), so there is something to change.
-          defaultValue: [0, 0.8, 1, 0.8, 0.8],
-          picker: ['hue', undefined, undefined, undefined, undefined],
-          // Colors people ask for by name, from a shade chart of real lipsticks (each color is read from the chart; its name is the
-          // plain description of it). Shades that were nearly the same color (a color distance under about 8) are left out, so every
-          // swatch is a choice a person can see. A swatch is a hue on the bar (1 minus its degrees around the wheel over 360, since the bar runs
-          // backwards), how vivid it is and how bright. A "sheer" shade also sets a light strength. Black and white come first.
-          swatches: lipSwatches,
-          // The AI finds the lips once, when the control opens; dragging only changes the color, the strength or the edge.
-          preload: makeupMasks,
-          layer: {
-            blend: lipBlend,
-            opacity: ([, amount]) => amount,
-            paint: (sheet, [hue, , softness, saturation, brightness]: number[], context) =>
-              applyLipstick(sheet, hue, softness, saturation, brightness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: LIP_LINER_KEY,
-          label: 'Lip Liner',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Width', 'Colorfulness', 'Brightness'],
-          min: [0, 0, 0, 0, 0],
-          max: [1, 1, 1, 1, 1],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          // Opening the control draws a soft rosy-brown line at once, so there is something to change.
-          defaultValue: [1 - 358 / 360, 0.8, 0.4, 0.8, 0.8],
-          picker: ['hue', undefined, undefined, undefined, undefined],
-          swatches: lipSwatches,
-          // The AI finds the lips once, when the control opens; dragging only changes the line.
-          preload: makeupMasks,
-          layer: {
-            blend: lipBlend,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [hue, , width, saturation, brightness]: number[], context) =>
-              applyLipLiner(sheet, hue, width, saturation, brightness, context),
-          },
-        },
-        {
-          kind: 'slider',
-          key: HIGHLIGHTER_KEY,
-          label: 'Highlighter',
-          display: 'tabulated',
-          sliderLabel: ['Color', 'Strength', 'Softness', 'Size', 'Spread'],
-          min: [0, 0, 0, 0.5, 0],
-          max: [1, 1, 1, 1.5, 1],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          // Opening the control adds a light glow to the cheekbones, nose, forehead and chin at once. Fan swings each cheek's glow in
-          // towards the nose.
-          defaultValue: [0, 0.2, 1, 1, 0],
-          picker: ['glow', undefined, undefined, undefined, undefined],
-          // Tints people ask for by name, each a place on the bar (the bar has a stop for each, evenly spaced).
-          swatches: [
-            { label: 'Pearl', color: 'rgb(255,250,245)', values: [0, undefined, undefined, undefined, undefined] },
-            {
-              label: 'Champagne',
-              color: 'rgb(247,231,206)',
-              values: [0.25, undefined, undefined, undefined, undefined],
-            },
-            { label: 'Gold', color: 'rgb(234,200,120)', values: [0.5, undefined, undefined, undefined, undefined] },
-            { label: 'Peach', color: 'rgb(255,190,150)', values: [0.75, undefined, undefined, undefined, undefined] },
-            { label: 'Rose', color: 'rgb(244,170,180)', values: [1, undefined, undefined, undefined, undefined] },
-          ],
-          // The AI finds the face once, when the control opens; dragging only changes how it looks.
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Screen,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [tint, , softness, size, fan = 0]: number[], context) =>
-              applySculpt('highlighter', sheet, softness, size, tint, context, fan),
-          },
-        },
-        {
-          kind: 'slider',
-          key: CONTOUR_KEY,
-          label: 'Face Shaping',
-          // First the shade of the shadow (a bar from a light tan to a dark brown), then how much, how soft it is, how big and how much the hollow fans out towards the mouth.
-          display: 'tabulated',
-          sliderLabel: ['Shade', 'Strength', 'Softness', 'Size', 'Spread'],
-          min: [0, 0, 0, 0.5, 0],
-          max: [1, 1, 1, 1.5, 1],
-          step: [0.01, 0.01, 0.01, 0.01, 0.01],
-          // Opening the control adds a soft shade under the cheekbones and beside the nose at once.
-          defaultValue: [0.5, 0.2, 1, 1.5, 0],
-          picker: ['shade', undefined, undefined, undefined, undefined],
-          // The AI finds the face once, when the control opens; dragging only changes how it looks.
-          preload: makeupMasks,
-          layer: {
-            blend: BlendMode.Multiply,
-            opacity: ([, strength]) => strength,
-            paint: (sheet, [shade, , softness, size, fan = 0]: number[], context) =>
-              applySculpt('contour', sheet, softness, size, shade, context, fan),
-          },
-        },
-      ],
-    },
-    {
-      kind: 'group',
       key: HAIR_GROUP_KEY,
       label: 'Hair',
       controls: [
@@ -642,6 +318,8 @@ export const beauty: EditSection = {
           kind: 'slider',
           key: HAIR_COLOR_KEY,
           label: 'Hair Color',
+          person: true,
+          needsModels: { title: 'Hair Color', roles: HAIR_MODELS },
           // First the color (a swatch or the bar), then how much of it, and how colorful and how light or dark the hair comes out.
           display: 'tabulated',
           sliderLabel: ['Color', 'Strength', 'Colorfulness', 'Lighten / Darken'],
@@ -671,3 +349,4 @@ export const beauty: EditSection = {
     },
   ],
 };
+

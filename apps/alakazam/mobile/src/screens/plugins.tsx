@@ -5,10 +5,22 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { formatBytes } from '@/src/lib/utils/format-bytes';
 import { useCommonStyles } from '@/src/lib/ui/styles';
 import { useTheme } from '@/src/lib/ui/theme';
-import { deleteModel, downloadModel, refreshAiModels, syncAiModels } from '@/src/lib/ai/ai-model-catalog';
+import {
+  deleteModel,
+  deletePluginListing,
+  downloadModel,
+  downloadPlugin,
+  refreshAiModels,
+  syncAiModels,
+} from '@/src/lib/ai/ai-model-catalog';
 import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
+import { pluginList, pluginList$, type PluginListing } from '@/src/state/plugins';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from 'lucide-react-native';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import Download from 'lucide-react-native/icons/download';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import Trash2 from 'lucide-react-native/icons/trash';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 
@@ -16,6 +28,7 @@ export function PluginsScreen() {
   const { colors } = useTheme();
   const commonStyles = useCommonStyles();
   const models = useObservable(aiModelList$, aiModelList.value);
+  const addons = useObservable(pluginList$, pluginList.value);
   const [downloading, setDownloading] = useState<string | null>(null);
   /** The downloads the bar shows, by model: 0 waiting, null on its way, 1 done. Kept apart from the editor's AI work, which the editor reacts to. */
   const [downloadTasks, setDownloadTasks] = useState<Record<string, number | null>>({});
@@ -27,6 +40,7 @@ export function PluginsScreen() {
       StyleSheet.create({
         container: { flex: 1, backgroundColor: colors.background, paddingTop: 24 },
         content: { paddingHorizontal: 16, gap: 12 },
+        flatRow: { paddingLeft: 16 },
         row: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -136,6 +150,34 @@ export function PluginsScreen() {
     syncAiModels();
   };
 
+  /** Installs a plugin that adds no model, and the plugins it depends on. Its row in the list is keyed `plugin:<id>`. */
+  const downloadAddon = async (plugin: PluginListing) => {
+    const key = `plugin:${plugin.id}`;
+    setError(null);
+    setDownloading(key);
+    setDownloadTasks({ [key]: null });
+    try {
+      await downloadPlugin(plugin, { update: progress => setDownloadTasks(current => ({ ...current, [key]: progress })) });
+      setDownloadTasks({ [key]: 1 });
+      clearWhenDone();
+    } catch (e) {
+      setError(errorMessage(e));
+      setDownloadTasks({});
+    }
+    setDownloading(null);
+    syncAiModels();
+  };
+
+  const removeAddon = (plugin: PluginListing) => {
+    setError(null);
+    try {
+      deletePluginListing(plugin);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+    syncAiModels();
+  };
+
   /** Smallest first, so more models are ready sooner and little is lost if the connection drops. */
   const notDownloaded = shown
     .filter(model => model.enabled && !model.downloaded)
@@ -197,6 +239,68 @@ export function PluginsScreen() {
         },
       ],
     );
+
+  /** One row of a list: what it is, whether it is on this device, and the button for it. */
+  const renderRow = (item: {
+    id: string;
+    title: string;
+    description: string;
+    downloaded: boolean;
+    sizeBytes: number;
+    downloadSizeBytes: number;
+    /** Without the indent of a row under a group. */
+    flat?: boolean;
+    onDownload: () => void;
+    onDelete: () => void;
+  }) => (
+        <View key={item.id} style={[styles.row, item.flat && styles.flatRow]}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>{item.title}</Text>
+            {item.description !== '' && <Text style={styles.rowSize}>{item.description}</Text>}
+            <Text style={styles.rowSize}>
+              {item.downloaded
+                ? `Downloaded · ${formatBytes(item.sizeBytes)}`
+                : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`}
+            </Text>
+          </View>
+          {item.id in downloadTasks && !item.downloaded ? (
+            <View style={[styles.button, styles.progressButton]}>
+              <View pointerEvents="none" style={styles.progressFill}>
+                <AiProgressBar
+                  tasks={{ [item.id]: downloadTasks[item.id] }}
+                  label={`Downloading ${item.title}`}
+                  height={36}
+                  radius={8}
+                  bare
+                  pulse={false}
+                />
+              </View>
+              <Text style={[styles.buttonText, { color: colors.textPrimary }]}>
+                {downloading === item.id ? 'Downloading' : 'Waiting'}
+              </Text>
+            </View>
+          ) : item.downloaded ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${item.title}`}
+              onPress={() => item.onDelete()}
+              style={[styles.button, styles.remove]}
+            >
+              <Text style={[styles.buttonText, { color: colors.danger }]}>Delete</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Download ${item.title}`}
+              disabled={downloading !== null}
+              onPress={() => item.onDownload()}
+              style={[styles.button, styles.download, downloading !== null && { opacity: 0.4 }]}
+            >
+              <Text style={[styles.buttonText, { color: '#fff' }]}>Download</Text>
+            </Pressable>
+          )}
+        </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -271,58 +375,41 @@ export function PluginsScreen() {
                 <Text style={styles.groupTitle}>{subject.charAt(0).toUpperCase() + subject.slice(1)}</Text>
               </Pressable>
               {expanded.has(subject) &&
-                members.map(model => (
-                  <View key={model.id} style={styles.row}>
-                    <View style={styles.rowText}>
-                      <Text style={styles.rowTitle}>{model.title}</Text>
-                      {model.description !== '' && <Text style={styles.rowSize}>{model.description}</Text>}
-                      <Text style={styles.rowSize}>
-                        {model.downloaded
-                          ? `Downloaded · ${formatBytes(model.sizeBytes)}`
-                          : `Not downloaded · ${formatBytes(model.downloadSizeBytes)}`}
-                      </Text>
-                    </View>
-                    {model.id in downloadTasks && !model.downloaded ? (
-                      <View style={[styles.button, styles.progressButton]}>
-                        <View pointerEvents="none" style={styles.progressFill}>
-                          <AiProgressBar
-                            tasks={{ [model.id]: downloadTasks[model.id] }}
-                            label={`Downloading ${model.title}`}
-                            height={36}
-                            radius={8}
-                            bare
-                            pulse={false}
-                          />
-                        </View>
-                        <Text style={[styles.buttonText, { color: colors.textPrimary }]}>
-                          {downloading === model.id ? 'Downloading' : 'Waiting'}
-                        </Text>
-                      </View>
-                    ) : model.downloaded ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${model.title}`}
-                        onPress={() => remove(model)}
-                        style={[styles.button, styles.remove]}
-                      >
-                        <Text style={[styles.buttonText, { color: colors.danger }]}>Delete</Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Download ${model.title}`}
-                        disabled={downloading !== null}
-                        onPress={() => download(model)}
-                        style={[styles.button, styles.download, downloading !== null && { opacity: 0.4 }]}
-                      >
-                        <Text style={[styles.buttonText, { color: '#fff' }]}>Download</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                ))}
+                members.map(model =>
+                  renderRow({
+                    id: model.id,
+                    title: model.title,
+                    description: model.description,
+                    downloaded: model.downloaded,
+                    sizeBytes: model.sizeBytes,
+                    downloadSizeBytes: model.downloadSizeBytes,
+                    onDownload: () => download(model),
+                    onDelete: () => remove(model),
+                  }),
+                )}
             </View>
           ))}
         </Card>
+        {addons.some(plugin => plugin.enabled || plugin.downloaded) && (
+          <Card title="Add-ons">
+            <CardHeader title="Add-ons" />
+            {addons
+              .filter(plugin => plugin.enabled || plugin.downloaded)
+              .map(plugin =>
+                renderRow({
+                  id: `plugin:${plugin.id}`,
+                  title: plugin.name,
+                  description: plugin.description,
+                  downloaded: plugin.downloaded,
+                  sizeBytes: plugin.downloadSizeBytes,
+                  downloadSizeBytes: plugin.downloadSizeBytes,
+                  flat: true,
+                  onDownload: () => downloadAddon(plugin),
+                  onDelete: () => removeAddon(plugin),
+                }),
+              )}
+          </Card>
+        )}
         {error && <Text style={styles.error}>{error}</Text>}
       </ScrollView>
     </View>

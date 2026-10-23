@@ -12,6 +12,27 @@ pub enum StepValue {
   List(Vec<f64>),
 }
 
+/// A field a plugin asks the host to show in its settings form.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PluginSetting {
+  Text {
+    id: String,
+    label: String,
+    description: Option<String>,
+    placeholder: Option<String>,
+    default: Option<String>,
+    required: bool,
+  },
+  Option {
+    id: String,
+    label: String,
+    description: Option<String>,
+    options: Vec<String>,
+    default: Option<String>,
+    required: bool,
+  },
+}
+
 /// One operation of a pipeline: the library operation to run, named as the host knows it, and its settings.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PipelineStep {
@@ -57,6 +78,27 @@ pub struct ScriptContribution {
   pub entry: String,
 }
 
+/// A control a plugin adds to the editor. Its place is its `root` and then its `path`, and its script makes the control. A plugin can
+/// have controls under more than one root.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlContribution {
+  /// The tab and groups the control goes in, as the names a person sees, separated by `/`, like `Beauty/Makeup`. A tab or group that is
+  /// not there is made.
+  pub root: String,
+  /// Where the control goes under the root: its name, which is what people see, or the names of groups and then its name
+  /// (`Eyes/Eyeliner`), separated by `/`.
+  pub path: String,
+  /// The control's script, relative to the plugin's folder. Its default export is a function that returns the control.
+  pub entry: String,
+}
+
+impl ControlContribution {
+  /// The control's name: the last name in its path, which is what people see.
+  pub fn name(&self) -> &str {
+    self.path.rsplit('/').next().unwrap_or(&self.path)
+  }
+}
+
 /// A file of a plugin that is downloaded to install it, and the SHA-256 it must have.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PluginFile {
@@ -80,6 +122,9 @@ pub struct PluginManifest {
   pub name: String,
   pub version: String,
   pub description: String,
+  pub subscription: bool,
+  /// Optional settings form declared by the plugin, in display order.
+  pub settings: Vec<PluginSetting>,
   /// The files to download to install the plugin, other than the `plugin.yml`. Empty for a plugin that is already in a folder.
   pub files: Vec<PluginFile>,
   /// The plugins that have to be installed for this one to be used, so a plugin can leave out what another already has (a plugin of
@@ -88,12 +133,16 @@ pub struct PluginManifest {
   pub models: Vec<ModelContribution>,
   pub pipelines: Vec<PipelineContribution>,
   pub scripts: Vec<ScriptContribution>,
+  /// The controls the plugin adds, under one root or several, in the order they go in their place.
+  pub controls: Vec<ControlContribution>,
 }
 
 /// Whether `p_id` is lowercase words of letters and digits joined by single dashes.
 fn is_id(p_id: &str) -> bool {
   !p_id.is_empty()
-    && p_id.split('-').all(|word| !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
+    && p_id
+      .split('-')
+      .all(|word| !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
 }
 
 /// Whether `p_path` stays inside the plugin's folder: relative, with `/` between names, and no `.` or `..`.
@@ -106,6 +155,10 @@ fn is_inside(p_path: &str) -> bool {
 
 fn text<'a>(p_node: &'a Yaml, p_key: &str) -> Option<&'a str> {
   p_node.as_mapping_get(p_key).and_then(Yaml::as_str)
+}
+
+fn boolean(p_node: &Yaml, p_key: &str) -> Option<bool> {
+  p_node.as_mapping_get(p_key).and_then(Yaml::as_bool)
 }
 
 fn required<'a>(p_node: &'a Yaml, p_key: &str, p_where: &str) -> Result<&'a str, PluginError> {
@@ -123,13 +176,121 @@ fn texts(p_node: &Yaml, p_key: &str) -> Result<Vec<String>, PluginError> {
     .ok_or_else(|| PluginError::invalid_manifest(format!("`{p_key}` must be a list")))?
     .iter()
     .map(|item| {
-      item.as_str().map(str::to_string).ok_or_else(|| PluginError::invalid_manifest(format!("`{p_key}` must be a list of text")))
+      item
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| PluginError::invalid_manifest(format!("`{p_key}` must be a list of text")))
     })
     .collect()
 }
 
 fn number(p_node: &Yaml) -> Option<f64> {
   p_node.as_floating_point().or_else(|| p_node.as_integer().map(|integer| integer as f64))
+}
+
+fn optional_text(p_node: &Yaml, p_key: &str, p_where: &str) -> Result<Option<String>, PluginError> {
+  p_node
+    .as_mapping_get(p_key)
+    .map(|value| {
+      value
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| PluginError::invalid_manifest(format!("{p_where}: `{p_key}` must be text")))
+    })
+    .transpose()
+}
+
+fn plugin_settings(p_node: &Yaml) -> Result<Vec<PluginSetting>, PluginError> {
+  let Some(settings) = p_node.as_mapping_get("settings") else {
+    return Ok(Vec::new());
+  };
+  let entries =
+    settings.as_vec().ok_or_else(|| PluginError::invalid_manifest("`settings` must be a list of setting fields"))?;
+  let mut parsed = Vec::with_capacity(entries.len());
+  let mut ids = HashSet::new();
+  for node in entries {
+    let id = id_of(node, "A plugin setting")?;
+    if !ids.insert(id.clone()) {
+      return Err(PluginError::invalid_manifest(format!("The setting `{id}` is listed more than once")));
+    }
+    let place = format!("The setting `{id}`");
+    let attributes = node
+      .as_mapping_get("attributes")
+      .filter(|attributes| attributes.as_mapping().is_some())
+      .ok_or_else(|| PluginError::invalid_manifest(format!("{place} needs an `attributes` map")))?;
+    let label = required(attributes, "label", &place)?.to_string();
+    let description = optional_text(attributes, "description", &place)?;
+    let validations = node.as_mapping_get("validations");
+    if validations.is_some_and(|validations| validations.as_mapping().is_none()) {
+      return Err(PluginError::invalid_manifest(format!("{place}: `validations` must be a map")));
+    }
+    let is_required = validations
+      .and_then(|validations| validations.as_mapping_get("required"))
+      .map(|value| {
+        value.as_bool().ok_or_else(|| {
+          PluginError::invalid_manifest(format!("{place}: `validations.required` must be true or false"))
+        })
+      })
+      .transpose()?
+      .unwrap_or(false);
+    let setting = match required(node, "type", &place)? {
+      "text" => {
+        if attributes.as_mapping_get("options").is_some() {
+          return Err(PluginError::invalid_manifest(format!("{place}: `text` does not take `attributes.options`")));
+        }
+        PluginSetting::Text {
+          id,
+          label,
+          description,
+          placeholder: optional_text(attributes, "placeholder", &place)?,
+          default: optional_text(attributes, "value", &place)?,
+          required: is_required,
+        }
+      }
+      "option" => {
+        if attributes.as_mapping_get("placeholder").is_some() || attributes.as_mapping_get("value").is_some() {
+          return Err(PluginError::invalid_manifest(format!(
+            "{place}: `option` does not take `placeholder` or `value`"
+          )));
+        }
+        let options = attributes
+          .as_mapping_get("options")
+          .and_then(Yaml::as_vec)
+          .filter(|options| !options.is_empty())
+          .ok_or_else(|| PluginError::invalid_manifest(format!("{place}: `option` needs a non-empty `options` list")))?
+          .iter()
+          .map(|option| {
+            option
+              .as_str()
+              .filter(|option| !option.trim().is_empty())
+              .map(str::to_string)
+              .ok_or_else(|| PluginError::invalid_manifest(format!("{place}: `options` must be non-empty text values")))
+          })
+          .collect::<Result<Vec<_>, _>>()?;
+        let default = optional_text(attributes, "default", &place)?;
+        if let Some(default) = &default {
+          if !options.contains(default) {
+            return Err(PluginError::invalid_manifest(format!("{place}: `default` must match one of its `options`")));
+          }
+        }
+        PluginSetting::Option {
+          id,
+          label,
+          description,
+          options,
+          default,
+          required: is_required,
+        }
+      }
+      kind => {
+        return Err(PluginError::invalid_manifest(format!(
+          "{place} has unknown type `{kind}`; expected `text` or `option`"
+        )))
+      }
+    };
+    parsed.push(setting);
+  }
+  Ok(parsed)
 }
 
 /// An id that follows the rules, or the reason it does not.
@@ -150,7 +311,9 @@ fn common(p_node: &Yaml, p_kind: &str) -> Result<(String, String, String, Vec<St
   let title = required(p_node, "title", &place)?.to_string();
   let capabilities = texts(p_node, "capabilities")?;
   if capabilities.is_empty() {
-    return Err(PluginError::invalid_manifest(format!("{place} needs at least one of `capabilities`, or no feature can find it")));
+    return Err(PluginError::invalid_manifest(format!(
+      "{place} needs at least one of `capabilities`, or no feature can find it"
+    )));
   }
   Ok((id, title, text(p_node, "description").unwrap_or_default().to_string(), capabilities))
 }
@@ -168,13 +331,16 @@ fn file_of(p_node: &Yaml, p_key: &str, p_where: &str) -> Result<String, PluginEr
 fn entries<'a, 'y>(p_contributes: Option<&'a Yaml<'y>>, p_key: &str) -> Result<&'a [Yaml<'y>], PluginError> {
   match p_contributes.and_then(|contributes| contributes.as_mapping_get(p_key)) {
     None => Ok(&[]),
-    Some(list) => list.as_vec().map(Vec::as_slice).ok_or_else(|| PluginError::invalid_manifest(format!("`{p_key}` must be a list"))),
+    Some(list) => {
+      list.as_vec().map(Vec::as_slice).ok_or_else(|| PluginError::invalid_manifest(format!("`{p_key}` must be a list")))
+    }
   }
 }
 
 fn step(p_node: &Yaml, p_where: &str) -> Result<PipelineStep, PluginError> {
-  let mapping =
-    p_node.as_mapping().ok_or_else(|| PluginError::invalid_manifest(format!("A step of {p_where} must have an `op` and its settings")))?;
+  let mapping = p_node
+    .as_mapping()
+    .ok_or_else(|| PluginError::invalid_manifest(format!("A step of {p_where} must have an `op` and its settings")))?;
   let op = required(p_node, "op", &format!("A step of {p_where}"))?.to_string();
   let mut settings = BTreeMap::new();
   for (key, value) in mapping.iter() {
@@ -188,7 +354,9 @@ fn step(p_node: &Yaml, p_where: &str) -> Result<PipelineStep, PluginError> {
     } else if let Some(items) = value.as_vec() {
       StepValue::List(items.iter().filter_map(number).collect())
     } else {
-      return Err(PluginError::invalid_manifest(format!("The setting `{key}` of the step `{op}` must be a number, text, true or false, or a list of numbers")));
+      return Err(PluginError::invalid_manifest(format!(
+        "The setting `{key}` of the step `{op}` must be a number, text, true or false, or a list of numbers"
+      )));
     };
     settings.insert(key.to_string(), value);
   }
@@ -201,7 +369,8 @@ impl PluginManifest {
   ///
   /// - `p_text`: The YAML of the manifest.
   pub fn parse(p_text: &str) -> Result<Self, PluginError> {
-    let docs = Yaml::load_from_str(p_text).map_err(|error| PluginError::invalid_manifest(format!("not valid YAML: {error}")))?;
+    let docs =
+      Yaml::load_from_str(p_text).map_err(|error| PluginError::invalid_manifest(format!("not valid YAML: {error}")))?;
     let doc = docs.first().ok_or_else(|| PluginError::invalid_manifest("the manifest is empty"))?;
     let id = id_of(doc, "The plugin")?;
     let place = format!("The plugin `{id}`");
@@ -223,7 +392,15 @@ impl PluginManifest {
           "{place} has `manifest: {manifest}`; the AI runtime reads a model's manifest from beside it, so it must be named `{expected}`"
         )));
       }
-      models.push(ModelContribution { id, title, description, capabilities, subjects: texts(node, "subjects")?, model, manifest });
+      models.push(ModelContribution {
+        id,
+        title,
+        description,
+        capabilities,
+        subjects: texts(node, "subjects")?,
+        model,
+        manifest,
+      });
     }
     let mut pipelines = Vec::new();
     for node in entries(contributes, "pipelines")? {
@@ -237,23 +414,42 @@ impl PluginManifest {
         .iter()
         .map(|node| step(node, &place))
         .collect::<Result<_, _>>()?;
-      pipelines.push(PipelineContribution { id, title, description, capabilities, steps });
+      pipelines.push(PipelineContribution {
+        id,
+        title,
+        description,
+        capabilities,
+        steps,
+      });
     }
     let mut scripts = Vec::new();
     for node in entries(contributes, "scripts")? {
       let (id, title, description, capabilities) = common(node, "script")?;
       let entry = file_of(node, "entry", &format!("The script `{id}`"))?;
-      scripts.push(ScriptContribution { id, title, description, capabilities, entry });
+      scripts.push(ScriptContribution {
+        id,
+        title,
+        description,
+        capabilities,
+        entry,
+      });
     }
+
+    let mut subscription: Option<bool> = None;
 
     let mut dependencies: Vec<Dependency> = Vec::new();
     if let Some(list) = doc.as_mapping_get("dependencies") {
-      let items = list.as_vec().ok_or_else(|| PluginError::invalid_manifest(format!("{place}: `dependencies` must be a list of `- id: plugin-id`")))?;
+      let items = list.as_vec().ok_or_else(|| {
+        PluginError::invalid_manifest(format!("{place}: `dependencies` must be a list of `- id: plugin-id`"))
+      })?;
       for node in items {
         // Only `id` for now. Any other key is an error, so a misspelled one is not a dependency that is silently not required.
-        for key in node.as_mapping().into_iter().flat_map(|mapping| mapping.iter()).filter_map(|(key, _)| key.as_str()) {
+        for key in node.as_mapping().into_iter().flat_map(|mapping| mapping.iter()).filter_map(|(key, _)| key.as_str())
+        {
           if key != "id" {
-            return Err(PluginError::invalid_manifest(format!("{place}: a dependency has `{key}`; it can only have `id`")));
+            return Err(PluginError::invalid_manifest(format!(
+              "{place}: a dependency has `{key}`; it can only have `id`"
+            )));
           }
         }
         let needed = required(node, "id", &format!("A dependency of {place}"))?;
@@ -282,14 +478,59 @@ impl PluginManifest {
       files.push(PluginFile { path, sha256 });
     }
 
-    if models.is_empty() && pipelines.is_empty() && scripts.is_empty() {
-      return Err(PluginError::invalid_manifest(format!("{place} adds nothing; list `models`, `pipelines` or `scripts` under `contributes`")));
+    // The controls, in groups that each have a root. The names are matched to what people see, ignoring case, so two paths that differ
+    // only by case are the same control.
+    let names = |path: &str, what: &str, example: &str| -> Result<String, PluginError> {
+      if path.split('/').any(|name| name.trim().is_empty()) {
+        return Err(PluginError::invalid_manifest(format!(
+          "{place} has {what} `{path}`; write names separated by `/`, none empty, like `{example}`"
+        )));
+      }
+      Ok(path.split('/').map(str::trim).collect::<Vec<_>>().join("/"))
+    };
+    let mut controls: Vec<ControlContribution> = Vec::new();
+    for group in entries(contributes, "controls")? {
+      let root =
+        names(required(group, "root", &format!("A group of controls of {place}"))?, "`root:`", "Beauty/Makeup")?;
+      let items =
+        group.as_mapping_get("items").and_then(Yaml::as_vec).filter(|items| !items.is_empty()).ok_or_else(|| {
+          PluginError::invalid_manifest(format!("{place}: the controls under `root: {root}` need `items`"))
+        })?;
+      for node in items {
+        let path = names(
+          required(node, "path", &format!("A control under `root: {root}` of {place}"))?,
+          "the control path",
+          "Lipstick",
+        )?;
+        let entry = file_of(node, "entry", &format!("The control `{path}` under `root: {root}`"))?;
+        if controls
+          .iter()
+          .any(|control| control.root.eq_ignore_ascii_case(&root) && control.path.eq_ignore_ascii_case(&path))
+        {
+          return Err(PluginError::invalid_manifest(format!(
+            "{place} has the control `{path}` under `root: {root}` more than once"
+          )));
+        }
+        controls.push(ControlContribution {
+          root: root.clone(),
+          path,
+          entry,
+        });
+      }
+    }
+
+    if models.is_empty() && pipelines.is_empty() && scripts.is_empty() && controls.is_empty() {
+      return Err(PluginError::invalid_manifest(format!(
+        "{place} adds nothing; list `models`, `pipelines`, `scripts` or `controls` under `contributes`"
+      )));
     }
     let mut seen = HashSet::new();
     let ids = models.iter().map(|m| &m.id).chain(pipelines.iter().map(|p| &p.id)).chain(scripts.iter().map(|s| &s.id));
     for id in ids {
       if !seen.insert(id) {
-        return Err(PluginError::invalid_manifest(format!("{place} uses the id `{id}` for more than one contribution")));
+        return Err(PluginError::invalid_manifest(format!(
+          "{place} uses the id `{id}` for more than one contribution"
+        )));
       }
     }
 
@@ -303,11 +544,14 @@ impl PluginManifest {
         .filter(|version| !version.trim().is_empty())
         .ok_or_else(|| PluginError::invalid_manifest(format!("{place} needs `version`")))?,
       description: text(doc, "description").unwrap_or_default().to_string(),
+      subscription: boolean(doc, "subscription").unwrap_or(false),
+      settings: plugin_settings(doc)?,
       files,
       dependencies,
       models,
       pipelines,
       scripts,
+      controls,
     })
   }
 }
@@ -325,11 +569,17 @@ mod tests {
   #[test]
   fn a_plugin_lists_its_models_pipelines_and_scripts() {
     let manifest = PluginManifest::parse(FULL).unwrap();
-    assert_eq!((manifest.id.as_str(), manifest.name.as_str(), manifest.version.as_str()), ("demo-plugin", "Demo", "1.2.0"));
+    assert_eq!(
+      (manifest.id.as_str(), manifest.name.as_str(), manifest.version.as_str()),
+      ("demo-plugin", "Demo", "1.2.0")
+    );
     let model = &manifest.models[0];
     assert_eq!((model.id.as_str(), model.model.as_str()), ("remover", "m/remover.onnx"));
     assert_eq!(model.manifest, "m/remover.yml", "the model's manifest defaults to its name with .yml");
-    assert_eq!((model.capabilities.clone(), model.subjects.clone()), (vec!["inpaint".to_string()], vec!["objects".to_string()]));
+    assert_eq!(
+      (model.capabilities.clone(), model.subjects.clone()),
+      (vec!["inpaint".to_string()], vec!["objects".to_string()])
+    );
     let step = &manifest.pipelines[0].steps[0];
     assert_eq!(step.op, "gaussian_blur");
     assert_eq!(step.settings["radius"], StepValue::Number(12.0));
@@ -340,26 +590,70 @@ mod tests {
   }
 
   #[test]
+  fn a_plugin_lists_its_controls_under_one_root_or_several() {
+    let with = |controls: &str| format!("id: pack\nname: Pack\nversion: 1.0.0\ncontributes:\n  controls:\n{controls}");
+    let ok = PluginManifest::parse(&with(
+      "    - root: Beauty / Makeup\n      items:\n        - path: Lipstick\n          entry: lipstick.js\n        - path: Eyes/ Eyeliner\n          entry: s/eyeliner.js\n    - root: Beauty/Hair\n      items:\n        - path: Color\n          entry: hair.js\n",
+    ))
+    .unwrap();
+    let controls: Vec<(&str, &str, &str, &str)> = ok
+      .controls
+      .iter()
+      .map(|control| (control.root.as_str(), control.path.as_str(), control.name(), control.entry.as_str()))
+      .collect();
+    assert_eq!(
+      controls,
+      [
+        ("Beauty/Makeup", "Lipstick", "Lipstick", "lipstick.js"),
+        ("Beauty/Makeup", "Eyes/Eyeliner", "Eyeliner", "s/eyeliner.js"),
+        ("Beauty/Hair", "Color", "Color", "hair.js"),
+      ],
+      "spaces round the names go, and the order is the order written"
+    );
+    assert!(PluginManifest::parse(FULL).unwrap().controls.is_empty());
+
+    let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
+    assert!(error(&with("    - items:\n        - path: A\n          entry: a.js\n")).contains("needs `root`"));
+    assert!(error(&with("    - root: Beauty\n")).contains("need `items`"));
+    assert!(error(&with("    - root: Beauty\n      items: []\n")).contains("need `items`"));
+    for wrong in ["/Beauty", "Beauty/", "Beauty//Makeup"] {
+      let text = with(&format!("    - root: {wrong}\n      items:\n        - path: A\n          entry: a.js\n"));
+      assert!(error(&text).contains("like `Beauty/Makeup`"), "{wrong}");
+    }
+    let one = |item: &str| with(&format!("    - root: Beauty\n      items:\n{item}"));
+    assert!(error(&one("        - path: A//B\n          entry: a.js\n")).contains("like `Lipstick`"));
+    assert!(error(&one("        - entry: a.js\n")).contains("needs `path`"));
+    assert!(error(&one("        - path: A\n")).contains("needs `entry`"));
+    assert!(error(&one("        - path: A\n          entry: ../a.js\n")).contains("no `..`"));
+    assert!(error(&one(
+      "        - path: Lipstick\n          entry: a.js\n        - path: lipstick\n          entry: b.js\n"
+    ))
+    .contains("more than once"));
+    // The same name under another root is another control.
+    let twice = with(
+      "    - root: Beauty\n      items:\n        - path: Color\n          entry: a.js\n    - root: Other\n      items:\n        - path: Color\n          entry: b.js\n",
+    );
+    assert_eq!(PluginManifest::parse(&twice).unwrap().controls.len(), 2);
+  }
+
+  #[test]
   fn the_files_to_download_each_have_a_path_and_a_sha256() {
     let hash = "ab".repeat(32);
-    let manifest = PluginManifest::parse(&format!("{FULL}files:
-  - path: m/remover.onnx
-    sha256: {}
-", hash.to_uppercase())).unwrap();
-    assert_eq!(manifest.files, vec![PluginFile { path: "m/remover.onnx".into(), sha256: hash.clone() }]);
+    let manifest =
+      PluginManifest::parse(&format!("{FULL}files:\n  - path: m/remover.onnx\n    sha256: {}\n", hash.to_uppercase()))
+        .unwrap();
+    assert_eq!(
+      manifest.files,
+      vec![PluginFile {
+        path: "m/remover.onnx".into(),
+        sha256: hash.clone()
+      }]
+    );
     assert!(PluginManifest::parse(FULL).unwrap().files.is_empty());
     let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
-    assert!(error(&format!("{FULL}files:
-  - path: ../x
-    sha256: {hash}
-")).contains("no `..`"));
-    assert!(error(&format!("{FULL}files:
-  - path: x
-    sha256: abc
-")).contains("not a SHA-256"));
-    assert!(error(&format!("{FULL}files:
-  - path: x
-")).contains("sha256"));
+    assert!(error(&format!("{FULL}files:\n  - path: ../x\n    sha256: {hash}\n")).contains("no `..`"));
+    assert!(error(&format!("{FULL}files:\n  - path: x\n    sha256: abc\n")).contains("not a SHA-256"));
+    assert!(error(&format!("{FULL}files:\n  - path: x\n")).contains("sha256"));
   }
 
   #[test]
@@ -386,11 +680,18 @@ mod tests {
     assert!(error(&FULL.replace("version: 1.2.0\n", "")).contains("version"));
     assert!(error(&FULL.replace("capabilities: [inpaint]", "capabilities: []")).contains("capabilities"));
     assert!(error(&FULL.replace("model: m/remover.onnx", "model: ../remover.onnx")).contains("no `..`"));
-    assert!(error(&FULL.replace("      model: m/remover.onnx\n", "      model: m/remover.onnx\n      manifest: m/other.yml\n")).contains("must be named `m/remover.yml`"));
+    assert!(error(
+      &FULL.replace("      model: m/remover.onnx\n", "      model: m/remover.onnx\n      manifest: m/other.yml\n")
+    )
+    .contains("must be named `m/remover.yml`"));
     assert!(error(&FULL.replace("entry: collage.js", "entry: /sdcard/collage.js")).contains("collage.js"));
     assert!(error(&FULL.replace("id: collage", "id: soften")).contains("more than one"));
     assert!(error("id: empty\nname: E\nversion: 1\n").contains("adds nothing"));
     assert!(error("id: a\nname: [").contains("not valid YAML"));
-    assert!(error(&FULL.replace("        - { op: gaussian_blur, radius: 12, edge: true, tint: [1, 0.5, 0], mode: soft }\n", "        - { radius: 12 }\n")).contains("op"));
+    assert!(error(&FULL.replace(
+      "        - { op: gaussian_blur, radius: 12, edge: true, tint: [1, 0.5, 0], mode: soft }\n",
+      "        - { radius: 12 }\n"
+    ))
+    .contains("op"));
   }
 }

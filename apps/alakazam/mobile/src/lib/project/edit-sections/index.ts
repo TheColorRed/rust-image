@@ -1,3 +1,4 @@
+import { setControlTraits } from '@/src/state/control-traits';
 import { type ImageSourcePropType } from 'react-native';
 import { skinMaskSized } from '@/src/lib/ai/analysis';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
@@ -135,6 +136,15 @@ export type SliderControl<T = unknown> = {
   key: string;
   /** The main label for the control. */
   label: string;
+  /** Whether the control can be set for one person, or for everyone. A value for one person is kept under its own key (see `adjustmentKey`). */
+  person?: boolean;
+  /** Whether the control's work is confined to a face, so opening it brings the selected person's face closer. */
+  face?: boolean;
+  /**
+   * The AI models the control cannot work without, by id, and the name to offer them under. Opening the control without them offers to
+   * download them first, and opens it once they are here.
+   */
+  needsModels?: { title: string; roles: readonly string[] };
   /** The label displayed for each individual slider, if different from the main label. */
   sliderLabel?: PerSlider<string>;
   /** The minimum value each slider can take. Defaults to 0 if not specified. */
@@ -745,3 +755,8 @@ export const groupPath = (controls: EditControl[], key: string): (GroupControl |
 
 export const findSection = (key: string): EditSection =>
   EDIT_SECTIONS.find(section => section.key === key) ?? EDIT_SECTIONS[0];
+
+// What each slider says about itself (`person`, `face`) is noted for the state, which reads it without the controls.
+for (const control of EDIT_SECTIONS.flatMap(section => leafControls(section.controls))) {
+  if (control.kind === 'slider') setControlTraits(control.key, control);
+}

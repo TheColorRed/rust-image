@@ -46,7 +46,7 @@ import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/s
 import { type Image as AbraPixels } from '@abra/core/image';
 import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
-import { filter, switchMap, tap } from 'rxjs/operators';
+import { distinctUntilChanged, filter, switchMap, tap } from 'rxjs/operators';
 import { release } from '@/src/lib/native/native-handles';
 
 // #region: The full-size picture, which is not shown
@@ -332,6 +332,9 @@ function renderCachedStack(base: AbraImage, full: boolean): AbraImage {
   } catch (error) {
     clearRenderCache();
     throw error;
+  } finally {
+    // The cache holds its own snapshots of it, and a native image the garbage collector cannot see the size of must not wait for it.
+    release(image);
   }
   return cache.snaps[steps.length]!.clone() as AbraImage;
 }
@@ -684,6 +687,7 @@ let renderedAnalysis: unknown;
 export function startReplay(): Subscription {
   const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$])
     .pipe(
+      distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4]?.width === b[4]?.width && a[4]?.height === b[4]?.height && a[5] === b[5]),
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
       tap(([, , , , box, analysis]) => {
         // A new preview size or new analysis changes what the steps make, so the rendered stack is not reused.

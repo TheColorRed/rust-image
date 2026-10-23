@@ -1,6 +1,6 @@
 import { useTheme } from '@/src/lib/ui/theme';
 import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-native-documents/picker';
-import { ImagePlus } from 'lucide-react-native';
+import ImagePlus from 'lucide-react-native/icons/image-plus';
 import { useMemo, useState } from 'react';
 import { Alert, Button, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { Card, CardHeader } from './card';

@@ -15,7 +15,8 @@ import {
 import { analysisOf, forgetAnalysis } from '@/src/lib/editor/editor-preloads';
 import { buildMasks, loadSavedMasks, saveMasks, saveMasksInBackground, withoutGroup, withoutPeople } from '@/src/lib/ai/saved-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
-import { hairMasks, makeupMasks } from '@/src/lib/beauty/eye-makeup';
+import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
+import { hairMasks } from '@/src/lib/beauty/hair-masks';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,

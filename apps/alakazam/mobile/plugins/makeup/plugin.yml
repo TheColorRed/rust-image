@@ -1,0 +1,55 @@
+id: makeup
+name: Makeup
+version: 1.1.1
+description: Makeup controls for the Beauty tab.
+
+# The plugins that must be installed first. Makeup does not carry the AI models it uses to find the lips.
+dependencies:
+  - id: person-detection
+  - id: face-parsing
+  - id: face-landmarks
+
+contributes:
+  controls:
+    # The tab and group they go in, by the names people see. A tab or group that is not there is made.
+    - root: Beauty/Makeup
+      items:
+        - path: Lipstick
+          entry: lipstick.js
+        - path: Lip Liner
+          entry: lip-liner.js
+        - path: Eyeliner
+          entry: eyeliner.js
+        - path: Eyeshadow
+          entry: eyeshadow.js
+        - path: Brow Highlight
+          entry: brow-highlight.js
+        - path: Concealer
+          entry: concealer.js
+        - path: Blush
+          entry: blush-control.js
+        - path: Highlighter
+          entry: highlighter.js
+        - path: Face Shaping
+          entry: face-shaping.js
+
+# What the phone downloads. `node scripts/build-plugins.mjs` builds these from src and writes the hashes.
+files:
+  - path: lipstick.js
+    sha256: 68c80c888491577dcf47c09179ed979cb87619c1c8e588d6d382318157b25928
+  - path: lip-liner.js
+    sha256: 99f40c6deb0e7fe0de9d753d45b271e9745bfd26754dc43405b66665b8a8b795
+  - path: eyeliner.js
+    sha256: 3a9f17209226ac75191f1e7d3884f4a5a35c12dd7d4d5f83b408e388dc616a32
+  - path: eyeshadow.js
+    sha256: 573c730ef3ecd7d5a8513fd468a0397dc1659148bf5d01854b2f80c111a98b04
+  - path: brow-highlight.js
+    sha256: b8c1a767f7cb407679f057d7e23bd81a719bd957bb476737b4b4f2793030560c
+  - path: concealer.js
+    sha256: 3c5a22ce9d058905a43ef2bff4b65226db12276527dbfc8b6822aaf05dd039c5
+  - path: blush-control.js
+    sha256: b6c128d994c96fa25d03cce5904d208773722f6bebc8a493be7f83c80f338e43
+  - path: highlighter.js
+    sha256: 251290f742ceb0026e3f4d668bdfeb80ea7f43abf59de7b68bff00c6717f99a4
+  - path: face-shaping.js
+    sha256: 3cbe6e40bda374b72415c2dbec21f2f37a726d90d47091df7930eaeb5d69fd44

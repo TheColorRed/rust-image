@@ -1,6 +1,6 @@
 use super::{
   error::PluginError,
-  manifest::{ModelContribution, PipelineContribution, PluginManifest, ScriptContribution},
+  manifest::{ControlContribution, ModelContribution, PipelineContribution, PluginManifest, ScriptContribution},
 };
 use std::{
   collections::HashSet,
@@ -36,7 +36,8 @@ impl Plugin {
       .models
       .iter()
       .flat_map(|model| [&model.model, &model.manifest])
-      .chain(manifest.scripts.iter().map(|script| &script.entry));
+      .chain(manifest.scripts.iter().map(|script| &script.entry))
+      .chain(manifest.controls.iter().map(|control| &control.entry));
     for file in files {
       if !plugin.path(file).is_file() {
         return Err(PluginError::file_not_found(file.clone()));
@@ -59,13 +60,18 @@ pub enum Contribution<'a> {
   Model(&'a Plugin, &'a ModelContribution),
   Pipeline(&'a Plugin, &'a PipelineContribution),
   Script(&'a Plugin, &'a ScriptContribution),
+  /// A control for the editor. It has no capabilities, because it is not found by asking for one: it is placed by its plugin's `root`.
+  Control(&'a Plugin, &'a ControlContribution),
 }
 
 impl<'a> Contribution<'a> {
   /// The plugin this came from.
   pub fn plugin(&self) -> &'a Plugin {
     match self {
-      Contribution::Model(plugin, _) | Contribution::Pipeline(plugin, _) | Contribution::Script(plugin, _) => plugin,
+      Contribution::Model(plugin, _)
+      | Contribution::Pipeline(plugin, _)
+      | Contribution::Script(plugin, _)
+      | Contribution::Control(plugin, _) => plugin,
     }
   }
 
@@ -75,6 +81,7 @@ impl<'a> Contribution<'a> {
       Contribution::Model(_, model) => &model.id,
       Contribution::Pipeline(_, pipeline) => &pipeline.id,
       Contribution::Script(_, script) => &script.id,
+      Contribution::Control(_, control) => &control.path,
     }
   }
 
@@ -84,6 +91,7 @@ impl<'a> Contribution<'a> {
       Contribution::Model(_, model) => &model.title,
       Contribution::Pipeline(_, pipeline) => &pipeline.title,
       Contribution::Script(_, script) => &script.title,
+      Contribution::Control(_, control) => control.name(),
     }
   }
 
@@ -93,6 +101,7 @@ impl<'a> Contribution<'a> {
       Contribution::Model(_, model) => &model.capabilities,
       Contribution::Pipeline(_, pipeline) => &pipeline.capabilities,
       Contribution::Script(_, script) => &script.capabilities,
+      Contribution::Control(..) => &[],
     }
   }
 }
@@ -118,8 +127,11 @@ impl PluginRegistry {
     let Ok(listing) = std::fs::read_dir(p_dir.as_ref()) else {
       return registry;
     };
-    let mut folders: Vec<PathBuf> =
-      listing.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.join("plugin.yml").is_file()).collect();
+    let mut folders: Vec<PathBuf> = listing
+      .filter_map(Result::ok)
+      .map(|entry| entry.path())
+      .filter(|path| path.join("plugin.yml").is_file())
+      .collect();
     folders.sort();
     for dir in folders {
       match Plugin::read(&dir) {
@@ -185,7 +197,7 @@ impl PluginRegistry {
   }
 
   /// Everything the plugins that can be used add, in the order of the plugins and then of the manifest: models, then pipelines, then
-  /// scripts. A plugin whose dependencies are not met adds nothing until they are.
+  /// scripts, then controls. A plugin whose dependencies are not met adds nothing until they are.
   pub fn contributions(&self) -> Vec<Contribution<'_>> {
     self
       .plugins
@@ -199,6 +211,7 @@ impl PluginRegistry {
           .map(move |model| Contribution::Model(plugin, model))
           .chain(manifest.pipelines.iter().map(move |pipeline| Contribution::Pipeline(plugin, pipeline)))
           .chain(manifest.scripts.iter().map(move |script| Contribution::Script(plugin, script)))
+          .chain(manifest.controls.iter().map(move |control| Contribution::Control(plugin, control)))
       })
       .collect()
   }
@@ -259,7 +272,11 @@ mod tests {
     folder.plugin("c-other", &model_plugin("segmenter", "mask"), &["m.onnx", "m.yml"]);
     let registry = PluginRegistry::scan(&folder.0);
     assert!(registry.problems().is_empty(), "{:?}", registry.problems());
-    let found: Vec<_> = registry.with_capability("inpaint").iter().map(|contribution| contribution.plugin().manifest.id.clone()).collect();
+    let found: Vec<_> = registry
+      .with_capability("inpaint")
+      .iter()
+      .map(|contribution| contribution.plugin().manifest.id.clone())
+      .collect();
     assert_eq!(found, ["migan", "lama"], "in the order of the folders' names");
     assert!(registry.with_capability("nothing").is_empty());
     let one = &registry.with_capability("mask")[0];
@@ -325,7 +342,11 @@ mod tests {
     for id in ["top", "middle", "a", "b"] {
       assert!(!registry.is_usable(registry.plugin(id).unwrap()), "{id}");
     }
-    assert_eq!(registry.missing_dependencies(registry.plugin("top").unwrap()), ["middle"], "what is missing is what cannot be used");
+    assert_eq!(
+      registry.missing_dependencies(registry.plugin("top").unwrap()),
+      ["middle"],
+      "what is missing is what cannot be used"
+    );
     assert_eq!(registry.missing_dependencies(registry.plugin("middle").unwrap()), ["bottom"]);
     assert!(registry.contributions().is_empty());
 
@@ -333,6 +354,58 @@ mod tests {
     let registry = PluginRegistry::scan(&folder.0);
     assert!(registry.is_usable(registry.plugin("top").unwrap()), "the chain is met from the bottom up");
     assert!(!registry.is_usable(registry.plugin("a").unwrap()), "a cycle stays unmet");
+  }
+
+  #[test]
+  fn the_controls_of_a_plugin_are_found_with_their_names_and_need_their_scripts() {
+    let manifest = |entry: &str| {
+      format!(
+        "id: pack
+name: Pack
+version: 1
+contributes:
+  controls:
+    - root: Beauty/Makeup
+      items:
+        - path: Eyes/Eyeliner
+          entry: {entry}
+    - root: Beauty/Hair
+      items:
+        - path: Color
+          entry: hair.js
+"
+      )
+    };
+    let folder = Folder::new("controls");
+    folder.plugin("pack", &manifest("eyeliner.js"), &["eyeliner.js", "hair.js"]);
+    folder.plugin("missing", &manifest("gone.js").replace("id: pack", "id: missing"), &["hair.js"]);
+    let registry = PluginRegistry::scan(&folder.0);
+    assert_eq!(
+      registry.problems().len(),
+      1,
+      "a control whose script is not there is reported: {:?}",
+      registry.problems()
+    );
+    assert!(matches!(&registry.problems()[0].error, PluginError::FileNotFound(file) if file == "gone.js"));
+
+    let controls: Vec<(String, String)> = registry
+      .contributions()
+      .into_iter()
+      .filter_map(|contribution| match contribution {
+        Contribution::Control(_, control) => Some((control.root.clone(), control.name().to_string())),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(
+      controls,
+      [
+        ("Beauty/Makeup".to_string(), "Eyeliner".to_string()),
+        ("Beauty/Hair".to_string(), "Color".to_string())
+      ]
+    );
+    let first = registry.contributions().into_iter().next().unwrap();
+    assert_eq!((first.id(), first.title()), ("Eyes/Eyeliner", "Eyeliner"));
+    assert!(first.capabilities().is_empty(), "a control is placed by its root, not found by a capability");
   }
 
   #[test]

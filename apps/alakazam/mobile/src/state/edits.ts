@@ -2,25 +2,15 @@ import { BehaviorSubject } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import {
   BLEMISH_TOOL_KEY,
-  OBJECT_REMOVAL_TOOL_KEY,
-  BROW_BONE_KEY,
   CROP_TOOL_KEY,
-  EYELINER_KEY,
-  EYESHADOW_KEY,
-  LIPSTICK_KEY,
-  HAIR_COLOR_KEY,
+  OBJECT_REMOVAL_TOOL_KEY,
   RED_EYE_TOOL_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
   SKIN_TAN_KEY,
   SKIN_TONE_KEY,
-  UNDER_EYE_KEY,
-  BLUSH_KEY,
-  LIP_LINER_KEY,
-  HIGHLIGHTER_KEY,
-  CONTOUR_KEY,
-  TEETH_WHITENING_KEY,
 } from '@/src/lib/project/edit-sections/keys';
+import { isFaceControlKey, isPersonControlKey } from '@/src/state/control-traits';
 import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
 
 // #region: Edit controls
@@ -70,40 +60,17 @@ export const isCropToolFocused$ = focusedControlKey$.pipe(
 );
 /** Controls whose work is confined to a face, so opening them can bring that face closer. */
 export const isFaceControlFocused$ = focusedControlKey$.pipe(
-  map(
-    key =>
-      key === LIPSTICK_KEY ||
-      key === EYELINER_KEY ||
-      key === EYESHADOW_KEY ||
-      key === BROW_BONE_KEY ||
-      key === UNDER_EYE_KEY ||
-      key === BLUSH_KEY ||
-      key === LIP_LINER_KEY ||
-      key === HIGHLIGHTER_KEY ||
-      key === CONTOUR_KEY ||
-      key === TEETH_WHITENING_KEY,
-  ),
+  map(key => key !== null && isFaceControlKey(key)),
   distinctUntilChanged(),
 );
 export const isPersonControlFocused$ = focusedControlKey$.pipe(
-  map(
-    key =>
-      key === SKIN_EVEN_OUT_KEY ||
-      key === SKIN_SMOOTH_KEY ||
-      key === SKIN_TAN_KEY ||
-      key === SKIN_TONE_KEY ||
-      key === LIPSTICK_KEY ||
-      key === EYELINER_KEY ||
-      key === EYESHADOW_KEY ||
-      key === BROW_BONE_KEY ||
-      key === UNDER_EYE_KEY ||
-      key === BLUSH_KEY ||
-      key === LIP_LINER_KEY ||
-      key === HIGHLIGHTER_KEY ||
-      key === CONTOUR_KEY ||
-      key === TEETH_WHITENING_KEY ||
-      key === HAIR_COLOR_KEY,
-  ),
+  map(key => key !== null && isPersonControlKey(key)),
+  distinctUntilChanged(),
+);
+/** Skin tools can offer the optional skin-detection models; other person controls have their own model requirements. */
+const SKIN_CONTROL_KEYS = new Set([SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY]);
+export const isSkinControlFocused$ = focusedControlKey$.pipe(
+  map(key => key !== null && SKIN_CONTROL_KEYS.has(key)),
   distinctUntilChanged(),
 );
 export const wasBlemishToolFocused = new BehaviorSubject(false);

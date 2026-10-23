@@ -32,7 +32,7 @@ pub use self::{
   engine::Engine,
   gpu::{GpuFrame, GpuTarget, RenderedFrame},
   media::{MediaSource, Pacing, Waker},
-  offscreen::Offscreen,
+  offscreen::{Offscreen, WeakOffscreen},
   view::View,
 };
 
@@ -50,7 +50,7 @@ pub struct Frame {
 /// What an app usually needs, in one import. `subscribe`, `next` and `filter` are trait methods, so the `pub-sub` traits
 /// are included. Items for a surface kind are included when its feature is on.
 pub mod prelude {
-  pub use crate::{Engine, Frame, GpuFrame, GpuTarget, MediaSource, Offscreen, Pacing, RenderedFrame, View, Waker};
+  pub use crate::{Engine, Frame, GpuFrame, GpuTarget, MediaSource, Offscreen, Pacing, RenderedFrame, View, Waker, WeakOffscreen};
   pub use pub_sub::prelude::*;
 
   #[cfg(any(feature = "android-surface", feature = "ios-surface", feature = "desktop-window"))]

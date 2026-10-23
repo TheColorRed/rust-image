@@ -1,7 +1,8 @@
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { personDetectionDownloaded, readImageAsync, type AbraImage, type PersonDetection } from '@alakazam/mobile';
-import { makeupMasks, hairMasks } from '@/src/lib/beauty/eye-makeup';
+import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
+import { hairMasks } from '@/src/lib/beauty/hair-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
 import { toLocalPath } from '@/src/lib/editor/edit-source';
 import { analysisOf, buildAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';

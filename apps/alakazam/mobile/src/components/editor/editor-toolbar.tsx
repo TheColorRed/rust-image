@@ -1,4 +1,9 @@
-import { Bug, CircleQuestionMark, Library, RotateCcw, Share2, X } from 'lucide-react-native';
+import Bug from 'lucide-react-native/icons/bug';
+import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
+import Library from 'lucide-react-native/icons/library';
+import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
+import Share2 from 'lucide-react-native/icons/share-2';
+import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
