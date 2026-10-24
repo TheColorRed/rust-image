@@ -1,3 +1,4 @@
+import { devDebug, warn } from '@/src/lib/log';
 import { fitted, maskInEditFrame } from '@/src/lib/editor/editor-pictures';
 import type { AbraImage, AbraImageLike } from '@alakazam/mobile';
 import type { Image as AbraPixels } from '@abra/core/image';
@@ -142,7 +143,7 @@ export const preloadFor = (
       preloads.set(preload, (byWidth = new Map([[width, provided]])));
       held = provided;
     }
-    if (__DEV__) console.debug(`[preload] ${control.key} ${width}px from the analysis, ms:`, Date.now() - resizeStarted);
+    devDebug('preload', ` ${control.key} ${width}px from the analysis, ms:`, Date.now() - resizeStarted);
   }
 
   // Not made yet: run it, once, on a photo that is not too large for it. One that is running in the background is waited for.
@@ -174,15 +175,15 @@ export const preloadFor = (
           })
           .catch(error => {
             running.delete(preload);
-            console.warn(`[preload] ${control.key} failed:`, error);
+            warn('preload', ` ${control.key} failed:`, error);
           })
           .finally(startWaiting);
-        if (__DEV__) console.debug(`[preload] ${control.key} started in the background`);
+        devDebug('preload', ` ${control.key} started in the background`);
         return undefined;
       }
       if (__DEV__) {
         const count = !made ? 0 : Array.isArray(made) ? made.length : isHandle(made) ? 1 : Object.keys(made).length;
-        console.debug(`[preload] ${control.key} analysed at ${analysedWidth}px, ms:`, Date.now() - analysisStarted, 'found:', count);
+        devDebug('preload', ` ${control.key} analysed at ${analysedWidth}px, ms:`, Date.now() - analysisStarted, 'found:', count);
       }
       const analysis = asPreloaded(made);
       if (!byWidth) preloads.set(preload, (byWidth = new Map()));

@@ -1,3 +1,4 @@
+import { devDebug, devWarn } from '@/src/lib/log';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { personDetectionDownloaded, readImageAsync, type AbraImage, type PersonDetection } from '@alakazam/mobile';
@@ -177,10 +178,10 @@ export async function saveMasksInBackground() {
       }
       const next = { ...project, ...saved, faceBoxes: boxes };
       openProject.next(next);
-      if (__DEV__) console.debug('[masks] saving the project record:', next.masks?.length ?? 0, 'masks, groups', next.maskGroups, 'people', next.people?.length);
+      devDebug('masks', 'saving the project record:', next.masks?.length ?? 0, 'masks, groups', next.maskGroups, 'people', next.people?.length);
       updateProject(next).then(
-        () => __DEV__ && console.debug('[masks] project record saved'),
-        error => console.warn('[masks] could not save the project:', errorMessage(error)),
+        () => devDebug('masks', 'project record saved'),
+        error => devWarn('masks', 'could not save the project:', errorMessage(error)),
       );
     } while (saveAgain);
   } finally {
@@ -200,7 +201,7 @@ export async function buildMasks(photo: AbraImage, isCancelled: () => boolean) {
     try {
       await work();
     } catch (error) {
-      if (__DEV__) console.debug('[masks] background build failed:', errorMessage(error));
+      devDebug('masks', 'background build failed:', errorMessage(error));
     } finally {
       // The next step loads its own models, so this step's are freed first, and only one step's models are in memory at a time.
       unloadModelsWhenIdle();

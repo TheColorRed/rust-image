@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { Animated, PanResponder, type GestureResponderEvent } from 'react-native';
 import { BehaviorSubject, combineLatest, merge, Observable, Subject, type Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged, filter, map, startWith, tap } from 'rxjs/operators';
@@ -182,7 +183,7 @@ export const previewRotationGlide = new Subject<number>();
 
 /** Glides the preview to `to` (and optionally `to.scale`); with no preview shown it just goes there. */
 export function springPreview(to: { x: number; y: number; scale?: number }) {
-  if (__DEV__) console.debug('[zoom] springPreview', JSON.stringify(to), 'observed:', previewGlide.observed);
+  devDebug('zoom', 'springPreview', JSON.stringify(to), 'observed:', previewGlide.observed);
   if (previewGlide.observed) return previewGlide.next(to);
   if (to.scale !== undefined) previewScale.value.setValue(to.scale);
   previewTranslateX.value.setValue(to.x);

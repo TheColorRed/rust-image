@@ -1,3 +1,4 @@
+import { devDebug, warn } from '@/src/lib/log';
 import { type BlendMode } from '@abra/core/blend';
 import { Canvas, type LayerLike } from '@abra/core/canvas';
 import { type ColorLike } from '@abra/core/color';
@@ -82,7 +83,7 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
     }
     const composeStarted = Date.now();
     const flat = root.asImage();
-    if (__DEV__) console.debug(`[layers] ${photo.width()}x${photo.height()} canvas, base + ${laid.length} sheets:`, laid.join(', ') || 'none', `| paint ${paintMs.toFixed(0)} ms, compose ${(Date.now() - composeStarted).toFixed(0)} ms, total ${(Date.now() - started).toFixed(0)} ms`);
+    devDebug('layers', ` ${photo.width()}x${photo.height()} canvas, base + ${laid.length} sheets:`, laid.join(', ') || 'none', `| paint ${paintMs.toFixed(0)} ms, compose ${(Date.now() - composeStarted).toFixed(0)} ms, total ${(Date.now() - started).toFixed(0)} ms`);
     return flat;
   } finally {
     // They are native objects the garbage collector cannot see the size of.
@@ -92,13 +93,13 @@ export const withLayers = (photo: ImageLike, sheets: Sheet[]): ImageLike => {
         release(item);
         freed++;
       } catch (error) {
-        console.warn('[layers] could not free an item:', error);
+        warn('layers', 'could not free an item:', error);
       }
     }
     if (__DEV__) {
       frames++;
       notFreed += owned.length - freed;
-      if (frames % 10 === 0) console.debug(`[layers] frame ${frames}: made ${owned.length}, freed ${freed}, never freed so far ${notFreed}`);
+      if (frames % 10 === 0) devDebug('layers', ` frame ${frames}: made ${owned.length}, freed ${freed}, never freed so far ${notFreed}`);
     }
   }
 };

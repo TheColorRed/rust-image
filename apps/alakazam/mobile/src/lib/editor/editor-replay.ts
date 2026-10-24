@@ -1,3 +1,4 @@
+import { devDebug, warn, error } from '@/src/lib/log';
 import { personIn } from '@/src/lib/ai/analysis';
 import { batch } from '@/src/lib/utils/batch';
 import {
@@ -40,14 +41,14 @@ import {
   historyVersion$,
 } from '@/src/state/edits';
 import { analysisVersion$ } from '@/src/state/analysis';
-import { previewBox$ } from '@/src/state/gestures';
+import { previewBox, previewBox$ } from '@/src/state/gestures';
 import { personSelection } from '@/src/state/person-selection';
 import { controlThumbnails } from '@/src/state/preview';
 import { busy, currentImage, editBaseImage, ready$, replayHidden } from '@/src/state/session';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
-import { distinctUntilChanged, filter, switchMap, tap } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, filter, startWith, switchMap, tap } from 'rxjs/operators';
 import { building, release } from '@/src/lib/native/native-handles';
 
 // #region: The full-size picture, which is not shown
@@ -68,7 +69,7 @@ function runFullReplay() {
   const next = renderEditStack(base, undefined, true);
   release(currentImage.value);
   currentImage.next(next);
-  if (__DEV__) console.debug('[edit] full-size replay ms (not shown):', Date.now() - started);
+  devDebug('edit', 'full-size replay ms (not shown):', Date.now() - started);
 }
 
 /**
@@ -93,6 +94,11 @@ export function releaseShownImages() {
 
 /** Gap between an edit and its replay, so the tap's immediate UI feedback can be drawn first. */
 const REPLAY_DELAY_MS = 60;
+// The preview box eases between heights over 240 ms when the editor panel changes size. Replaying
+// the whole edit stack on every animation frame turns that one layout change into a burst of
+// synchronous native renders, starving presses and slider work on the JS thread.
+const PREVIEW_BOX_TWEEN_MS = 240;
+const REPLAY_BOX_SETTLE_MS = PREVIEW_BOX_TWEEN_MS + 40;
 
 const findAction = (key: string): { control: ActionControl; section: EditSection } | undefined => {
   for (const section of EDIT_SECTIONS) {
@@ -387,7 +393,7 @@ function runSteps(
   }
   timed('layers', lay);
   capture?.(steps.length, image);
-  if (__DEV__) console.debug(`[steps] ${image.width()}px:`, timings.join(', '));
+  devDebug('steps', ` ${image.width()}px:`, timings.join(', '));
 }
 
 /**
@@ -555,7 +561,7 @@ function sectionThumbnails(section: EditSection, base: AbraImage) {
   const source = shrunkOf('thumbnail', shrunkOf('base', base), thumbnailPixels()).clone() as AbraImage;
   try {
     runSteps(source, appliedSteps(inGroup.length ? groups : undefined), base);
-    if (__DEV__) console.debug('[thumbnails] small-size replay ms:', Date.now() - started);
+    devDebug('thumbnails', 'small-size replay ms:', Date.now() - started);
     const previous = Object.fromEntries(
       section.controls.flatMap(control => {
         const preview = controlThumbnails.value[control.key];
@@ -638,42 +644,51 @@ function replay() {
   // Re-check: on Fast Refresh this can fire after the session was disposed and its images destroyed.
   const base = editBaseImage.value;
   replayHidden.next(false);
-  if (!base) return busy.next(false);
+  if (!base) {
+    busy.next(false);
+    return;
+  }
 
-  // A new photo makes what was preloaded from the old one again, when its control is next used. This comes before anything is
-  // drawn, so the edits drawn now (and the thumbnails after them) share what is made for the new photo and do not lose it.
-  if (preloadedBase && preloadedBase !== base) clearPreloads();
-  preloadedBase = base;
-  replayedBase = base;
+  try {
+    // A new photo makes what was preloaded from the old one again, when its control is next used. This comes before anything is
+    // drawn, so the edits drawn now (and the thumbnails after them) share what is made for the new photo and do not lose it.
+    if (preloadedBase && preloadedBase !== base) clearPreloads();
+    preloadedBase = base;
+    replayedBase = base;
 
-  const started = Date.now();
-  // When every control only makes the photo remember effects, the edit is made on the full-size photo, which costs nothing and
-  // is what is drawn and saved. Otherwise it is made on a screen-size copy first, and on the full-size photo a moment later.
-  const deferred = isStackDeferred();
-  const next = renderCachedStack(base, deferred);
-  // Keeps a held before/after preview correct even if an edit finishes replaying with a finger down.
-  setShown(next);
-  if (deferred) {
-    fullReplayPending = false;
-    release(currentImage.value);
-    currentImage.next(next.clone() as AbraImage);
-  } else fullReplayPending = true;
-  if (__DEV__) console.debug(`[preview] ${deferred ? 'full-size deferred' : 'screen-size'} replay ms:`, Date.now() - started);
+    const started = Date.now();
+    // When every control only makes the photo remember effects, the edit is made on the full-size photo, which costs nothing and
+    // is what is drawn and saved. Otherwise it is made on a screen-size copy first, and on the full-size photo a moment later.
+    const deferred = isStackDeferred();
+    const next = renderCachedStack(base, deferred);
+    // Keeps a held before/after preview correct even if an edit finishes replaying with a finger down.
+    setShown(next);
+    if (deferred) {
+      fullReplayPending = false;
+      release(currentImage.value);
+      currentImage.next(next.clone() as AbraImage);
+    } else fullReplayPending = true;
+    devDebug('preview', ` ${deferred ? 'full-size deferred' : 'screen-size'} replay ms:`, Date.now() - started);
 
-  busy.next(false);
-  // Let React mount the main preview before starting thumbnail work.
-  thumbnailFrame = requestAnimationFrame(() => {
-    thumbnailFrame = undefined;
-    thumbnailTimer = setTimeout(() => {
-      thumbnailTimer = undefined;
-      try {
-        preloadSection();
-        sectionThumbnails(findSection(activeSectionKey.value), base);
-      } catch (error) {
-        console.warn('[edit] preparing thumbnail edit stack threw:', error);
-      }
-    }, 0);
-  });
+    // Let React mount the main preview before starting thumbnail work.
+    thumbnailFrame = requestAnimationFrame(() => {
+      thumbnailFrame = undefined;
+      thumbnailTimer = setTimeout(() => {
+        thumbnailTimer = undefined;
+        try {
+          preloadSection();
+          sectionThumbnails(findSection(activeSectionKey.value), base);
+        } catch (error) {
+          warn('edit', 'preparing thumbnail edit stack threw:', error);
+        }
+      }, 0);
+    });
+  } catch (cause) {
+    error('edit', 'preview replay failed:', cause);
+  } finally {
+    // A failed native or tool render must not leave the editor permanently busy; keep the last preview interactive.
+    busy.next(false);
+  }
 }
 
 /**
@@ -689,7 +704,10 @@ let renderedBox: unknown;
 let renderedAnalysis: unknown;
 
 export function startReplay(): Subscription {
-  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$, historyVersion$])
+  // Keep the current box for the first replay, then only publish it after its height tween settles.
+  // Other replay inputs (especially committed edits) still trigger immediately.
+  const settledPreviewBox$ = previewBox$.pipe(debounceTime(REPLAY_BOX_SETTLE_MS), startWith(previewBox.value));
+  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, settledPreviewBox$, analysisVersion$, historyVersion$])
     .pipe(
       distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4]?.width === b[4]?.width && a[4]?.height === b[4]?.height && a[5] === b[5] && a[6] === b[6]),
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
@@ -701,7 +719,7 @@ export function startReplay(): Subscription {
           clearRenderCache();
         }
         cancelThumbnailBuild();
-        if (__DEV__) console.debug('[replay] change received', activeSectionKey.value);
+        devDebug('replay', 'change received', activeSectionKey.value);
         busy.next(!replayHidden.value);
       }),
       switchMap(

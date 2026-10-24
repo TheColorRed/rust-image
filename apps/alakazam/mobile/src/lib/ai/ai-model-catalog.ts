@@ -1,3 +1,4 @@
+import { devWarn } from '@/src/lib/log';
 import { scanPlugins } from '@abra/core';
 import {
   aiModelPath,
@@ -125,8 +126,8 @@ export const refreshAiModels = async (): Promise<AiModelListing[]> => {
   for (const item of Array.isArray(parsed?.plugins) ? parsed.plugins : []) {
     if (item && typeof item.id === 'string' && typeof item.uri === 'string' && /^[0-9a-fA-F]{64}$/.test(String(item.sha256))) {
       catalogPlugins.set(item.id, { id: item.id, uri: item.uri, sha256: String(item.sha256).toLowerCase() });
-    } else if (__DEV__) {
-      console.warn('[plugins] a plugin in the catalog needs its `id`, `uri` and SHA-256 `sha256`:', JSON.stringify(item));
+    } else {
+      devWarn('plugins', 'a plugin in the catalog needs its `id`, `uri` and SHA-256 `sha256`:', JSON.stringify(item));
     }
   }
 
@@ -193,7 +194,7 @@ export const refreshAiModels = async (): Promise<AiModelListing[]> => {
       )
       .map((item: Record<string, unknown>) =>
         pluginModels(item, addons).catch(error => {
-          if (__DEV__) console.warn('[plugins] a plugin in the catalog could not be read:', errorMessage(error));
+          devWarn('plugins', 'a plugin in the catalog could not be read:', errorMessage(error));
           return [];
         }),
       ),

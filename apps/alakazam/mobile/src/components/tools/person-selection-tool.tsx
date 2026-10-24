@@ -1,3 +1,4 @@
+import { devDebug, warn } from '@/src/lib/log';
 import { personDetectionDownloaded } from '@alakazam/mobile';
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
@@ -64,7 +65,7 @@ export function PersonSelectionToolController() {
           // The skin model runs now that a control that uses the skin is open, and not when the photo opens. Without it the
           // controls find the skin by its color.
           detectSkin(originalImage.value ?? image).catch(error => {
-            if (__DEV__) console.debug('[image] skin detection unavailable:', errorMessage(error));
+            devDebug('image', 'skin detection unavailable:', errorMessage(error));
           });
           // Without the body model there is nothing to detect; skin effects apply to the whole photo. Detection starts once
           // the model is downloaded.
@@ -98,13 +99,13 @@ export function PersonSelectionToolController() {
               // The faces are found after the people are shown, because the face models take a moment.
               setTimeout(() => {
                 if (requestId === currentRequest && personSelection.value.focused) {
-                  findFaceBoxes(image).catch(error => console.warn('[faces] could not find the faces:', errorMessage(error)));
+                  findFaceBoxes(image).catch(error => warn('faces', 'could not find the faces:', errorMessage(error)));
                 }
               }, 0);
             },
             error => {
               if (requestId !== currentRequest || !personSelection.value.focused) return;
-              console.warn('[people] detection failed:', errorMessage(error));
+              warn('people', 'detection failed:', errorMessage(error));
               personSelection.next({
                 ...personSelection.value,
                 focused: true,
@@ -136,7 +137,7 @@ export function PersonSelectionToolController() {
           ),
         )
         .subscribe(([isFaceControl, selectedId, face]) => {
-          if (__DEV__) console.debug('[zoom] face tool zoom', isFaceControl, selectedId, !!face, 'focused:', personSelection.value.focused);
+          devDebug('zoom', 'face tool zoom', isFaceControl, selectedId, !!face, 'focused:', personSelection.value.focused);
           const image = getPersonSelectionImage();
           const box = previewBox.value;
           if (!personSelection.value.focused || !image || !box) return;

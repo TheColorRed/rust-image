@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { ResizeTarget } from '@abra/core/canvas';
 import { type ImageLike } from '@abra/core/image';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
@@ -104,8 +105,7 @@ export const edgeMatte = async (
       done();
     }
   }
-  if (__DEV__)
-    console.debug('[matte] edge refinement looked at', width, 'x', height, 'in', xs.length * ys.length, 'tiles');
+  devDebug('matte', 'edge refinement looked at', width, 'x', height, 'in', xs.length * ys.length, 'tiles');
   if (!alpha) return undefined;
   return keep(alpha.resized(part.width, part.height, TransformAlgorithm.Bilinear)).placed(
     photo.width(),

@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -109,7 +110,7 @@ export function AiProgressBar({
     <View
       style={styles.track}
       onLayout={event => {
-        if (__DEV__) console.debug('[bar] layout', event.nativeEvent.layout.width, 'x', event.nativeEvent.layout.height);
+        devDebug('bar', 'layout', event.nativeEvent.layout.width, 'x', event.nativeEvent.layout.height);
         setWidth(event.nativeEvent.layout.width);
       }}
       accessibilityRole="progressbar"

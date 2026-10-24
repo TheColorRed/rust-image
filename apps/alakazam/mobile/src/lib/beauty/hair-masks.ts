@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { AiModel } from '@abra/core';
 import { type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
@@ -74,9 +75,9 @@ export const hairMasks = async (photo: ImageLike): Promise<Record<string, MaskLi
           unloadModel(EDGE_REFINEMENT);
         }
         if (matte) made['hair|matte'] = matte;
-        if (__DEV__) console.debug('[hair] edge refinement ms:', Date.now() - started, 'made:', !!matte);
-      } else if (__DEV__) {
-        console.debug('[hair] edge refinement skipped:', refiner ? 'no hair found' : 'model not downloaded');
+        devDebug('hair', 'edge refinement ms:', Date.now() - started, 'made:', !!matte);
+      } else {
+        devDebug('hair', 'edge refinement skipped:', refiner ? 'no hair found' : 'model not downloaded');
       }
     });
     aiProgress.next({ ...aiProgress.value, hair: 1 });

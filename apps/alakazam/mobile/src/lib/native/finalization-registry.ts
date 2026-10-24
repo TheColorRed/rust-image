@@ -1,3 +1,4 @@
+import { warn } from '@/src/lib/log';
 // A `FinalizationRegistry` for engines that have `WeakRef` and not `FinalizationRegistry`, which is the case of the Hermes this app runs on.
 //
 // Every class the bindings generate makes one registry (`typeof FinalizationRegistry !== 'undefined' ? new FinalizationRegistry(free) : null`)
@@ -66,7 +67,7 @@ export function installFinalizationRegistry(target: Engine, sweepMs = SWEEP_MS) 
         try {
           this.cleanup(entry.held);
         } catch (error) {
-          console.warn('[native] could not free a handle whose wrapper was collected:', error);
+          warn('native', 'could not free a handle whose wrapper was collected:', error);
         }
       }
     }

@@ -1,3 +1,4 @@
+import { warn } from '@/src/lib/log';
 import { type ImageLike } from '@abra/core/image';
 import { ImagePreview, type AbraImage } from '@alakazam/mobile';
 import { BehaviorSubject } from 'rxjs';
@@ -63,7 +64,7 @@ export class LiveRenderer {
       this.view.next(this.open.preview);
       return true;
     } catch (error) {
-      console.warn(`[live] could not open a preview:`, error);
+      warn('live', ` could not open a preview:`, error);
       return false;
     } finally {
       if (ownsSource) release(image);
@@ -91,7 +92,7 @@ export class LiveRenderer {
       open.preview.refresh();
       this.publish(open);
     } catch (error) {
-      console.warn(`[live] could not update the preview:`, error);
+      warn('live', ` could not update the preview:`, error);
     }
   }
 

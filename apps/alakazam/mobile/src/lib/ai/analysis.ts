@@ -29,7 +29,7 @@ let made:
 const cache = () => {
   const crops = cropKey();
   if (made?.skin !== skinMask.value || made.list !== people.value || made.crops !== crops) {
-    freeFramed();
+    freeCachedMasks();
     const skin = skinMask.value;
     const list = people.value;
     made = {
@@ -52,11 +52,22 @@ const framePerson = (person: PersonDetection): PersonDetection => {
   return { ...person, mask, ...(box ? { x: box.x, y: box.y, width: box.width, height: box.height } : {}) };
 };
 
-/** Frees the cut copies in the cache, which are only copies when the photo is cropped. */
-const freeFramed = () => {
-  if (!made?.crops) return;
-  release(made.framedSkin);
-  for (const person of made.framedList ?? []) release(person.mask);
+/** Frees native masks the cache owns, and its framed source copies when the photo is cropped. */
+const freeCachedMasks = () => {
+  if (!made) return;
+  // `full` can contain either a borrowed source mask or a new per-person mask, while `sized` owns every cached resize.
+  // Keep the ownership distinction explicit so invalidating the cache frees its native copies without freeing the AI results.
+  const borrowed = new Set<MaskLike>();
+  if (made.framedSkin) borrowed.add(made.framedSkin);
+  for (const person of made.framedList ?? []) borrowed.add(person.mask);
+  const owned = new Set<MaskLike>();
+  for (const mask of made.full.values()) if (mask && !borrowed.has(mask)) owned.add(mask);
+  for (const mask of made.sized.values()) owned.add(mask);
+  if (made.crops) {
+    if (made.framedSkin) owned.add(made.framedSkin);
+    for (const person of made.framedList ?? []) owned.add(person.mask);
+  }
+  release(...Array.from(owned));
 };
 
 /** The people as they lie on the cropped photo, or null until they are found. Do not free them. */
@@ -92,7 +103,10 @@ export const skinMaskSized = (
   const key = `${personId ?? ''}:${width}x${height}`;
   let held = sized.get(key);
   if (!held) {
-    if (sized.size >= 8) sized.clear();
+    if (sized.size >= 8) {
+      release(...Array.from(new Set(sized.values())));
+      sized.clear();
+    }
     sized.set(key, (held = mask.resized(width, height, TransformAlgorithm.Bilinear)));
   }
   let result = held.resized(width, height, TransformAlgorithm.Bilinear);
@@ -247,7 +261,7 @@ export const detectPeople = (
 export const clearAnalysis = () => {
   const skin = skinMask.value;
   const list = people.value;
-  freeFramed();
+  freeCachedMasks();
   made = undefined;
   skinMask.next(null);
   people.next(null);

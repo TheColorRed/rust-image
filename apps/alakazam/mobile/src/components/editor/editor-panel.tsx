@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { filter, takeUntil } from 'rxjs/operators';
 import { ColorBarPicker } from '@/src/components/editor/color-bar-picker';
 import { RangeSlider } from '@/src/components/range-slider';
@@ -285,7 +286,7 @@ export function EditorPanel() {
     <View
       style={[styles.panel, { paddingBottom: bottomInset + 12 }]}
       onLayout={event =>
-        __DEV__ && console.debug('[panel] height', event.nativeEvent.layout.height, 'bottom inset', bottomInset)
+        devDebug('panel', 'height', event.nativeEvent.layout.height, 'bottom inset', bottomInset)
       }
     >
       <BlemishToolController />
@@ -369,7 +370,7 @@ export function EditorPanel() {
         )}
       </View>
       <View
-        onLayout={event => __DEV__ && console.debug('[panel] controls height', event.nativeEvent.layout.height)}
+        onLayout={event => devDebug('panel', 'controls height', event.nativeEvent.layout.height)}
         style={[
           styles.controls,
           focusedControl?.kind === 'slider'
@@ -400,7 +401,11 @@ export function EditorPanel() {
           <Pressable
             key={section.key}
             style={[styles.sectionTab, section.key === activeKey && styles.sectionTabActive]}
-            onPress={() => selectSectionRequested.next(section.key)}
+            onPressIn={() => devDebug('touch', 'section press-in', section.key)}
+            onPress={() => {
+              devDebug('touch', 'section press', section.key);
+              selectSectionRequested.next(section.key);
+            }}
           >
             <Text style={[styles.sectionText, section.key === activeKey && styles.sectionTextActive]}>
               {section.label}
@@ -428,6 +433,7 @@ function SliderEditor() {
   const onLiveChange = useSliderPreview(control?.kind === 'slider' ? control : undefined);
   // Drawn areas step aside while a slider moves and come back when it is released.
   const liveChange = (next: number[]) => {
+    devDebug('touch', 'slider change', control?.key, next);
     areaOutlinesHidden.next(true);
     onLiveChange?.(next);
   };
@@ -668,7 +674,9 @@ function SliderEditor() {
                         accessibilityRole="button"
                         accessibilityLabel={swatch.label}
                         accessibilityState={{ selected: chosen }}
+                        onPressIn={() => devDebug('touch', 'swatch press-in', control.key, swatch.label)}
                         onPress={() => {
+                          devDebug('touch', 'swatch press', control.key, swatch.label);
                           swatch.values.forEach((wanted, swatchIndex) => {
                             if (wanted !== undefined) values[swatchIndex] = wanted;
                           });
@@ -754,6 +762,7 @@ function ThumbnailControls() {
   const sectionKey = useObservable(activeSectionKey$, 'section-colorization');
   const appliedActions = useObservable(appliedActions$, []);
   const controlThumbnails = useObservable(controlThumbnails$, {});
+  const loggedCards = useRef(new Set<string>());
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const activeSection = findSection(sectionKey);
@@ -768,7 +777,11 @@ function ThumbnailControls() {
       {activeSection.controls.map(control => {
         const adjusted = control.kind === 'action' && !control.repeatable && appliedActions.includes(control.key);
         const thumbnail = controlThumbnails[control.key];
-        if (__DEV__ && thumbnail) console.debug('[panel] card drawn by React', control.key);
+        const logKey = `${sectionKey}:${control.key}`;
+        if (thumbnail && !loggedCards.current.has(logKey)) {
+          loggedCards.current.add(logKey);
+          devDebug('panel', 'card drawn by React', control.key);
+        }
         return (
           <Pressable
             key={control.key}

@@ -1,9 +1,11 @@
+import { devDebug } from '@/src/lib/log';
 import { AiModel } from '@abra/core';
 import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTranslated, type Rect } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
 import { aiModelPath, runAiModelAsync, unloadAiModels } from '@alakazam/mobile';
 import { debounceTime, filter } from 'rxjs/operators';
-import { personIn } from '@/src/lib/ai/analysis';
+import { personIn } from '@/src/lib/ai/analysis';
+
 import { owning, release } from '@/src/lib/native/native-handles';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { faceBoxes, people } from '@/src/state/analysis';
@@ -280,7 +282,7 @@ export const findFaceBoxes = (photo: ImageLike): Promise<void> => {
           boxes[owner.id] = { x: face.x * scale, y: face.y * scale, width: face.width * scale, height: face.height * scale };
         }
       });
-      if (__DEV__) console.debug('[faces] face boxes found in the background, ms:', Date.now() - started, 'faces:', Object.keys(boxes).length);
+      devDebug('faces', 'face boxes found in the background, ms:', Date.now() - started, 'faces:', Object.keys(boxes).length);
       // The photo may have been closed while the models ran, and then what they found is for a photo that is gone.
       if (people.value === found) faceBoxes.next(boxes);
     } finally {

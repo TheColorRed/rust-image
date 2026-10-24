@@ -1,3 +1,4 @@
+import { devDebug, warn } from '@/src/lib/log';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { AbraImage, ThumbnailPreview } from '@alakazam/mobile';
 import { PixelRatio } from 'react-native';
@@ -119,7 +120,7 @@ export function buildControlThumbnails(
             }
           } catch (error) {
             succeeded = false;
-            if (!cancelled) console.warn(`[edit] building thumbnail for "${control.key}" threw:`, error);
+            if (!cancelled) warn('edit', ` building thumbnail for "${control.key}" threw:`, error);
           } finally {
             release(created);
             release(pixels);
@@ -135,12 +136,12 @@ export function buildControlThumbnails(
       await render();
       return !cancelled && succeeded;
     } catch (error) {
-      if (!cancelled) console.warn('[edit] preparing native thumbnail source threw:', error);
+      if (!cancelled) warn('edit', 'preparing native thumbnail source threw:', error);
       return false;
     } finally {
       release(source);
-      if (__DEV__ && !cancelled) {
-        console.debug('[thumbnails]', section.key, {
+      if (!cancelled) {
+        devDebug('thumbnails', section.key, {
           firstCardMs,
           firstEffectMs,
           firstComponentMs,

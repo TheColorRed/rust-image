@@ -1,3 +1,4 @@
+import { devDebug } from '@/src/lib/log';
 import { BehaviorSubject } from 'rxjs';
 import { debounceTime, filter } from 'rxjs/operators';
 
@@ -21,7 +22,7 @@ aiProgress$
   )
   .subscribe(() => aiProgress.next({}));
 
-if (__DEV__) aiProgress$.subscribe(tasks => console.debug('[ai] tasks:', JSON.stringify(tasks)));
+aiProgress$.subscribe(tasks => devDebug('ai', 'tasks:', JSON.stringify(tasks)));
 
 /**
  * How far along the whole job is, from 0 to 1. Every task is worth the same share of it, because how long each takes is not known

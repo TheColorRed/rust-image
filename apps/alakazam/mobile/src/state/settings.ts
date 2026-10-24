@@ -1,3 +1,4 @@
+import { warn } from '@/src/lib/log';
 import type { ThemePreference } from '@/src/lib/ui/theme';
 import { setWorkerStackMegabytes } from '@alakazam/mobile';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -61,7 +62,7 @@ const STORAGE_KEY = 'settings';
     if (WORKER_STACK_CHOICES.includes(saved.workerStackMegabytes)) workerStackMegabytes.next(saved.workerStackMegabytes);
     if (['system', 'light', 'dark'].includes(saved.themePreference)) themePreference.next(saved.themePreference);
   } catch (error) {
-    console.warn('[settings] could not read the saved settings:', error);
+    warn('settings', 'could not read the saved settings:', error);
   }
   // Tells the library before the first image job, which is when the workers are made.
   setWorkerStackMegabytes(workerStackMegabytes.value);
@@ -72,7 +73,7 @@ const STORAGE_KEY = 'settings';
     .subscribe(([format, quality, theme, stack]) => {
       setWorkerStackMegabytes(stack);
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ exportFormat: format, exportQuality: quality, themePreference: theme, workerStackMegabytes: stack })).catch(error =>
-        console.warn('[settings] could not save the settings:', error),
+        warn('settings', 'could not save the settings:', error),
       );
     });
 })();

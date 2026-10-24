@@ -1,3 +1,4 @@
+import { devDebug, devLog, warn } from '@/src/lib/log';
 import { registerAiAnalysis } from '@/src/lib/ai/ai-analyses';
 import { clearAnalysis, detectPeople } from '@/src/lib/ai/analysis';
 import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
@@ -212,7 +213,7 @@ export async function saveOpenProject(): Promise<void> {
           final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: RESULT_QUALITY });
         } catch (error) {
           // WebP cannot hold a side over 16383 pixels, and may run out of memory on a very large photo. JPEG still can.
-          console.warn('[project] WebP result failed, saving a JPEG instead:', errorMessage(error));
+          warn('project', 'WebP result failed, saving a JPEG instead:', errorMessage(error));
           resultFile = `result-${stamp}.jpg`;
           final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: JPEG_FALLBACK_QUALITY });
         }
@@ -221,7 +222,7 @@ export async function saveOpenProject(): Promise<void> {
       }
     }
     const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
-    if (__DEV__) console.debug('[project] saving on close:', savedProject.masks?.length ?? 0, 'masks, groups', savedProject.maskGroups);
+    devDebug('project', 'saving on close:', savedProject.masks?.length ?? 0, 'masks, groups', savedProject.maskGroups);
     openProject.next(savedProject);
     await updateProject(savedProject);
   } catch (error) {
@@ -296,7 +297,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
   sessionProject = project;
-  if (__DEV__ && project) console.log('[project] opened', project.id, project.dir);
+  if (project) devLog('project', 'opened', project.id, project.dir);
   const ledgerMark = handleLedgerMark();
   const replay = startReplay();
   const live = startEditorPreview();
@@ -345,7 +346,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         release(original);
         return;
       }
-      if (__DEV__) console.debug('[image] decode and skin mask ms:', Date.now() - started);
+      devDebug('image', 'decode and skin mask ms:', Date.now() - started);
 
       // The project was closed with some steps applied and maybe more undone after them. Only the applied steps are rebuilt.
       // Only steps that change pixels (blemish and red-eye fixes) are rendered: each bakes in the edits that came before it, on top

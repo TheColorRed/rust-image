@@ -1,3 +1,4 @@
+import { warn } from '@/src/lib/log';
 // Development only: a ledger of the native handles that are alive and where each was made, so a handle that nobody released shows up the
 // first time the code runs, and not as memory that is held until the garbage collector gets to it.
 //
@@ -95,8 +96,8 @@ export function warnUnreleasedSince(mark: number, label: string) {
   const groups = unreleasedSince(mark);
   if (groups.length === 0) return;
   const total = groups.reduce((sum, group) => sum + group.count, 0);
-  console.warn(`[leak] ${total} native handles made before ${label} are still alive, from ${groups.length} places:`);
-  for (const { where, count, first } of groups) console.warn(`[leak] ${count} x ${where}`, first);
+  warn('leak', ` ${total} native handles made before ${label} are still alive, from ${groups.length} places:`);
+  for (const { where, count, first } of groups) warn('leak', ` ${count} x ${where}`, first);
 }
 
 if (__DEV__) installHandleLedger(globalThis as { FinalizationRegistry?: unknown });
