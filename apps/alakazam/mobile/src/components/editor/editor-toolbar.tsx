@@ -2,6 +2,7 @@ import Bug from 'lucide-react-native/icons/bug';
 import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
 import Library from 'lucide-react-native/icons/library';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
+import Save from 'lucide-react-native/icons/save';
 import Share2 from 'lucide-react-native/icons/share-2';
 import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useState } from 'react';
@@ -12,7 +13,9 @@ import { ImageInfoDialog } from '@/src/components/editor/image-info-dialog';
 import { PresetDialog } from '@/src/components/editor/preset-dialog';
 import { type EditablePhoto } from '@/src/lib/editor/edit-source';
 import { resetEdits } from '@/src/lib/editor/editor-history';
-import { shareEditedPhoto } from '@/src/lib/editor/editor-session';
+import { saveEditedPhotoToGallery, shareEditedPhoto } from '@/src/lib/editor/editor-session';
+import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dialog';
+import type { ExportFormat } from '@/src/state/settings';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { useTheme } from '@/src/lib/ui/theme';
@@ -34,6 +37,13 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [developerOpen, setDeveloperOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const exportItems = useMemo(
+    () => [{ id: 'editor-photo', uri: photo.uri, name: photo.fileName ?? photo.project?.name ?? 'photo.jpg' }],
+    [photo.fileName, photo.project?.name, photo.uri],
+  );
+  const saveCurrentPhoto = async (_item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) =>
+    saveEditedPhotoToGallery(fileName, format, quality);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -52,6 +62,14 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
       </Pressable>
       {/* The close button stays put; the buttons beside it scroll sideways when the screen is too narrow for them all. */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rightScroll} contentContainerStyle={styles.right}>
+        <Pressable
+          accessibilityLabel="Save to device"
+          style={styles.iconButton}
+          onPress={() => setSaveOpen(true)}
+          hitSlop={8}
+        >
+          <Save color={overlayIconColor} size={22} />
+        </Pressable>
         <Pressable
           accessibilityLabel="Share"
           style={[styles.iconButton, sharing && styles.disabled]}
@@ -104,6 +122,12 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
       <ImageInfoDialog photo={photo} visible={infoOpen} onClose={() => setInfoOpen(false)} />
       {__DEV__ ? <DeveloperDialog visible={developerOpen} onClose={() => setDeveloperOpen(false)} /> : null}
       <PresetDialog visible={presetsOpen} onClose={() => setPresetsOpen(false)} />
+      <ExportDialog
+        items={exportItems}
+        visible={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        onSaveImage={saveCurrentPhoto}
+      />
     </View>
   );
 }

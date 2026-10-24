@@ -34,9 +34,12 @@ export function useSliderPreview(p_control: SliderControl | undefined): ((values
 
   // Everything except this slider changes what a drag should start from; its own value does not.
   const targetKey = adjustmentKey(key ?? '', selection.selectedId);
+  // Area edits belong to this slider's effect too. Drawing one commits a separate adjustment, so
+  // include those values when deciding whether the cached rest of the stack is still current.
+  const areas = p_control?.areaKeys?.map(areaKey => adjustments[areaKey]);
   const others = useMemo(
-    () => JSON.stringify([key, selection.selectedId, actions, { ...adjustments, [targetKey]: 0 }]),
-    [key, selection.selectedId, targetKey, actions, adjustments],
+    () => JSON.stringify([key, selection.selectedId, actions, { ...adjustments, [targetKey]: 0 }, areas]),
+    [key, selection.selectedId, targetKey, actions, adjustments, areas],
   );
 
   // Open the preview this drag needs before it starts: the shared edit base, or the CPU-rendered rest of the stack.

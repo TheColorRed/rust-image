@@ -435,7 +435,6 @@ impl PluginManifest {
       });
     }
 
-    let mut subscription: Option<bool> = None;
 
     let mut dependencies: Vec<Dependency> = Vec::new();
     if let Some(list) = doc.as_mapping_get("dependencies") {

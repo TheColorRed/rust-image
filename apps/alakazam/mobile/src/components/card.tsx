@@ -10,6 +10,8 @@ export interface CardProps {
   subtitle?: string;
   /** Makes the whole card a button. */
   onPress?: () => void;
+  /** Indicates that the card's associated content is currently open. */
+  selected?: boolean;
   /** Anything at all, shown below the header (or on its own when there is no header). */
   children?: ReactNode;
   /** Applied to the outer container, so a card can size itself in a row, a grid or a list. */
@@ -84,7 +86,7 @@ export function CardHeader({
 CardHeader.slot = 'header';
 
 /** A surface with an optional header (icon, title, subtitle), any content below it, and an optional tap target. */
-export function Card({ icon: Icon, title, subtitle, onPress, children, style }: CardProps) {
+export function Card({ icon: Icon, title, subtitle, onPress, children, style, selected = false }: CardProps) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
@@ -95,6 +97,10 @@ export function Card({ icon: Icon, title, subtitle, onPress, children, style }: 
           borderRadius: 16,
           backgroundColor: colors.surface,
           overflow: 'hidden',
+        },
+        selectedCard: {
+          borderColor: colors.accent,
+          backgroundColor: colors.chip,
         },
         icon: {
           width: 56,
@@ -126,9 +132,10 @@ export function Card({ icon: Icon, title, subtitle, onPress, children, style }: 
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
+      accessibilityState={{ expanded: selected }}
       activeOpacity={0.75}
       onPress={onPress}
-      style={[styles.card, style]}
+      style={[styles.card, selected && styles.selectedCard, style]}
     >
       {content}
     </TouchableOpacity>

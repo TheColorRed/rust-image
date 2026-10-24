@@ -1,10 +1,12 @@
 import { NativeModules, Platform, Share } from 'react-native';
+import type { ExportFormat } from '@/src/state/settings';
 
 type MediaFileModule = {
   copyToCache(uri: string, fileName: string): Promise<string>;
   deleteFromCache(uri: string): Promise<boolean>;
   newCacheFile(fileName: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
+  saveToGallery(uri: string, fileName: string): Promise<string>;
 };
 
 const mediaFile = NativeModules.MediaFile as MediaFileModule | undefined;
@@ -30,6 +32,24 @@ export async function shareImageFile(uri: string): Promise<void> {
   }
   if (!mediaFile?.shareImage) throw new Error('The installed app is older than this code. Rebuild it with npm run dev:android.');
   await mediaFile.shareImage(uri);
+}
+
+/** Copies an exported image into the device photo library and returns its content URI. */
+export async function saveImageToGallery(uri: string, fileName: string): Promise<string> {
+  if (!mediaFile?.saveToGallery) throw new Error('The installed app is older than this code. Rebuild it with npm run dev:android.');
+  return mediaFile.saveToGallery(uri, fileName);
+}
+
+/** Encodes an Abra image in the chosen export format and saves it to the photo library. */
+export async function writeImageToGallery(
+  image: { write(path: string, options?: { quality: number }): void },
+  fileName: string,
+  format: ExportFormat,
+  quality: number,
+): Promise<string> {
+  const uri = await cacheFileUri(fileName);
+  image.write(decodeURIComponent(uri.replace(/^file:\/\//, '')), { quality });
+  return saveImageToGallery(uri, fileName);
 }
 
 /** Deletes a file that is in the app cache. Anything outside the cache is left alone; returns whether it was deleted. */

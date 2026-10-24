@@ -1,6 +1,7 @@
 import { highlightsShadows } from '@/src/effects/highlights-shadows';
 import { brightness, contrast, exposure, saturation, vibrance } from '@abra/core/adjustments';
 import { EditSection, SliderControl } from '@/src/lib/project/edit-sections';
+import { owning } from '@/src/lib/native/native-handles';
 
 export const adjustments: EditSection = {
   key: 'section-adjustments',
@@ -16,8 +17,8 @@ export const adjustments: EditSection = {
       defaultValue: 0,
       applyOnSelect: false,
       deferred: true,
-      tool: (image, [value]) => brightness(value).applyDeferred(image),
-      thumb: image => brightness(100).apply(image),
+      tool: (image, [value]) => owning(keep => keep(brightness(value)).applyDeferred(image)),
+      thumb: image => owning(keep => keep(brightness(100)).apply(image)),
     } satisfies SliderControl<number>,
     {
       kind: 'slider',
@@ -28,8 +29,8 @@ export const adjustments: EditSection = {
       defaultValue: 0,
       applyOnSelect: false,
       deferred: true,
-      tool: (image, [value]) => contrast(value).applyDeferred(image),
-      thumb: image => contrast(100).apply(image),
+      tool: (image, [value]) => owning(keep => keep(contrast(value)).applyDeferred(image)),
+      thumb: image => owning(keep => keep(contrast(100)).apply(image)),
     } satisfies SliderControl<number>,
     {
       kind: 'slider',
@@ -52,8 +53,8 @@ export const adjustments: EditSection = {
       defaultValue: 0,
       applyOnSelect: false,
       deferred: true,
-      tool: (image, [value]) => saturation(value).applyDeferred(image),
-      thumb: image => saturation(100).apply(image),
+      tool: (image, [value]) => owning(keep => keep(saturation(value)).applyDeferred(image)),
+      thumb: image => owning(keep => keep(saturation(100)).apply(image)),
     } satisfies SliderControl<number>,
     {
       kind: 'slider',
@@ -67,8 +68,9 @@ export const adjustments: EditSection = {
       defaultValue: [0, 1, 0],
       applyOnSelect: false,
       deferred: true,
-      tool: (image, [exp, gamma, offset]) => exposure(exp).withGamma(gamma).withOffset(offset).applyDeferred(image),
-      thumb: image => exposure(5).withGamma(1.0).withOffset(0.0).apply(image),
+      tool: (image, [exp, gamma, offset]) =>
+        owning(keep => keep(keep(keep(exposure(exp)).withGamma(gamma)).withOffset(offset)).applyDeferred(image)),
+      thumb: image => owning(keep => keep(keep(keep(exposure(5)).withGamma(1.0)).withOffset(0.0)).apply(image)),
     } satisfies SliderControl<number>,
     {
       kind: 'slider',
@@ -79,8 +81,8 @@ export const adjustments: EditSection = {
       defaultValue: 0,
       applyOnSelect: false,
       deferred: true,
-      tool: (image, [value]) => vibrance(value).applyDeferred(image),
-      thumb: image => vibrance(100).apply(image),
+      tool: (image, [value]) => owning(keep => keep(vibrance(value)).applyDeferred(image)),
+      thumb: image => owning(keep => keep(vibrance(100)).apply(image)),
     } satisfies SliderControl<number>,
   ],
 };

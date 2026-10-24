@@ -149,7 +149,7 @@ fn downloaded_files(p_role: &str) -> Vec<fs::DirEntry> {
     .filter_map(Result::ok)
     .filter(|entry| {
       let name = entry.file_name().to_string_lossy().into_owned();
-      name.len() == prefix.len() + 12 + ".onnx".len() && name.starts_with(&prefix) && name.ends_with(".onnx")
+      name.len() == prefix.len() + 12 + ".onnx".len() && name.starts_with(&prefix) && name.ends_with(".onnx") && entry.path().with_extension("yml").is_file()
     })
     .collect()
 }

@@ -78,7 +78,6 @@ export const unloadAllModels = (): void => {
 export const unloadModelsWhenIdle = (): void => {
   if (Object.values(aiProgress.value).every(progress => progress === 1)) unloadAllModels();
 };
-
 // A model is loaded when an analysis needs it and let go of when the AI work is done, so the large models do not stay in memory. The
 // wait lets a task that follows straight on start before they are freed and loaded again; work that runs steps one after another
 // frees its models between the steps itself (see `buildMasks`).

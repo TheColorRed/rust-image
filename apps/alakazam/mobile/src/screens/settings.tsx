@@ -145,9 +145,9 @@ export function SettingsScreen() {
       key: 'quality',
       title: 'Export quality',
       help: 'How much detail a shared photo keeps. Best looks sharpest but makes the biggest file. It has no effect on PNG.',
-      options: EXPORT_QUALITIES,
-      value: quality,
-      onSelect: value => exportQuality.next(value),
+      options: EXPORT_QUALITIES.map(option => ({ value: String(option.value), label: option.label })),
+      value: String(quality),
+      onSelect: value => exportQuality.next(Number(value)),
     },
     {
       card: 'performance',

@@ -1,8 +1,8 @@
+import { useTheme } from '@/src/lib/ui/theme';
+import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
-import { useTheme } from '@/src/lib/ui/theme';
-import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 
 /** How long the AI works before the banner shows: short jobs finish before anyone would read it. */
 const SHOW_AFTER_MS = 2000;
@@ -21,7 +21,13 @@ const FINDING: Record<string, string> = {
  * finishing, and stops the editor from being used until it is done. It names the step that is running now, and the bar under the
  * photo shows how far along the work is. It is for the work that starts when a photo opens, and it goes away by itself when the work is done.
  */
-export function AiPendingNotice() {
+export function AiPendingNotice({
+  text = 'Getting your photo ready',
+  subText = 'Your edits will start working by themselves when that is done.',
+}: {
+  text?: string;
+  subText?: string;
+}) {
   const { colors } = useTheme();
   const tasks = useObservable(aiProgress$, aiProgress.value);
   const unfinished = Object.entries(tasks).filter(([, progress]) => progress !== 1);
@@ -81,8 +87,8 @@ export function AiPendingNotice() {
       <View style={styles.box}>
         <ActivityIndicator size="large" color={colors.accent} />
         <View style={styles.text}>
-          <Text style={styles.title}>Getting your photo ready</Text>
-          <Text style={styles.body}>Your edits will start working by themselves when that is done.</Text>
+          <Text style={styles.title}>{text}</Text>
+          <Text style={styles.body}>{subText}</Text>
           {current ? <Text style={styles.step}>Finding {current}…</Text> : null}
         </View>
       </View>

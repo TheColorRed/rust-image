@@ -28,15 +28,15 @@ import {
 import { showStandIn } from '@/src/lib/editor/editor-pictures';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { ownedImage } from '@/src/lib/native/native-image';
-import { cacheFileUri, shareImageFile } from '@/src/lib/native/media-file';
-import { EXPORT_QUALITIES, exportFormat, exportQuality } from '@/src/state/settings';
+import { cacheFileUri, shareImageFile, writeImageToGallery } from '@/src/lib/native/media-file';
+import { exportFormat, exportQuality, type ExportFormat } from '@/src/state/settings';
 import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project/project-store';
 import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/project/timeline';
 import { analysisVersion, analysisVersion$, faceBoxes, faceBoxes$, people, people$, skinMask, skinMask$ } from '@/src/state/analysis';
 import { aiModelsVersion } from '@/src/state/ai-models';
 import { closeRequested } from '@/src/state/commands';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
-import { timeline } from '@/src/state/history';
+import { timeline, timeline$ } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { historyReady, openProject } from '@/src/state/project-session';
@@ -48,6 +48,7 @@ import { AbraImage, personDetectionDownloaded, readImageAsync, type PersonDetect
 import { Alert, AppState } from 'react-native';
 import { merge, type BehaviorSubject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
+import { handleLedgerMark, warnUnreleasedSince } from '@/src/lib/native/handle-ledger';
 import { release } from '@/src/lib/native/native-handles';
 
 /** Nulls the subject before destroying its Rust object so no subscriber can read a dangling pointer. */
@@ -87,6 +88,9 @@ function resetSessionState() {
 const RESULT_QUALITY = 85;
 /** The JPEG quality of the saved final image when WebP cannot encode the photo. */
 const JPEG_FALLBACK_QUALITY = 90;
+
+// Keep the source project available for recovery actions even if its saved history cannot be replayed.
+let sessionProject: Project | null = null;
 
 const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
@@ -164,7 +168,7 @@ const NOT_SAVED = 'This session will not be saved, so the project keeps what it 
  * photo that is not a project, while the project is still loading (its saved state must not be overwritten by an empty
  * one), or when nothing changed since it was opened.
  */
-function saveOpenProject() {
+export async function saveOpenProject(): Promise<void> {
   const project = openProject.value;
   const base = editBaseImage.value;
   // Until the history is built the base is only the saved picture, and the steps are not there yet.
@@ -174,23 +178,23 @@ function saveOpenProject() {
   const { masks, maskGroups, people: savedPeople } = saveMasks(project);
   // Like the people, the faces belong to the original, so they are saved once: the first time they are known.
   const savedFaceBoxes = project.faceBoxes ?? faceBoxes.value ?? undefined;
-  const entriesWithResources = entries.map((entry, index) => {
-    if (!changesPixels(entry.change)) return entry;
-    const checkpoint = checkpointFor(entry);
-    if (!checkpoint) return entry;
-    const checkpointFile = entry.checkpointFile ?? `checkpoint-${index}.webp`;
-    checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`), undefined);
-    return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
-  });
-  if (
-    masks === project.masks &&
-    maskGroups === project.maskGroups &&
-    JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
-      JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
-  )
-    return;
-
   try {
+    const entriesWithResources = entries.map((entry, index) => {
+      if (!changesPixels(entry.change)) return entry;
+      const checkpoint = checkpointFor(entry);
+      if (!checkpoint) return entry;
+      const checkpointFile = entry.checkpointFile ?? `checkpoint-${index}.webp`;
+      checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`), undefined);
+      return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
+    });
+    if (
+      masks === project.masks &&
+      maskGroups === project.maskGroups &&
+      JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
+        JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
+    )
+      return;
+
     // The picture is the base with the edits since the last blemish on top, which is what the controls show now.
     const recipe: ProjectRecipe = { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] };
     const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
@@ -219,7 +223,7 @@ function saveOpenProject() {
     const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
     if (__DEV__) console.debug('[project] saving on close:', savedProject.masks?.length ?? 0, 'masks, groups', savedProject.maskGroups);
     openProject.next(savedProject);
-    updateProject(savedProject).catch(error => Alert.alert('Could not save the project', errorMessage(error)));
+    await updateProject(savedProject);
   } catch (error) {
     Alert.alert('Could not save the project', errorMessage(error));
   }
@@ -238,7 +242,7 @@ function saveOpenProject() {
  * project again starts from the photo alone. The files they were in are left in the project's folder, unused, until it is deleted.
  */
 export async function resetProjectToNew() {
-  const project = openProject.value;
+  const project = openProject.value ?? sessionProject;
   if (!project) return;
   const { version, id, name, sourceFile, createdAt, dir } = project;
   const fresh: Project = { version, id, name, sourceFile, timeline: [], cursor: 0, createdAt, modifiedAt: Date.now(), dir };
@@ -264,7 +268,7 @@ export async function shareEditedPhoto() {
   let uri: string | undefined;
   try {
     uri = await cacheFileUri(`${openProject.value?.name || 'photo'}.${exportFormat.value}`);
-    final.write(toLocalPath(uri), { quality: EXPORT_QUALITIES.find(option => option.value === exportQuality.value)!.encoder });
+    final.write(toLocalPath(uri), { quality: exportQuality.value });
   } finally {
     release(rendered);
   }
@@ -272,10 +276,28 @@ export async function shareEditedPhoto() {
   await shareImageFile(uri);
 }
 
+/** Writes the current full-size editor result to the device photo library in the chosen format. */
+export async function saveEditedPhotoToGallery(fileName: string, format: ExportFormat, quality: number): Promise<void> {
+  const base = editBaseImage.value;
+  if (!base) throw new Error('The photo is still loading. Try again in a moment.');
+  const recipe: ProjectRecipe = { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] };
+  const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
+  if (hasRecipe) flushFullReplay();
+  const rendered = hasRecipe && !currentImage.value ? renderRecipe(base, recipe) : null;
+  const final = rendered ?? (hasRecipe ? currentImage.value! : base);
+  try {
+    await writeImageToGallery(final, fileName, format, quality);
+  } finally {
+    release(rendered);
+  }
+}
+
 export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
+  sessionProject = project;
   if (__DEV__ && project) console.log('[project] opened', project.id, project.dir);
+  const ledgerMark = handleLedgerMark();
   const replay = startReplay();
   const live = startEditorPreview();
   // Phones kill apps in the background without warning, so save when the app leaves the foreground too.
@@ -287,6 +309,8 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   const masksFound = merge(analysisVersion$, people$, skinMask$, faceBoxes$)
     .pipe(debounceTime(300))
     .subscribe(() => saveMasksInBackground());
+  // Pixel-changing steps need their checkpoint on disk so reopening never reruns an AI tool.
+  const timelineSaved = timeline$.pipe(debounceTime(500)).subscribe(() => saveOpenProject());
 
   (async () => {
     try {
@@ -427,9 +451,13 @@ export function openEditorSession(photo: EditablePhoto): () => void {
     cancelled = true;
     appState.remove();
     masksFound.unsubscribe();
+    timelineSaved.unsubscribe();
     saveOpenProject();
     replay.unsubscribe();
     live.unsubscribe();
     batch(resetSessionState);
+    if (sessionProject === project) sessionProject = null;
+    // Some handles are let go a moment after the close (see `replaceThumbnails`), so what is still alive after that was never released.
+    if (__DEV__) setTimeout(() => warnUnreleasedSince(ledgerMark, 'the editor closed'), 3000);
   };
 }

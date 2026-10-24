@@ -1,5 +1,6 @@
 import { brightness, contrast, FilterType, PhotoFilter, photoFilter, saturation, vibrance } from '@abra/core/adjustments';
 import { EditSection } from '@/src/lib/project/edit-sections';
+import { owning } from '@/src/lib/native/native-handles';
 
 // Ordered by how often people tend to reach for each mood, most popular first. Each mood is its `tool`, which runs its
 // adjustments in order for the instant preview and is what the replay applies.
@@ -14,10 +15,11 @@ export const colorization: EditSection = {
       label: 'Vibrant',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        saturation(30).applyDeferred(photo);
-        vibrance(30).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(saturation(30)).applyDeferred(photo);
+          keep(vibrance(30)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -25,9 +27,10 @@ export const colorization: EditSection = {
       label: 'Warm',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight))).withDensity(0.35)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -35,10 +38,11 @@ export const colorization: EditSection = {
       label: 'Golden Hour',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.45).withPreserveLuminosity(false).applyDeferred(photo);
-        brightness(12).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight))).withDensity(0.45)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(brightness(12)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -46,11 +50,12 @@ export const colorization: EditSection = {
       label: 'Vintage',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.Sepia)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
-        contrast(-10).applyDeferred(photo);
-        saturation(-20).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.Sepia))).withDensity(0.2)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(contrast(-10)).applyDeferred(photo);
+          keep(saturation(-20)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -58,10 +63,11 @@ export const colorization: EditSection = {
       label: 'Noir',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        saturation(-100).applyDeferred(photo);
-        contrast(20).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(saturation(-100)).applyDeferred(photo);
+          keep(contrast(20)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -69,11 +75,12 @@ export const colorization: EditSection = {
       label: 'Moody',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.25).withPreserveLuminosity(false).applyDeferred(photo);
-        contrast(15).applyDeferred(photo);
-        brightness(-10).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight))).withDensity(0.25)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(contrast(15)).applyDeferred(photo);
+          keep(brightness(-10)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -81,11 +88,12 @@ export const colorization: EditSection = {
       label: 'Sunny',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
-        vibrance(20).applyDeferred(photo);
-        brightness(8).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight))).withDensity(0.2)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(vibrance(20)).applyDeferred(photo);
+          keep(brightness(8)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -93,9 +101,10 @@ export const colorization: EditSection = {
       label: 'Cold',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight))).withDensity(0.35)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -103,10 +112,11 @@ export const colorization: EditSection = {
       label: 'Fade',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        contrast(-20).applyDeferred(photo);
-        saturation(-15).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(contrast(-20)).applyDeferred(photo);
+          keep(saturation(-15)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -114,9 +124,10 @@ export const colorization: EditSection = {
       label: 'Sepia',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.Sepia)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.Sepia))).withDensity(0.35)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -124,11 +135,12 @@ export const colorization: EditSection = {
       label: 'Dreamy',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight)).withDensity(0.15).withPreserveLuminosity(false).applyDeferred(photo);
-        contrast(-15).applyDeferred(photo);
-        saturation(-10).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.WarmingLight))).withDensity(0.15)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(contrast(-15)).applyDeferred(photo);
+          keep(saturation(-10)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -136,11 +148,12 @@ export const colorization: EditSection = {
       label: 'Cloudy',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight)).withDensity(0.2).withPreserveLuminosity(false).applyDeferred(photo);
-        saturation(-20).applyDeferred(photo);
-        brightness(-6).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.CoolingLight))).withDensity(0.2)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(saturation(-20)).applyDeferred(photo);
+          keep(brightness(-6)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -148,12 +161,13 @@ export const colorization: EditSection = {
       label: 'Midnight',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark)).withDensity(0.4).withPreserveLuminosity(false).applyDeferred(photo);
-        brightness(-20).applyDeferred(photo);
-        contrast(15).applyDeferred(photo);
-        saturation(-10).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep => {
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark))).withDensity(0.4)).withPreserveLuminosity(false)).applyDeferred(photo);
+          keep(brightness(-20)).applyDeferred(photo);
+          keep(contrast(15)).applyDeferred(photo);
+          keep(saturation(-10)).applyDeferred(photo);
+        }),
     },
     {
       kind: 'action',
@@ -161,9 +175,10 @@ export const colorization: EditSection = {
       label: 'Ocean',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.Underwater)).withDensity(0.35).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.Underwater))).withDensity(0.35)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -171,9 +186,10 @@ export const colorization: EditSection = {
       label: 'Forest',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.DeepEmerald)).withDensity(0.3).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.DeepEmerald))).withDensity(0.3)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -181,9 +197,10 @@ export const colorization: EditSection = {
       label: 'Frost',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark)).withDensity(0.3).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.CoolingDark))).withDensity(0.3)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
     {
       kind: 'action',
@@ -191,9 +208,10 @@ export const colorization: EditSection = {
       label: 'Neon',
       group: 'mood',
       deferred: true,
-      tool: photo => {
-        photoFilter(PhotoFilter.Preset.new(FilterType.Magenta)).withDensity(0.25).withPreserveLuminosity(false).applyDeferred(photo);
-      },
+      tool: photo =>
+        owning(keep =>
+          keep(keep(keep(photoFilter(PhotoFilter.Preset.new(FilterType.Magenta))).withDensity(0.25)).withPreserveLuminosity(false)).applyDeferred(photo),
+        ),
     },
   ],
 };

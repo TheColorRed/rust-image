@@ -6,6 +6,9 @@ export type DrawnPoint = { x: number; y: number };
 /** What a drawn loop does to an area: starts it over with the loop, adds to it, or takes away from it. */
 export type DrawMode = 'new' | 'add' | 'subtract';
 
+/** A change made through the shared area controls, for a tool controller that needs to react to it. */
+export type AreaChange = { type: 'draw'; loop: DrawnPoint[]; mode: DrawMode } | { type: 'clear' };
+
 /**
  * An area that a control lets the person draw on the photo. Any control can offer one (a color's area, what to remove, a mask to paint):
  * it describes the area here while it is open, and the Draw area, + and − buttons, the drawing layer over the photo and the outline of the
@@ -31,6 +34,8 @@ export interface AreaTarget {
   onClear: () => void;
   /** A loop was drawn, in the photo's pixels. The control starts its area over with it, adds it, or takes it away, as `mode` says. */
   onDrawn: (loop: DrawnPoint[], mode: DrawMode) => void;
+  /** Called after a draw or clear action, so other parts of the control can react to shared area edits. */
+  onChange?: (change: AreaChange) => void;
 }
 
 /**

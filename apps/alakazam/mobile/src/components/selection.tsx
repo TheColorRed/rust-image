@@ -1,11 +1,11 @@
 import { useTheme } from '@/src/lib/ui/theme';
-import ArrowLeftIcon from 'lucide-react-native/icons/arrow-left';
+import { ImagePreview } from '@/src/components/image-preview';
 import CheckIcon from 'lucide-react-native/icons/check';
 import ImageMinusIcon from 'lucide-react-native/icons/image-minus';
 import ImagesIcon from 'lucide-react-native/icons/images';
 import XIcon from 'lucide-react-native/icons/x';
 import { useState } from 'react';
-import { FlatList, Image, Modal, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -47,6 +47,7 @@ export function SelectionBar({
   destructive = false,
   onCancel,
   onPreview,
+  onExport,
   onAction,
 }: {
   count: number;
@@ -55,6 +56,8 @@ export function SelectionBar({
   onCancel: () => void;
   /** Shows a Preview button before the action. */
   onPreview?: () => void;
+  /** Starts an export of the selected items. */
+  onExport?: () => void;
   onAction: () => void;
 }) {
   const { colors } = useTheme();
@@ -101,6 +104,15 @@ export function SelectionBar({
             style={{ paddingHorizontal: 12, height: 48, justifyContent: 'center' }}
           >
             <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Preview</Text>
+          </TouchableOpacity>
+        )}
+        {onExport && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={onExport}
+            style={{ paddingHorizontal: 12, height: 48, justifyContent: 'center' }}
+          >
+            <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Export</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -166,57 +178,20 @@ export function SelectionPreview({
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const [index, setIndex] = useState(0);
   const items = (selection.previewIds ?? []).flatMap(id => {
     const uri = uriOf(id);
     return uri === undefined ? [] : [{ id, uri }];
   });
-  const current = items[index];
-  const isSelected = current !== undefined && selection.selected.includes(current.id);
   const cornerButton = { position: 'absolute', left: 8, width: 48, height: 48, alignItems: 'center', justifyContent: 'center' } as const;
 
   return (
-    <Modal
+    <ImagePreview
+      images={items}
       visible={selection.previewIds !== null}
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={selection.closePreview}
-      onShow={() => setIndex(0)}
-    >
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <FlatList
-          // A new key re-lays the pages out for a new width, such as after turning the phone.
-          key={width}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          data={items}
-          keyExtractor={item => item.id}
-          getItemLayout={(_, itemIndex) => ({ length: width, offset: width * itemIndex, index: itemIndex })}
-          onMomentumScrollEnd={event => setIndex(Math.round(event.nativeEvent.contentOffset.x / width))}
-          renderItem={({ item }) => (
-            <View style={{ width, justifyContent: 'center' }}>
-              <Image source={{ uri: item.uri }} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
-            </View>
-          )}
-        />
-
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          onPress={selection.closePreview}
-          style={{ ...cornerButton, top: insets.top + 8 }}
-        >
-          <ArrowLeftIcon size={28} color="#fff" />
-        </TouchableOpacity>
-
-        {items.length > 1 && (
-          <Text style={{ position: 'absolute', top: insets.top + 20, alignSelf: 'center', color: '#fff', fontSize: 16 }}>
-            {index + 1} / {items.length}
-          </Text>
-        )}
-
+      onClose={selection.closePreview}
+      renderControls={({ current }) => {
+        const isSelected = current !== undefined && selection.selected.includes(current.id);
+        return <>
         <TouchableOpacity
           accessibilityRole="checkbox"
           accessibilityState={{ checked: isSelected }}
@@ -284,7 +259,8 @@ export function SelectionPreview({
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>{doneLabel}</Text>
           </TouchableOpacity>
         </View>
-      </View>
-    </Modal>
+      </>;
+      }}
+    />
   );
 }

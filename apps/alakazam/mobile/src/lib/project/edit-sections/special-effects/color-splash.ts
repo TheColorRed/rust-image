@@ -14,7 +14,7 @@ export const colorSplashControl = {
   step: [0.01, 0.01, 0.01, 1],
   defaultValue: [1, 0, 0, 40],
   picker: ['hue', 'hue', 'hue', undefined],
-  applyOnSelect: false,
+  applyOnSelect: true,
   areaKeys: [colorAreaKey(0), colorAreaKey(1), colorAreaKey(2)],
   tool: (photo, [first, second, third, range]: number[], context) => {
     colorSplash(

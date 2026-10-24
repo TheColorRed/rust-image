@@ -94,7 +94,10 @@ export function DrawAreaButtons() {
         disabled={!editable}
         style={[styles.segment, !editable && styles.locked]}
         hitSlop={8}
-        onPress={target.onClear}
+        onPress={() => {
+          target.onClear();
+          target.onChange?.({ type: 'clear' });
+        }}
       >
         <Eraser color={ICON} size={16} />
       </Pressable>

@@ -26,6 +26,22 @@ export function release(...values: unknown[]) {
   }
 }
 
+/**
+ * Makes a handle with `make`, lets `finish` change or fill it, and gives it back for the caller to own. When `finish` throws, the handle
+ * is freed first and the error goes on, so a handle that was only half made is never left behind. For a function that returns a copy it
+ * changed, which is the shape that forgets this: `building(() => image.clone(), copy => runSteps(copy))`.
+ */
+export function building<T>(make: () => T, finish: (value: T) => void): T {
+  const value = make();
+  try {
+    finish(value);
+  } catch (error) {
+    release(value);
+    throw error;
+  }
+  return value;
+}
+
 /** What `keep` has been given so far, and the way to free all of it, last kept first. Nothing (`null`, `undefined`) is skipped. */
 function scope() {
   const owned: unknown[] = [];

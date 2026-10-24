@@ -167,11 +167,13 @@ export function EditorPanel() {
   const clearOpen =
     focusedControl?.kind === 'slider'
       ? () => {
+          editorPreview.hide();
           removeSlider(focusedControl);
           goBack();
         }
       : !focusedControl && openGroup?.kind === 'mixed'
         ? () => {
+            editorPreview.hide();
             leafControls([openGroup]).forEach(control => control.kind === 'slider' && removeSlider(control));
             goBack();
           }

@@ -8,6 +8,7 @@ import {
   type SliderControl,
 } from '@/src/lib/project/edit-sections';
 import { renderRecipe } from '@/src/lib/editor/editor-replay';
+import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { type CropRect, cropPicture } from '@/src/lib/tools/crop';
 import type { ProjectRecipe } from '@/src/lib/project/project-store';
@@ -175,20 +176,29 @@ function removeSlider(control: SliderControl) {
   // Both go, or the one left behind keeps the control showing as applied.
   const personKey = adjustmentKey(control.key, personSelection.value.selectedId);
   const key = adjustments.value[personKey] === undefined ? control.key : personKey;
-  if (adjustments.value[key] === undefined) return;
+  const hasArea = control.areaKeys?.some(areaKey => adjustments.value[areaKey] !== undefined) ?? false;
+  // An area can make a control apply even when its default slider value was never saved.
+  if (adjustments.value[key] === undefined && !hasArea) return;
   replayHidden.next(!!(control.tool || control.joint || control.layer));
   lastGroup = null;
-  const { [key]: _removed, [control.key]: _everyone, ...rest } = adjustments.value;
+  // Some controls keep their masks as separate adjustments. Removing the effect must remove those
+  // too, or they keep the control in the stack and constrain it if it is applied again.
+  const removed = new Set([key, control.key, ...(control.areaKeys ?? [])]);
+  const rest = Object.fromEntries(Object.entries(adjustments.value).filter(([savedKey]) => !removed.has(savedKey)));
   recordEdit({ type: 'slider', key, value: null }, { adjustments: rest }, endsWithSlider(key));
   adjustments.next(rest);
 }
 
 /** A color's drawn area changed. `points` is a flat list of x, y fractions of the photo, or null to clear it. */
 function commitColorArea(key: string, points: number[] | null) {
-  replayHidden.next(true);
+  replayHidden.next(false);
+  // The committed replay below the live slider renderer has the new area, while that renderer still holds the previous frame.
+  // Hide it so the refreshed committed image is visible immediately; the next slider move will publish a new live frame.
+  editorPreview.hide();
   lastGroup = null;
-  const { [key]: _old, ...rest } = adjustments.value;
-  const next = points ? { ...rest, [key]: points } : rest;
+  const next = { ...adjustments.value };
+  if (points) next[key] = points;
+  else delete next[key];
   recordEdit({ type: 'slider', key, value: points }, { adjustments: next }, endsWithSlider(key));
   adjustments.next(next);
 }
@@ -241,8 +251,8 @@ function commitRetouch(change: PixelChange) {
     appliedActions: [],
     before: { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] },
   };
-  record(entry);
   blemishBases.set(entry, image.clone() as AbraImage);
+  record(entry);
   release(editBaseImage.value);
   editBaseImage.next(image.clone() as AbraImage);
   lastGroup = null;

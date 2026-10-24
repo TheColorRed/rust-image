@@ -61,6 +61,8 @@
     "winit",
     "workgroups"
   ],
+  "editor.codeLens": true,
+  "js/ts.referencesCodeLens.enabled": true,
   "search.exclude": {
     "**/node_modules": true,
     "**/bower_components": true,

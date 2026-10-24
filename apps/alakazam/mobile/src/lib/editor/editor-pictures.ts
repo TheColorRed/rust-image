@@ -9,7 +9,7 @@ import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
 import { resize } from '@abra/core/transform';
 import type { AbraImage } from '@alakazam/mobile';
 import { Dimensions, PixelRatio } from 'react-native';
-import { release } from '@/src/lib/native/native-handles';
+import { building, owning, release } from '@/src/lib/native/native-handles';
 
 // What is on screen. The editor only ever draws a photo shrunk to the preview (a photo that already fits is drawn as it is).
 // Every edit is made twice: first on that screen-size picture, which is what the user sees, and then, a moment later, on the
@@ -22,9 +22,14 @@ import { release } from '@/src/lib/native/native-handles';
 
 /** A copy of `source` shrunk to fit within `width` x `height`, or just a copy when it already fits. The caller owns it. */
 export function fitted(source: AbraImage, width: number, height: number): AbraImage {
-  const copy = source.clone() as AbraImage;
-  if (copy.width() > width || copy.height() > height) resize(ResizeTarget.Fit.new({ width, height })).apply(copy);
-  return copy;
+  return building(
+    () => source.clone() as AbraImage,
+    copy => {
+      if (copy.width() > width || copy.height() > height) {
+        owning(keep => keep(resize(ResizeTarget.Fit.new({ width, height }))).apply(copy));
+      }
+    },
+  );
 }
 
 /** A screen-size copy of a full-size image, and what it was made from, so it is only made again when either changes. */

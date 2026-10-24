@@ -202,7 +202,11 @@ export function EditorPreview() {
             gizmo={areaTarget.key}
             opacity={areaTarget.opacity}
             minShare={areaTarget.minShare}
-            onDrawn={loop => areaTarget.onDrawn(loop, areaDrawMode.value)}
+            onDrawn={loop => {
+              const mode = areaDrawMode.value;
+              areaTarget.onDrawn(loop, mode);
+              areaTarget.onChange?.({ type: 'draw', loop, mode });
+            }}
           />
         ) : null}
         {cropFocused && <CropGizmos />}

@@ -184,6 +184,14 @@ worker! {
 }
 
 worker! {
+  /// Loads a model and its manifest on an image worker thread, keeping large model initialization off the UI thread.
+  load_ai_model_async(role: String) -> Arc<AiModel> {
+    let path = crate::models::ai_model_path(role)?;
+    AiModel::load(path).map(Arc::new).map_err(|error| AbraError::Ai { message: error.to_string() })
+  }
+}
+
+worker! {
   /// Runs an AI model that takes a guide mask (a matting model and its trimap) on a worker thread. The same as `AiModel.run_guided`.
   run_ai_model_guided_async(model: Arc<AiModel>, image: Arc<Image>, guide: Arc<Mask>) -> Arc<AiOutput> {
     Ok(Arc::new(AiOutput::from_core(model.core().run_guided(&image.core(), Some(&guide.core()), &|_| {})?)))

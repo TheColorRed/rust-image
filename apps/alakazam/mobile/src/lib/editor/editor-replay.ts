@@ -37,6 +37,7 @@ import {
   appliedActions$,
   focusedControlKey,
   focusedControlKey$,
+  historyVersion$,
 } from '@/src/state/edits';
 import { analysisVersion$ } from '@/src/state/analysis';
 import { previewBox$ } from '@/src/state/gestures';
@@ -47,7 +48,7 @@ import { type Image as AbraPixels } from '@abra/core/image';
 import { AbraImage, type AbraImageLike, type ThumbnailPreview } from '@alakazam/mobile';
 import { combineLatest, Observable, type Subscription } from 'rxjs';
 import { distinctUntilChanged, filter, switchMap, tap } from 'rxjs/operators';
-import { release } from '@/src/lib/native/native-handles';
+import { building, release } from '@/src/lib/native/native-handles';
 
 // #region: The full-size picture, which is not shown
 
@@ -248,9 +249,10 @@ function appliedSteps(
 
 /** Renders a saved recipe onto a fresh copy of `base`, without touching the live edit state. The caller owns the result. */
 export function renderRecipe(base: AbraImage, recipe: ProjectRecipe): AbraImage {
-  const next = base.clone() as AbraImage;
-  runSteps(next, appliedSteps(undefined, undefined, undefined, recipe), base);
-  return next;
+  return building(
+    () => base.clone() as AbraImage,
+    next => runSteps(next, appliedSteps(undefined, undefined, undefined, recipe), base),
+  );
 }
 
 /**
@@ -258,9 +260,10 @@ export function renderRecipe(base: AbraImage, recipe: ProjectRecipe): AbraImage 
  * the result.
  */
 function renderEditStack(base: AbraImage, excludeGroups?: ReadonlySet<string>, full = false) {
-  const next = (full ? base : shrunkOf('base', base)).clone() as AbraImage;
-  runSteps(next, appliedSteps(excludeGroups), base);
-  return next;
+  return building(
+    () => (full ? base : shrunkOf('base', base)).clone() as AbraImage,
+    next => runSteps(next, appliedSteps(excludeGroups), base),
+  );
 }
 
 /**
@@ -424,9 +427,10 @@ function stepsAroundSlider(sliderKey: string) {
 export function renderStackWithoutSlider(sliderKey: string, beforeOnly = false, full = false): AbraImage | null {
   const base = editBaseImage.value;
   if (!base) return null;
-  const next = (full ? base : shrunkOf('base', base)).clone() as AbraImage;
-  runSteps(next, beforeOnly ? stepsAroundSlider(sliderKey).before : appliedSteps(undefined, { key: sliderKey }), base);
-  return next;
+  return building(
+    () => (full ? base : shrunkOf('base', base)).clone() as AbraImage,
+    next => runSteps(next, beforeOnly ? stepsAroundSlider(sliderKey).before : appliedSteps(undefined, { key: sliderKey }), base),
+  );
 }
 
 /** Runs the steps that come after the slider in the stack on `image`, which a drag of the slider made from the steps before it. */
@@ -685,9 +689,9 @@ let renderedBox: unknown;
 let renderedAnalysis: unknown;
 
 export function startReplay(): Subscription {
-  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$])
+  const subscription = combineLatest([ready$, adjustments$, appliedActions$, activeSectionKey$, previewBox$, analysisVersion$, historyVersion$])
     .pipe(
-      distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4]?.width === b[4]?.width && a[4]?.height === b[4]?.height && a[5] === b[5]),
+      distinctUntilChanged((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4]?.width === b[4]?.width && a[4]?.height === b[4]?.height && a[5] === b[5] && a[6] === b[6]),
       filter(([isReady, , , , box]) => isReady && !!box && !!editBaseImage.value),
       tap(([, , , , box, analysis]) => {
         // A new preview size or new analysis changes what the steps make, so the rendered stack is not reused.

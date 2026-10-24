@@ -1,18 +1,25 @@
 import { Card, CardHeader } from '@/src/components/card';
+import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dialog';
 import { FilePicker } from '@/src/components/file-picker';
+import { MagicalSlogan } from '@/src/components/magical-slogan';
 import {
-  SELECTION_BAR_CLEARANCE,
   SelectedOverlay,
+  SELECTION_BAR_CLEARANCE,
   SelectionBar,
   SelectionPreview,
   useSelection,
 } from '@/src/components/selection';
 import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
+import { toLocalPath } from '@/src/lib/editor/edit-source';
+import { writeImageToGallery } from '@/src/lib/native/media-file';
+import { release } from '@/src/lib/native/native-handles';
+import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-store';
 import { useCommonStyles } from '@/src/lib/ui/styles';
 import { useTheme } from '@/src/lib/ui/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
-import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-store';
 import { addProject, projects$, removeProjects } from '@/src/state/projects';
+import type { ExportFormat } from '@/src/state/settings';
+import { readImageAsync } from '@alakazam/mobile';
 import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
 import CameraIcon from 'lucide-react-native/icons/camera';
 import { useMemo, useState } from 'react';
@@ -111,10 +118,7 @@ function Permissions({
           contentContainerStyle={[styles.grid, selection.selecting && { paddingBottom: SELECTION_BAR_CLEARANCE }]}
           columnWrapperStyle={styles.row}
           renderItem={({ item }) => (
-            <Pressable
-              onPress={() => selection.toggle(item.node.id)}
-              style={styles.thumbWrapper}
-            >
+            <Pressable onPress={() => selection.toggle(item.node.id)} style={styles.thumbWrapper}>
               <Image source={{ uri: item.node.image.uri }} style={styles.thumb} />
               {selection.selected.includes(item.node.id) && <SelectedOverlay />}
             </Pressable>
@@ -201,7 +205,21 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
   const columns = Math.max(MIN_COLUMNS, Math.floor((innerWidth + GAP) / (MIN_THUMB + GAP)));
   const thumbSize = (innerWidth - GAP * (columns - 1)) / columns;
   const selection = useSelection();
+  const [exportOpen, setExportOpen] = useState(false);
   const { selected, selecting, toggle, clear } = selection;
+  const exportProjects = useMemo(() => projects.filter(project => selected.includes(project.id)), [projects, selected]);
+  const exportItems = useMemo(
+    () => exportProjects.map(project => ({ id: project.id, uri: projectImageUri(project), name: project.name })),
+    [exportProjects],
+  );
+  const saveProjectImage = async (item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) => {
+    const image = await readImageAsync(toLocalPath(item.uri));
+    try {
+      await writeImageToGallery(image, fileName, format, quality);
+    } finally {
+      release(image);
+    }
+  };
   const confirmRemove = () =>
     Alert.alert(
       `Delete ${selected.length} project${selected.length === 1 ? '' : 's'}?`,
@@ -222,8 +240,7 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
     <View style={{ flex: 1, padding: 16 }}>
       {projects.length === 0 && (
         <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-          <Text style={{ color: colors.textSecondary, fontSize: 25, fontWeight: '900' }}>Abra. Kadabra. Alakazam!</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 16, marginTop: 8 }}>No images have been loaded yet.</Text>
+          <MagicalSlogan fontSize={40} subText="No images have been loaded yet." />
         </View>
       )}
       {projects.length > 0 && (
@@ -236,7 +253,9 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
           renderItem={({ item: project }) => (
             <Pressable
               onPress={() =>
-                selecting ? toggle(project.id) : onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project })
+                selecting
+                  ? toggle(project.id)
+                  : onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project })
               }
               onLongPress={() => toggle(project.id)}
               style={{ width: thumbSize, height: thumbSize, marginBottom: GAP }}
@@ -260,9 +279,16 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
           destructive
           onCancel={clear}
           onPreview={selection.openPreview}
+          onExport={() => setExportOpen(true)}
           onAction={confirmRemove}
         />
       )}
+      <ExportDialog
+        items={exportItems}
+        visible={exportOpen}
+        onClose={() => setExportOpen(false)}
+        onSaveImage={saveProjectImage}
+      />
       <SelectionPreview
         selection={selection}
         uriOf={id => {
@@ -303,6 +329,7 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
             title="Camera Roll"
             subtitle="Select photos from your device"
             style={{ width: 280 }}
+            selected={showCameraRoll}
             onPress={() => setShowCameraRoll(!showCameraRoll)}
           >
             <CardHeader icon={CameraIcon} title="Camera Roll" subtitle="Select photos from your device" />
@@ -319,9 +346,7 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
       </View>
 
       {!showCameraRoll && <LoadedImages onOpenPhoto={onOpenPhoto} />}
-      {showCameraRoll && (
-        <CameraRoll onAddPhotos={addPhotos} />
-      )}
+      {showCameraRoll && <CameraRoll onAddPhotos={addPhotos} />}
     </View>
   );
 }

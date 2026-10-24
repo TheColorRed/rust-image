@@ -14,16 +14,16 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
 ];
 
 /** How much detail an exported photo keeps; better looks cost a bigger file. Does nothing for PNG, which loses none. */
-export type ExportQuality = 'good' | 'better' | 'best';
+export type ExportQuality = number;
 
 /** Every export quality with the encoder quality (0 to 100) it stands for, in the order Settings lists them. */
 export const EXPORT_QUALITIES: { value: ExportQuality; label: string; encoder: number }[] = [
-  { value: 'good', label: 'Good', encoder: 70 },
-  { value: 'better', label: 'Better', encoder: 85 },
-  { value: 'best', label: 'Best', encoder: 100 },
+  { value: 70, label: 'Good', encoder: 70 },
+  { value: 85, label: 'Better', encoder: 85 },
+  { value: 100, label: 'Best', encoder: 100 },
 ];
 
-export const exportQuality = new BehaviorSubject<ExportQuality>('better');
+export const exportQuality = new BehaviorSubject<ExportQuality>(85);
 export const exportQuality$ = exportQuality.asObservable();
 
 /** The format the share sheet gets the edited photo in. WebP is smaller than JPEG at the same looks. */
@@ -55,7 +55,9 @@ const STORAGE_KEY = 'settings';
   try {
     const saved = JSON.parse((await AsyncStorage.getItem(STORAGE_KEY)) ?? '{}');
     if (EXPORT_FORMATS.some(option => option.value === saved.exportFormat)) exportFormat.next(saved.exportFormat);
-    if (EXPORT_QUALITIES.some(option => option.value === saved.exportQuality)) exportQuality.next(saved.exportQuality);
+    const legacyQualities: Record<string, number> = { good: 70, better: 85, best: 100 };
+    const savedQuality = typeof saved.exportQuality === 'number' ? saved.exportQuality : legacyQualities[saved.exportQuality];
+    if (typeof savedQuality === 'number' && savedQuality >= 0 && savedQuality <= 100) exportQuality.next(savedQuality);
     if (WORKER_STACK_CHOICES.includes(saved.workerStackMegabytes)) workerStackMegabytes.next(saved.workerStackMegabytes);
     if (['system', 'light', 'dark'].includes(saved.themePreference)) themePreference.next(saved.themePreference);
   } catch (error) {

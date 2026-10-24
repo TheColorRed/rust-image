@@ -2,6 +2,10 @@ package com.alakazam.mobile
 
 import android.content.Intent
 import android.net.Uri
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -81,6 +85,44 @@ class MediaFileModule(private val context: ReactApplicationContext) : ReactConte
       promise.resolve(null)
     } catch (error: Exception) {
       promise.reject("MEDIA_SHARE_FAILED", "Could not open the share sheet", error)
+    }
+  }
+
+  /** Copies an app-owned image into Pictures/Alakazam using scoped storage. */
+  @ReactMethod
+  fun saveToGallery(uriString: String, fileName: String, promise: Promise) {
+    var destination: Uri? = null
+    try {
+      val source = File(Uri.parse(uriString).path ?: "").canonicalFile
+      val cacheRoot = File(context.cacheDir, "media").canonicalFile
+      val projectRoot = File(context.filesDir, "projects").canonicalFile
+      if ((!source.path.startsWith(cacheRoot.path + File.separator) && !source.path.startsWith(projectRoot.path + File.separator)) || !source.isFile) {
+        throw IOException("Not an app image: $uriString")
+      }
+      val name = File(fileName).name.ifBlank { "image.${source.extension}" }
+      val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, name)
+        put(MediaStore.Images.Media.MIME_TYPE, when (name.substringAfterLast('.', "").lowercase()) {
+          "png" -> "image/png"
+          "webp" -> "image/webp"
+          else -> "image/jpeg"
+        })
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Alakazam")
+          put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+      }
+      destination = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        ?: throw IOException("Could not add the image to the photo library")
+      context.contentResolver.openOutputStream(destination!!)?.use { output -> source.inputStream().use { it.copyTo(output) } }
+        ?: throw IOException("Could not write the exported image")
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        context.contentResolver.update(destination!!, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+      }
+      promise.resolve(destination.toString())
+    } catch (error: Exception) {
+      destination?.let { context.contentResolver.delete(it, null, null) }
+      promise.reject("MEDIA_SAVE_FAILED", "Could not save the image to the photo library", error)
     }
   }
 

@@ -5,15 +5,17 @@ import { createProject, deleteProject, listProjects, writeProject, type Project 
 import { Alert } from 'react-native';
 import { BehaviorSubject } from 'rxjs';
 
-/** Every saved project, newest first. They live in the app's files folder, so they are still here after a restart. */
+/** Every saved project, most recently modified first. They live in the app's files folder, so they are still here after a restart. */
 export const projects = new BehaviorSubject<Project[]>([]);
 export const projects$ = projects.asObservable();
+
+const byLastModified = (a: Project, b: Project) => b.modifiedAt - a.modifiedAt;
 
 /** Makes a project from a photo (Camera Roll or file picker) and adds it to `projects`. Returns it, or nothing if it failed. */
 export async function addProject(photo: EditablePhoto): Promise<Project | undefined> {
   try {
     const project = await createProject(photo.uri, photo.fileName ?? `photo-${Date.now()}.jpg`);
-    projects.next([project, ...projects.value]);
+    projects.next([...projects.value, project].sort(byLastModified));
     // A picker leaves its own temporary copy in the cache; the project has its own now.
     await deleteMediaFromCache(photo.uri);
     return project;
@@ -37,7 +39,7 @@ export async function restoreProjects(): Promise<void> {
   try {
     const known = new Set(projects.value.map(project => project.id));
     const restored = (await listProjects()).filter(project => !known.has(project.id));
-    projects.next([...projects.value, ...restored].sort((a, b) => b.createdAt - a.createdAt));
+    projects.next([...projects.value, ...restored].sort(byLastModified));
   } catch (error) {
     Alert.alert('Could not restore the projects', errorMessage(error));
   }
@@ -45,6 +47,6 @@ export async function restoreProjects(): Promise<void> {
 
 /** Saves a changed project and swaps it into `projects`, so the grid shows its new final image. */
 export async function updateProject(project: Project): Promise<void> {
-  projects.next(projects.value.map(existing => (existing.id === project.id ? project : existing)));
+  projects.next(projects.value.map(existing => (existing.id === project.id ? project : existing)).sort(byLastModified));
   await writeProject(project);
 }

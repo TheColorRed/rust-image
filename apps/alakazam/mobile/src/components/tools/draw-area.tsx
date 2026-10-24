@@ -72,7 +72,7 @@ export function DrawAreaOverlay({ gizmo, opacity = 0.7, minShare = 0.002, onDraw
       const loop = points.current;
       points.current = [];
       gizmos?.remove(gizmo);
-      const outline = inPhoto(loop);
+      const outline = inPhoto(smoothLoop(loop));
       if (outline && enclosedShare(outline.points, outline.image) >= minShare) drawn.current(outline.points);
     };
     return PanResponder.create({
@@ -126,6 +126,23 @@ function inPhoto(screenPoints: readonly DrawnPoint[]) {
     if (inImage) points.push(inImage);
   }
   return points.length < 3 ? null : { points, image: { width, height } };
+}
+
+/** Smooth a drawn loop with two light corner-cutting passes. Keeping a share of each original point preserves its shape. */
+function smoothLoop(points: readonly DrawnPoint[]): DrawnPoint[] {
+  if (points.length < 4) return [...points];
+  let smoothed = [...points];
+  for (let pass = 0; pass < 2; pass++) {
+    const next: DrawnPoint[] = [];
+    for (let index = 0; index < smoothed.length; index++) {
+      const a = smoothed[index];
+      const b = smoothed[(index + 1) % smoothed.length];
+      next.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+      next.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+    }
+    smoothed = next;
+  }
+  return smoothed;
 }
 
 /** The share of the photo that a loop encloses, from 0 to 1. */
