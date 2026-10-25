@@ -2,6 +2,7 @@ import { type TimelineChange } from '@/src/lib/project/timeline';
 import { cropPicture } from '@/src/lib/tools/crop';
 import { previewBox } from '@/src/state/gestures';
 import { timeline } from '@/src/state/history';
+import { openProject } from '@/src/state/project-session';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { originalImage } from '@/src/state/session';
 import { ResizeTarget } from '@abra/core/canvas';
@@ -80,14 +81,29 @@ export function shrunkOf(
   return next.image;
 }
 
-/** The crop steps that are applied (before the undo cursor), in order. Each one cuts what the one before it left. */
+let persistedCropCount = 0;
+
+/** The saved project crop prefix. The session timeline adds reversible crops after this baseline. */
+export const setPersistedCropCount = (count: number) => {
+  persistedCropCount = count;
+};
+
+/** The saved project crops followed by crops in the current session's undo history. */
 export const appliedCrops = () => {
   const { entries, cursor } = timeline.value;
-  return entries.slice(0, cursor).flatMap(({ change }) => (change.type === 'crop' ? [change] : []));
+  const saved = (openProject.value?.savedCrops?.slice(0, persistedCropCount) ?? []).map(crop => ({
+    type: 'crop' as const,
+    ...crop,
+  }));
+  const current = entries.slice(0, cursor).flatMap(({ change }) => (change.type === 'crop' ? [change] : []));
+  return [...saved, ...current];
 };
 
 /** Names the applied crops, so something made for them can be kept until they change. */
-export const cropKey = () => appliedCrops().map(({ left, top, right, bottom, turn }) => `${left},${top},${right},${bottom},${turn ?? 0}`).join('|');
+export const cropKey = () =>
+  appliedCrops()
+    .map(({ left, top, right, bottom, turn }) => `${left},${top},${right},${bottom},${turn ?? 0}`)
+    .join('|');
 
 /**
  * A copy of `mask`, which was found in the uncropped original, cut by the applied crops (turned first when a crop is tilted) and
@@ -119,7 +135,12 @@ export const comparisonImage = (): AbraImage | null => {
   const crops = appliedCrops();
   const shrunk = shrunkOf('original', original);
   if (!crops.length) return shrunk;
-  if (croppedOriginal && croppedOriginal.source === shrunk && croppedOriginal.crops.every((crop, i) => crop === crops[i]) && croppedOriginal.crops.length === crops.length) {
+  if (
+    croppedOriginal &&
+    croppedOriginal.source === shrunk &&
+    croppedOriginal.crops.every((crop, i) => crop === crops[i]) &&
+    croppedOriginal.crops.length === crops.length
+  ) {
     return croppedOriginal.image;
   }
   let image = shrunk;

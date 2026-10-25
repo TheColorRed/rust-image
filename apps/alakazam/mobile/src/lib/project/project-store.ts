@@ -1,10 +1,8 @@
 import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
-import type { TimelineEntry } from '@/src/lib/project/timeline';
 import { NativeModules, Platform } from 'react-native';
 
 /**
- * The edit state at one moment: the slider values and the applied actions. A blemish removal, if the checkpoint ended
- * with one, is a tap at `x`, `y` (image pixels) healed with `radius`.
+ * The editable slider values and applied actions currently used to render a project's control stack.
  */
 export interface ProjectRecipe {
   /** A number for a slider control with one slider (as saved before controls could have several), an array for several. */
@@ -27,17 +25,25 @@ export interface SavedPersonDetection {
  * without `dir`.
  */
 export interface Project {
-  /** Bumped when the saved shape changes, so older projects can still be read. */
-  version: 1;
+  /** Version 2 stores a saved document stack and no session undo history. */
+  version: 2;
   id: string;
   name: string;
   /** The original's file name inside the project folder. */
   sourceFile: string;
-  /** The final image's file name, once the project has been edited. It is shown before the edits are replayed. */
+  /** The flattened result shown in project lists and while saved control images load. */
   resultFile?: string;
+  /** The current control settings. Session-only undo/redo state is not part of a project's editable state. */
+  recipe: ProjectRecipe;
+  /** Per-control flattened pixels, used to restore the render cache without rerunning the controls on open. */
+  layers: { signature: string; file: string }[];
+  /** The baked base after crop and pixel-changing tools, separate from the editable controls. */
+  baseFile?: string;
+  /** Crops applied to the source frame, retained so saved masks and the before view keep the correct framing. */
+  savedCrops: { left: number; top: number; right: number; bottom: number; turn?: number }[];
   /**
    * Every mask the AI models made for the original, one lossless gray WebP each, by name (see `saved-masks.ts`). Opening the project
-   * loads them instead of running the models, so the edits replay with the same masks, even when the models are not on this device.
+   * loads them instead of running the models, so editable controls use the same masks even when the models are not on this device.
    */
   masks?: { name: string; file: string }[];
   /** The groups of masks (`makeup`, `hair`, `subject`) whose models have run, including ones that found nothing. */
@@ -49,10 +55,6 @@ export interface Project {
    * instead of running the face models. An empty object means the models ran and found no face.
    */
   faceBoxes?: Record<number, { x: number; y: number; width: number; height: number }>;
-  /** Every step, in the order it was performed, including ones that were undone and can be redone. */
-  timeline: TimelineEntry[];
-  /** How many steps of `timeline` are applied: where undo had got to when the project was closed. */
-  cursor: number;
   createdAt: number;
   modifiedAt: number;
   /** The project folder as a `file://` URI. Filled in when the project is read, never saved. */

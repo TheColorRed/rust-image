@@ -4,15 +4,15 @@ Every photo you edit is a **project**. Alakazam keeps your original photo and yo
 
 ## Start a project
 
-At the top of the home screen there are two cards. Use either one to bring in a photo.
+Use either card on the home screen to bring photos into Alakazam.
 
 ### Camera Roll
 
-**Camera Roll** ("Select photos from your device") shows the photos you've taken with your phone's camera, in a grid with a count of how many there are.
+**Camera Roll** ("Select photos from your device") shows photos available in your phone's photo library in a grid.
 
-1. Tap the **Camera Roll** card to open the grid. Tap the card again to close it and go back to your projects.
+1. Tap the **Camera Roll** card to open the grid. Tap it again to close it and return to your projects.
 2. **Tap** the photos you want. A bar at the bottom shows how many you picked.
-3. Tap **Add**. Use **Preview** first if you want to swipe through your picks, and the X to cancel.
+3. Tap **Add**. Use **Preview** to swipe through your picks, or the X to cancel.
 
 If you add **one photo**, it opens in the editor right away. If you add **several**, they're added as projects and you stay on the home screen, ready to open any of them.
 
@@ -20,7 +20,7 @@ Scroll down to load more photos, and pull down to refresh the list. The first ti
 
 ### Choose a photo
 
-**Choose a photo** ("Browse this device or a connected photo app") opens your phone's file chooser. Use it for photos that aren't in your Camera Roll, such as downloads, screenshots, or photos in another photo app. You can choose more than one, and each becomes a project. It works like the Camera Roll: one photo opens in the editor right away, and several are added as projects while you stay on the home screen.
+**Choose a photo** ("Browse this device or a connected photo app") opens your phone's file chooser. Use it for photos such as downloads or screenshots. You can choose more than one; one photo opens in the editor right away, while several are added as projects and you stay on the home screen.
 
 Either way, the original is copied into the new project, so your original photo is never changed.
 
@@ -28,7 +28,7 @@ Either way, the original is copied into the new project, so your original photo 
 
 - **Your original photo.** It is copied into the project and never changed.
 - **Every step you took.** Alakazam remembers the steps, not just the finished picture.
-- **What the smart models found.** People, faces, skin and hair are saved, so the project opens without running a model. See [Smart features](/guide/smart-features).
+- **Supported analysis results.** Some masks and people data are saved, so the project can replay supported edits without running those models again. See [Smart features](/guide/smart-features).
 
 Your projects are listed on the home screen. Tap one to open it and continue editing.
 
@@ -45,23 +45,22 @@ The **Reset all edits** button puts the photo back the way it was when you opene
 
 ## Presets
 
-A **preset** is a saved set of edits you can apply to other photos in one tap. Open **Presets** from the buttons at the top of the editor.
+Presets save a chosen set of compatible edits so you can reuse them on other photos. Open **Presets** from the editor toolbar.
 
-**To save a preset**
-1. Choose **Save preset**.
-2. Tick the edits you want to include.
-3. Give it a name, and a description if you like, then tap **Save**.
+- **Save preset:** choose which current edits to include, enter a name and optionally a description, then save.
+- **Apply preset:** search your saved presets, choose one, then select which settings to apply. Applying a preset adds the selected settings to the current edits as one step, so you can undo it.
 
-**To use a preset**
-1. Choose **Apply preset**. You can search the list by name.
-2. Tap a preset, then tick the settings you want. Anything you leave unticked stays as it is on your photo.
-3. Tap **Apply selected settings**.
+Tools and transforms are not included in presets.
 
-A preset is merged into your photo's current edits as one step, so you can undo it like any other.
+## Save your photo
+
+Tap the **Save to device** button at the top of the editor. In the **Export images** screen, you can rename the photo, choose **WebP**, **JPEG** or **PNG**, and set export quality for WebP and JPEG. Tap **Save** to write the full-size edited photo to your device's gallery, in **Pictures/Alakazam**. Alakazam confirms when the export is complete.
+
+You can also export several project images at once from the home screen. Press and hold a project to start selecting, tap any other projects to add them, then choose **Export** in the selection bar. In **Export images**, you can rename each image, choose a format and quality for the batch, and tap **Save**. The selected project images are saved to **Pictures/Alakazam**. You can preview the selection before exporting, and remove individual images from the export list with the X.
 
 ## Share your photo
 
-Tap **Share** at the top of the editor to send the finished photo to another app.
+Tap **Share** at the top of the editor to send the finished photo to another app. Sharing opens your phone's share sheet; it does not replace the separate **Save to device** export flow.
 
 ## Delete a project
 
@@ -69,6 +68,6 @@ Tap **Share** at the top of the editor to send the finished photo to another app
 2. To delete more than one, **tap** other projects to add them. Tap a selected project again to unselect it. A bar at the bottom shows how many are selected.
 3. Tap **Delete** in the bar. Alakazam asks you to confirm.
 
-The bar also has **Preview**, which lets you swipe through the selected photos before you delete them, and a close button (the X) to cancel without deleting anything.
+The selection bar also has **Preview**, which lets you swipe through selected projects, and an X to cancel without deleting anything.
 
 Deleting a project removes its edits from the app. Your original photos in your gallery are not touched.

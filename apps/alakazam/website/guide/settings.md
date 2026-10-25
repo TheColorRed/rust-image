@@ -20,7 +20,7 @@ Whether the app is light or dark.
 
 ## Export
 
-These two settings decide the file you get when you **Share** a finished photo. See [Projects](/guide/projects#share-your-photo).
+The export settings decide the file you get when you **Share** a finished photo. See [Projects](/guide/projects#share-your-photo).
 
 ### Export format
 
@@ -56,4 +56,4 @@ The change doesn't happen right away. It starts working the next time you open t
 
 ## AI models are in Plugins
 
-The smart models aren't managed here. Use the **Plugins** tab to see them, download them and delete them. See [Smart features](/guide/smart-features#managing-plugins).
+AI models and add-ons aren't managed here. Use the **Plugins** tab to see, download and delete them. See [Plugins](/guide/plugins).

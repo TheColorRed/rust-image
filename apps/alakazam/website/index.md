@@ -9,7 +9,7 @@ hero:
       text: Download for Android
       link: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/releases/alakazam.apk
     - theme: alt
-      text: Download for iOS
+      text: Download iOS test build
       link: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/releases/alakazam.ipa
     - theme: alt
       text: How to install
@@ -23,7 +23,7 @@ features:
   - title: Faces and portraits
     details: Smooth skin, brighten teeth, add lipstick or blush, change hair color, and shape a portrait. Edits apply to one person or everyone in the photo.
   - title: Smart, on your phone
-    details: Alakazam finds people and subjects for you. The smart parts run once per photo and are saved with your project, so it opens again with nothing to wait for.
+    details: On-device models help with edits like portraits and object removal. Alakazam saves supported analysis with your project, so those results can be reused when you reopen it.
   - title: Live preview
     details: Every slider updates the photo as you move it, even when you pan and zoom.
   - title: Your edits stay editable

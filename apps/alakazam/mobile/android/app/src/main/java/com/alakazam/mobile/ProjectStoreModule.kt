@@ -17,8 +17,8 @@ import java.util.UUID
 /**
  * Keeps projects in the app's files folder, which Android only clears on uninstall or "clear data" (unlike the cache).
  * Each project is a folder, `projects/<id>/`, holding `source.<ext>` (the untouched original copied in once) and
- * `project.json` (the name, timestamps and the edit recipe) and, once edited, `result-<time>.jpg` (the final image, so it
- * can be shown before the recipe is replayed). The source is never rewritten.
+ * `project.json` (the name, timestamps and editable control values), the baked document base, the flattened composite,
+ * and the per-control pixel stack. Undo history is session-only. The source is never rewritten.
  */
 @ReactModule(name = ProjectStoreModule.NAME)
 class ProjectStoreModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
@@ -79,12 +79,13 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
       writeProjectFile(
         folder,
         JSONObject()
-          .put("version", 1)
+          .put("version", 2)
           .put("id", id)
           .put("name", name)
           .put("sourceFile", sourceFile)
-          .put("timeline", JSONArray())
-          .put("cursor", 0)
+          .put("recipe", JSONObject().put("adjustments", JSONObject()).put("appliedActions", JSONArray()))
+          .put("layers", JSONArray())
+          .put("savedCrops", JSONArray())
           .put("createdAt", now)
           .put("modifiedAt", now),
       )
@@ -111,7 +112,7 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
     }
   }
 
-  /** Saves a project's JSON (its name and edit recipe). The source image is never rewritten. */
+  /** Saves a project's document metadata. The source image is never rewritten. */
   @ReactMethod
   fun writeProject(id: String, json: String, promise: Promise) {
     try {
@@ -119,9 +120,17 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
       if (!folder.isDirectory) throw IOException("No such project: $id")
       val project = JSONObject(json).put("modifiedAt", System.currentTimeMillis())
       writeProjectFile(folder, project)
-      // Each save of the final image gets a new file name (so the image cache never shows a stale one); drop the old ones.
-      val resultFile = project.optString("resultFile")
-      folder.listFiles { entry -> entry.name.startsWith("result") && entry.name != resultFile }?.forEach { it.delete() }
+      // Each save writes new immutable render files; remove any snapshots no longer referenced by the document.
+      val retained = mutableSetOf<String>()
+      project.optString("resultFile").takeIf(String::isNotEmpty)?.let(retained::add)
+      project.optString("baseFile").takeIf(String::isNotEmpty)?.let(retained::add)
+      val layers = project.optJSONArray("layers") ?: JSONArray()
+      for (index in 0 until layers.length()) {
+        layers.optJSONObject(index)?.optString("file")?.takeIf(String::isNotEmpty)?.let(retained::add)
+      }
+      folder.listFiles { entry ->
+        (entry.name.startsWith("result") || entry.name.startsWith("base-") || entry.name.startsWith("layer-")) && entry.name !in retained
+      }?.forEach { it.delete() }
       promise.resolve(null)
     } catch (error: Exception) {
       promise.reject("PROJECT_WRITE_FAILED", "Could not save the project", error)

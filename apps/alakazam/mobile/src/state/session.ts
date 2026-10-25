@@ -12,6 +12,8 @@ export const currentImage = new BehaviorSubject<AbraImage | null>(null);
 export const currentImage$ = currentImage.asObservable();
 export const editBaseImage = new BehaviorSubject<AbraImage | null>(null);
 export const editBaseImage$ = editBaseImage.asObservable();
+/** The baked image state at the start of this editor session; only this session can undo back to it. */
+export const sessionBaseImage = new BehaviorSubject<AbraImage | null>(null);
 
 // #endregion
 

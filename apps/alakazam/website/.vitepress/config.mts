@@ -22,6 +22,7 @@ export default defineConfig({
           { text: 'Give a photo a look', link: '/guide/looks' },
           { text: 'Portraits and faces', link: '/guide/portraits' },
           { text: 'Smart features', link: '/guide/smart-features' },
+          { text: 'Plugins', link: '/guide/plugins' },
           { text: 'Projects', link: '/guide/projects' },
           { text: 'Settings', link: '/guide/settings' },
         ],

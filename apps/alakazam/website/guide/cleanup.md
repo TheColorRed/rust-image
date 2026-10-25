@@ -2,11 +2,14 @@
 
 ## Cleanup
 
-The **Cleanup** section has three controls for photos with flaws:
+The **Cleanup** section has two controls for common photo flaws:
 
 - **Smooth Noise** reduces the grainy speckles you often see in dark or low-light photos.
 - **Remove Dust** cleans up small specks.
-- **Remove Objects** takes something out of the photo, such as a stranger in the background or a sign. Draw around it with your finger or a pen. You can circle more than one thing, or draw again to add to it. Tap **Remove** and the space is filled in to match what is around it. **Clear** starts the circling over. The first time, the app asks to download a small helper (about 28 MB). After that it works without a connection.
+
+## Remove Objects
+
+**Remove Objects** is a tool in the **Cleanup** section. Use it to remove something such as a stranger in the background or a sign. Circle the area with your finger or a pen, then tap **Remove**. You can add more to the area or take parts back out before removing. The tool needs an object-removal AI model; if it isn't installed, Alakazam offers to download one. Once downloaded, it can be used offline. See [Smart features](/guide/smart-features) for more about models.
 
 ## Red Eye and Blemish
 

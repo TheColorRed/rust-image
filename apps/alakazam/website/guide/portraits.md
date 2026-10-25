@@ -1,6 +1,6 @@
 # Portraits and faces
 
-The **Beauty** section is for photos of people. Alakazam finds the people, faces, skin, lips and hair for you, so you don't mark anything by hand.
+The **Beauty** section is for photos of people. Alakazam can use on-device models to find people, faces, skin, lips and hair, so you don't mark those areas by hand. Some edits can still work without every model; see [Smart features](/guide/smart-features).
 
 ## One person or several
 
@@ -78,4 +78,4 @@ Blonde and other light colors don't work as well on dark hair. Dark hair is hard
 
 ## Smart features
 
-Finding people, faces, skin, lips and hair uses built-in smart models. They run the first time you open a control that needs them, and Alakazam offers to get any that you don't have. See [Smart features](/guide/smart-features).
+Finding people, faces, skin, lips and hair uses downloadable on-device models. Some results are prepared in the background when you open a photo; others are calculated when you use a control. If a required model is missing, Alakazam offers to download it. See [Smart features](/guide/smart-features).

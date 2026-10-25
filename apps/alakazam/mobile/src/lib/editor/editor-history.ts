@@ -13,6 +13,7 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { type CropRect, cropPicture } from '@/src/lib/tools/crop';
 import type { ProjectRecipe } from '@/src/lib/project/project-store';
 import { type EditPreset } from '@/src/lib/project/presets';
+import { setPersistedCropCount } from '@/src/lib/editor/editor-pictures';
 import { applyRedEyeStep } from '@/src/lib/beauty/red-eye';
 import { adjustmentKey } from '@/src/lib/beauty/skin-adjustments';
 import {
@@ -30,7 +31,7 @@ import { adjustments, appliedActions, areaOutlinesHidden, focusedControlKey, his
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { historyReady, openProject } from '@/src/state/project-session';
-import { currentImage, editBaseImage, originalImage, replayHidden } from '@/src/state/session';
+import { currentImage, editBaseImage, originalImage, replayHidden, sessionBaseImage } from '@/src/state/session';
 import { AbraImage, personDetectionDownloaded } from '@alakazam/mobile';
 import { Alert } from 'react-native';
 import { release } from '@/src/lib/native/native-handles';
@@ -40,7 +41,6 @@ import { release } from '@/src/lib/native/native-handles';
  * Kept for as long as the step is in the timeline, so undoing or redoing across it only swaps the base instead of redoing it.
  */
 const blemishBases = new Map<TimelineEntry, AbraImage>();
-
 
 /** The group of the action picked last, while nothing else has been done since: picking another one in it replaces that step. */
 let lastGroup: string | null = null;
@@ -64,7 +64,8 @@ export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
   }
   // The model that removes objects runs on a worker thread and cannot be waited for here, so its picture is only ever made once,
   // when the tool is used, and kept (see `commitRetouch`). A saved project keeps it as the step's checkpoint.
-  if (change.type === 'object-removal') throw new Error('The picture after removing objects is missing, and cannot be made again.');
+  if (change.type === 'object-removal')
+    throw new Error('The picture after removing objects is missing, and cannot be made again.');
   const healed = renderRecipe(base, entry.before);
   if (change.type === 'crop') {
     try {
@@ -204,20 +205,25 @@ function commitColorArea(key: string, points: number[] | null) {
 }
 
 /** Applies the checked parts of a preset as one undoable change, preserving every unchecked existing edit. */
-export function applyPreset(preset: EditPreset, selectedKeys = new Set([...Object.keys(preset.adjustments), ...preset.appliedActions])) {
+export function applyPreset(
+  preset: EditPreset,
+  selectedKeys = new Set([...Object.keys(preset.adjustments), ...preset.appliedActions]),
+) {
   const keys = selectedKeys;
   const nextAdjustments = {
     ...Object.fromEntries(Object.entries(adjustments.value).filter(([key]) => !keys.has(key))),
     ...Object.fromEntries(Object.entries(preset.adjustments).filter(([key]) => keys.has(key))),
   };
   const selectedActions = preset.appliedActions.filter(key => keys.has(key));
-  const groups = new Set(selectedActions.flatMap(key => {
-    for (const section of EDIT_SECTIONS) {
-      const control = leafControls(section.controls).find(item => item.kind === 'action' && item.key === key);
-      if (control?.kind === 'action' && control.group) return [control.group];
-    }
-    return [];
-  }));
+  const groups = new Set(
+    selectedActions.flatMap(key => {
+      for (const section of EDIT_SECTIONS) {
+        const control = leafControls(section.controls).find(item => item.kind === 'action' && item.key === key);
+        if (control?.kind === 'action' && control.group) return [control.group];
+      }
+      return [];
+    }),
+  );
   const nextActions = [
     ...appliedActions.value.filter(key => {
       if (keys.has(key)) return false;
@@ -302,14 +308,16 @@ function moveTo(cursor: number) {
   const baseIndex = baseIndexAt(after.entries, after.cursor);
   let source: AbraImage | null | undefined;
   if (baseIndex !== baseIndexAt(before.entries, before.cursor)) {
-    source = baseIndex < 0 ? originalImage.value : blemishBases.get(after.entries[baseIndex]);
+    source =
+      baseIndex < 0 ? (sessionBaseImage.value ?? originalImage.value) : blemishBases.get(after.entries[baseIndex]);
   }
   try {
     // A saved project only rebuilds the pictures up to where it was closed. The ones after that, which redo brings back, are
     // healed the first time they are needed, from the picture before them.
     if (!source && baseIndex >= 0 && baseIndex !== baseIndexAt(before.entries, before.cursor)) {
       const earlier = baseIndexAt(after.entries, baseIndex);
-      const previous = earlier < 0 ? originalImage.value : blemishBases.get(after.entries[earlier]);
+      const previous =
+        earlier < 0 ? (sessionBaseImage.value ?? originalImage.value) : blemishBases.get(after.entries[earlier]);
       if (!previous) throw new Error('The picture before this blemish is missing.');
       source = healBlemish(previous, after.entries[baseIndex]);
       blemishBases.set(after.entries[baseIndex], source);
@@ -345,6 +353,19 @@ export function resetEdits() {
     clearTimeline();
     release(editBaseImage.value);
     editBaseImage.next(original.clone() as AbraImage);
+    release(sessionBaseImage.value);
+    sessionBaseImage.next(original.clone() as AbraImage);
+    const project = openProject.value;
+    if (project) {
+      openProject.next({
+        ...project,
+        recipe: { adjustments: {}, appliedActions: [] },
+        layers: [],
+        baseFile: undefined,
+        savedCrops: [],
+      });
+      setPersistedCropCount(0);
+    }
     focusedControlKey.next(null);
     replayHidden.next(false);
     // The replay follows these, so the picture is drawn again from the original.

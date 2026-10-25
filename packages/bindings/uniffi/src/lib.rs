@@ -38,11 +38,11 @@ pub use abra::canvas::prelude::{
   AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
 };
 pub use adjustments::{
-  AutoColor, AutoTone, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
+  AutoColor, AutoTone, BlackWhite, BlackWhitePreset, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
   Grayscale, HighlightsShadows, Hue, Invert, Levels, LinearGradientEffect, Opacity, PhotoFilter, PhotoFilterAdjustment,
   Posterize, Quantize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
   gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, quantize, reduce_opacity, saturation,
-  selective_color, threshold, vibrance, curves,
+  selective_color, threshold, vibrance, curves, black_white,
 };
 pub use plugins::{
   PipelineStep, PluginControl, PluginInfo, PluginModel, PluginPipeline, PluginProblem, PluginScan, PluginScript, StepValue,

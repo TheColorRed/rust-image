@@ -1,6 +1,6 @@
 # Getting started
 
-Alakazam helps you make your photos look better without needing to know editing jargon. You tell it what you want, like "make it warmer" or "smooth the skin", and it does the work.
+Alakazam gives you photo editing tools that are easy to use. Choose an edit, adjust it with simple controls, and see the result as you work.
 
 ## Open a photo
 
@@ -15,7 +15,7 @@ Three tabs along the bottom of the home screen take you around the app. They're 
 
 - **Home:** your projects, and the way to add photos. See [Projects](/guide/projects).
 - **Settings:** light or dark, and the file you get when you share. See [Settings](/guide/settings).
-- **Plugins:** the smart models and other add-ons stored on your phone. See [Smart features](/guide/smart-features#managing-plugins).
+- **Plugins:** AI models and add-ons that can add editing tools. See [Plugins](/guide/plugins).
 
 ## Find an edit
 

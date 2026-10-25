@@ -1,20 +1,27 @@
 import { devDebug, devLog, warn } from '@/src/lib/log';
 import { registerAiAnalysis } from '@/src/lib/ai/ai-analyses';
-import { clearAnalysis, detectPeople } from '@/src/lib/ai/analysis';
+import { clearAnalysis } from '@/src/lib/ai/analysis';
 import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
-import { EDGE_REFINEMENT, HAIR_MODELS, findFaceBoxes, MAKEUP_MODELS, PERSON_DETECTION, SKIN_SEGMENTATION } from '@/src/lib/ai/faces';
+import {
+  EDGE_REFINEMENT,
+  HAIR_MODELS,
+  findFaceBoxes,
+  MAKEUP_MODELS,
+  PERSON_DETECTION,
+  SKIN_SEGMENTATION,
+} from '@/src/lib/ai/faces';
 import { batch } from '@/src/lib/utils/batch';
 import { resolveLocalPhotoPath, toLocalPath, type EditablePhoto } from '@/src/lib/editor/edit-source';
+import { clearTimeline } from '@/src/lib/editor/editor-history';
+import { forgetAnalysis } from '@/src/lib/editor/editor-preloads';
 import {
-  PERSON_MODEL_MISSING,
-  checkpointFor,
-  clearTimeline,
-  editsAPerson,
-  healBlemish,
-  keepBlemishBase,
-} from '@/src/lib/editor/editor-history';
-import { analysisOf, forgetAnalysis } from '@/src/lib/editor/editor-preloads';
-import { buildMasks, loadSavedMasks, saveMasks, saveMasksInBackground, withoutGroup, withoutPeople } from '@/src/lib/ai/saved-masks';
+  buildMasks,
+  loadSavedMasks,
+  saveMasks,
+  saveMasksInBackground,
+  withoutGroup,
+  withoutPeople,
+} from '@/src/lib/ai/saved-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
 import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
 import { hairMasks } from '@/src/lib/beauty/hair-masks';
@@ -22,30 +29,50 @@ import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
   flushFullReplay,
+  markCurrentImageRecipe,
   releaseShownImages,
   renderRecipe,
+  restoreProjectRenderCache,
+  stackSignatures,
   startReplay,
+  writeProjectRenderLayers,
 } from '@/src/lib/editor/editor-replay';
-import { showStandIn } from '@/src/lib/editor/editor-pictures';
+import { appliedCrops, fitted, setPersistedCropCount, showStandIn, shrunkOf } from '@/src/lib/editor/editor-pictures';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { ownedImage } from '@/src/lib/native/native-image';
 import { cacheFileUri, shareImageFile, writeImageToGallery } from '@/src/lib/native/media-file';
 import { exportFormat, exportQuality, type ExportFormat } from '@/src/state/settings';
-import { projectImageUri, type Project, type ProjectRecipe, type SavedPersonDetection } from '@/src/lib/project/project-store';
-import { changesPixels, recipeAt, type TimelineEntry } from '@/src/lib/project/timeline';
-import { analysisVersion, analysisVersion$, faceBoxes, faceBoxes$, people, people$, skinMask, skinMask$ } from '@/src/state/analysis';
+import { projectImageUri, type Project, type ProjectRecipe } from '@/src/lib/project/project-store';
+import { changesPixels, emptyTimeline } from '@/src/lib/project/timeline';
+import {
+  analysisVersion,
+  analysisVersion$,
+  faceBoxes,
+  faceBoxes$,
+  people,
+  people$,
+  skinMask,
+  skinMask$,
+} from '@/src/state/analysis';
 import { aiModelsVersion } from '@/src/state/ai-models';
 import { closeRequested } from '@/src/state/commands';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
-import { timeline, timeline$ } from '@/src/state/history';
+import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { updateProject } from '@/src/state/projects';
-import { busy, currentImage, editBaseImage, loadError, originalImage, ready } from '@/src/state/session';
+import {
+  busy,
+  currentImage,
+  editBaseImage,
+  loadError,
+  originalImage,
+  ready,
+  sessionBaseImage,
+} from '@/src/state/session';
 import { type Image as AbraPixels } from '@abra/core/image';
-import { Mask, type MaskLike } from '@abra/core/mask';
-import { AbraImage, personDetectionDownloaded, readImageAsync, type PersonDetection } from '@alakazam/mobile';
+import { AbraImage, readImageAsync } from '@alakazam/mobile';
 import { Alert, AppState } from 'react-native';
 import { merge, type BehaviorSubject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
@@ -60,9 +87,12 @@ function destroy<T>(subject: BehaviorSubject<T | null>) {
 }
 
 function resetSessionState() {
+  lastSavedBase = null;
+  setPersistedCropCount(0);
   destroy(originalImage);
   destroy(currentImage);
   destroy(editBaseImage);
+  destroy(sessionBaseImage);
   clearTimeline();
   previewSourceImage.next(null);
   releaseShownImages();
@@ -84,16 +114,15 @@ function resetSessionState() {
 
 /**
  * The quality (0 to 100) of a project's saved final image, which is WebP: close to a JPEG at 90 in looks, but smaller, and
- * it keeps transparency. It is only shown before the edits are replayed, so it need not be lossless.
+ * it keeps transparency. It is used for the project grid and as an immediate stand-in while saved control snapshots load.
  */
 const RESULT_QUALITY = 85;
 /** The JPEG quality of the saved final image when WebP cannot encode the photo. */
 const JPEG_FALLBACK_QUALITY = 90;
 
-// Keep the source project available for recovery actions even if its saved history cannot be replayed.
+// Keep the source project available for reset and delete actions while its editor session is open.
 let sessionProject: Project | null = null;
-
-const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+let lastSavedBase: AbraImage | null = null;
 
 /**
  * Finds the faces' masks again, in case the first time went wrong: what was found is thrown away, the editor draws again without it,
@@ -161,53 +190,64 @@ registerAiAnalysis('people', {
   regenerate: rescanPeople,
 });
 
-const NOT_SAVED = 'This session will not be saved, so the project keeps what it had.';
-
 /**
- * Saves the open project: every step in the order it was performed, undone ones included, where the cursor is, and the
- * final image at the cursor, so the grid and the next open can show it before anything is replayed. Does nothing for a
- * photo that is not a project, while the project is still loading (its saved state must not be overwritten by an empty
- * one), or when nothing changed since it was opened.
+ * Saves the document's editable control values and rendered pixel stack. Undo and redo stay in memory for this session only.
+ * Does nothing for a photo that is not a project, while it is still loading, or when nothing changed since it was opened.
  */
 export async function saveOpenProject(): Promise<void> {
   const project = openProject.value;
   const base = editBaseImage.value;
-  // Until the history is built the base is only the saved picture, and the steps are not there yet.
   if (!project || !base || !historyReady.value) return;
   const { entries, cursor } = timeline.value;
+  const activeEntries = entries.slice(0, cursor);
+  const recipe: ProjectRecipe = { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] };
+  const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
   // The masks belong to the original, so each is saved once: the first time it exists. The project then opens without the models.
   const { masks, maskGroups, people: savedPeople } = saveMasks(project);
   // Like the people, the faces belong to the original, so they are saved once: the first time they are known.
   const savedFaceBoxes = project.faceBoxes ?? faceBoxes.value ?? undefined;
+  const savedCrops = appliedCrops();
+  const pixelChanges = activeEntries.some(entry => changesPixels(entry.change));
   try {
-    const entriesWithResources = entries.map((entry, index) => {
-      if (!changesPixels(entry.change)) return entry;
-      const checkpoint = checkpointFor(entry);
-      if (!checkpoint) return entry;
-      const checkpointFile = entry.checkpointFile ?? `checkpoint-${index}.webp`;
-      checkpoint.write(toLocalPath(`${project.dir}/${checkpointFile}`), undefined);
-      return entry.checkpointFile === checkpointFile ? entry : { ...entry, checkpointFile };
-    });
     if (
       masks === project.masks &&
       maskGroups === project.maskGroups &&
-      JSON.stringify([entriesWithResources, cursor, savedPeople, savedFaceBoxes]) ===
-        JSON.stringify([project.timeline, project.cursor, project.people, project.faceBoxes])
+      JSON.stringify(recipe) === JSON.stringify(project.recipe) &&
+      (project.layers?.length ?? -1) === stackSignatures(recipe).length &&
+      !!project.resultFile === (hasRecipe || !!project.baseFile || cursor > 0) &&
+      (!pixelChanges || (base === lastSavedBase && !!project.baseFile)) &&
+      JSON.stringify([savedCrops, savedPeople, savedFaceBoxes]) ===
+        JSON.stringify([project.savedCrops, project.people, project.faceBoxes])
     )
       return;
 
-    // The picture is the base with the edits since the last blemish on top, which is what the controls show now.
-    const recipe: ProjectRecipe = { adjustments: { ...adjustments.value }, appliedActions: [...appliedActions.value] };
-    const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
+    const stamp = Date.now();
+    let baseFile = project.baseFile;
+    if (pixelChanges) {
+      baseFile = `base-${stamp}.png`;
+      base.write(toLocalPath(`${project.dir}/${baseFile}`), undefined);
+    }
+    let layers = project.layers;
+    let rendered: AbraImage | null = null;
+    if (hasRecipe) {
+      // Save each control's full-resolution composite. Reopening can seed the render cache from these images instead of
+      // executing every saved control again. The project stores pixels and values, never undo/redo history as a recipe log.
+      const stack = writeProjectRenderLayers(base, recipe, (index, _signature, image) => {
+        const file = `layer-${stamp}-${index}.png`;
+        image.write(toLocalPath(`${project.dir}/${file}`), undefined);
+        return file;
+      });
+      layers = stack.layers;
+      rendered = stack.image;
+      release(currentImage.value);
+      currentImage.next(rendered.clone() as AbraImage);
+    } else {
+      layers = [];
+    }
     let resultFile: string | undefined;
-    if (cursor > 0) {
-      const stamp = Date.now();
+    if (hasRecipe || baseFile || cursor > 0) {
       resultFile = `result-${stamp}.webp`;
-      // The replay already made the full-size picture of this recipe (`currentImage`), so it is written as it is. Rendering it again
-      // would hold a second full-size copy, and every layer of a canvas, next to the original, the base and that one.
-      if (hasRecipe) flushFullReplay();
-      const rendered = hasRecipe && !currentImage.value ? renderRecipe(base, recipe) : null;
-      const final = rendered ?? (hasRecipe ? currentImage.value! : base);
+      const final = rendered ?? base;
       try {
         try {
           final.write(toLocalPath(`${project.dir}/${resultFile}`), { quality: RESULT_QUALITY });
@@ -219,21 +259,39 @@ export async function saveOpenProject(): Promise<void> {
         }
       } finally {
         release(rendered);
+        rendered = null;
       }
+      if (!hasRecipe) {
+        release(currentImage.value);
+        currentImage.next(base.clone() as AbraImage);
+      }
+      markCurrentImageRecipe(recipe);
     }
-    const savedProject = { ...project, timeline: entriesWithResources, cursor, resultFile, masks, maskGroups, people: savedPeople, faceBoxes: savedFaceBoxes };
+    release(rendered);
+    const savedProject = {
+      ...project,
+      recipe,
+      layers,
+      baseFile,
+      savedCrops,
+      resultFile,
+      masks,
+      maskGroups,
+      people: savedPeople,
+      faceBoxes: savedFaceBoxes,
+    };
     devDebug('project', 'saving on close:', savedProject.masks?.length ?? 0, 'masks, groups', savedProject.maskGroups);
     openProject.next(savedProject);
     await updateProject(savedProject);
+    lastSavedBase = base;
   } catch (error) {
     Alert.alert('Could not save the project', errorMessage(error));
   }
 }
 
 /**
- * Loads `photo` into the editor controller and starts replaying edits onto it. If `photo` is a project, its saved
- * final image is shown at once while the original is read and the pictures its blemish steps left are rebuilt, in the
- * order they were performed. Returns the teardown, which saves the project, stops the replay and destroys every native
+ * Loads `photo` into the editor and restores saved control snapshots into the render cache without rerunning saved controls.
+ * Undo and redo start empty for each session. Returns the teardown, which saves the project and destroys session images.
  * image. Destroying nulls the subjects rather than just freeing the objects: a Fast Refresh remount runs this cleanup on
  * the old instance, and a stale in-flight callback could otherwise read a freed pointer ("Raw pointer value was null").
  */
@@ -245,8 +303,19 @@ export async function saveOpenProject(): Promise<void> {
 export async function resetProjectToNew() {
   const project = openProject.value ?? sessionProject;
   if (!project) return;
-  const { version, id, name, sourceFile, createdAt, dir } = project;
-  const fresh: Project = { version, id, name, sourceFile, timeline: [], cursor: 0, createdAt, modifiedAt: Date.now(), dir };
+  const { id, name, sourceFile, createdAt, dir } = project;
+  const fresh: Project = {
+    version: 2,
+    id,
+    name,
+    sourceFile,
+    recipe: { adjustments: {}, appliedActions: [] },
+    layers: [],
+    savedCrops: [],
+    createdAt,
+    modifiedAt: Date.now(),
+    dir,
+  };
   // Nothing may save over it: not the save when the editor closes, and not the masks being saved in the background.
   historyReady.next(false);
   openProject.next(fresh);
@@ -297,6 +366,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
   sessionProject = project;
+  setPersistedCropCount(project?.savedCrops.length ?? 0);
   if (project) devLog('project', 'opened', project.id, project.dir);
   const ledgerMark = handleLedgerMark();
   const replay = startReplay();
@@ -310,25 +380,29 @@ export function openEditorSession(photo: EditablePhoto): () => void {
   const masksFound = merge(analysisVersion$, people$, skinMask$, faceBoxes$)
     .pipe(debounceTime(300))
     .subscribe(() => saveMasksInBackground());
-  // Pixel-changing steps need their checkpoint on disk so reopening never reruns an AI tool.
-  const timelineSaved = timeline$.pipe(debounceTime(500)).subscribe(() => saveOpenProject());
-
   (async () => {
     try {
+      if (project && (project.version !== 2 || !project.recipe || !project.layers)) {
+        throw new Error('This project format is no longer supported. Create a new project from the original image.');
+      }
+      if (
+        project &&
+        (Object.keys(project.recipe.adjustments).length > 0 || project.recipe.appliedActions.length > 0) &&
+        !project.resultFile
+      ) {
+        throw new Error('This project is missing its saved image.');
+      }
       if (project?.resultFile) {
         const result = ownedImage(await readImageAsync(toLocalPath(projectImageUri(project))));
         if (cancelled) {
           release(result);
           return;
         }
-        // The saved picture is shown, and edits can be made on it right away, while the history rebuilds below. Those
-        // edits are pending work: they are merged into the saved edits once the real base is ready. The first replay
-        // destroys the shown image, like any image it replaces.
+        // Show the saved composite immediately. The editor stays unready until the saved control layers are loaded into
+        // the render cache, so opening does not execute the saved tools again.
         batch(() => {
-          editBaseImage.next(result.clone() as AbraImage);
           currentImage.next(result);
           showStandIn(result);
-          ready.next(true);
         });
       }
 
@@ -348,90 +422,64 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       }
       devDebug('image', 'decode and skin mask ms:', Date.now() - started);
 
-      // The project was closed with some steps applied and maybe more undone after them. Only the applied steps are rebuilt.
-      // Only steps that change pixels (blemish and red-eye fixes) are rendered: each bakes in the edits that came before it, on top
-      // of the picture the last one left. Every other step is just edit state, which the last step already holds. Each healed
-      // picture is kept by the timeline, so undo and redo across a blemish only swap the base. The undone steps are kept as
-      // they are, and a blemish among them is healed if it is ever redone.
-      const saved = project?.timeline ?? [];
-      const applied = Math.min(project?.cursor ?? saved.length, saved.length);
-      // Load rendered retouch checkpoints up front, including undone ones. Redo can then swap pixels without rerunning the
-      // automatic red-eye models (and old projects without checkpoints still use the compatibility replay below).
-      for (const entry of saved) {
-        if (!changesPixels(entry.change) || !entry.checkpointFile) continue;
-        const checkpoint = ownedImage(
-          await readImageAsync(toLocalPath(`${project!.dir}/${entry.checkpointFile}`)),
-        );
-        // The editor may have been left while this was decoding: the session's maps are already cleared, so a picture kept now would
-        // stay in memory with no owner.
-        if (cancelled) {
-          release(checkpoint);
-          release(original);
-          return;
-        }
-        keepBlemishBase(entry, checkpoint);
+      let base: AbraImage;
+      if (project?.baseFile) {
+        base = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${project.baseFile}`)));
+      } else {
+        base = original.clone() as AbraImage;
       }
-      let base = original.clone() as AbraImage;
-      const rebuilt: TimelineEntry[] = [];
-      let restoreFailed = false;
-      // Without the person model, an edit made to one person cannot be replayed (it would only throw).
-      const personModelMissing = !personDetectionDownloaded() && !project?.people;
-      for (const entry of saved.slice(0, applied)) {
-        try {
-          if (personModelMissing && editsAPerson(entry.before ?? entry)) throw new Error(PERSON_MODEL_MISSING);
-          if (changesPixels(entry.change)) {
-            const checkpoint = checkpointFor(entry);
-            let healed: AbraImage;
-            if (checkpoint) {
-              healed = checkpoint.clone() as AbraImage;
-            } else {
-              await nextFrame();
-              if (cancelled) {
-                release(base);
-                release(original);
-                return;
-              }
-              healed = healBlemish(base, entry);
-              keepBlemishBase(entry, healed.clone() as AbraImage);
-            }
-            release(base);
-            base = healed;
-          }
-          rebuilt.push(entry);
-        } catch (error) {
-          // Keep the steps before this one and edit from there, but do not save over the project, which has every step.
-          restoreFailed = true;
-          Alert.alert('Could not restore every edit', `${errorMessage(error)}\n\n${NOT_SAVED}`);
-          break;
-        }
+      if (cancelled) {
+        release(base);
+        release(original);
+        return;
       }
 
+      const persistedRecipe: ProjectRecipe = project ? project.recipe : { adjustments: {}, appliedActions: [] };
+      const merged = persistedRecipe;
+      const savedLayerImages: { signature: string; image: AbraImage }[] = [];
+      if (project) {
+        const screenBase = shrunkOf('base', base);
+        try {
+          for (const layer of project.layers) {
+            const fullLayer = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${layer.file}`)));
+            if (cancelled) {
+              release(fullLayer);
+              savedLayerImages.forEach(saved => release(saved.image));
+              release(base);
+              release(original);
+              return;
+            }
+            try {
+              savedLayerImages.push({
+                signature: layer.signature,
+                image: fitted(fullLayer, screenBase.width(), screenBase.height()),
+              });
+            } finally {
+              release(fullLayer);
+            }
+          }
+        } catch (error) {
+          savedLayerImages.forEach(saved => release(saved.image));
+          throw error;
+        }
+      }
+      restoreProjectRenderCache(base, merged, savedLayerImages);
+      markCurrentImageRecipe(merged);
+
+      const activeProject = project;
+
       batch(() => {
-        // Swap the saved picture, which was only a stand-in base, for the real one.
         release(editBaseImage.value);
         originalImage.next(original);
         editBaseImage.next(base);
-        // Edits made while this was loading are pending work. They go on top of the saved edits, and win where both set
-        // the same control. They become one step on the timeline.
-        const current = recipeAt(rebuilt, rebuilt.length);
-        const merged: ProjectRecipe = {
-          adjustments: { ...current.adjustments, ...adjustments.value },
-          appliedActions: [
-            ...current.appliedActions,
-            ...appliedActions.value.filter(key => !current.appliedActions.includes(key)),
-          ],
-        };
-        const changed = JSON.stringify(merged) !== JSON.stringify(current);
-        // Without a failure the steps after the cursor stay for redo, unless a pending edit comes first and drops them.
-        const kept = restoreFailed || changed ? [] : saved.slice(applied);
-        const entries: TimelineEntry[] = [
-          ...rebuilt,
-          ...(changed ? [{ change: { type: 'pending' }, ...merged } as TimelineEntry] : []),
-          ...kept,
-        ];
-        timeline.next({ entries, cursor: rebuilt.length + (changed ? 1 : 0) });
-        if (project && !restoreFailed) openProject.next(project);
-        // Setting the edit state replays everything from the real base, which also replaces the stand-in picture on screen.
+        release(sessionBaseImage.value);
+        sessionBaseImage.next(base.clone() as AbraImage);
+        lastSavedBase = base;
+        timeline.next(emptyTimeline);
+        if (activeProject) {
+          openProject.next(activeProject);
+          setPersistedCropCount(activeProject.savedCrops.length);
+        }
         adjustments.next(merged.adjustments);
         appliedActions.next(merged.appliedActions);
         busy.next(false);
@@ -452,7 +500,6 @@ export function openEditorSession(photo: EditablePhoto): () => void {
     cancelled = true;
     appState.remove();
     masksFound.unsubscribe();
-    timelineSaved.unsubscribe();
     saveOpenProject();
     replay.unsubscribe();
     live.unsubscribe();

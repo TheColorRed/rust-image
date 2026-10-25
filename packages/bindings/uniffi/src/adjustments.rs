@@ -11,6 +11,77 @@ use crate::effect::effect_methods;
 use crate::{Color, Curve, Gradient, Image};
 use abra::abra_core::{Image as CoreImage, PointF};
 
+/// Starting settings for a black and white conversion.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum BlackWhitePreset {
+  Default,
+  BlueFilter,
+  Darker,
+  GreenFilter,
+  HighContrastBlueFilter,
+  HighContrastRedFilter,
+  Infrared,
+  Lighter,
+  MaximumBlack,
+  MaximumWhite,
+  NeutralDensity,
+  RedFilter,
+  YellowFilter,
+}
+
+impl From<BlackWhitePreset> for color::BlackWhitePreset {
+  fn from(preset: BlackWhitePreset) -> Self {
+    match preset {
+      BlackWhitePreset::Default => Self::Default,
+      BlackWhitePreset::BlueFilter => Self::BlueFilter,
+      BlackWhitePreset::Darker => Self::Darker,
+      BlackWhitePreset::GreenFilter => Self::GreenFilter,
+      BlackWhitePreset::HighContrastBlueFilter => Self::HighContrastBlueFilter,
+      BlackWhitePreset::HighContrastRedFilter => Self::HighContrastRedFilter,
+      BlackWhitePreset::Infrared => Self::Infrared,
+      BlackWhitePreset::Lighter => Self::Lighter,
+      BlackWhitePreset::MaximumBlack => Self::MaximumBlack,
+      BlackWhitePreset::MaximumWhite => Self::MaximumWhite,
+      BlackWhitePreset::NeutralDensity => Self::NeutralDensity,
+      BlackWhitePreset::RedFilter => Self::RedFilter,
+      BlackWhitePreset::YellowFilter => Self::YellowFilter,
+    }
+  }
+}
+
+/// Converts an image to monochrome with six color-range controls and optional tint.
+#[derive(uniffi::Object)]
+pub struct BlackWhite(color::BlackWhite);
+
+/// A black and white conversion with default luminance weights.
+#[uniffi::export]
+pub fn black_white() -> Arc<BlackWhite> {
+  Arc::new(BlackWhite(color::black_white()))
+}
+
+#[uniffi::export]
+impl BlackWhite {
+  /// Sets red, yellow, green, cyan, blue and magenta controls, in percentages.
+  pub fn with_channels(&self, reds: f32, yellows: f32, greens: f32, cyans: f32, blues: f32, magentas: f32) -> Arc<BlackWhite> {
+    Arc::new(BlackWhite(self.0.clone().with_channels(reds, yellows, greens, cyans, blues, magentas)))
+  }
+
+  /// Starts with a named preset. Channel controls can be changed afterward.
+  pub fn with_preset(&self, preset: BlackWhitePreset) -> Arc<BlackWhite> {
+    Arc::new(BlackWhite(self.0.clone().with_preset(preset.into())))
+  }
+
+  /// Applies a tint using hue in degrees and saturation from 0 to 1.
+  pub fn with_tint(&self, hue: f32, saturation: f32) -> Arc<BlackWhite> {
+    Arc::new(BlackWhite(self.0.clone().with_tint(hue, saturation)))
+  }
+
+  /// Removes tinting.
+  pub fn without_tint(&self) -> Arc<BlackWhite> {
+    Arc::new(BlackWhite(self.0.clone().without_tint()))
+  }
+}
+
 /// Reduces an image to this many levels of each color channel. Made by [`posterize`].
 #[derive(uniffi::Object)]
 pub struct Posterize(color::Posterize);
