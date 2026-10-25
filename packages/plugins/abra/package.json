@@ -1,0 +1,35 @@
+{
+  "name": "@abra/core",
+  "version": "1.0.0",
+  "description": "TypeScript declarations for the Alakazam Abra plugin API",
+  "license": "UNLICENSED",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts" },
+    "./adjustments": { "types": "./dist/entries/adjustments.d.ts" },
+    "./beauty": { "types": "./dist/entries/beauty.d.ts" },
+    "./blend": { "types": "./dist/entries/blend.d.ts" },
+    "./canvas": { "types": "./dist/entries/canvas.d.ts" },
+    "./color": { "types": "./dist/entries/color.d.ts" },
+    "./drawing": { "types": "./dist/entries/drawing.d.ts" },
+    "./fill": { "types": "./dist/entries/fill.d.ts" },
+    "./filters": { "types": "./dist/entries/filters.d.ts" },
+    "./geometry": { "types": "./dist/entries/geometry.d.ts" },
+    "./gradient": { "types": "./dist/entries/gradient.d.ts" },
+    "./image": { "types": "./dist/entries/image.d.ts" },
+    "./mask": { "types": "./dist/entries/mask.d.ts" },
+    "./tools": { "types": "./dist/entries/tools.d.ts" },
+    "./transform": { "types": "./dist/entries/transform.d.ts" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node ./build.mjs",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@ubjs/core": "0.31.0-6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

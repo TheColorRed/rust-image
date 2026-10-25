@@ -10,6 +10,7 @@ abra-uniffi = { workspace = true }
 abra-body-segmentation = { workspace = true }
 abra-find-person = { workspace = true }
 sha2 = { version = "0.11.0" }
+zip = { workspace = true }
 ureq = { version = "3.4.2" }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
 vessel = { workspace = true, features = ["android-surface", "ios-surface"] }

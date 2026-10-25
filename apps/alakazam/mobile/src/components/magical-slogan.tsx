@@ -9,7 +9,9 @@ export function MagicalSlogan({ fontSize = 24, subText }: { fontSize?: number; s
   const [width, setWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
   const { colors } = useTheme();
-  const height = fontSize * 1.7;
+  const scale = width > 0 && textWidth > 0 ? Math.min(1, Math.max(0.1, (width - 16) / textWidth)) : 1;
+  const fittedFontSize = fontSize * scale;
+  const height = fittedFontSize * 1.7;
   const onLayout = (event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width);
   const sparkles = useMemo(
     () =>
@@ -74,119 +76,121 @@ export function MagicalSlogan({ fontSize = 24, subText }: { fontSize?: number; s
   }, [sparkles]);
 
   return (
-    <View onLayout={onLayout} style={{ width: '100%', height, alignItems: 'center', justifyContent: 'center' }}>
-      <Text
-        accessible={false}
-        onLayout={event => setTextWidth(event.nativeEvent.layout.width)}
-        style={{
-          position: 'absolute',
-          alignSelf: 'center',
-          opacity: 0,
-          fontFamily: 'sans-serif',
-          fontSize,
-          fontWeight: '900',
-          includeFontPadding: false,
-        }}
-      >
-        {APP_SLOGAN}
-      </Text>
-      {width > 0 && (
-        <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-          <Defs>
-            <LinearGradient id="slogan-magic" x1="0" y1="0" x2="1" y2="0">
-              <Stop offset="0%" stopColor="#53f4ff" />
-              <Stop offset="28%" stopColor="#9e7bff" />
-              <Stop offset="57%" stopColor="#ff74df" />
-              <Stop offset="82%" stopColor="#ffd86a" />
-              <Stop offset="100%" stopColor="#7fffc0" />
-            </LinearGradient>
-          </Defs>
-          <SvgText
-            x={width / 2}
-            y={fontSize * 1.18}
-            textAnchor="middle"
-            fontSize={fontSize}
-            fontWeight="900"
-            fontFamily="sans-serif"
-            fill="url(#slogan-magic)"
-          >
-            {APP_SLOGAN}
-          </SvgText>
-        </Svg>
-      )}
-      {width > 0 &&
-        textWidth > 0 &&
-        sparkles.map(sparkle => {
-          const rawX = width / 2 + sparkle.side * (textWidth / 2 + sparkle.distance);
-          const x = Math.max(sparkle.size * 2, Math.min(width - sparkle.size * 2, rawX));
-          const samples = 48;
-          const inputRange = Array.from({ length: samples + 1 }, (_, index) => index / samples);
-          const yAmplitude = Math.max(
-            0,
-            Math.min(
-              fontSize * 0.42,
-              sparkle.top - sparkle.verticalMin,
-              sparkle.verticalMin + sparkle.verticalRange - sparkle.top,
-            ),
-          );
-          const relativeWave = (time: number, frequency: number, phase: number) =>
-            Math.sin(2 * Math.PI * frequency * time + phase) - Math.sin(phase);
-          const xRange = Math.min(
-            sparkle.driftX,
-            Math.max(1, Math.min(rawX - sparkle.size * 2, width - rawX - sparkle.size * 2)),
-          );
-          const xValues = inputRange.map(
-            time =>
-              xRange *
-              0.5 *
-              (0.68 * relativeWave(time, sparkle.xFrequency, sparkle.xPhase) +
-                0.32 * relativeWave(time, sparkle.xFrequency2, sparkle.xPhase2)),
-          );
-          const yValues = inputRange.map(
-            time =>
-              yAmplitude *
-              0.5 *
-              (0.68 * relativeWave(time, sparkle.yFrequency, sparkle.yPhase) +
-                0.32 * relativeWave(time, sparkle.yFrequency2, sparkle.yPhase2)),
-          );
-          const opacityValues = inputRange.map(
-            time =>
-              0.72 +
-              0.28 * (0.5 + 0.5 * Math.sin(2 * Math.PI * sparkle.opacityFrequency * time + sparkle.opacityPhase)),
-          );
-          const translateX = sparkle.phase.interpolate({ inputRange, outputRange: xValues });
-          const translateY = sparkle.phase.interpolate({ inputRange, outputRange: yValues });
-          const opacity = sparkle.phase.interpolate({ inputRange, outputRange: opacityValues });
-          const rotate = sparkle.phase.interpolate({
-            inputRange: [0, 1],
-            outputRange: ['0deg', `${sparkle.star ? sparkle.rotationTurns * 360 : 0}deg`],
-          });
-          return (
-            <Animated.View
-              key={sparkle.id}
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: x - sparkle.size * 2,
-                top: sparkle.top - sparkle.size * 2,
-                width: sparkle.size * 4,
-                height: sparkle.size * 4,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity,
-                transform: [{ translateX }, { translateY }, { rotate }],
-              }}
+    <View style={{ width: '100%', alignItems: 'center' }}>
+      <View onLayout={onLayout} style={{ width: '100%', height, alignItems: 'center', justifyContent: 'center' }}>
+        <Text
+          accessible={false}
+          onLayout={event => setTextWidth(event.nativeEvent.layout.width)}
+          style={{
+            position: 'absolute',
+            alignSelf: 'center',
+            opacity: 0,
+            fontFamily: 'sans-serif',
+            fontSize,
+            fontWeight: '900',
+            includeFontPadding: false,
+          }}
+        >
+          {APP_SLOGAN}
+        </Text>
+        {width > 0 && (
+          <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+            <Defs>
+              <LinearGradient id="slogan-magic" x1="0" y1="0" x2="1" y2="0">
+                <Stop offset="0%" stopColor="#53f4ff" />
+                <Stop offset="28%" stopColor="#9e7bff" />
+                <Stop offset="57%" stopColor="#ff74df" />
+                <Stop offset="82%" stopColor="#ffd86a" />
+                <Stop offset="100%" stopColor="#7fffc0" />
+              </LinearGradient>
+            </Defs>
+            <SvgText
+              x={width / 2}
+              y={fittedFontSize * 1.18}
+              textAnchor="middle"
+              fontSize={fittedFontSize}
+              fontWeight="900"
+              fontFamily="sans-serif"
+              fill="url(#slogan-magic)"
             >
-              <Svg width={sparkle.size * 4} height={sparkle.size * 4} viewBox="0 0 4 4">
-                {sparkle.star ? (
-                  <Path d="M2 0 L2.55 1.45 L4 2 L2.55 2.55 L2 4 L1.45 2.55 L0 2 L1.45 1.45 Z" fill={sparkle.color} />
-                ) : (
-                  <Circle cx={2} cy={2} r={1.1} fill={sparkle.color} />
-                )}
-              </Svg>
-            </Animated.View>
-          );
-        })}
+              {APP_SLOGAN}
+            </SvgText>
+          </Svg>
+        )}
+        {width > 0 &&
+          textWidth > 0 &&
+          sparkles.map(sparkle => {
+            const size = sparkle.size * scale;
+            const top = sparkle.top * scale;
+            const verticalMin = sparkle.verticalMin * scale;
+            const verticalRange = sparkle.verticalRange * scale;
+            const rawX = width / 2 + sparkle.side * ((textWidth * scale) / 2 + sparkle.distance * scale);
+            const x = Math.max(size * 2, Math.min(width - size * 2, rawX));
+            const samples = 48;
+            const inputRange = Array.from({ length: samples + 1 }, (_, index) => index / samples);
+            const yAmplitude = Math.max(
+              0,
+              Math.min(fittedFontSize * 0.42, top - verticalMin, verticalMin + verticalRange - top),
+            );
+            const relativeWave = (time: number, frequency: number, phase: number) =>
+              Math.sin(2 * Math.PI * frequency * time + phase) - Math.sin(phase);
+            const xRange = Math.min(
+              sparkle.driftX * scale,
+              Math.max(1, Math.min(rawX - size * 2, width - rawX - size * 2)),
+            );
+            const xValues = inputRange.map(
+              time =>
+                xRange *
+                0.5 *
+                (0.68 * relativeWave(time, sparkle.xFrequency, sparkle.xPhase) +
+                  0.32 * relativeWave(time, sparkle.xFrequency2, sparkle.xPhase2)),
+            );
+            const yValues = inputRange.map(
+              time =>
+                yAmplitude *
+                0.5 *
+                (0.68 * relativeWave(time, sparkle.yFrequency, sparkle.yPhase) +
+                  0.32 * relativeWave(time, sparkle.yFrequency2, sparkle.yPhase2)),
+            );
+            const opacityValues = inputRange.map(
+              time =>
+                0.72 +
+                0.28 * (0.5 + 0.5 * Math.sin(2 * Math.PI * sparkle.opacityFrequency * time + sparkle.opacityPhase)),
+            );
+            const translateX = sparkle.phase.interpolate({ inputRange, outputRange: xValues });
+            const translateY = sparkle.phase.interpolate({ inputRange, outputRange: yValues });
+            const opacity = sparkle.phase.interpolate({ inputRange, outputRange: opacityValues });
+            const rotate = sparkle.phase.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0deg', `${sparkle.star ? sparkle.rotationTurns * 360 : 0}deg`],
+            });
+            return (
+              <Animated.View
+                key={sparkle.id}
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: x - size * 2,
+                  top: top - size * 2,
+                  width: size * 4,
+                  height: size * 4,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity,
+                  transform: [{ translateX }, { translateY }, { rotate }],
+                }}
+              >
+                <Svg width={size * 4} height={size * 4} viewBox="0 0 4 4">
+                  {sparkle.star ? (
+                    <Path d="M2 0 L2.55 1.45 L4 2 L2.55 2.55 L2 4 L1.45 2.55 L0 2 L1.45 1.45 Z" fill={sparkle.color} />
+                  ) : (
+                    <Circle cx={2} cy={2} r={1.1} fill={sparkle.color} />
+                  )}
+                </Svg>
+              </Animated.View>
+            );
+          })}
+      </View>
       {subText && (
         <Text style={{ color: colors.textMuted, textAlign: 'center', fontSize: 20, fontWeight: '600' }}>{subText}</Text>
       )}

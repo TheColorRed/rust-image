@@ -56,12 +56,14 @@ import { building, release } from '@/src/lib/native/native-handles';
 /** Whether the edit has changed since the full-size picture (`currentImage`) was made, so it is out of date. */
 let fullReplayPending = false;
 let currentImageRecipe = '';
+let currentImageBase: AbraImage | null = null;
 
 const recipeSignature = (recipe: ProjectRecipe) => JSON.stringify(recipe);
 
 /** Marks the already-saved full-size image as the result of this recipe when a project opens. */
-export function markCurrentImageRecipe(recipe: ProjectRecipe) {
+export function markCurrentImageRecipe(recipe: ProjectRecipe, base = editBaseImage.value) {
   currentImageRecipe = recipeSignature(recipe);
+  currentImageBase = base;
 }
 
 /**
@@ -79,6 +81,7 @@ function runFullReplay() {
   release(currentImage.value);
   currentImage.next(next);
   currentImageRecipe = recipeSignature(recipe);
+  currentImageBase = base;
   devDebug('edit', 'full-size replay ms (not shown):', Date.now() - started);
 }
 
@@ -87,13 +90,24 @@ function runFullReplay() {
  * blemish tool, calls this first, so it works on the photo as it is edited now and not on the one before the last change.
  */
 export function flushFullReplay() {
-  if (fullReplayPending) runFullReplay();
+  const recipe: ProjectRecipe = { adjustments: adjustments.value, appliedActions: appliedActions.value };
+  // The editor can become ready before its first preview replay has populated `currentImage`.
+  // Pixel tools (blemish and object removal) may be used during that gap, so make sure they have
+  // a full-size image for the current recipe instead of silently doing nothing or using a stale one.
+  if (
+    fullReplayPending ||
+    !currentImage.value ||
+    currentImageRecipe !== recipeSignature(recipe) ||
+    currentImageBase !== editBaseImage.value
+  )
+    runFullReplay();
 }
 
 /** Lets go of every screen-size picture and forgets a full-size edit that was waiting, when the session ends. */
 export function releaseShownImages() {
   fullReplayPending = false;
   currentImageRecipe = '';
+  currentImageBase = null;
   clearRenderCache();
   releasePreloads();
   preloadedBase = null;
@@ -760,7 +774,11 @@ function replay() {
     const deferred = isStackDeferred();
     const recipe: ProjectRecipe = { adjustments: adjustments.value, appliedActions: appliedActions.value };
     const hasRecipe = Object.keys(recipe.adjustments).length > 0 || recipe.appliedActions.length > 0;
-    if (currentImageRecipe === recipeSignature(recipe) && (!hasRecipe || currentImage.value)) {
+    if (
+      currentImageRecipe === recipeSignature(recipe) &&
+      currentImageBase === base &&
+      (!hasRecipe || currentImage.value)
+    ) {
       // A reopened project's full-size result is already current. Draw from the restored screen cache and leave its saved
       // pixels alone; loading a project must not run its controls again just to recreate the image already on disk.
       const next = renderCachedStack(base, false);
@@ -776,6 +794,7 @@ function replay() {
         release(currentImage.value);
         currentImage.next(next.clone() as AbraImage);
         currentImageRecipe = recipeSignature(recipe);
+        currentImageBase = base;
       } else fullReplayPending = true;
       devDebug('preview', ` ${deferred ? 'full-size deferred' : 'screen-size'} replay ms:`, Date.now() - started);
     }

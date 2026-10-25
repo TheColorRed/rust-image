@@ -1,0 +1,9 @@
+{
+  "name": "@alakazam/object-remover-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@abra/core": "1.0.0",
+    "@alakazam/plugin-toolkit": "0.1.0"
+  }
+}

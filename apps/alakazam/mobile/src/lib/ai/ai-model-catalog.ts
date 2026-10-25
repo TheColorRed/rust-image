@@ -6,7 +6,7 @@ import {
   deletePlugin,
   downloadAiModel,
   downloadedAiModelBytes,
-  installPlugin,
+  installPluginPackage,
   pluginsFolder,
 } from '@alakazam/mobile';
 import { parse } from 'yaml';
@@ -15,6 +15,42 @@ import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { aiModelList, type AiModelListing, type AiModelSource } from '@/src/state/ai-models';
 import { pluginList, type PluginListing } from '@/src/state/plugins';
+
+/** Installed plugins that must be removed with these ids, with dependents before their dependencies. */
+export const pluginsToRemove = (ids: readonly string[]) => {
+  const plugins = scanPlugins(pluginsFolder()).plugins;
+  const byId = new Map(plugins.map(plugin => [plugin.id, plugin]));
+  const removing = new Set(ids);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const plugin of plugins) {
+      if (!removing.has(plugin.id) && plugin.dependencies.some(id => removing.has(id))) {
+        removing.add(plugin.id);
+        changed = true;
+      }
+    }
+  }
+
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+  const visit = (id: string) => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    for (const plugin of plugins) {
+      if (removing.has(plugin.id) && plugin.dependencies.includes(id)) visit(plugin.id);
+    }
+    if (removing.has(id)) ordered.push(id);
+  };
+  for (const id of removing) visit(id);
+  return ordered.map(id => byId.get(id)).filter((plugin): plugin is (typeof plugins)[number] => plugin !== undefined);
+};
+
+/** Deletes an already-confirmed plugin removal plan and reloads active contributions once. */
+export const deletePlugins = (ids: readonly string[]) => {
+  for (const id of ids) deletePlugin(id);
+  loadPlugins();
+};
 
 /** The catalog of AI models. The app owns it: the native side is only told about one model at a time. */
 const MODEL_CATALOG_URL = 'https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/catalog.yml';
@@ -60,10 +96,9 @@ export const syncAiModels = () => {
 export const downloadPlugin = (plugin: PluginListing, listener: { update: (progress: number) => void }): Promise<void> =>
   installPluginWithDependencies(plugin.id, listener);
 
-/** Deletes a plugin that adds no model. Plugins that depend on it stop adding their controls until it is installed again. */
-export const deletePluginListing = (plugin: PluginListing): void => {
-  deletePlugin(plugin.id);
-  loadPlugins();
+/** Deletes a plugin that adds no model and, after confirmation, its installed dependents. */
+export const deletePluginListing = (plugin: PluginListing, ids = [plugin.id]): void => {
+  deletePlugins(ids);
 };
 
 /** The plugins the catalog lists, by id. It is the lookup that finds a plugin's dependencies. Filled by every read of the catalog. */
@@ -71,7 +106,7 @@ const catalogPlugins = new Map<string, CatalogPlugin>();
 
 /** The ids of the plugins that a plugin of the catalog depends on, from its `plugin.yml`. */
 const dependenciesOf = async (plugin: CatalogPlugin): Promise<string[]> => {
-  const response = await fetch(plugin.uri);
+  const response = await fetch(plugin.uri, { cache: 'no-store' });
   if (!response.ok) throw new Error(`The plugin ${plugin.id} could not be downloaded (${response.status}).`);
   const dependencies: unknown = parse(await response.text())?.dependencies;
   return Array.isArray(dependencies) ? dependencies.map((dependency: { id?: unknown }) => String(dependency?.id)) : [];
@@ -91,7 +126,9 @@ export const installPluginWithDependencies = async (id: string, listener: { upda
   );
   const plan = await installPlan(id, catalogPlugins, installed, dependenciesOf);
   for (const [index, plugin] of plan.entries()) {
-    await installPlugin(plugin.uri, plugin.sha256, { update: share => listener.update((index + share) / plan.length) });
+    await installPluginPackage(plugin.archiveUri, plugin.archiveSha256, plugin.sha256, {
+      update: share => listener.update((index + share) / plan.length),
+    });
   }
   // A plugin that adds controls to the editor has them there from now on, without starting the app again.
   loadPlugins();
@@ -105,17 +142,16 @@ export const downloadModel = (model: AiModelListing, listener: { update: (progre
     : installPluginWithDependencies(model.source.pluginId, listener);
 
 /** Deletes what a model downloaded. For a plugin that is the plugin, and so every model it adds, and a copy downloaded as a file before. */
-export const deleteModel = (model: AiModelListing): void => {
+export const deleteModel = (model: AiModelListing, pluginIds?: readonly string[]): void => {
   if (model.source.type === 'plugin') {
-    deletePlugin(model.source.pluginId);
-    loadPlugins();
+    deletePlugins(pluginIds ?? pluginsToRemove([model.source.pluginId]).map(plugin => plugin.id));
   }
   deleteAiModel(model.id);
 };
 
 /** Reads the catalog, keeps the list of its models and returns it. Fails when the catalog cannot be read. */
 export const refreshAiModels = async (): Promise<AiModelListing[]> => {
-  const response = await fetch(MODEL_CATALOG_URL);
+  const response = await fetch(MODEL_CATALOG_URL, { cache: 'no-store' });
   if (!response.ok) throw new Error(`The model catalog could not be downloaded (${response.status}).`);
   const parsed = parse(await response.text());
   // `models` lists the models as files, for the apps that came before plugins. A catalog of plugins only does not need it.
@@ -125,7 +161,17 @@ export const refreshAiModels = async (): Promise<AiModelListing[]> => {
   catalogPlugins.clear();
   for (const item of Array.isArray(parsed?.plugins) ? parsed.plugins : []) {
     if (item && typeof item.id === 'string' && typeof item.uri === 'string' && /^[0-9a-fA-F]{64}$/.test(String(item.sha256))) {
-      catalogPlugins.set(item.id, { id: item.id, uri: item.uri, sha256: String(item.sha256).toLowerCase() });
+      if (typeof item.archive_uri === 'string' && /^[0-9a-fA-F]{64}$/.test(String(item.archive_sha256))) {
+        catalogPlugins.set(item.id, {
+          id: item.id,
+          uri: item.uri,
+          sha256: String(item.sha256).toLowerCase(),
+          archiveUri: item.archive_uri,
+          archiveSha256: String(item.archive_sha256).toLowerCase(),
+        });
+      } else {
+        devWarn('plugins', 'a plugin in the catalog needs its `archive_uri` and SHA-256 `archive_sha256`:', JSON.stringify(item));
+      }
     } else {
       devWarn('plugins', 'a plugin in the catalog needs its `id`, `uri` and SHA-256 `sha256`:', JSON.stringify(item));
     }
@@ -229,7 +275,12 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
   if (typeof manifestUrl !== 'string' || typeof manifestSha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(manifestSha256)) {
     throw new Error('A plugin in the catalog needs its `uri` and a SHA-256 `sha256`.');
   }
-  const response = await fetch(manifestUrl);
+  const archiveUrl = item.archive_uri;
+  const archiveSha256 = item.archive_sha256;
+  if (typeof archiveUrl !== 'string' || typeof archiveSha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(archiveSha256)) {
+    throw new Error('A plugin in the catalog needs its `archive_uri` and a SHA-256 `archive_sha256`.');
+  }
+  const response = await fetch(manifestUrl, { cache: 'no-store' });
   if (!response.ok) throw new Error(`The plugin ${manifestUrl} could not be downloaded (${response.status}).`);
   const manifest = parse(await response.text());
   const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
@@ -238,10 +289,7 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
   }
   // The catalog is looked up by id, so the id it gives has to be the plugin's own.
   if (item.id !== manifest.id) throw new Error(`The catalog lists ${manifestUrl} as ${String(item.id)}, but it is ${manifest.id}.`);
-  const base = manifestUrl.slice(0, manifestUrl.lastIndexOf('/'));
-  const files: { path: string }[] = Array.isArray(manifest.files) ? manifest.files : [];
-  const sizes = await Promise.all(files.map(file => sizeOf(`${base}/${file.path}`)));
-  const bytes = sizes.reduce((total, size) => total + size, 0);
+  const bytes = await sizeOf(archiveUrl);
   pluginBytes.set(manifestUrl, bytes);
   const source: AiModelSource = {
     type: 'plugin',
@@ -249,6 +297,8 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
     version: String(manifest.version),
     manifestUrl,
     manifestSha256: manifestSha256.toLowerCase(),
+    archiveUrl,
+    archiveSha256: archiveSha256.toLowerCase(),
   };
   const models: Record<string, unknown>[] = Array.isArray(manifest.contributes?.models) ? manifest.contributes.models : [];
   // A plugin with no model is listed as a plugin; one with models is listed by its models.
@@ -261,6 +311,8 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
       enabled: item.enabled !== false,
       manifestUrl,
       manifestSha256: source.manifestSha256,
+      archiveUrl: source.archiveUrl,
+      archiveSha256: source.archiveSha256,
       downloadSizeBytes: bytes,
       downloaded: installedVersion(manifest.id, source.version),
     });

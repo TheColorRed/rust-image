@@ -1,5 +1,5 @@
 import { BlendMode } from '@abra/core/blend';
-import { swatchesOf } from '@alakazam/host';
+import { swatchesOf } from '@alakazam/plugin-toolkit';
 
 /** The colors the lips offer, each once. `lipSwatches` below turns them into the lipstick and lip liner swatches. */
 const lipColors = [

@@ -66,6 +66,7 @@ pollster = { version = "1.0.1" }
 bytemuck = { version = "1.25.2" }
 futures = { version = "0.3.34" }
 anyhow = { version = "1.0.104" }
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 saphyr = { version = "0.1.0" }
 ctor = { version = "1.0.13" }
 paste = { version = "1.0.15" }

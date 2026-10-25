@@ -1,4 +1,5 @@
-id: face-landmarks
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.face-landmarks
 name: Face landmarks
 version: 1.0.0
 description: Locates 478 facial landmarks, including the eyes, lips, irises, and facial contour.

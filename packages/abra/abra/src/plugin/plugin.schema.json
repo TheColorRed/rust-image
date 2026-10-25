@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plugin.schema.json",
+  "title": "Alakazam plugin manifest",
+  "description": "A plugin.yml manifest for an Alakazam plugin.",
+  "type": "object",
+  "required": ["id", "name", "version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "number" }] },
+    "description": { "type": "string" },
+    "subscription": { "type": "boolean" },
+    "settings": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["id", "type", "attributes"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "type": { "const": "text" },
+              "attributes": {
+                "type": "object",
+                "required": ["label"],
+                "properties": {
+                  "label": { "type": "string", "minLength": 1 },
+                  "description": { "type": "string" },
+                  "placeholder": { "type": "string" },
+                  "value": { "type": "string" }
+                },
+                "additionalProperties": false
+              },
+              "validations": { "$ref": "#/$defs/validations" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["id", "type", "attributes"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "type": { "const": "option" },
+              "attributes": {
+                "type": "object",
+                "required": ["label", "options"],
+                "properties": {
+                  "label": { "type": "string", "minLength": 1 },
+                  "description": { "type": "string" },
+                  "options": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                  "default": { "type": "string" }
+                },
+                "additionalProperties": false
+              },
+              "validations": { "$ref": "#/$defs/validations" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "$ref": "#/$defs/id" } },
+        "additionalProperties": false
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "controls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["root", "items"],
+            "properties": {
+              "root": { "$ref": "#/$defs/controlName" },
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["path", "entry"],
+                  "properties": {
+                    "path": { "$ref": "#/$defs/controlName" },
+                    "entry": { "$ref": "#/$defs/filePath" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "capabilities", "model"],
+            "properties": {
+              "id": { "$ref": "#/$defs/contributionId" },
+              "title": { "type": "string", "minLength": 1 },
+              "description": { "type": "string" },
+              "capabilities": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "subjects": { "$ref": "#/$defs/stringList" },
+              "model": { "$ref": "#/$defs/filePath" },
+              "manifest": { "$ref": "#/$defs/filePath" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "pipelines": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/contribution" },
+              {
+                "type": "object",
+                "required": ["steps"],
+                "properties": {
+                  "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["op"],
+                      "properties": {
+                        "op": { "type": "string", "minLength": 1 }
+                      },
+                      "additionalProperties": { "$ref": "#/$defs/stepValue" }
+                    }
+                  }
+                }
+              }
+            ],
+            "additionalProperties": false
+          }
+        },
+        "scripts": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/contribution" },
+              {
+                "type": "object",
+                "required": ["entry"],
+                "properties": { "entry": { "$ref": "#/$defs/filePath" } }
+              }
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "$ref": "#/$defs/filePath" },
+          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.[a-z0-9]+(-[a-z0-9]+)*$" },
+    "contributionId": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "filePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$" },
+    "controlName": { "type": "string", "pattern": "^[^/\\s](?:[^/]*[^/\\s])?(?:/[^/\\s](?:[^/]*[^/\\s])?)*$" },
+    "stringList": { "type": "array", "items": { "type": "string" } },
+    "validations": {
+      "type": "object",
+      "properties": { "required": { "type": "boolean" } },
+      "additionalProperties": false
+    },
+    "contribution": {
+      "type": "object",
+      "required": ["id", "title", "capabilities"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "capabilities": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "stepValue": {
+      "oneOf": [
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "boolean" },
+        { "type": "array", "items": { "type": "number" } }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

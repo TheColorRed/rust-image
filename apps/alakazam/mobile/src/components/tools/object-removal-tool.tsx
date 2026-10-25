@@ -1,31 +1,23 @@
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
-import { missingModels } from '@/src/lib/ai/ai-model-availability';
-import { commitRetouch } from '@/src/lib/editor/editor-history';
-import { saveOpenProject } from '@/src/lib/editor/editor-session';
-import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { combineArea } from '@/src/lib/native/area-mask';
 import { refreshAiModels } from '@/src/lib/ai/ai-model-catalog';
-import { INPAINT, prepareObjectRemoval, removeObjects } from '@/src/lib/tools/object-removal';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
-import { aiModelList, aiModelList$, aiModelsRequested, type AiModelListing } from '@/src/state/ai-models';
-import { objectRemovalRequested$ } from '@/src/state/commands';
+import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
 import { focusedControlKey, isObjectRemovalFocused$ } from '@/src/state/edits';
-import { removalLoadError, removalLoadError$, removalMessage, removalMessage$, removerRole, removerRole$ } from '@/src/state/object-removal';
-import { historyReady } from '@/src/state/project-session';
-import { busy, currentImage } from '@/src/state/session';
+import { currentImage } from '@/src/state/session';
 import { useAreaTarget } from '@/src/components/tools/draw-area';
-import { OBJECT_REMOVAL_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { areaRings, areas, areas$, setArea, type DrawMode, type DrawnPoint } from '@/src/state/draw-area';
-import { aiModelLifetimes, releaseAiModel, type AiModelRegistration } from '@/src/lib/ai/model-warmth';
-
-const MESSAGE_MS = 4000;
+import { objectRemovalToolKey, objectRemovalToolKey$ } from '@/src/state/plugin-tool-panels';
+import { toolAiModelSelections, toolAiModelSelections$, setToolAiModel } from '@/src/state/tool-ai-models';
+import { toolMessages, toolMessages$ } from '@/src/state/tool-messages';
+import { app } from '@/src/lib/plugins/host-api';
 
 /** Every model the catalog lists with the capability to fill a masked part of a photo, in the catalog's order. */
 const removersIn = (models: readonly AiModelListing[]) =>
-  models.filter(model => model.enabled && model.kinds.includes(INPAINT));
+  models.filter(model => model.enabled && model.kinds.includes('inpaint'));
 
 /** The remover to use: the one picked if the catalog still lists it, else the first. */
 const removerFor = (models: readonly AiModelListing[], picked: string | null) => {
@@ -35,11 +27,12 @@ const removerFor = (models: readonly AiModelListing[], picked: string | null) =>
 
 /** A loop was drawn around something to remove (see `AreaTarget`). It starts the circled area over, joins it, or takes part of it back out. */
 function circleToRemove(loop: DrawnPoint[], mode: DrawMode) {
+  const key = objectRemovalToolKey.value;
   const image = currentImage.value;
-  const circled = areaRings(areas.value, OBJECT_REMOVAL_TOOL_KEY);
+  const circled = key ? areaRings(areas.value, key) : [];
   // Taking away from nothing circled would circle the rest of the photo.
   if (!image || (mode === 'subtract' && circled.length === 0)) return;
-  setArea(OBJECT_REMOVAL_TOOL_KEY, combineArea(circled, loop, mode, { width: image.width(), height: image.height() }));
+  if (key) setArea(key, combineArea(circled, loop, mode, { width: image.width(), height: image.height() }));
 }
 
 /** The controls beneath the tool: what to do, and the button that removes what is circled. */
@@ -47,17 +40,18 @@ export function ObjectRemovalControls({ onRemove }: { onRemove: () => void }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const drawn = useObservable(areas$, areas.value);
-  const said = useObservable(removalMessage$, null);
-  const loadError = useObservable(removalLoadError$, null);
-  const picked = useObservable(removerRole$, removerRole.value);
+  const messages = useObservable(toolMessages$, toolMessages.value);
+  const choices = useObservable(toolAiModelSelections$, toolAiModelSelections.value);
   const models = useObservable(aiModelList$, aiModelList.value);
+  const toolKey = useObservable(objectRemovalToolKey$, objectRemovalToolKey.value);
   const removers = removersIn(models);
-  const chosen = removerFor(models, picked);
+  const chosen = removerFor(models, toolKey ? choices[toolKey] ?? null : null);
   // The catalog is read when a screen needs it. Read it for this tool too, so the removers are here when it opens.
   useEffect(() => {
     if (removersIn(aiModelList.value).length === 0) refreshAiModels().catch(() => {});
   }, []);
-  const circled = areaRings(drawn, OBJECT_REMOVAL_TOOL_KEY).length > 0;
+  const circled = toolKey ? areaRings(drawn, toolKey).length > 0 : false;
+  const said = toolKey ? messages[toolKey] : undefined;
   return (
     <View style={styles.controlRow}>
       {removers.length > 1 ? (
@@ -68,7 +62,7 @@ export function ObjectRemovalControls({ onRemove }: { onRemove: () => void }) {
               accessibilityRole="radio"
               accessibilityState={{ selected: id === chosen?.id }}
               style={[styles.choice, id === chosen?.id && styles.choiceOn]}
-              onPress={() => removerRole.next(id)}
+              onPress={() => toolKey && setToolAiModel(toolKey, id)}
             >
               <Text style={[styles.choiceText, id === chosen?.id && styles.choiceTextOn]} numberOfLines={2}>
                 {title}
@@ -78,8 +72,8 @@ export function ObjectRemovalControls({ onRemove }: { onRemove: () => void }) {
         </View>
       ) : null}
       <View style={styles.topRow}>
-        <Text style={said || loadError ? styles.message : styles.hint}>
-          {loadError ?? said ??
+        <Text style={said ? styles.message : styles.hint}>
+          {said ??
             (circled
               ? 'Tap + to circle more, or tap Remove'
               : 'Circle what you want gone. Tap Draw area to pan and zoom')}
@@ -98,12 +92,13 @@ export function ObjectRemovalControls({ onRemove }: { onRemove: () => void }) {
  */
 export function ObjectRemovalToolController() {
   const focused = useObservable(isObjectRemovalFocused$, false);
+  const toolKey = useObservable(objectRemovalToolKey$, objectRemovalToolKey.value);
   // Circling is the whole of this tool, so it opens ready to draw.
   const target = useMemo(
     () =>
-      focused
+      focused && toolKey
         ? {
-            key: OBJECT_REMOVAL_TOOL_KEY,
+            key: toolKey,
             canDraw: true,
             startsDrawing: true,
             hint: {
@@ -113,117 +108,55 @@ export function ObjectRemovalToolController() {
             },
             opacity: 0.55,
             minShare: 0.0002,
-            onClear: () => setArea(OBJECT_REMOVAL_TOOL_KEY, []),
+            onClear: () => setArea(toolKey, []),
             onDrawn: circleToRemove,
           }
         : null,
-    [focused],
+    [focused, toolKey],
   );
   useAreaTarget('object-removal', target);
 
   useEffect(() => {
-    let clearTimer: ReturnType<typeof setTimeout> | undefined;
-    let registration: AiModelRegistration | undefined;
-    let modelReady: Promise<void> = Promise.resolve();
+    let registration: { owner: string; role: string } | undefined;
     const prepare = (role: string) => {
       if (registration?.role === role) return;
-      removalLoadError.next(null);
-      if (registration) releaseAiModel(registration.owner, registration.role);
-      const nextRegistration = { owner: OBJECT_REMOVAL_TOOL_KEY, role, lifetime: aiModelLifetimes.multiShot };
+      const owner = objectRemovalToolKey.value;
+      if (!owner) return;
+      app.tools.setMessage(owner, null);
+      if (registration) app.ai.releaseModel(registration.owner, registration.role);
+      const nextRegistration = { owner, role };
       registration = nextRegistration;
-      modelReady = prepareObjectRemoval(nextRegistration);
-      modelReady.catch(error => {
+      app.ai.prepareModel(owner, role).catch(error => {
         if (registration === nextRegistration) {
-          removalLoadError.next(`Could not load model: ${errorMessage(error)}`);
-          releaseAiModel(OBJECT_REMOVAL_TOOL_KEY, role);
+          app.tools.setMessage(owner, `Could not load model: ${errorMessage(error)}`);
+          app.ai.releaseModel(owner, role);
           registration = undefined;
-          modelReady = Promise.resolve();
         }
       });
     };
-    const say = (text: string) => {
-      removalMessage.next(text);
-      clearTimeout(clearTimer);
-      clearTimer = setTimeout(() => removalMessage.next(null), MESSAGE_MS);
-    };
-
-    const run = async () => {
-      removalLoadError.next(null);
-      // The removal is made on the full-size photo, so it must have this edit's full-size version first.
-      flushFullReplay();
-      const image = currentImage.value;
-      const area = areaRings(areas.value, OBJECT_REMOVAL_TOOL_KEY);
-      const role = removerFor(aiModelList.value, removerRole.value)?.id;
-      // Until the history is built the image is a project's saved picture, and a removal made on it would be lost.
-      if (!image || !historyReady.value || area.length === 0 || !role) return;
-      busy.next(true);
-      try {
-        const currentRegistration = registration?.role === role
-          ? registration
-          : { owner: OBJECT_REMOVAL_TOOL_KEY, role, lifetime: aiModelLifetimes.oneShot };
-        if (currentRegistration === registration) await modelReady;
-        await removeObjects(image, area, currentRegistration);
-        // Undo or closing the editor while the model ran leaves a different photo open, which this removal is not for.
-        if (currentImage.value !== image) return;
-        const width = image.width();
-        const height = image.height();
-        const spots = area.map(ring => {
-          const xs = ring.map(([x]) => x * width);
-          const ys = ring.map(([, y]) => y * height);
-          const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-          return { x: (left + right) / 2, y: (top + bottom) / 2, radius: Math.hypot(right - left, bottom - top) / 2 };
-        });
-        setArea(OBJECT_REMOVAL_TOOL_KEY, []);
-        removalMessage.next(null);
-        removalLoadError.next(null);
-        commitRetouch({ type: 'object-removal', area, spots });
-        // Keep the one-time AI result before the user can close or reopen the project. Its timeline entry
-        // points to this checkpoint, so reopening can restore it without running the model again.
-        await saveOpenProject();
-      } catch (error) {
-        say(`Could not remove it: ${errorMessage(error)}`);
-      } finally {
-        busy.next(false);
-      }
-    };
 
     const subscriptions = [
-      objectRemovalRequested$.subscribe(() => {
-        if (areaRings(areas.value, OBJECT_REMOVAL_TOOL_KEY).length === 0) return;
-        // The AI model is not on the device until it is downloaded. Offer it, and remove once it is here.
-        const role = removerFor(aiModelList.value, removerRole.value)?.id;
-        if (!role) {
-          say('No object removal model is listed. Check your connection and try again.');
-          return;
-        }
-        if (missingModels([role]).length > 0) {
-          aiModelsRequested.next({ title: 'Object removal', roles: [role], onReady: run });
-          return;
-        }
-        run();
-      }),
       isObjectRemovalFocused$.subscribe(focused => {
         if (focused) {
-          const role = removerFor(aiModelList.value, removerRole.value)?.id;
+          const role = removerFor(aiModelList.value, toolKey ? toolAiModelSelections.value[toolKey] ?? null : null)?.id;
           if (role) prepare(role);
           return;
         }
-        setArea(OBJECT_REMOVAL_TOOL_KEY, []);
-        removalMessage.next(null);
-        releaseAiModel(OBJECT_REMOVAL_TOOL_KEY, registration?.role);
+        if (toolKey) {
+          setArea(toolKey, []);
+          app.tools.setMessage(toolKey, null);
+        }
+        if (registration) app.ai.releaseModel(registration.owner, registration.role);
         registration = undefined;
-        modelReady = Promise.resolve();
       }),
-      removerRole$.subscribe(() => {
-        if (focusedControlKey.value !== OBJECT_REMOVAL_TOOL_KEY) return;
-        const role = removerFor(aiModelList.value, removerRole.value)?.id;
+      toolAiModelSelections$.subscribe(selections => {
+        if (focusedControlKey.value !== toolKey) return;
+        const role = removerFor(aiModelList.value, toolKey ? selections[toolKey] ?? null : null)?.id;
         if (role) prepare(role);
       }),
     ];
     return () => {
-      clearTimeout(clearTimer);
-      removalLoadError.next(null);
-      releaseAiModel(OBJECT_REMOVAL_TOOL_KEY, registration?.role);
+      if (registration) app.ai.releaseModel(registration.owner, registration.role);
       subscriptions.forEach(subscription => subscription.unsubscribe());
     };
   }, []);

@@ -137,8 +137,21 @@ pub struct PluginManifest {
   pub controls: Vec<ControlContribution>,
 }
 
-/// Whether `p_id` is lowercase words of letters and digits joined by single dashes.
+/// Whether `p_id` is a lowercase author and plugin name, separated by a dot, with words joined by single dashes.
 fn is_id(p_id: &str) -> bool {
+  fn is_name(p_name: &str) -> bool {
+    !p_name.is_empty()
+      && p_name
+        .split('-')
+        .all(|word| !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
+  }
+
+  let mut parts = p_id.split('.');
+  matches!((parts.next(), parts.next(), parts.next()), (Some(author), Some(name), None) if is_name(author) && is_name(name))
+}
+
+/// Whether `p_id` is a contribution id scoped by its plugin.
+fn is_contribution_id(p_id: &str) -> bool {
   !p_id.is_empty()
     && p_id
       .split('-')
@@ -296,9 +309,15 @@ fn plugin_settings(p_node: &Yaml) -> Result<Vec<PluginSetting>, PluginError> {
 /// An id that follows the rules, or the reason it does not.
 fn id_of(p_node: &Yaml, p_where: &str) -> Result<String, PluginError> {
   let id = required(p_node, "id", p_where)?;
-  if !is_id(id) {
+  let valid = if p_where == "The plugin" { is_id(id) } else { is_contribution_id(id) };
+  if !valid {
     return Err(PluginError::invalid_manifest(format!(
-      "{p_where} has the id `{id}`; use lowercase words of letters and digits joined by dashes"
+      "{p_where} has the id `{id}`; use {}",
+      if p_where == "The plugin" {
+        "`<author>.<id>` with lowercase words of letters and digits joined by dashes"
+      } else {
+        "lowercase words of letters and digits joined by dashes"
+      }
     )));
   }
   Ok(id.to_string())
@@ -454,7 +473,7 @@ impl PluginManifest {
         let needed = required(node, "id", &format!("A dependency of {place}"))?;
         if !is_id(needed) {
           return Err(PluginError::invalid_manifest(format!(
-            "{place} depends on `{needed}`; use the plugin's id: lowercase words of letters and digits joined by dashes"
+            "{place} depends on `{needed}`; use the plugin's id: `<author>.<id>` with lowercase words of letters and digits joined by dashes"
           )));
         }
         if needed == id {
@@ -559,10 +578,10 @@ impl PluginManifest {
 mod tests {
   use super::*;
 
-  const FULL: &str = "id: demo-plugin\nname: Demo\nversion: 1.2.0\ndescription: d\ncontributes:\n  models:\n    - id: remover\n      title: Remover\n      capabilities: [inpaint]\n      subjects: [objects]\n      model: m/remover.onnx\n  pipelines:\n    - id: soften\n      title: Soften\n      capabilities: [effect]\n      steps:\n        - { op: gaussian_blur, radius: 12, edge: true, tint: [1, 0.5, 0], mode: soft }\n  scripts:\n    - id: collage\n      title: Collage\n      capabilities: [generator]\n      entry: collage.js\n";
+  const FULL: &str = "id: demo.author\nname: Demo\nversion: 1.2.0\ndescription: d\ncontributes:\n  models:\n    - id: remover\n      title: Remover\n      capabilities: [inpaint]\n      subjects: [objects]\n      model: m/remover.onnx\n  pipelines:\n    - id: soften\n      title: Soften\n      capabilities: [effect]\n      steps:\n        - { op: gaussian_blur, radius: 12, edge: true, tint: [1, 0.5, 0], mode: soft }\n  scripts:\n    - id: collage\n      title: Collage\n      capabilities: [generator]\n      entry: collage.js\n";
 
   fn without(p_text: &str) -> String {
-    p_text.replace("id: demo-plugin", "id: Demo Plugin")
+    p_text.replace("id: demo.author", "id: Demo Plugin")
   }
 
   #[test]
@@ -570,7 +589,7 @@ mod tests {
     let manifest = PluginManifest::parse(FULL).unwrap();
     assert_eq!(
       (manifest.id.as_str(), manifest.name.as_str(), manifest.version.as_str()),
-      ("demo-plugin", "Demo", "1.2.0")
+      ("demo.author", "Demo", "1.2.0")
     );
     let model = &manifest.models[0];
     assert_eq!((model.id.as_str(), model.model.as_str()), ("remover", "m/remover.onnx"));
@@ -590,7 +609,7 @@ mod tests {
 
   #[test]
   fn a_plugin_lists_its_controls_under_one_root_or_several() {
-    let with = |controls: &str| format!("id: pack\nname: Pack\nversion: 1.0.0\ncontributes:\n  controls:\n{controls}");
+    let with = |controls: &str| format!("id: demo.pack\nname: Pack\nversion: 1.0.0\ncontributes:\n  controls:\n{controls}");
     let ok = PluginManifest::parse(&with(
       "    - root: Beauty / Makeup\n      items:\n        - path: Lipstick\n          entry: lipstick.js\n        - path: Eyes/ Eyeliner\n          entry: s/eyeliner.js\n    - root: Beauty/Hair\n      items:\n        - path: Color\n          entry: hair.js\n",
     ))
@@ -658,24 +677,27 @@ mod tests {
   #[test]
   fn what_a_plugin_depends_on_is_a_list_of_plugin_ids() {
     let with = |dependencies: &str| format!("{FULL}dependencies:\n{dependencies}");
-    let manifest = PluginManifest::parse(&with("  - id: ai-face-landmarks\n  - id: ai-face-parsing\n")).unwrap();
+    let manifest = PluginManifest::parse(&with("  - id: alakazam.face-landmarks\n  - id: alakazam.face-parsing\n")).unwrap();
     let ids: Vec<&str> = manifest.dependencies.iter().map(|dependency| dependency.id.as_str()).collect();
-    assert_eq!(ids, ["ai-face-landmarks", "ai-face-parsing"]);
+    assert_eq!(ids, ["alakazam.face-landmarks", "alakazam.face-parsing"]);
     assert!(PluginManifest::parse(FULL).unwrap().dependencies.is_empty(), "a plugin needs nothing unless it says so");
 
     let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
     assert!(error(&with("  - ids: x\n")).contains("can only have `id`"), "a misspelled key is an error");
     assert!(error(&with("  - id: Not An Id\n")).contains("use the plugin's id"));
-    assert!(error(&with("  - id: demo-plugin\n")).contains("depends on itself"));
-    assert!(error(&with("  - id: other\n  - id: other\n")).contains("more than once"));
+    assert!(error(&with("  - id: demo.author\n")).contains("depends on itself"));
+    assert!(error(&with("  - id: other.plugin\n  - id: other.plugin\n")).contains("more than once"));
     assert!(error(&with("  - title: x\n")).contains("can only have `id`"));
-    assert!(error(&with("  id: other\n")).contains("must be a list"));
+    assert!(error(&with("  id: other.plugin\n")).contains("must be a list"));
+    for invalid in ["demo-plugin", ".plugin", "author.", "one.two.three"] {
+      assert!(error(&with(&format!("  - id: {invalid}\n"))).contains("use the plugin's id"), "{invalid}");
+    }
   }
 
   #[test]
   fn a_manifest_that_is_wrong_says_what_is_wrong() {
     let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
-    assert!(error(&without(FULL)).contains("Demo Plugin"), "an id is lowercase words with dashes");
+    assert!(error(&without(FULL)).contains("Demo Plugin"), "an id is an author and name separated by a dot");
     assert!(error(&FULL.replace("version: 1.2.0\n", "")).contains("version"));
     assert!(error(&FULL.replace("capabilities: [inpaint]", "capabilities: []")).contains("capabilities"));
     assert!(error(&FULL.replace("model: m/remover.onnx", "model: ../remover.onnx")).contains("no `..`"));
@@ -685,7 +707,7 @@ mod tests {
     .contains("must be named `m/remover.yml`"));
     assert!(error(&FULL.replace("entry: collage.js", "entry: /sdcard/collage.js")).contains("collage.js"));
     assert!(error(&FULL.replace("id: collage", "id: soften")).contains("more than one"));
-    assert!(error("id: empty\nname: E\nversion: 1\n").contains("adds nothing"));
+    assert!(error("id: alakazam.empty\nname: E\nversion: 1\n").contains("adds nothing"));
     assert!(error("id: a\nname: [").contains("not valid YAML"));
     assert!(error(&FULL.replace(
       "        - { op: gaussian_blur, radius: 12, edge: true, tint: [1, 0.5, 0], mode: soft }\n",

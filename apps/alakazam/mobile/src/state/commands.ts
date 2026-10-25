@@ -33,6 +33,3 @@ export const cropApplyRequested$ = cropApplyRequested.asObservable();
 /** The red-eye tool's Auto Removal button was pressed. */
 export const redEyeAutoRequested = new Subject<void>();
 export const redEyeAutoRequested$ = redEyeAutoRequested.asObservable();
-/** The object removal tool's Remove button was pressed. */
-export const objectRemovalRequested = new Subject<void>();
-export const objectRemovalRequested$ = objectRemovalRequested.asObservable();

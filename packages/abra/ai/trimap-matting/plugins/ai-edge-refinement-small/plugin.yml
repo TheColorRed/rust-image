@@ -1,4 +1,5 @@
-id: edge-refinement-small
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.edge-refinement-small
 name: Edge refinement
 version: 1.0.0
 description: Finds the exact edge of hair, fur and other fine detail along a rough selection. Smaller and faster.

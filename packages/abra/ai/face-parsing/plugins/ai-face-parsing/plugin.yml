@@ -1,4 +1,5 @@
-id: face-parsing
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.face-parsing
 name: Face regions
 version: 1.0.0
 description: Creates masks for facial regions such as eyes, ears, nose, mouth, lips, skin, hair, and brows.

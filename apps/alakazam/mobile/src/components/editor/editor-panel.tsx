@@ -23,7 +23,6 @@ import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai/ai-analyses';
 import { aiModelList, aiModelList$, aiModelsRequested } from '@/src/state/ai-models';
 import { pluginControlsVersion$ } from '@/src/state/plugins';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
-import { OBJECT_REMOVAL_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
 import {
@@ -59,7 +58,6 @@ import { useTheme } from '@/src/lib/ui/theme';
 import {
   actionPreviewRequested,
   blemishApplyRequested,
-  objectRemovalRequested,
   cropApplyRequested,
   redEyeAutoRequested,
   redoRequested,
@@ -384,8 +382,8 @@ export function EditorPanel() {
           <BlemishControls onApply={() => blemishApplyRequested.next()} />
         ) : focusedControl?.kind === 'tool' && focusedControl.key === RED_EYE_TOOL_KEY ? (
           <RedEyeControls onAuto={() => redEyeAutoRequested.next()} />
-        ) : focusedControl?.kind === 'tool' && focusedControl.key === OBJECT_REMOVAL_TOOL_KEY ? (
-          <ObjectRemovalControls onRemove={() => objectRemovalRequested.next()} />
+        ) : focusedControl?.kind === 'tool' && focusedControl.panel === 'object-removal' ? (
+          <ObjectRemovalControls onRemove={() => focusedControl.onApply?.()} />
         ) : focusedControl?.kind === 'tool' && focusedControl.key === CROP_TOOL_KEY ? (
           <CropControls onApply={() => cropApplyRequested.next()} />
         ) : focusedControl?.kind === 'slider' ? (

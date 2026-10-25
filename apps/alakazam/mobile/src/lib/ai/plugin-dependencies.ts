@@ -1,5 +1,5 @@
-/** A plugin the catalog (`catalog.yml`) can install: its id, and where its `plugin.yml` is and what it hashes to. */
-export type CatalogPlugin = { id: string; uri: string; sha256: string };
+/** A plugin the catalog (`catalog.yml`) can install: its manifest for metadata and its archive for installation. */
+export type CatalogPlugin = { id: string; uri: string; sha256: string; archiveUri: string; archiveSha256: string };
 
 /** What the device knows of a plugin that is installed. A plugin that cannot be used lacks some of the plugins it depends on. */
 export type InstalledPlugin = { usable: boolean; missingDependencies: readonly string[] };

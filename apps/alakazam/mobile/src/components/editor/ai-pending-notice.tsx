@@ -1,5 +1,5 @@
 import { useTheme } from '@/src/lib/ui/theme';
-import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
+import { aiPendingNotice, aiPendingNotice$, aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
@@ -30,8 +30,9 @@ export function AiPendingNotice({
 }) {
   const { colors } = useTheme();
   const tasks = useObservable(aiProgress$, aiProgress.value);
+  const customText = useObservable(aiPendingNotice$, aiPendingNotice.value);
   const unfinished = Object.entries(tasks).filter(([, progress]) => progress !== 1);
-  const working = unfinished.length > 0;
+  const working = unfinished.length > 0 || customText !== null;
   const [late, setLate] = useState(false);
   useEffect(() => {
     setLate(false);
@@ -87,9 +88,9 @@ export function AiPendingNotice({
       <View style={styles.box}>
         <ActivityIndicator size="large" color={colors.accent} />
         <View style={styles.text}>
-          <Text style={styles.title}>{text}</Text>
-          <Text style={styles.body}>{subText}</Text>
-          {current ? <Text style={styles.step}>Finding {current}…</Text> : null}
+          <Text style={styles.title}>{customText?.text ?? text}</Text>
+          {(customText?.subText ?? subText) ? <Text style={styles.body}>{customText?.subText ?? subText}</Text> : null}
+          {customText?.detail ? <Text style={styles.step}>{customText.detail}</Text> : current ? <Text style={styles.step}>Finding {current}…</Text> : null}
         </View>
       </View>
     </View>

@@ -5,10 +5,17 @@
 //! then does it get its final name. The whole plugin is built in a staging folder and moved into place once it has been read back
 //! successfully, so a folder in the plugins folder is always a complete plugin, and reading the folder never sees a half-installed one.
 //!
-//! The app owns what is installable (the catalog lists each plugin's `plugin.yml` URL and hash). The plugin's `files` list says what else
-//! to download, from beside the `plugin.yml`, with the hash of each file.
+//! The app owns what is installable (the catalog lists each plugin archive URL and hash). The archive contains the manifest and every
+//! file it lists, each checked against its declared hash before it can be installed.
 
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+  fs,
+  io::{Read, Write},
+  path::PathBuf,
+  sync::Arc,
+};
+
+use sha2::{Digest, Sha256};
 
 use abra::plugin::{Contribution, Plugin, PluginManifest, PluginRegistry};
 
@@ -55,6 +62,32 @@ impl DownloadListener for Share<'_> {
 
 fn is_sha256(p_hash: &str) -> bool {
   p_hash.len() == 64 && p_hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Installs a ZIP downloaded from the catalog after checking its archive hash.
+fn install_archive_url(
+  p_archive_url: &str,
+  p_archive_sha256: &str,
+  p_manifest_sha256: &str,
+  p_listener: &dyn DownloadListener,
+) -> Result<(), String> {
+  if !is_sha256(p_archive_sha256) || !is_sha256(p_manifest_sha256) {
+    return Err(format!("The catalog hashes for {p_archive_url} are not lowercase SHA-256 values"));
+  }
+  let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+  let root = plugins_dir();
+  fs::create_dir_all(&root).map_err(|error| format!("Cannot create the plugin folder: {error}"))?;
+  let archive_path = root.join(".download.plugin.zip");
+  let download = AiModelFile::ensure_file("the plugin package", p_archive_url, p_archive_sha256, &archive_path, Some(p_listener));
+  if let Err(error) = download {
+    let _ = fs::remove_file(&archive_path);
+    return Err(error);
+  }
+  // install_archive takes the same lock, so release it before calling the shared local archive installer.
+  drop(_guard);
+  let result = install_archive(&archive_path.to_string_lossy(), Some(p_manifest_sha256), p_listener);
+  let _ = fs::remove_file(archive_path);
+  result
 }
 
 /// Installs the plugin whose `plugin.yml` is at `p_manifest_url`, replacing an installed one with the same id.
@@ -119,6 +152,111 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
   built
 }
 
+/// Installs a plugin package chosen from this device. The ZIP contains `plugin.yml` at its root and every file listed by its manifest.
+/// Files are copied into staging and checked against their declared SHA-256 before the plugin replaces an installed version.
+fn install_archive(p_archive_path: &str, p_manifest_sha256: Option<&str>, p_listener: &dyn DownloadListener) -> Result<(), String> {
+  const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
+
+  let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+  let archive_file = fs::File::open(p_archive_path).map_err(|error| format!("Cannot open the plugin package: {error}"))?;
+  let mut archive = zip::ZipArchive::new(archive_file).map_err(|error| format!("This is not a valid plugin ZIP: {error}"))?;
+  let mut manifest_text = String::new();
+  archive
+    .by_name("plugin.yml")
+    .map_err(|_| "The ZIP must contain plugin.yml at its root".to_string())?
+    .read_to_string(&mut manifest_text)
+    .map_err(|error| format!("Cannot read plugin.yml: {error}"))?;
+  if let Some(expected) = p_manifest_sha256 {
+    let actual = Sha256::digest(manifest_text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    if actual != expected {
+      return Err(format!("The plugin manifest in {p_archive_path} does not match its catalog hash (got {actual})"));
+    }
+  }
+  let manifest = PluginManifest::parse(&manifest_text).map_err(|error| error.to_string())?;
+
+  let named = manifest
+    .models
+    .iter()
+    .flat_map(|model| [&model.model, &model.manifest])
+    .chain(manifest.scripts.iter().map(|script| &script.entry))
+    .chain(manifest.controls.iter().map(|control| &control.entry));
+  for file in named {
+    if !manifest.files.iter().any(|listed| &listed.path == file) {
+      return Err(format!("The plugin {} names {file} but does not list it in `files`", manifest.id));
+    }
+  }
+
+  let mut total_bytes = 0u64;
+  for file in &manifest.files {
+    let size = archive
+      .by_name(&file.path)
+      .map_err(|_| format!("The plugin package is missing {}", file.path))?
+      .size();
+    total_bytes = total_bytes.saturating_add(size);
+    if total_bytes > MAX_PACKAGE_BYTES {
+      return Err("The plugin package is larger than 1 GB".to_string());
+    }
+  }
+
+  let root = plugins_dir();
+  let staging = root.join(".installing");
+  let _ = fs::remove_dir_all(&staging);
+  fs::create_dir_all(&staging).map_err(|error| format!("Cannot create the plugin folder: {error}"))?;
+
+  let built = (|| {
+    fs::write(staging.join("plugin.yml"), manifest_text).map_err(|error| format!("Cannot save plugin.yml: {error}"))?;
+    let count = manifest.files.len().max(1);
+    let mut written_bytes = 0u64;
+    for (done, listed) in manifest.files.iter().enumerate() {
+      let mut input = archive
+        .by_name(&listed.path)
+        .map_err(|_| format!("The plugin package is missing {}", listed.path))?;
+      let destination = staging.join(&listed.path);
+      if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("Cannot create the plugin folder: {error}"))?;
+      }
+      let mut output = fs::File::create(&destination).map_err(|error| format!("Cannot save {}: {error}", listed.path))?;
+      let mut hasher = Sha256::new();
+      let mut buffer = [0u8; 64 * 1024];
+      loop {
+        let bytes = input.read(&mut buffer).map_err(|error| format!("Cannot read {}: {error}", listed.path))?;
+        if bytes == 0 {
+          break;
+        }
+        written_bytes = written_bytes.saturating_add(bytes as u64);
+        if written_bytes > MAX_PACKAGE_BYTES {
+          return Err("The plugin package is larger than 1 GB".to_string());
+        }
+        hasher.update(&buffer[..bytes]);
+        output
+          .write_all(&buffer[..bytes])
+          .map_err(|error| format!("Cannot save {}: {error}", listed.path))?;
+      }
+      let actual = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+      if actual != listed.sha256 {
+        return Err(format!("{} does not match its SHA-256 in plugin.yml", listed.path));
+      }
+      Share { listener: p_listener, done, count }.update(1.0);
+    }
+
+    let plugin = Plugin::read(&staging).map_err(|error| error.to_string())?;
+    let target = root.join(&plugin.manifest.id);
+    match fs::remove_dir_all(&target) {
+      Ok(()) => {}
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+      Err(error) => return Err(format!("Cannot replace the installed plugin: {error}")),
+    }
+    fs::rename(&staging, &target).map_err(|error| format!("Cannot save the plugin: {error}"))
+  })();
+
+  if built.is_err() {
+    let _ = fs::remove_dir_all(&staging);
+  } else {
+    p_listener.update(1.0);
+  }
+  built
+}
+
 /// Installs a plugin from its `plugin.yml` URL and the hash that file must have, unless the same version is already installed. The
 /// listener hears how far the download has got, as a share of every file. It is not optional: the bindings generator cannot pass a
 /// TypeScript object inside an `Option`.
@@ -130,6 +268,32 @@ pub async fn install_plugin(
 ) -> Result<(), AbraError> {
   image_workers::run(move || {
     install(&manifest_url, &manifest_sha256, listener.as_ref()).map_err(|message| AbraError::Ai { message })
+  })
+  .await
+}
+
+/// Installs an `.akzx` package selected locally. Every file is checked before the plugin is swapped into place.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn install_plugin_archive(
+  archive_path: String,
+  listener: Arc<dyn DownloadListener>,
+) -> Result<(), AbraError> {
+  image_workers::run(move || {
+    install_archive(&archive_path, None, listener.as_ref()).map_err(|message| AbraError::Ai { message })
+  })
+  .await
+}
+
+/// Downloads and installs a catalog `.akzx` package, verifying its archive SHA-256 and every listed file.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn install_plugin_package(
+  archive_url: String,
+  archive_sha256: String,
+  manifest_sha256: String,
+  listener: Arc<dyn DownloadListener>,
+) -> Result<(), AbraError> {
+  image_workers::run(move || {
+    install_archive_url(&archive_url, &archive_sha256, &manifest_sha256, listener.as_ref()).map_err(|message| AbraError::Ai { message })
   })
   .await
 }
@@ -154,7 +318,14 @@ pub fn read_plugin_script(path: String) -> Result<String, AbraError> {
 /// Removes an installed plugin and its files. It does nothing when the plugin is not installed.
 #[uniffi::export]
 pub fn delete_plugin(id: String) -> Result<(), AbraError> {
-  if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') {
+  let valid_name = |name: &str| {
+    !name.is_empty()
+      && name
+        .split('-')
+        .all(|word| !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
+  };
+  let mut parts = id.split('.');
+  if !matches!((parts.next(), parts.next(), parts.next()), (Some(author), Some(name), None) if valid_name(author) && valid_name(name)) {
     return Err(AbraError::Ai { message: format!("`{id}` is not a plugin id") });
   }
   let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -257,7 +428,7 @@ contributes:
     let error = install("https://example.com/plugins/a/plugin.yml", "nothash", &heard).unwrap_err();
     assert!(error.contains("lowercase SHA-256"), "{error}");
     assert!(delete_plugin("../x".into()).is_err());
-    assert!(delete_plugin("not-installed-anywhere".into()).is_ok());
+    assert!(delete_plugin("test.not-installed-anywhere".into()).is_ok());
   }
 
   #[test]
@@ -270,7 +441,7 @@ contributes:
   fn a_plugin_is_downloaded_checked_and_found_by_the_registry() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let script = b"export default () => 1;".to_vec();
-    let text = manifest("install-test-good", &format!("files:
+    let text = manifest("test.install-test-good", &format!("files:
   - path: s/run.js
     sha256: {}
 ", sha(&script)));
@@ -283,20 +454,20 @@ contributes:
     install(&format!("{base}/p/plugin.yml"), &hash, &heard).unwrap();
 
     let registry = PluginRegistry::scan(plugins_dir());
-    let found = registry.plugin("install-test-good").expect("the plugin is installed");
+    let found = registry.plugin("test.install-test-good").expect("the plugin is installed");
     assert_eq!(fs::read(found.path("s/run.js")).unwrap(), script);
     assert_eq!(registry.with_capability("test").len(), 1);
     assert_eq!(heard.0.lock().unwrap().last(), Some(&1.0));
     assert!(!plugins_dir().join(".installing").exists(), "the staging folder is gone");
 
-    delete_plugin("install-test-good".into()).unwrap();
-    assert!(PluginRegistry::scan(plugins_dir()).plugin("install-test-good").is_none());
+    delete_plugin("test.install-test-good".into()).unwrap();
+    assert!(PluginRegistry::scan(plugins_dir()).plugin("test.install-test-good").is_none());
   }
 
   #[test]
   fn a_file_that_does_not_match_its_hash_installs_nothing() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let text = manifest("install-test-tampered", &format!("files:
+    let text = manifest("test.install-test-tampered", &format!("files:
   - path: s/run.js
     sha256: {}
 ", sha(b"what it should be")));
@@ -308,33 +479,33 @@ contributes:
     let heard = Heard(Mutex::new(Vec::new()));
     let error = install(&format!("{base}/p/plugin.yml"), &hash, &heard).unwrap_err();
     assert!(error.contains("does not match its hash"), "{error}");
-    assert!(PluginRegistry::scan(plugins_dir()).plugin("install-test-tampered").is_none());
+    assert!(PluginRegistry::scan(plugins_dir()).plugin("test.install-test-tampered").is_none());
     assert!(!plugins_dir().join(".installing").exists());
   }
 
   #[test]
   fn a_plugin_that_names_a_file_it_does_not_list_is_not_installed() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let text = manifest("install-test-unlisted", "");
+    let text = manifest("test.install-test-unlisted", "");
     let hash = sha(text.as_bytes());
     let base = serve(HashMap::from([("/p/plugin.yml".to_string(), text.into_bytes())]));
     let heard = Heard(Mutex::new(Vec::new()));
     let error = install(&format!("{base}/p/plugin.yml"), &hash, &heard).unwrap_err();
     assert!(error.contains("does not list it"), "{error}");
-    assert!(PluginRegistry::scan(plugins_dir()).plugin("install-test-unlisted").is_none());
+    assert!(PluginRegistry::scan(plugins_dir()).plugin("test.install-test-unlisted").is_none());
   }
 
   #[test]
   fn the_model_a_plugin_adds_is_found_by_its_id_like_any_other_model() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dir = plugins_dir().join("model-lookup-test");
+    let dir = plugins_dir().join("test.model-lookup-test");
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("m.onnx"), b"x").unwrap();
     fs::write(dir.join("m.yml"), b"x").unwrap();
     fs::write(
       dir.join("plugin.yml"),
-      "id: model-lookup-test
+      "id: test.model-lookup-test
 name: T
 version: 1
 contributes:
@@ -347,16 +518,16 @@ contributes:
     )
     .unwrap();
     let found = crate::models::ai_model_path("lookup-test-model".to_string()).unwrap();
-    assert!(found.ends_with("m.onnx") && found.contains("model-lookup-test"), "{found}");
+    assert!(found.ends_with("m.onnx") && found.contains("test.model-lookup-test"), "{found}");
     assert!(crate::models::ai_model_path("nothing-has-this-id".to_string()).is_err());
-    delete_plugin("model-lookup-test".into()).unwrap();
+    delete_plugin("test.model-lookup-test".into()).unwrap();
     assert!(crate::models::ai_model_path("lookup-test-model".to_string()).is_err());
   }
 
   #[test]
   fn only_a_script_inside_the_plugins_folder_can_be_read() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dir = plugins_dir().join("script-read-test");
+    let dir = plugins_dir().join("test.script-read-test");
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("run.js"), "exports.default = () => 1;").unwrap();
@@ -372,13 +543,13 @@ contributes:
     assert!(read_plugin_script(climbing.to_string_lossy().into_owned()).is_err());
     assert!(read_plugin_script(dir.join("missing.js").to_string_lossy().into_owned()).is_err());
     let _ = fs::remove_file(&outside);
-    delete_plugin("script-read-test".into()).unwrap();
+    delete_plugin("test.script-read-test".into()).unwrap();
   }
 
   #[test]
   fn a_manifest_whose_hash_is_wrong_is_refused() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let text = manifest("install-test-hash", "");
+    let text = manifest("test.install-test-hash", "");
     let base = serve(HashMap::from([("/p/plugin.yml".to_string(), text.into_bytes())]));
     let heard = Heard(Mutex::new(Vec::new()));
     let error = install(&format!("{base}/p/plugin.yml"), &sha(b"another manifest"), &heard).unwrap_err();

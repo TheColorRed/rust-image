@@ -1,0 +1,21 @@
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.object-remover
+name: Object Remover
+version: 1.0.1
+description: Remove unwanted objects from photos in the Cleanup tab.
+
+# The remover can use either available inpainting model.
+dependencies:
+  - id: alakazam.migan-object-removal
+  - id: alakazam.lama-object-removal
+
+contributes:
+  controls:
+    - root: Cleanup
+      items:
+        - path: Remove Objects
+          entry: remove-objects.js
+
+files:
+  - path: remove-objects.js
+    sha256: d0590ce585689d967a8017c69911fdd608f8b9a89acc20af189cc40bbac4ea82

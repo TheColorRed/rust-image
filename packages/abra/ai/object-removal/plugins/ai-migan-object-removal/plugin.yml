@@ -1,4 +1,5 @@
-id: migan-object-removal
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.migan-object-removal
 name: MI-GAN object removal
 version: 1.0.0
 description: Removes objects from a photo with MI-GAN. Small and fast.

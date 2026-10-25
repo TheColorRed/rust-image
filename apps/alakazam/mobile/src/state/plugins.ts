@@ -16,6 +16,9 @@ export type PluginListing = {
   version: string;
   /** `false` keeps it out of the list until it is installed. */
   enabled: boolean;
+  /** Its archive to install and its SHA-256, as the catalog says. */
+  archiveUrl: string;
+  archiveSha256: string;
   /** Where its `plugin.yml` is and what it hashes to, as the catalog says. */
   manifestUrl: string;
   manifestSha256: string;

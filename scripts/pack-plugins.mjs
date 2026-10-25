@@ -3,16 +3,16 @@
 // A plugin is found as `packages/abra/ai/<crate>/plugins/<folder>/plugin.yml`, or `apps/alakazam/mobile/plugins/<folder>/plugin.yml`. Its `files` are taken from the plugin's own folder, or when
 // they are not there from the `models` folder of its crate, so a model that other code reads from `models` is not copied into the
 // repository twice. Every file is checked against the SHA-256 the plugin lists, and the folder is written the way the bucket holds it:
-// `plugins/<folder>/plugin.yml` with its files beside it. The folder's name is only where the plugin is kept: the plugin is named by the
+// `plugins/<folder>/plugin.yml` and one installable ZIP. The folder's name is only where the plugin is kept: the plugin is named by the
 // `id` in its plugin.yml, so the folder can be called anything and can be moved without the plugin knowing.
 //
-// It prints what to upload, and the lines to add to the catalog's `plugins:` list: the plugin.yml's URL and its SHA-256, which only a
-// finished plugin.yml has. Usage: `node scripts/pack-plugins.mjs [folder ...]` (all plugins when none is named).
+// It prints the two files to upload and their catalog URLs and SHA-256 values. Usage: `node scripts/pack-plugins.mjs [folder ...]`.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import JSZip from 'jszip';
 import { parse } from 'yaml';
 import { outDirOf } from './plugin-config.mjs';
 
@@ -20,7 +20,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const aiDir = path.join(root, 'packages/abra/ai');
 const appDir = path.join(root, 'apps/alakazam/mobile/plugins');
 const outDir = path.join(root, 'target/plugin-packages');
-const BUCKET_URL = 'https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins';
+const BUCKET_URL = 'https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/authors/alakazam';
 const wanted = new Set(process.argv.slice(2));
 const problems = [];
 const packed = [];
@@ -62,6 +62,9 @@ for (const { crate, folder, dir } of found) {
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   if (files.length === 0) problems.push(`${folder}: the plugin.yml lists no files, so nothing can be downloaded`);
   let ok = true;
+  const zip = new JSZip();
+  const manifestText = readFileSync(path.join(dir, 'plugin.yml'));
+  zip.file('plugin.yml', manifestText);
   for (const file of files) {
     const from = [path.join(dir, file.path), path.join(outDirOf(dir), file.path), crate && path.join(aiDir, crate, 'models', file.path)]
       .filter(Boolean)
@@ -77,19 +80,25 @@ for (const { crate, folder, dir } of found) {
       ok = false;
       continue;
     }
-    mkdirSync(path.dirname(path.join(out, file.path)), { recursive: true });
-    copyFileSync(from, path.join(out, file.path));
+    zip.file(file.path, readFileSync(from));
   }
   if (!ok) continue;
-  copyFileSync(path.join(dir, 'plugin.yml'), path.join(out, 'plugin.yml'));
-  packed.push({ folder, out, files: files.map((file) => file.path), manifestSha256: sha256(path.join(out, 'plugin.yml')) });
+  const manifestPath = path.join(out, 'plugin.yml');
+  copyFileSync(path.join(dir, 'plugin.yml'), manifestPath);
+  const archive = `${manifest.id}.akzx`;
+  const archivePath = path.join(out, archive);
+  const archiveBytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+  await import('node:fs/promises').then(({ writeFile }) => writeFile(archivePath, archiveBytes));
+  packed.push({ folder, out, archive, manifestSha256: sha256(manifestPath), archiveSha256: sha256(path.join(out, archive)) });
 }
 
-for (const { folder, out, files, manifestSha256 } of packed) {
-  const bytes = files.reduce((total, file) => total + statSync(path.join(out, file)).size, 0);
+for (const { folder, out, archive, manifestSha256, archiveSha256 } of packed) {
+  const bytes = readFileSync(path.join(out, archive)).length;
+  const id = parse(readFileSync(path.join(out, 'plugin.yml'), 'utf8')).id;
   console.log(`\n${folder}  (${(bytes / 1e6).toFixed(1)} MB)  ${path.relative(root, out)}`);
-  for (const file of ['plugin.yml', ...files]) console.log(`  plugins/${folder}/${file}`);
-  console.log(`  catalog:  - uri: ${BUCKET_URL}/${folder}/plugin.yml\n            sha256: ${manifestSha256}`);
+  console.log(`  plugins/authors/alakazam/${folder}/plugin.yml  sha256: ${manifestSha256}`);
+  console.log(`  plugins/authors/alakazam/${folder}/${archive}  sha256: ${archiveSha256}`);
+  console.log(`  catalog:  - id: ${id}\n            uri: ${BUCKET_URL}/${folder}/plugin.yml\n            sha256: ${manifestSha256}\n            archive_uri: ${BUCKET_URL}/${folder}/${archive}\n            archive_sha256: ${archiveSha256}`);
 }
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem(s):\n${problems.map((problem) => `  ${problem}`).join('\n')}`);

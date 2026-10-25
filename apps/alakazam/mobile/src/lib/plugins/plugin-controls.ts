@@ -3,12 +3,13 @@ import { pluginsFolder, readPluginScript } from '@alakazam/mobile';
 import { EDIT_SECTIONS, leafControls, type EditControl } from '@/src/lib/project/edit-sections';
 import { insertControls, removeControls } from '@/src/lib/plugins/control-insertion';
 import type { ControlScript } from '@/src/lib/plugins/host-api';
-import { PLUGIN_MODULES } from '@/src/lib/plugins/plugin-host';
+import { pluginModules } from '@/src/lib/plugins/plugin-host';
 import { runPluginScript } from '@/src/lib/plugins/plugin-script';
 import { resolveRoot, type Place, type PlaceMaker } from '@/src/lib/plugins/root-path';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { clearControlTraits, setControlTraits } from '@/src/state/control-traits';
 import { pluginControlsVersion, pluginProblems, type PluginProblem } from '@/src/state/plugins';
+import { objectRemovalToolKey } from '@/src/state/plugin-tool-panels';
 
 /** What a plugin put in the editor, and how to take it out again. */
 type Loaded = { version: string; undo: () => void };
@@ -25,6 +26,38 @@ const slug = (label: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 
+/** Plugin control keys are persisted in editor state, so keep each one namespaced to its author and plugin. */
+function validateControlKeys(plugin: PluginInfo, control: EditControl): void {
+  const prefix = `${plugin.id}.`;
+  const suffix = control.key.startsWith(prefix) ? control.key.slice(prefix.length) : '';
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suffix)) {
+    throw new Error(`Control key "${control.key}" must follow "${plugin.id}.<tool>" (for example, "${plugin.id}.remove-objects").`);
+  }
+  if ('controls' in control) for (const child of control.controls) validateControlKeys(plugin, child);
+}
+
+/** Removes controls left by an earlier load of this plugin, including controls with keys it has since renamed. */
+function removePluginControls(controls: EditControl[], prefix: string): void {
+  for (let index = controls.length - 1; index >= 0; index--) {
+    const control = controls[index];
+    if (control.key.startsWith(prefix)) {
+      for (const leaf of leafControls([control])) if (leaf.kind === 'slider') clearControlTraits(leaf.key);
+      controls.splice(index, 1);
+    } else if ('controls' in control) {
+      removePluginControls(control.controls, prefix);
+    }
+  }
+}
+
+/** Removes a control key left in memory by an older version of the app. */
+function removeControlByKey(controls: EditControl[], key: string): void {
+  for (let index = controls.length - 1; index >= 0; index--) {
+    const control = controls[index];
+    if (control.key === key) controls.splice(index, 1);
+    else if ('controls' in control) removeControlByKey(control.controls, key);
+  }
+}
+
 /** A tab or group that a plugin's root names and the editor does not have yet. */
 const maker: PlaceMaker = {
   section: label => ({ key: `section-plugin-${slug(label)}`, label, controls: [] }),
@@ -35,16 +68,23 @@ const maker: PlaceMaker = {
 function loadControls(plugin: PluginInfo): Loaded {
   const undos: (() => void)[] = [];
   try {
+    // Plugin controls may outlive this module during Fast Refresh. Clear the whole plugin namespace before loading the current version.
+    for (const section of EDIT_SECTIONS) removePluginControls(section.controls, `${plugin.id}.`);
+    // Older app builds supplied object removal as a built-in Cleanup item. It must not remain beside the plugin-owned control.
+    if (plugin.id === 'alakazam.object-remover') {
+      for (const section of EDIT_SECTIONS) removeControlByKey(section.controls, 'action-object-removal');
+    }
     for (const control of plugin.controls) {
       const names = control.path.split('/');
       const name = names[names.length - 1];
       // The controls go under the root, and under the groups of their own path, if the path has any.
       const root = [control.root, ...names.slice(0, -1)].join('/');
       const what = `${plugin.name}: ${control.path}`;
-      const made = runPluginScript(readPluginScript(control.entryPath), PLUGIN_MODULES, what).default;
+      const made = runPluginScript(readPluginScript(control.entryPath), pluginModules(plugin.id), what).default;
       if (typeof made !== 'function') throw new Error(`${what} has no default export that is a function.`);
       // The plugin's yml says what the control is called, so the label people see is the name there.
       const placed = { ...(made as ControlScript)(), label: name } as EditControl;
+      validateControlKeys(plugin, placed);
 
       const { list, undo: undoPlaces } = resolveRoot(EDIT_SECTIONS as unknown as Place[], root, maker);
       const controls = list as unknown as EditControl[];
@@ -53,9 +93,13 @@ function loadControls(plugin: PluginInfo): Loaded {
         controls.filter(other => other.key === placed.key),
       );
       insertControls(controls, [placed]);
+      if (placed.kind === 'tool' && placed.panel === 'object-removal') objectRemovalToolKey.next(placed.key);
       for (const leaf of leafControls([placed])) if (leaf.kind === 'slider') setControlTraits(leaf.key, leaf);
       undos.push(() => {
         removeControls(controls, [placed]);
+        if (placed.kind === 'tool' && placed.panel === 'object-removal' && objectRemovalToolKey.value === placed.key) {
+          objectRemovalToolKey.next(null);
+        }
         for (const leaf of leafControls([placed])) if (leaf.kind === 'slider') clearControlTraits(leaf.key);
         undoPlaces();
       });

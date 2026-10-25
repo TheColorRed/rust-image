@@ -1,12 +1,13 @@
 import { BlendMode } from '@abra/core/blend';
-import { MAKEUP_MODELS, makeupMasks, swatchesOf, type EditControl } from '@alakazam/host';
+import { swatchesOf, toolKey, type EditControl } from '@alakazam/plugin-toolkit';
+import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 import { faceColors } from './face-colors';
 import { applyBlush } from './blush';
 
 export default function (): EditControl {
   return {
           kind: 'slider',
-          key: 'slider-blush',
+          key: toolKey('slider-blush'),
           label: 'Blush',
           person: true,
           face: true,

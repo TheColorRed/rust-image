@@ -1,0 +1,32 @@
+{
+  "name": "@alakazam/plugin-toolkit",
+  "version": "0.1.0",
+  "description": "Build Alakazam plugins and create installable plugin packages",
+  "type": "module",
+  "bin": {
+    "build-plugins": "./build-plugins.mjs"
+  },
+  "files": [
+    "build-plugins.mjs",
+    "plugin-toolkit.d.ts",
+    "README.md"
+  ],
+  "types": "./plugin-toolkit.d.ts",
+  "scripts": {
+    "build": "node ./build-plugins.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "jszip": "^3.10.2",
+    "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@abra/core": "1.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

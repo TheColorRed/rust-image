@@ -2,17 +2,17 @@ import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import {
-  MAKEUP_MODELS,
   belongsTo,
+  toolKey,
   derivedFor,
-  makeupMasks,
   owning,
   paintSheet,
   type EditControl,
   type Painting,
   type ToolContext,
-} from '@alakazam/host';
+} from '@alakazam/plugin-toolkit';
 import { lipBlend, lipSwatches } from './lips';
+import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 
 /**
  * How wide the softest edge is, as a fraction of the width of the mouth: the Softness slider's 1. Lipstick has a fairly hard
@@ -66,7 +66,7 @@ export const applyLipstick = (
 export default function (): EditControl {
   return {
     kind: 'slider',
-    key: 'slider-lipstick',
+    key: toolKey('slider-lipstick'),
     label: 'Lipstick',
     person: true,
     face: true,

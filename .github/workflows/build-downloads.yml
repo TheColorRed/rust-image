@@ -19,6 +19,10 @@ on:
         description: Build and publish the website
         type: boolean
         default: true
+      plugins:
+        description: Build and upload Alakazam plugins to S3
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -270,3 +274,33 @@ jobs:
       - name: Clear CloudFront cache
         if: vars.CLOUDFRONT_DISTRIBUTION_ID != ''
         run: aws cloudfront create-invalidation --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" --paths "/*"
+
+  plugins:
+    name: Plugins
+    if: github.event_name == 'workflow_dispatch' && inputs.plugins
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build and package plugins
+        run: node scripts/pack-plugins.mjs
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload plugin packages to S3
+        run: aws s3 cp target/plugin-packages/ "s3://${{ vars.S3_BUCKET }}/plugins/authors/alakazam/" --recursive

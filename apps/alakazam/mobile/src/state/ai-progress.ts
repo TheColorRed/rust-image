@@ -11,6 +11,12 @@ import { debounceTime, filter } from 'rxjs/operators';
 export const aiProgress = new BehaviorSubject<Record<string, number | null>>({});
 export const aiProgress$ = aiProgress.asObservable();
 
+/** Optional text for the pending notice. Clear it with null to restore the generic AI message. */
+export type AiPendingNoticeText = { text: string; subText?: string; detail?: string };
+export const aiPendingNotice = new BehaviorSubject<AiPendingNoticeText | null>(null);
+export const aiPendingNotice$ = aiPendingNotice.asObservable();
+export const setAiPendingNotice = (text: AiPendingNoticeText | null) => aiPendingNotice.next(text);
+
 /** How long a finished job shows its full bar before it clears, so a short one is seen and the next job starts from nothing. */
 const DONE_MS = 500;
 

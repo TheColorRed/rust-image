@@ -1,4 +1,5 @@
-id: person-detection
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.person-detection
 name: Body detection
 version: 1.0.0
 description: Finds each body in a photo so edits can be applied to one body at a time.

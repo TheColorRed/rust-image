@@ -33,7 +33,7 @@ export type AiModelSource =
       type: 'file';
       file: { role: string; url: string; sha256: string; manifestUrl: string | undefined; manifestSha256: string | undefined };
     }
-  | { type: 'plugin'; pluginId: string; version: string; manifestUrl: string; manifestSha256: string };
+  | { type: 'plugin'; pluginId: string; version: string; manifestUrl: string; manifestSha256: string; archiveUrl: string; archiveSha256: string };
 
 /**
  * The AI models from the last catalog read, kept here so the plugins screen shows them as soon as it opens and then

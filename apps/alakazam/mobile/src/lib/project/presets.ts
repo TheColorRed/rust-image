@@ -18,8 +18,6 @@ type PresetStoreModule = {
 };
 
 const store = NativeModules.ProjectStore as (PresetStoreModule | undefined);
-const PRESET_SECTIONS = new Set(['section-mood', 'section-adjustments', 'section-beauty']);
-
 function native(): PresetStoreModule {
   if (Platform.OS !== 'android' || !store?.listPresets || !store.writePresets) {
     throw new Error('The installed app is older than this code. Rebuild it with npm run dev:android.');
@@ -27,9 +25,9 @@ function native(): PresetStoreModule {
   return store;
 }
 
-/** Controls that are meaningful on another photo. Tools and transforms are deliberately left out. */
+/** Controls that are meaningful on another photo. Tools and pickers are UI-only; all other edit controls are portable. */
 const reusableControls = (): Exclude<EditControl, { kind: 'group' | 'mixed' | 'tool' | 'picker' }>[] =>
-  EDIT_SECTIONS.filter(section => PRESET_SECTIONS.has(section.key)).flatMap(section =>
+  EDIT_SECTIONS.flatMap(section =>
     leafControls(section.controls).filter(
       (control): control is Exclude<EditControl, { kind: 'group' | 'mixed' | 'tool' | 'picker' }> =>
         control.kind !== 'tool' && control.kind !== 'picker',
@@ -44,10 +42,14 @@ export function portableRecipe(recipe: ProjectRecipe): ProjectRecipe {
   const keys = presetControlKeys();
   const adjustments: Record<string, AdjustmentValue> = {};
   for (const [key, value] of Object.entries(recipe.adjustments)) {
-    if (keys.has(key) && !key.includes(':person:')) adjustments[key] = Array.isArray(value) ? [...value] : value;
+    if ((keys.has(key) || !isRegisteredControlKey(key)) && !key.includes(':person:')) {
+      adjustments[key] = Array.isArray(value) ? [...value] : value;
+    }
   }
-  return { adjustments, appliedActions: recipe.appliedActions.filter(key => keys.has(key)) };
+  return { adjustments, appliedActions: recipe.appliedActions.filter(key => keys.has(key) || !isRegisteredControlKey(key)) };
 }
+
+const isRegisteredControlKey = (key: string) => reusableControls().some(control => control.key === key);
 
 export const listPresets = async (): Promise<EditPreset[]> => {
   const parsed: unknown = JSON.parse(await native().listPresets());

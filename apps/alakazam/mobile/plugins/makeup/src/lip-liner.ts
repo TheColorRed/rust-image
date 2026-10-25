@@ -2,17 +2,17 @@ import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import {
-  MAKEUP_MODELS,
   belongsTo,
+  toolKey,
   derivedFor,
-  makeupMasks,
   owning,
   paintSheet,
   type EditControl,
   type Painting,
   type ToolContext,
-} from '@alakazam/host';
+} from '@alakazam/plugin-toolkit';
 import { lipBlend, lipSwatches } from './lips';
+import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 
 /** How wide the line is, as a fraction of the width of the mouth: the least (the Width slider's 0) and the most (its 1). */
 const THINNEST = 0.008;
@@ -67,7 +67,7 @@ export const applyLipLiner = (
 export default function (): EditControl {
   return {
     kind: 'slider',
-    key: 'slider-lip-liner',
+    key: toolKey('slider-lip-liner'),
     label: 'Lip Liner',
     person: true,
     face: true,

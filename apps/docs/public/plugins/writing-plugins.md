@@ -136,35 +136,32 @@ contributes:
 - **The root** is matched to the names in the app, ignoring case. A tab or group that is not there is made, so a plugin can add a tab of its own. If the plugin is taken away, a tab or group it made goes with it once it is empty.
 - **The path** is the control's name, which is what people see, and so the script does not need to say it. A path with more names puts the control in groups under the root.
 - **The order** is the order written here.
-- **The script** is TypeScript in `src/` named like its entry (`src/lipstick.ts` builds to `lipstick.js`). Its default export is a function that returns the control, in the same shape the app's own controls use. It can import the Abra library (`@abra/core/...`), `@alakazam/host` (what the app offers plugins: the face masks, the layer painter and a few helpers), and other files of the plugin by relative path, which are built into the same file.
-- **Types** are checked with the plugin's own `tsconfig.json`, which extends `../tsconfig.base.json` (the app's settings, plus the `@alakazam/host` module). A script that imports something the app does not offer plugins is an error.
+- **The script** is TypeScript in `src/` named like its entry (`src/lipstick.ts` builds to `lipstick.js`). Its default export is a function that returns the control, in the same shape the app's own controls use. It can import the Abra library (`@abra/core/...`), `@alakazam/plugin-toolkit` (what the app offers plugins: the face masks, the layer painter and a few helpers), and other files of the plugin by relative path, which are built into the same file.
+- **Types** in app-owned plugins are checked with the app's plugin config. The public npm builder does not require the Alakazam app source: it transpiles TypeScript and leaves documented runtime imports external. Plugin authors can add their own type-checking setup if they want one.
 
 ## Build and package
 
-For an Alakazam plugin with TypeScript controls or scripts, put its source in `apps/alakazam/mobile/plugins/<folder>/src/`. Add a `tsconfig.json` beside `plugin.yml` that extends the shared plugin config and sets an output folder:
+For a plugin with TypeScript controls or scripts, put its source in `src/` beside `plugin.yml`. The npm build tool bundles its TypeScript entries and relative imports without needing the Alakazam app source code.
 
-```json
-{
-  "extends": "../tsconfig.base.json",
-  "compilerOptions": { "outDir": "dist" },
-  "include": ["src/**/*"]
-}
-```
+Each source file matches its manifest entry: `entry: color.js` is built from `src/color.ts`. Relative imports are bundled into the entry. Imports such as `@abra/core/color` and `@alakazam/plugin-toolkit` stay external for Alakazam to provide at runtime.
 
-Name each source file after its manifest entry: `entry: color.js` is built from `src/color.ts`. Relative TypeScript imports are bundled into that entry. Imports such as `@abra/core/color` and `@alakazam/host` stay external for the app to provide.
-
-From the repository root, build and package one plugin:
+Build from the plugin folder, or pass the folder path:
 
 ```sh
-node scripts/build-plugins.mjs my-control
-node scripts/pack-plugins.mjs my-control
+npx @alakazam/plugin-toolkit
+# or
+npx @alakazam/plugin-toolkit ./my-plugin
 ```
 
-The build type-checks the plugin, writes its JavaScript bundle to `dist/`, and updates the manifest's `files:` list with the bundle's SHA-256. The pack command rebuilds app plugins being packed, checks every listed file against its hash, and assembles the upload folder at `target/plugin-packages/my-control/`. That folder contains `plugin.yml` and the downloadable files at the paths named in the manifest. It prints the object paths and the catalog entry, including the hash of `plugin.yml`.
+Add `@alakazam/plugin-toolkit` and `@abra/core` to your plugin's `devDependencies` to type-check host API imports in your own TypeScript project. The package provides the declarations for `@alakazam/plugin-toolkit`; Alakazam supplies its runtime implementation when the plugin loads.
 
-To build all app plugins, leave off the folder name. To package all app and AI plugins, leave off the folder name from the pack command. AI plugins do not have TypeScript to build; their model files are copied from the model crate when needed. Review the generated package before uploading it.
+The build updates the `files:` list and SHA-256 hashes in `plugin.yml`, then writes `dist/<id>.akzx`. An `.akzx` package is a ZIP archive. Plugin authors can install it from **Plugins → Local plugin package → Choose .akzx** without uploading to S3. The local installer verifies every file against its manifest hash. Declared dependencies still need to be installed before the plugin can be used.
 
-A script runs with all of the app's rights. Only plugins from a catalog that checks their hash are installed, and the same applies to anything you add.
+
+
+In this repository, `node scripts/build-plugins.mjs <folder>` delegates to the same npm builder and also type-checks app-owned plugins. `scripts/pack-plugins.mjs [folder ...]` is for maintainers preparing catalog uploads; plugin authors do not need it. It checks files and assembles upload folders under `target/plugin-packages/`, including model files from the AI crates when needed. Each upload folder contains exactly `plugin.yml` and `<id>.akzx`; the catalog entry has `uri`/`sha256` for the manifest and `archive_uri`/`archive_sha256` for the `.akzx` package. The app reads the manifest for metadata and dependencies, then installs the package after verifying both hashes and each file hash in the manifest.
+
+A plugin script runs with all of the app's rights. Install only packages from authors you trust. File hashes detect a damaged or mismatched package; they do not identify who made it.
 
 ## Dependencies
 
@@ -172,11 +169,11 @@ A plugin can need other plugins. A plugin of controls that use AI models, for ex
 
 ```yaml
 dependencies:
-  - id: ai-face-landmarks
-  - id: ai-face-parsing
+  - id: alakazam.face-landmarks
+  - id: alakazam.face-parsing
 ```
 
-Each dependency is a plugin's `id`. That is all a dependency says: where to get the plugin is not in the file, because the app's `catalog.yml` lists every plugin that can be installed, and the app looks a dependency up there by its id.
+Each plugin `id` uses `<author>.<id>` so plugins from different authors can use the same name. The app's `catalog.yml` lists every plugin that can be installed, and the app looks dependencies up there by their full IDs.
 
 - **Installing** a plugin installs the plugins it depends on that are not on the device yet, and what those depend on, before it. If one of them is not in the catalog, nothing is installed and the app says which.
 - **Using** a plugin needs every plugin it depends on to be installed and usable itself. Until then the plugin is listed, with the missing ones named, but it adds nothing. Plugins that depend on each other in a circle are never usable.

@@ -16,7 +16,7 @@
 //! A plugin may also declare an ordered settings form with `text` and single-select `option` fields.
 //!
 //! ```yaml
-//! id: lama-object-removal          # lowercase words joined by dashes; names the plugin
+//! id: alakazam.lama-object-removal # author and plugin name, separated by a dot
 //! name: LaMa object removal
 //! version: 1.0.0
 //! description: Removes objects from a photo with LaMa.
@@ -33,7 +33,7 @@
 //!       options: [fast, balanced, best]
 //!       default: balanced
 //! dependencies:                   # optional: plugins that have to be installed for this one to be used
-//!   - id: ai-face-landmarks
+//!   - id: alakazam.face-landmarks
 //! contributes:
 //!   models:
 //!     - id: object-removal-large   # unique in the plugin

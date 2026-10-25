@@ -1,11 +1,12 @@
 import { BlendMode } from '@abra/core/blend';
-import { MAKEUP_MODELS, makeupMasks, type EditControl } from '@alakazam/host';
+import { toolKey, type EditControl } from '@alakazam/plugin-toolkit';
+import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 import { applySculpt } from './sculpt';
 
 export default function (): EditControl {
   return {
           kind: 'slider',
-          key: 'slider-contour',
+          key: toolKey('slider-contour'),
           label: 'Face Shaping',
           person: true,
           face: true,

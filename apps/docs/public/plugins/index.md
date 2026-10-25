@@ -24,7 +24,7 @@ A plugin can also declare an optional settings form with `text` and single-selec
 ## A plugin
 
 ```yaml
-id: lama-object-removal
+id: alakazam.lama-object-removal
 name: LaMa object removal
 version: 1.0.0
 description: Removes objects from a photo with LaMa.

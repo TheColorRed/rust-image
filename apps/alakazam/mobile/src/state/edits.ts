@@ -1,9 +1,8 @@
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, combineLatest } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import {
   BLEMISH_TOOL_KEY,
   CROP_TOOL_KEY,
-  OBJECT_REMOVAL_TOOL_KEY,
   RED_EYE_TOOL_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
@@ -11,6 +10,7 @@ import {
   SKIN_TONE_KEY,
 } from '@/src/lib/project/edit-sections/keys';
 import { isFaceControlKey, isPersonControlKey } from '@/src/state/control-traits';
+import { objectRemovalToolKey$ } from '@/src/state/plugin-tool-panels';
 import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
 
 // #region: Edit controls
@@ -48,8 +48,8 @@ export const isBlemishToolFocused$ = focusedControlKey$.pipe(
   map(key => key === BLEMISH_TOOL_KEY),
   distinctUntilChanged(),
 );
-export const isObjectRemovalFocused$ = focusedControlKey$.pipe(
-  map(key => key === OBJECT_REMOVAL_TOOL_KEY),
+export const isObjectRemovalFocused$ = combineLatest([focusedControlKey$, objectRemovalToolKey$]).pipe(
+  map(([focused, tool]) => tool !== null && focused === tool),
   distinctUntilChanged(),
 );
 export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOOL_KEY;

@@ -308,6 +308,10 @@ export type ToolControl<T = unknown> = {
   kind: 'tool';
   key: string;
   label: string;
+  /** Selects an app-provided panel by its registered identifier. */
+  panel?: string;
+  /** Runs the tool's plugin-provided action when its custom panel asks to apply it. */
+  onApply?: () => void;
   /**
    * A tool written against the Abra library (`@abra/core`), the same as a slider's: it gets an image that is its own to
    * change, and either changes it in place and returns nothing, or returns a new image to use instead. It also gets the

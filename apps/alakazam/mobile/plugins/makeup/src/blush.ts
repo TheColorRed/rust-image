@@ -1,7 +1,14 @@
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Falloff, Mask, type MaskLike } from '@abra/core/mask';
-import { belongsTo, derivedFor, owning, paintSheet, type Painting, type ToolContext } from '@alakazam/host';
+import {
+  belongsTo,
+  derivedFor,
+  owning,
+  paintSheet,
+  type Painting,
+  type ToolContext,
+} from '@alakazam/plugin-toolkit';
 
 const DOWN_TO_MOUTH = 0.4;
 /** How far out from the eye's middle (away from the middle of the face), in eye widths, the blush's middle is moved. */
@@ -42,7 +49,9 @@ export const applyBlush = (
           const eye = preloaded[key] as MaskLike;
           const bounds = eye.bounds(0);
           if (!bounds) return undefined;
-          const other = (preloaded[`eye|${box}|${side === 'left' ? 'right' : 'left'}`] as MaskLike | undefined)?.bounds(0);
+          const other = (preloaded[`eye|${box}|${side === 'left' ? 'right' : 'left'}`] as MaskLike | undefined)?.bounds(
+            0,
+          );
           const centerX = bounds.x + bounds.width / 2;
           // Away from the other eye, or from the middle of the photo when there is only one.
           const midline = other ? (centerX + other.x + other.width / 2) / 2 : sheet.width() / 2;
@@ -81,7 +90,8 @@ export const applyBlush = (
               },
             ]),
           );
-          if (__DEV__) console.debug(`[blobs] blush ${width}x${height} oval ${(Date.now() - blobsStarted).toFixed(0)} ms`);
+          if (__DEV__)
+            console.debug(`[blobs] blush ${width}x${height} oval ${(Date.now() - blobsStarted).toFixed(0)} ms`);
           // Only on skin, with a soft edge so it does not stop at a line.
           const skin = preloaded[`skin|${box}`] as MaskLike | undefined;
           if (skin) {

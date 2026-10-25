@@ -1,4 +1,5 @@
-id: skin-segmentation
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.skin-segmentation
 name: Body detail
 version: 1.0.0
 description: Maps faces, skin, hair and clothes on a body so beauty adjustments land in the right places.

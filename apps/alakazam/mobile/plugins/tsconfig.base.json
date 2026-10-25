@@ -4,11 +4,11 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // What a plugin can import besides the Abra library: `@alakazam/host`, which is the single list of what the app offers plugins
-    // (`src/lib/plugins/host-api.ts`), and the app's own paths, which that list is written with.
+    // Plugin sources remain under the app root so the repository can type-check app-owned plugins.
+    "rootDir": "..",
+    // App paths are available to app-owned plugins; plugin APIs resolve through their package names.
     "paths": {
-      "@/*": ["../*"],
-      "@alakazam/host": ["../src/lib/plugins/host-api.ts"]
+      "@/*": ["../*"]
     }
   },
   // Each plugin names its own sources.
