@@ -284,6 +284,56 @@ pub async fn install_plugin_archive(
   .await
 }
 
+/// Installs a plugin folder synchronized by the Android development toolkit. The folder still has to pass the same manifest and file
+/// hash checks as a packaged plugin before it can replace an installed plugin.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn install_dev_plugin_folder(folder: String) -> Result<(), AbraError> {
+  image_workers::run(move || {
+    let source = PathBuf::from(&folder);
+    let plugin = Plugin::read(&source).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let root = plugins_dir();
+    fs::create_dir_all(&root).map_err(|error| AbraError::Ai { message: format!("Cannot create the plugin folder: {error}") })?;
+    let staging = root.join(".dev-installing");
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|error| AbraError::Ai { message: format!("Cannot create the plugin staging folder: {error}") })?;
+    let result = (|| {
+      fs::copy(source.join("plugin.yml"), staging.join("plugin.yml"))
+        .map_err(|error| format!("Cannot copy plugin.yml: {error}"))?;
+      for file in &plugin.manifest.files {
+        let relative = PathBuf::from(&file.path);
+        if relative.is_absolute() || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_))) {
+          return Err(format!("{} is not a safe plugin file path", file.path));
+        }
+        let destination = staging.join(&relative);
+        if let Some(parent) = destination.parent() {
+          fs::create_dir_all(parent).map_err(|error| format!("Cannot create plugin folder: {error}"))?;
+        }
+        fs::copy(source.join(&relative), &destination).map_err(|error| format!("Cannot copy {}: {error}", file.path))?;
+        let bytes = fs::read(&destination).map_err(|error| format!("Cannot read {}: {error}", file.path))?;
+        let actual = Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        if actual != file.sha256 {
+          return Err(format!("{} does not match its SHA-256 in plugin.yml", file.path));
+        }
+      }
+      Plugin::read(&staging).map_err(|error| error.to_string())?;
+      let target = root.join(&plugin.manifest.id);
+      match fs::remove_dir_all(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Cannot replace the installed plugin: {error}")),
+      }
+      fs::rename(&staging, target).map_err(|error| format!("Cannot save the plugin: {error}"))
+    })();
+    if let Err(message) = result {
+      let _ = fs::remove_dir_all(&staging);
+      return Err(AbraError::Ai { message });
+    }
+    Ok(())
+  })
+  .await
+}
+
 /// Downloads and installs a catalog `.akzx` package, verifying its archive SHA-256 and every listed file.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn install_plugin_package(

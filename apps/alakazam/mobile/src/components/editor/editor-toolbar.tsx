@@ -8,6 +8,7 @@ import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useObservable } from 'react-rx';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DeveloperDialog } from '@/src/components/editor/developer-dialog';
 import { ImageInfoDialog } from '@/src/components/editor/image-info-dialog';
 import { PresetDialog } from '@/src/components/editor/preset-dialog';
@@ -21,7 +22,7 @@ import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { useTheme } from '@/src/lib/ui/theme';
 import { closeRequested, closeRequested$ } from '@/src/state/commands';
 import { timeline$ } from '@/src/state/history';
-import { topInset$ } from '@/src/state/preview';
+import { adjustments, appliedActions } from '@/src/state/edits';
 
 export interface EditorToolbarProps {
   photo: EditablePhoto;
@@ -30,8 +31,13 @@ export interface EditorToolbarProps {
 
 /** The buttons floating over the photo: close on the left, and on the right the photo's information and the reset of the edits. */
 export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
-  const topInset = useObservable(topInset$, 0);
-  const hasEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
+  const { top: topInset } = useSafeAreaInsets();
+  // A reopened project restores its recipe but not its undo timeline. Include the live edit state
+  // so Reset remains available for saved adjustments and actions after reopening.
+  const hasTimelineEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
+  const hasAdjustmentEdits = Object.keys(useObservable(adjustments, {})).length > 0;
+  const hasActionEdits = useObservable(appliedActions, []).length > 0;
+  const hasEdits = hasTimelineEdits || hasAdjustmentEdits || hasActionEdits;
   const { colors } = useTheme();
   const [infoOpen, setInfoOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);

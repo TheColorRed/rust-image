@@ -8,7 +8,6 @@ import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
 import { adjustments } from '@/src/lib/project/edit-sections/adjustments';
-import { beauty } from '@/src/lib/project/edit-sections/beauty';
 import { blur } from '@/src/lib/project/edit-sections/blur';
 import { cleanup } from '@/src/lib/project/edit-sections/cleanup';
 import { detail } from '@/src/lib/project/edit-sections/detail';
@@ -145,6 +144,8 @@ export type SliderControl<T = unknown> = {
    * download them first, and opens it once they are here.
    */
   needsModels?: { title: string; roles: readonly string[] };
+  /** Stable group name for project-persisted masks produced by this control's preload. */
+  analysisGroup?: string;
   /** The label displayed for each individual slider, if different from the main label. */
   sliderLabel?: PerSlider<string>;
   /** The minimum value each slider can take. Defaults to 0 if not specified. */
@@ -311,7 +312,7 @@ export type ToolControl<T = unknown> = {
   /** Selects an app-provided panel by its registered identifier. */
   panel?: string;
   /** Runs the tool's plugin-provided action when its custom panel asks to apply it. */
-  onApply?: () => void;
+  onApply?: (value?: unknown) => unknown;
   /**
    * A tool written against the Abra library (`@abra/core`), the same as a slider's: it gets an image that is its own to
    * change, and either changes it in place and returns nothing, or returns a new image to use instead. It also gets the
@@ -403,7 +404,9 @@ export type PickerControl = {
   after?: number;
 };
 
-export type EditControl = SliderControl | ActionControl | ToolControl | GroupControl | MixedControl | PickerControl;
+/** Optional app-side owner metadata, set when a plugin contributes a control. */
+export type EditControl =
+  (SliderControl | ActionControl | ToolControl | GroupControl | MixedControl | PickerControl) & { pluginId?: string };
 
 /**
  * Applies an action to `image`: its own `apply`, or else its tool.
@@ -673,7 +676,6 @@ export { BLEMISH_TOOL_KEY, CROP_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKI
 export const EDIT_SECTIONS: EditSection[] = [
   colorization,
   adjustments,
-  beauty,
   transform,
   sharpen,
   effects,

@@ -28,7 +28,7 @@ import Download from 'lucide-react-native/icons/download';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import Trash2 from 'lucide-react-native/icons/trash';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, NativeModules, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
 
 const removalMessage = (name: string, targetId: string, plan: ReturnType<typeof pluginsToRemove>) => {
@@ -36,6 +36,13 @@ const removalMessage = (name: string, targetId: string, plan: ReturnType<typeof 
   return dependents.length
     ? `${name} is required by ${dependents.map(plugin => plugin.name).join(', ')}. Deleting it will also uninstall ${dependents.length === 1 ? 'this add-on' : 'these add-ons'}.`
     : `Delete ${name}?`;
+};
+
+type PluginDevServerState = { running: boolean; port: number; token: string; addresses: string[] };
+type PluginDevServerModule = {
+  getPluginDevServerState(): Promise<PluginDevServerState>;
+  startPluginDevServer(): Promise<PluginDevServerState>;
+  stopPluginDevServer(): Promise<void>;
 };
 
 export function PluginsScreen() {
@@ -52,11 +59,13 @@ export function PluginsScreen() {
   const [refreshing, setRefreshing] = useState(true);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [devServer, setDevServer] = useState<PluginDevServerState | null>(null);
+  const [devServerBusy, setDevServerBusy] = useState(false);
   const styles = useMemo(
     () =>
       StyleSheet.create({
         container: { flex: 1, backgroundColor: colors.background, paddingTop: 24 },
-        content: { paddingHorizontal: 16, paddingTop: 12, gap: 12 },
+        content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 48, gap: 12 },
         flatRow: { paddingLeft: 16 },
         row: {
           flexDirection: 'row',
@@ -109,19 +118,45 @@ export function PluginsScreen() {
   const reload = useCallback(async () => {
     setError(null);
     setRefreshing(true);
+    setCatalogLoaded(false);
     syncAiModels();
     try {
       await refreshAiModels();
+      setCatalogLoaded(true);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setCatalogLoaded(true);
       setRefreshing(false);
     }
   }, []);
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    const server = NativeModules.MediaFile as PluginDevServerModule | undefined;
+    if (!server?.getPluginDevServerState) return;
+    server.getPluginDevServerState().then(setDevServer).catch(e => setError(errorMessage(e)));
+  }, []);
+
+  const toggleDevServer = async () => {
+    const server = NativeModules.MediaFile as PluginDevServerModule | undefined;
+    if (!server) { setError('The plugin development server is unavailable on this device.'); return; }
+    setDevServerBusy(true);
+    setError(null);
+    try {
+      if (devServer?.running) {
+        await server.stopPluginDevServer();
+        setDevServer(await server.getPluginDevServerState());
+      } else {
+        setDevServer(await server.startPluginDevServer());
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setDevServerBusy(false);
+    }
+  };
 
   /** A model that is turned off is hidden unless it is on this device, so it can still be deleted to free the space. */
   const shown = models.filter(model => model.enabled || model.downloaded);
@@ -227,7 +262,7 @@ export function PluginsScreen() {
     try {
       const [picked] = await pick({ type: [types.zip] });
       if (!picked.name?.endsWith('.akzx'))
-        throw new Error('Choose an .akzx package built with @alakazam/plugin-toolkit.');
+        throw new Error('Choose an .akzx package built with @alakazam/plugin.');
       const [copy] = await keepLocalCopy({
         files: [{ uri: picked.uri, fileName: picked.name }],
         destination: 'cachesDirectory',
@@ -298,7 +333,11 @@ export function PluginsScreen() {
     ...addons.map(plugin => plugin.id),
     ...models.flatMap(model => (model.source.type === 'plugin' ? [model.source.pluginId] : [])),
   ]);
-  const localOnlyPlugins = catalogLoaded ? installedPlugins.filter(plugin => !listedPluginIds.has(plugin.id)) : [];
+  // Once the catalog has loaded, this card only contains packages not already represented by
+  // an add-on or an AI model. When it cannot load, keep every installed package manageable.
+  const installedPluginRows = catalogLoaded
+    ? installedPlugins.filter(plugin => !listedPluginIds.has(plugin.id))
+    : installedPlugins;
   const hasPluginUpdate = (id: string, version: string) => {
     const installed = installedPluginsById.get(id);
     return installed !== undefined && installed.version !== version;
@@ -383,6 +422,7 @@ export function PluginsScreen() {
     downloaded: boolean;
     sizeBytes: number;
     downloadSizeBytes: number;
+    statusText?: string;
     updateAvailable?: boolean;
     /** Without the indent of a row under a group. */
     flat?: boolean;
@@ -394,11 +434,11 @@ export function PluginsScreen() {
         <Text style={styles.rowTitle}>{item.title}</Text>
         {item.description !== '' && <Text style={styles.rowSize}>{item.description}</Text>}
         <Text style={styles.rowSize}>
-          {item.updateAvailable
+          {item.statusText ?? (item.updateAvailable
             ? 'Update available'
             : item.downloaded
               ? `Downloaded · ${formatBytes(item.sizeBytes)}`
-              : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`}
+              : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`)}
         </Text>
       </View>
       {item.id in downloadTasks && !item.downloaded ? (
@@ -493,20 +533,6 @@ export function PluginsScreen() {
                   <Download size={20} color={colors.accent} />
                 )}
               </Pressable>
-              {localOnlyPlugins.map((plugin, index) =>
-                renderRow({
-                  id: `local:${plugin.id}`,
-                  title: plugin.name,
-                  description: `Local package · ${plugin.version}${plugin.missingDependencies.length ? ` · needs ${plugin.missingDependencies.join(', ')}` : ''}`,
-                  downloaded: true,
-                  sizeBytes: 0,
-                  downloadSizeBytes: 0,
-                  flat: true,
-                  first: index === 0,
-                  onDownload: () => {},
-                  onDelete: () => removeInstalledPlugin(plugin.id),
-                }),
-              )}
             </Card>
             {addons.some(plugin => plugin.enabled || plugin.downloaded) && (
               <Card title="Add-ons">
@@ -597,7 +623,55 @@ export function PluginsScreen() {
                 </View>
               ))}
             </Card>
+            <Card
+              title="Other installed plugins"
+              subtitle="Installed here but not listed above, including plugins removed from the catalog."
+            >
+              {installedPluginRows.length === 0 ? (
+                <Text style={[styles.rowSize, { padding: 16 }]}>No other plugins are installed on this device.</Text>
+              ) : installedPluginRows.map(plugin =>
+                renderRow({
+                  id: `installed:${plugin.id}`,
+                  title: plugin.name,
+                  description: `${plugin.id} · ${plugin.version}${plugin.missingDependencies.length ? ` · needs ${plugin.missingDependencies.join(', ')}` : ''}`,
+                  downloaded: true,
+                  sizeBytes: 0,
+                  downloadSizeBytes: 0,
+                  statusText: 'Installed on this device',
+                  flat: true,
+                  onDownload: () => {},
+                  onDelete: () => removeInstalledPlugin(plugin.id),
+                }),
+              )}
+            </Card>
             {error && <Text style={styles.error}>{error}</Text>}
+            <Card title="Developer" subtitle="Sync plugin changes from your computer over the local network.">
+              <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Development server</Text>
+                  <Text style={styles.rowSize}>{devServer?.running ? 'On' : 'Off'}</Text>
+                </View>
+                {devServerBusy && <ActivityIndicator color={colors.accent} />}
+                <Switch
+                  accessibilityLabel="Plugin development server"
+                  value={devServer?.running ?? false}
+                  disabled={devServerBusy}
+                  onValueChange={toggleDevServer}
+                  trackColor={{ true: colors.accent }}
+                />
+              </View>
+              {devServer?.running && (
+                <View style={{ paddingHorizontal: 16, paddingBottom: 16, gap: 6 }}>
+                  <Text style={styles.rowTitle}>Server addresses</Text>
+                  {devServer.addresses.length ? devServer.addresses.map(address => (
+                    <Text key={address} selectable style={styles.rowSize}>{address}</Text>
+                  )) : <Text style={styles.rowSize}>No local network address found.</Text>}
+                  <Text style={[styles.rowTitle, { marginTop: 8 }]}>Access token</Text>
+                  <Text selectable style={styles.rowSize}>{devServer.token}</Text>
+                  <Text style={[styles.rowSize, { marginTop: 6 }]}>Keep the token private and use a trusted network.</Text>
+                </View>
+              )}
+            </Card>
           </>
         )}
       </ScrollView>

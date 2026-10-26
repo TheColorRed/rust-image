@@ -22,6 +22,14 @@ import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { MASK_KINDS, analysesUsedBy } from '@/src/lib/ai/ai-analyses';
 import { aiModelList, aiModelList$, aiModelsRequested } from '@/src/state/ai-models';
 import { pluginControlsVersion$ } from '@/src/state/plugins';
+import {
+  orderByToolbarUse,
+  orderToolbarSections,
+  recordToolbarUse,
+  toolbarUsage,
+  toolbarUsage$,
+  toolbarPath,
+} from '@/src/state/toolbar-usage';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { useActionPreview } from '@/src/hooks/useActionPreview';
 import { useSliderPreview } from '@/src/hooks/useSliderPreview';
@@ -53,6 +61,7 @@ import {
 import { commitSlider, redoHistory, removeSlider, toggleAction, undoHistory } from '@/src/lib/editor/editor-history';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH } from '@/src/lib/editor/editor-thumbnails';
+import { clearScrollOffset, getScrollOffset, setScrollOffset } from '@/src/lib/editor/scroll-offsets';
 import { adjustmentKey, isPersonAdjustment, personAdjustmentTargets } from '@/src/lib/beauty/skin-adjustments';
 import { useTheme } from '@/src/lib/ui/theme';
 import {
@@ -103,7 +112,7 @@ import ScanFace from 'lucide-react-native/icons/scan-face';
 import Undo2 from 'lucide-react-native/icons/undo-2';
 import X from 'lucide-react-native/icons/x';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewProps } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
 
 /** The colors of the bar that picks a color, by the name a control gives its `picker`. */
@@ -116,6 +125,13 @@ const barColors = {
   neon: () => NEON_COLORS,
 };
 
+const pluginIdForControls = (controls: readonly EditControl[]): string | undefined => {
+  const plugins = new Set(
+    controls.flatMap(control => leafControls([control]).flatMap(leaf => (leaf.pluginId ? [leaf.pluginId] : []))),
+  );
+  return plugins.size === 1 ? [...plugins][0] : undefined;
+};
+
 /** The control that is open in the active section, or undefined. */
 function useFocusedControl() {
   const sectionKey = useObservable(activeSectionKey$, activeSectionKey.value);
@@ -124,15 +140,26 @@ function useFocusedControl() {
 }
 
 /** The bottom panel: history buttons, the focused control's editor, and the section tabs. */
-export function EditorPanel() {
+export function EditorPanel({
+  sectionScrollOffset,
+  onSectionScroll,
+}: {
+  sectionScrollOffset: number;
+  onSectionScroll: (offset: number) => void;
+}) {
   // A plugin that adds or takes away controls changes what the panel lists, so it reads them again then.
   useObservable(pluginControlsVersion$, 0);
+  const recentToolbarUse = useObservable(toolbarUsage$, toolbarUsage.value);
   const bottomInset = useObservable(bottomInset$, 0);
   const activeKey = useObservable(activeSectionKey$, 'section-colorization');
+  const orderedSections = useMemo(() => orderToolbarSections(EDIT_SECTIONS, recentToolbarUse), [recentToolbarUse]);
   const canUndo = useObservable(canUndo$, false);
   const canRedo = useObservable(canRedo$, false);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const sectionsScroll = useRef<ScrollView>(null);
+  const sectionsOffsetRestored = useRef(false);
+  const currentSectionsOffset = useRef(sectionScrollOffset);
   const activeSection = findSection(activeKey);
   const openKey = useObservable(openGroupKey$, openGroupKey.value);
   const groups = openKey ? groupPath(activeSection.controls, openKey) : [];
@@ -151,6 +178,7 @@ export function EditorPanel() {
   const openGroup = groups[groups.length - 1];
   /** Steps out of what is open: the focused control, back to the row it sits in, or else the open group, back to its parent. */
   const goBack = () => {
+    let remainingGroups = groups.length;
     if (focusedControl) {
       focusedControlKey.next(null);
       const table = mixedParent(activeSection.controls, focusedControl.key);
@@ -158,9 +186,25 @@ export function EditorPanel() {
       // row of other controls goes back to that row, which is still open.
       if (table?.controls.every(inner => inner.kind === 'slider' || inner.kind === 'picker')) {
         const path = groupPath(activeSection.controls, table.key);
-        openGroupKey.next(path.length > 1 ? path[path.length - 2].key : null);
+        remainingGroups = Math.max(0, path.length - 1);
+        openGroupKey.next(remainingGroups ? path[remainingGroups - 1].key : null);
       }
-    } else openGroupKey.next(groups[groups.length - 2]?.key ?? null);
+    } else {
+      remainingGroups = Math.max(0, groups.length - 1);
+      openGroupKey.next(remainingGroups ? groups[remainingGroups - 1].key : null);
+    }
+    if (remainingGroups === 0) {
+      clearScrollOffset('section-tabs');
+      currentSectionsOffset.current = 0;
+      onSectionScroll(0);
+      sectionsScroll.current?.scrollTo({ x: 0, animated: false });
+    } else {
+      // Some native layout updates can reset a horizontal ScrollView while the control row changes.
+      // Reapply the live offset after React has committed the back-navigation state.
+      requestAnimationFrame(() => {
+        sectionsScroll.current?.scrollTo({ x: currentSectionsOffset.current, animated: false });
+      });
+    }
   };
   /** Turns off what is open: the focused slider, or every slider of the open mixed control. Undefined when neither is open. */
   const clearOpen =
@@ -278,7 +322,7 @@ export function EditorPanel() {
       sliderCommitRequested$.subscribe(({ control, value }) => commitSlider(control, value)),
     ];
     return () => subscriptions.forEach(subscription => subscription.unsubscribe());
-  }, []);
+  }, [onSectionScroll]);
 
   return (
     <View
@@ -394,14 +438,33 @@ export function EditorPanel() {
           <ChipControls />
         )}
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sections}>
-        {EDIT_SECTIONS.map(section => (
+      <ScrollView
+        ref={sectionsScroll}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.sections}
+        onLayout={() => {
+          if (sectionsOffsetRestored.current) return;
+          sectionsOffsetRestored.current = true;
+          currentSectionsOffset.current = sectionScrollOffset;
+          sectionsScroll.current?.scrollTo({ x: currentSectionsOffset.current, animated: false });
+        }}
+        onScroll={event => {
+          if (!sectionsOffsetRestored.current) return;
+          const offset = event.nativeEvent.contentOffset.x;
+          currentSectionsOffset.current = offset;
+          onSectionScroll(offset);
+        }}
+        scrollEventThrottle={16}
+      >
+        {orderedSections.map(section => (
           <Pressable
             key={section.key}
             style={[styles.sectionTab, section.key === activeKey && styles.sectionTabActive]}
             onPressIn={() => devDebug('touch', 'section press-in', section.key)}
             onPress={() => {
               devDebug('touch', 'section press', section.key);
+              recordToolbarUse(toolbarPath(section.label), pluginIdForControls(section.controls));
               selectSectionRequested.next(section.key);
             }}
           >
@@ -760,6 +823,7 @@ function ThumbnailControls() {
   const sectionKey = useObservable(activeSectionKey$, 'section-colorization');
   const appliedActions = useObservable(appliedActions$, []);
   const controlThumbnails = useObservable(controlThumbnails$, {});
+  const recentToolbarUse = useObservable(toolbarUsage$, toolbarUsage.value);
   const loggedCards = useRef(new Set<string>());
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -772,7 +836,7 @@ function ThumbnailControls() {
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.thumbnailRow}
     >
-      {activeSection.controls.map(control => {
+      {orderByToolbarUse(activeSection.controls, recentToolbarUse, toolbarPath(activeSection.label)).map(control => {
         const adjusted = control.kind === 'action' && !control.repeatable && appliedActions.includes(control.key);
         const thumbnail = controlThumbnails[control.key];
         const logKey = `${sectionKey}:${control.key}`;
@@ -784,7 +848,10 @@ function ThumbnailControls() {
           <Pressable
             key={control.key}
             style={styles.thumbnailButton}
-            onPress={() => selectControlRequested.next(control)}
+            onPress={() => {
+              recordToolbarUse(toolbarPath(activeSection.label, control.label), pluginIdForControls([control]));
+              selectControlRequested.next(control);
+            }}
             accessibilityRole="button"
             accessibilityLabel={control.label}
             accessibilityState={{ selected: adjusted }}
@@ -869,6 +936,7 @@ function ChipControls() {
   const sectionKey = useObservable(activeSectionKey$, 'section-colorization');
   const appliedActions = useObservable(appliedActions$, []);
   const adjustments = useObservable(adjustments$, {});
+  const recentToolbarUse = useObservable(toolbarUsage$, toolbarUsage.value);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const groupKey = useObservable(openGroupKey$, openGroupKey.value);
@@ -894,15 +962,19 @@ function ChipControls() {
     return <PickerItems key={sectionKey + group.key} picker={group} />;
   }
   const rowControls = group ? group.controls : activeSection.controls;
-
+  // A mixed control is one tool with intentionally ordered tabs (for example Bokeh's Orb 1 and Orb 2).
+  const insideTool = path.some(parent => parent.kind === 'mixed');
+  const parentPath = toolbarPath(activeSection.label, ...path.map(parent => parent.label));
+  const shownControls = insideTool ? rowControls : orderByToolbarUse(rowControls, recentToolbarUse, parentPath);
   return (
-    <ScrollView
+    <RememberingScrollView
+      rowKey={`chips:${sectionKey}:${group?.key ?? 'root'}`}
       key={sectionKey + (group?.key ?? '')}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.chipRow}
     >
-      {rowControls.map(control => {
+      {shownControls.map(control => {
         // A blue chip is a one-shot action that is on. Any other chip that holds changes, itself or in the controls inside it,
         // carries a blue dot instead.
         const selected = control.kind === 'action' && isApplied(control);
@@ -911,14 +983,20 @@ function ChipControls() {
           <Pressable
             key={control.key}
             style={[styles.chip, selected && styles.chipApplied]}
-            onPress={() => selectControlRequested.next(control)}
+            onPress={() => {
+              recordToolbarUse(
+                toolbarPath(activeSection.label, ...path.map(parent => parent.label), control.label),
+                pluginIdForControls([control]),
+              );
+              selectControlRequested.next(control);
+            }}
           >
             <Text style={[styles.chipText, selected && styles.chipTextApplied]}>{control.label}</Text>
             {changed && <View style={styles.sliderPillDot} />}
           </Pressable>
         );
       })}
-    </ScrollView>
+    </RememberingScrollView>
   );
 }
 
@@ -1004,4 +1082,35 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     sectionText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
     sectionTextActive: { color: colors.background },
   });
+}
+
+/** A horizontal editor row that keeps its own position when its content is temporarily unmounted. */
+function RememberingScrollView({
+  rowKey,
+  onLayout,
+  onScroll,
+  ...props
+}: ScrollViewProps & { rowKey: string }) {
+  const scroll = useRef<ScrollView>(null);
+  const restored = useRef(false);
+
+  return (
+    <ScrollView
+      {...props}
+      ref={scroll}
+      onLayout={event => {
+        onLayout?.(event);
+        if (restored.current) return;
+        requestAnimationFrame(() => {
+          scroll.current?.scrollTo({ x: getScrollOffset(rowKey), animated: false });
+          restored.current = true;
+        });
+      }}
+      onScroll={event => {
+        if (restored.current) setScrollOffset(rowKey, event.nativeEvent.contentOffset.x);
+        onScroll?.(event);
+      }}
+      scrollEventThrottle={props.scrollEventThrottle ?? 16}
+    />
+  );
 }

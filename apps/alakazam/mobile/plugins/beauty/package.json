@@ -1,0 +1,9 @@
+{
+  "name": "@alakazam/beauty-plugin",
+  "version": "1.2.1",
+  "private": true,
+  "devDependencies": {
+    "@abra/core": "1.0.0",
+    "@alakazam/plugin": "0.1.0"
+  }
+}

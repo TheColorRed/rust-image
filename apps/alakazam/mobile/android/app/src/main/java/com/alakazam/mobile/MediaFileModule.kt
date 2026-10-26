@@ -8,23 +8,69 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.module.annotations.ReactModule
-import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.UUID
+import java.io.File
 
 /** Copies media URIs the app can read (for example MediaStore/Camera Roll URIs) into its cache. */
 @ReactModule(name = MediaFileModule.NAME)
 class MediaFileModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+  private val pluginDevServer by lazy { PluginDevServer(context.cacheDir) }
   companion object {
     const val NAME = "MediaFile"
   }
 
   override fun getName() = NAME
+
+  override fun invalidate() {
+    pluginDevServer.stop()
+    super.invalidate()
+  }
+
+  @ReactMethod
+  fun startPluginDevServer(promise: Promise) {
+    try { promise.resolve(pluginDevServerState(pluginDevServer.start())) }
+    catch (error: Exception) { promise.reject("PLUGIN_DEV_SERVER_FAILED", "Could not start plugin development server", error) }
+  }
+
+  @ReactMethod
+  fun getPluginDevServerState(promise: Promise) {
+    try { promise.resolve(pluginDevServerState(pluginDevServer.state())) }
+    catch (error: Exception) { promise.reject("PLUGIN_DEV_SERVER_FAILED", "Could not read plugin development server state", error) }
+  }
+
+  @ReactMethod
+  fun stopPluginDevServer(promise: Promise) {
+    try { pluginDevServer.stop(); promise.resolve(null) }
+    catch (error: Exception) { promise.reject("PLUGIN_DEV_SERVER_FAILED", "Could not stop plugin development server", error) }
+  }
+
+  private fun pluginDevServerState(state: PluginDevServer.State) = Arguments.createMap().apply {
+    val addresses = Arguments.createArray()
+    state.addresses.forEach(addresses::pushString)
+    putBoolean("running", state.running)
+    putInt("port", state.port)
+    putString("token", state.token)
+    putArray("addresses", addresses)
+  }
+
+  @ReactMethod
+  fun takeDevPluginFolder(promise: Promise) {
+    try { promise.resolve(pluginDevServer.takeFolder()) }
+    catch (error: Exception) { promise.reject("PLUGIN_DEV_SERVER_FAILED", "Could not read received plugin folder", error) }
+  }
+
+  @ReactMethod
+  fun clearDevPluginFolder(path: String, promise: Promise) {
+    try { pluginDevServer.clearFolder(path); promise.resolve(null) }
+    catch (error: Exception) { promise.reject("PLUGIN_DEV_SERVER_FAILED", "Could not clear received plugin folder", error) }
+  }
 
   @ReactMethod
   fun copyToCache(uriString: String, fileName: String, promise: Promise) {

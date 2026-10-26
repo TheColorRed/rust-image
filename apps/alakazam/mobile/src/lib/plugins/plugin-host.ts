@@ -17,7 +17,7 @@ import * as hostApi from '@/src/lib/plugins/host-api';
 import type { ScriptModules } from '@/src/lib/plugins/plugin-script';
 
 /**
- * The modules a plugin script can import: the Abra library, in the same parts the app imports it by, and `@alakazam/plugin-toolkit` (see
+ * The modules a plugin script can import: the Abra library, in the same parts the app imports it by, and `@alakazam/plugin` (see
  * `host-api.ts`). A script that imports anything else does not load.
  */
 const BASE_PLUGIN_MODULES: ScriptModules = {
@@ -36,14 +36,13 @@ const BASE_PLUGIN_MODULES: ScriptModules = {
   '@abra/core/mask': mask,
   '@abra/core/tools': tools,
   '@abra/core/transform': transform,
+  '@alakazam/plugin': hostApi,
+  // Keep already-published plugins working while new plugin projects use @alakazam/plugin.
   '@alakazam/plugin-toolkit': hostApi,
 };
 
 /** Give each plugin a toolkit instance whose key helper is scoped to its manifest ID. */
-export const pluginModules = (pluginId: string): ScriptModules => ({
-  ...BASE_PLUGIN_MODULES,
-  '@alakazam/plugin-toolkit': {
-    ...hostApi,
-    toolKey: (id: string) => `${pluginId}.${id}`,
-  },
-});
+export const pluginModules = (pluginId: string): ScriptModules => {
+  const pluginApi = { ...hostApi, toolKey: (id: string) => `${pluginId}.${id}` };
+  return { ...BASE_PLUGIN_MODULES, '@alakazam/plugin': pluginApi, '@alakazam/plugin-toolkit': pluginApi };
+};

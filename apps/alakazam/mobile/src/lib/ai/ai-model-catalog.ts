@@ -13,8 +13,10 @@ import { parse } from 'yaml';
 import { installPlan, type CatalogPlugin } from '@/src/lib/ai/plugin-dependencies';
 import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
 import { errorMessage } from '@/src/lib/utils/error-message';
+import { EDIT_SECTIONS } from '@/src/lib/project/edit-sections';
 import { aiModelList, type AiModelListing, type AiModelSource } from '@/src/state/ai-models';
 import { pluginList, type PluginListing } from '@/src/state/plugins';
+import { pruneToolbarUsage, toolbarPathsFor } from '@/src/state/toolbar-usage';
 
 /** Installed plugins that must be removed with these ids, with dependents before their dependencies. */
 export const pluginsToRemove = (ids: readonly string[]) => {
@@ -50,6 +52,7 @@ export const pluginsToRemove = (ids: readonly string[]) => {
 export const deletePlugins = (ids: readonly string[]) => {
   for (const id of ids) deletePlugin(id);
   loadPlugins();
+  pruneToolbarUsage(toolbarPathsFor(EDIT_SECTIONS));
 };
 
 /** The catalog of AI models. The app owns it: the native side is only told about one model at a time. */

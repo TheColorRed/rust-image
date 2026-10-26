@@ -11,6 +11,7 @@ metadata:
     - desktop-app
     - typescript
     - javascript
+    - plugin
 ---
 
 # Alakazam App
@@ -39,6 +40,10 @@ how a control that applies to a person behaves with one person or several. Read 
 ## AI
 
 AI models run only when a control that needs one is used, and run once per photo. Whatever they find that an edit needs is saved to the project (masks as files, data in `project.json`) so a project opens and replays with no model installed or run. See the AI rules in the [mobile structure document](./references/mobile-structure.md#ai-rules).
+
+## Plugins
+
+The Alakazam App supports plugins to extend its functionality. Plugins can be used to add new image manipulation features, integrate with external services, or customize the user interface. See the [plugins document](./references/plugins.md) for information on how to create and use plugins within the Alakazam App.
 
 ## Bindings
 

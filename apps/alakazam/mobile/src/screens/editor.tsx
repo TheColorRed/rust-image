@@ -6,9 +6,11 @@ import { EditorPreview } from '@/src/components/editor/editor-preview';
 import { EditorToolbar } from '@/src/components/editor/editor-toolbar';
 import { type EditablePhoto } from '@/src/lib/editor/edit-source';
 import { openEditorSession } from '@/src/lib/editor/editor-session';
+import { editorSectionScrollOffset, setEditorSectionScrollOffset } from '@/src/lib/editor/editor-session';
+import { clearScrollOffsets } from '@/src/lib/editor/scroll-offsets';
 import { useTheme } from '@/src/lib/ui/theme';
 import { closeRequested } from '@/src/state/commands';
-import { bottomInset, topInset } from '@/src/state/preview';
+import { bottomInset } from '@/src/state/preview';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
 import { useEffect, useRef } from 'react';
 import { BackHandler, View } from 'react-native';
@@ -51,16 +53,25 @@ export function EditScreen({ photo, onClose }: EditScreenProps) {
   const largestBottom = useRef(0);
   useEffect(() => {
     largestBottom.current = Math.max(largestBottom.current, insets.bottom);
-    topInset.next(insets.top);
     bottomInset.next(largestBottom.current);
   }, [insets.top, insets.bottom]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <EditorPreview />
-      <EditorToolbar photo={photo} onClose={onClose} />
+      <EditorToolbar
+        photo={photo}
+        onClose={() => {
+          setEditorSectionScrollOffset(0);
+          clearScrollOffsets();
+          onClose();
+        }}
+      />
       <AiProgressBar tasks={aiTasks} />
-      <EditorPanel />
+      <EditorPanel
+        sectionScrollOffset={editorSectionScrollOffset}
+        onSectionScroll={setEditorSectionScrollOffset}
+      />
       <AiPendingNotice />
       <AiModelPrompt />
     </View>

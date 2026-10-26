@@ -1,5 +1,5 @@
 import { batch } from '@/src/lib/utils/batch';
-import { removeBlemish } from '@/src/lib/beauty/blemish';
+import { RemoverShape, ShapePosition, Units, remover } from '@abra/core/tools';
 import {
   EDIT_SECTIONS,
   leafControls,
@@ -75,7 +75,12 @@ export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
     }
   }
   try {
-    if (change.type === 'blemish') removeBlemish(healed, change.x, change.y, change.radius);
+    if (change.type === 'blemish') {
+      remover(RemoverShape.Circle.new(change.radius))
+        .withDistance(Units.Pixels.new(Math.max(Math.round(change.radius * 0.6), 3)))
+        .withPosition(ShapePosition.Point.new({ x: change.x, y: change.y }))
+        .apply(healed);
+    }
     else applyRedEyeStep(healed, change);
   } catch (error) {
     release(healed);

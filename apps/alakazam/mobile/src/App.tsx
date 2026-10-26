@@ -5,11 +5,13 @@ import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';
 import { PluginsScreen } from '@/src/screens/plugins';
 import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
+import { syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { restoreProjects } from '@/src/state/projects';
 import BootSplash from 'react-native-bootsplash';
 import { useEffect, useState } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
+import { installDevPluginFolder } from '@alakazam/mobile';
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const TABS: TabItem[] = [
   { name: 'home', label: 'Home' },
@@ -17,10 +19,15 @@ const TABS: TabItem[] = [
   { name: 'plugins', label: 'Plugins' },
 ];
 
+type DevPluginSync = {
+  takeDevPluginFolder(): Promise<string | null>;
+  clearDevPluginFolder(folder: string): Promise<void>;
+};
+
 export default function App() {
   return (
     <ThemeProvider>
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <AppContent />
       </SafeAreaProvider>
     </ThemeProvider>
@@ -40,6 +47,40 @@ function AppContent() {
     // The plugins' controls are in the editor before any photo opens.
     loadPlugins();
     restoreProjects().finally(() => setRestored(true));
+  }, []);
+
+  useEffect(() => {
+    const sync = NativeModules.MediaFile as DevPluginSync | undefined;
+    if (!sync?.takeDevPluginFolder || !sync.clearDevPluginFolder) return;
+    let stopped = false;
+    let busy = false;
+    const poll = async () => {
+      if (stopped || busy) return;
+      busy = true;
+      let folder: string | null = null;
+      try {
+        folder = await sync.takeDevPluginFolder();
+        if (folder) {
+          await installDevPluginFolder(folder);
+          loadPlugins(true);
+          syncAiModels();
+        }
+      } catch (error) {
+        console.warn('Could not install the received plugin files:', error);
+        Alert.alert('Plugin update failed', error instanceof Error ? error.message : String(error));
+      } finally {
+        if (folder) {
+          await sync.clearDevPluginFolder(folder).catch(error => console.warn('Could not clear the received plugin folder:', error));
+        }
+        busy = false;
+      }
+    };
+    const timer = setInterval(() => void poll(), 700);
+    void poll();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
   }, []);
 
   // The native splash covers the screen until the first real screen is ready to show.

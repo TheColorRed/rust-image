@@ -3,6 +3,7 @@ import type { BlendMode } from '@abra/core/blend';
 import type { ColorLike } from '@abra/core/color';
 import type { Image, ImageLike } from '@abra/core/image';
 import type { MaskLike } from '@abra/core/mask';
+import type { Rect } from '@abra/core/geometry';
 
 /** Set temporary text for the app's AI pending notice. Set to null to restore its generic text. */
 export declare function setAiPendingNotice(value: AiPendingNoticeText | null): void;
@@ -19,6 +20,8 @@ export declare const app: {
     setArea(key: string, rings: number[][][]): void;
     setBusy(value: boolean): void;
     replaceImage(image: ImageLike, result: ImageLike): void;
+    /** Detected subjects with their bounds and masks when analysis is available. */
+    subjects(): { id: number; x: number; y: number; width: number; height: number; mask: MaskLike }[];
   };
   ai: {
     models(): readonly AppModel[];
@@ -29,6 +32,10 @@ export declare const app: {
     prepareModel(owner: string, role: string): Promise<void>;
     releaseModel(owner: string, role?: string): void;
     withModel<T>(owner: string, role: string, work: (model: AiModel) => Promise<T>): Promise<T>;
+    /** Run a model file with a caller-supplied manifest and release the model afterward. */
+    withManifest<T>(role: string, manifest: string, work: (model: AiModel) => Promise<T>): Promise<T>;
+    /** Run an image model and get its result (for example, a segmentation mask). */
+    run(model: AiModel, image: ImageLike): Promise<{ mask(): MaskLike }>;
     runGuided(model: AiModel, image: ImageLike, mask: MaskLike): Promise<{ image(): ImageLike }>;
     withProgress<T>(key: string, work: () => Promise<T>): Promise<T>;
   };
@@ -48,6 +55,15 @@ export declare function belongsTo(
   person: { x: number; y: number; width: number; height: number } | undefined,
   others?: number[],
 ): boolean;
+/** Find faces with their parsed regions, crop positions and landmark results for general facial effects. */
+export declare function findFaces(photo: ImageLike, keep: Keep): Generator<{
+  body: Rect;
+  labels: { maskNamed(names: string[]): MaskLike };
+  zoom: Rect;
+  face: Rect;
+  faceImage: ImageLike;
+  landmarks: { landmarks: { point: { x: number; y: number } }[] };
+}>;
 export declare function derivedFor(
   owner: Preloaded,
   group: string,
@@ -99,6 +115,8 @@ export type SliderControl<T = unknown> = {
   person?: boolean;
   face?: boolean;
   needsModels?: { title: string; roles: readonly string[] };
+  /** Stable name for project-persisted analysis masks produced by this preload. */
+  analysisGroup?: string;
   sliderLabel?: PerSlider<string>;
   min?: PerSlider<RangeSetting>;
   max?: PerSlider<RangeSetting>;
@@ -134,7 +152,7 @@ export type ToolControl<T = unknown> = {
   kind: 'tool'; key: string; label: string;
   /** Selects an app-provided panel for this tool, when needed. */
   panel?: string;
-  onApply?: () => void;
+  onApply?: (value?: unknown) => unknown;
   tool?(photo: ImageLike, value: T[], context: ToolContext): ImageLike | void;
   thumb?(photo: ImageLike, context: ToolContext): ImageLike | void;
 };

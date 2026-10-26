@@ -1,0 +1,90 @@
+﻿$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.beauty
+name: Beauty
+version: 1.2.1
+description: Beauty and makeup controls for the Beauty tab.
+
+dependencies:
+  - id: alakazam.person-detection
+  - id: alakazam.face-parsing
+  - id: alakazam.face-landmarks
+  - id: alakazam.skin-segmentation
+
+contributes:
+  controls:
+    - root: Beauty/Skin
+      items:
+        - path: Even Skin Tone
+          entry: skin/skin-even-out.js
+        - path: Tan
+          entry: skin/skin-tan.js
+        - path: Lighten and Darken
+          entry: skin/skin-tone.js
+        - path: Smooth
+          entry: skin/skin-smooth.js
+    - root: Beauty
+      items:
+        - path: Teeth Whitening
+          entry: retouch/teeth-whitening.js
+        - path: Red Eye
+          entry: retouch/red-eye.js
+        - path: Blemish
+          entry: retouch/blemish.js
+        - path: Hair
+          entry: hair/hair.js
+    - root: Beauty/Makeup
+      items:
+        - path: Lipstick
+          entry: makeup/lipstick.js
+        - path: Lip Liner
+          entry: makeup/lip-liner.js
+        - path: Eyeliner
+          entry: makeup/eyeliner.js
+        - path: Eyeshadow
+          entry: makeup/eyeshadow.js
+        - path: Brow Highlight
+          entry: makeup/brow-highlight.js
+        - path: Concealer
+          entry: makeup/concealer.js
+        - path: Blush
+          entry: makeup/blush-control.js
+        - path: Highlighter
+          entry: makeup/highlighter.js
+        - path: Face Shaping
+          entry: makeup/face-shaping.js
+
+files:
+  - path: skin/skin-even-out.js
+    sha256: ec8f5882c0f3ba22422613eff6652984bb5f0b179e202baa54e453422f647554
+  - path: skin/skin-tan.js
+    sha256: 9b7f4d142918cbc6308ecabee9a9425b8ab28072717adc9e6d31454188ec35ed
+  - path: skin/skin-tone.js
+    sha256: 2ae2c856bab2fd6888cd98dc11cf71a9aea6023ee7b580a7d3bad7de558759d3
+  - path: skin/skin-smooth.js
+    sha256: 3196e326eff0d94d4075a6667ff3ccc9c47b7c929601c0f24688f75e61949f66
+  - path: retouch/teeth-whitening.js
+    sha256: 0b323d5ea74bd1adae261a24f751f1dcacf9c415de135c15079c26e185bf5b7b
+  - path: retouch/red-eye.js
+    sha256: cf7cf23705fd66048c6b03fffb22217c21c74cce8a3a34095a4511a68d9c493f
+  - path: retouch/blemish.js
+    sha256: 8fc36ba5ebbaaf80d4db5803571ee00fc8d2845f5bdbeec69e353d870529ca47
+  - path: hair/hair.js
+    sha256: 91af03b55f31692eeb3fecc966f3112c262d3cf7bc68ab864591a8b8cd8162ac
+  - path: makeup/lipstick.js
+    sha256: 6f6c87a0ffb93eb969db5190c85a5ffc054911f304f4209dc8d3e6b5c53f0178
+  - path: makeup/lip-liner.js
+    sha256: 34c55e06f55120ace2cac0b2651b4d495d7e60054841f040f4e4229b6239541a
+  - path: makeup/eyeliner.js
+    sha256: 7c168c2ee7481197898764a8269ec52f3b3f946d3e517f79a177442a7480f6eb
+  - path: makeup/eyeshadow.js
+    sha256: 1c0b1fa4687d3a4d8baf58945c9c43a9fdcd51f4f142f136362648dd2c8cf6bd
+  - path: makeup/brow-highlight.js
+    sha256: 863643c75d3eadecdbb14a5f1d44d854d2341193112dc61277ebd7e98956a41f
+  - path: makeup/concealer.js
+    sha256: 6f75a2929d63c2c252ba803d7f714dcd78058a194f83e03aee81921d15e955f3
+  - path: makeup/blush-control.js
+    sha256: 0e4d34d7201dbae058e18ce4cec2de8643f723c781ccfe3e356df32c28a3dd5f
+  - path: makeup/highlighter.js
+    sha256: 556bb083a7ec33005fa62b54378ffaf8f477de9cc44ff60dfc939825548bfcb1
+  - path: makeup/face-shaping.js
+    sha256: 805079f74e1354cb7ab5eb4f1fd5008b81c33d2545219d7327aa62b7949e6842

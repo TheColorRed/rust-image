@@ -1,5 +1,6 @@
 import { Color } from '@abra/core/color';
 import { Gradient } from '@abra/core/gradient';
+import { keptForLife } from '@/src/lib/native/handle-ledger';
 import { owning } from '@/src/lib/native/native-handles';
 
 /**
@@ -8,13 +9,17 @@ import { owning } from '@/src/lib/native/native-handles';
  * cannot disagree.
  *
  * What is made by the library is made when it is first asked for, not when this file loads: the library is not ready until the
- * app has started, and the controls import this file before that.
+ * app has started, and the controls import this file before that. It is then kept for as long as the app runs.
  */
 
 const once = <T>(make: () => T) => {
   let made: T | undefined;
-  return () => (made ??= make());
+  return () => (made ??= keptForLife(make()));
 };
+
+/** A gradient with these colors evenly spaced. The gradient copies the colors, so the handles made for them are freed here. */
+const evenly = (colors: number[][]) =>
+  owning(keep => Gradient.evenly(colors.map(([red, green, blue]) => keep(Color.fromRgb(red, green, blue)))));
 
 /** The hues of the color wheel, 360 at 0 falling to 0 at 1: a stop every 30 degrees is as exact as the wheel itself. */
 export const hueColors = once(() =>
@@ -31,9 +36,7 @@ export const SHADE_COLORS = [
   [139, 90, 43],
   [101, 67, 33],
 ];
-export const shadeGradient = once(() =>
-  Gradient.evenly(SHADE_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
-);
+export const shadeGradient = once(() => evenly(SHADE_COLORS));
 
 /** The tints of a highlighter: pearl, champagne, gold, peach and rose, from the palest to the pinkest. */
 export const GLOW_COLORS = [
@@ -43,9 +46,7 @@ export const GLOW_COLORS = [
   [255, 190, 150],
   [244, 170, 180],
 ];
-export const glowGradient = once(() =>
-  Gradient.evenly(GLOW_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
-);
+export const glowGradient = once(() => evenly(GLOW_COLORS));
 
 /** The infrared tints, from hot pink foliage to snowy white. */
 export const INFRARED_COLORS = [
@@ -54,9 +55,7 @@ export const INFRARED_COLORS = [
   [255, 210, 230],
   [255, 255, 255],
 ];
-export const infraredGradient = once(() =>
-  Gradient.evenly(INFRARED_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
-);
+export const infraredGradient = once(() => evenly(INFRARED_COLORS));
 
 /** The neon tints of the vaporwave grid, from teal through blue and violet to hot pink. */
 export const NEON_COLORS = [
@@ -75,9 +74,7 @@ export const TAN_COLORS = [
   [101, 67, 33],
   [0, 0, 0],
 ];
-export const tanGradient = once(() =>
-  Gradient.evenly(TAN_COLORS.map(([red, green, blue]) => Color.fromRgb(red, green, blue))),
-);
+export const tanGradient = once(() => evenly(TAN_COLORS));
 
 /** The color at `position` (0 to 1) along a bar of evenly spaced `stops`, as red, green and blue, mixed between the two stops either side. */
 export const colorAlongBar = (stops: number[][], position: number): number[] => {

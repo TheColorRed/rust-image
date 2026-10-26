@@ -19,12 +19,12 @@ import {
   loadSavedMasks,
   saveMasks,
   saveMasksInBackground,
+  forgetAnalysisGroup,
   withoutGroup,
   withoutPeople,
 } from '@/src/lib/ai/saved-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
 import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
-import { hairMasks } from '@/src/lib/beauty/hair-masks';
 import { startEditorPreview } from '@/src/lib/editor/editor-preview';
 import {
   clearControlThumbnails,
@@ -57,6 +57,9 @@ import {
 import { aiModelsVersion } from '@/src/state/ai-models';
 import { closeRequested } from '@/src/state/commands';
 import { activeSectionKey, adjustments, appliedActions, focusedControlKey, openGroupKey } from '@/src/state/edits';
+import { orderToolbarSections, toolbarUsage } from '@/src/state/toolbar-usage';
+import { clearScrollOffsets } from '@/src/lib/editor/scroll-offsets';
+import { EDIT_SECTIONS } from '@/src/lib/project/edit-sections';
 import { timeline } from '@/src/state/history';
 import { personSelection } from '@/src/state/person-selection';
 import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
@@ -123,6 +126,12 @@ const JPEG_FALLBACK_QUALITY = 90;
 // Keep the source project available for reset and delete actions while its editor session is open.
 let sessionProject: Project | null = null;
 let lastSavedBase: AbraImage | null = null;
+/** Horizontal position of the section tabs, retained only while the current editor project session is open. */
+export let editorSectionScrollOffset = 0;
+
+export function setEditorSectionScrollOffset(offset: number) {
+  editorSectionScrollOffset = offset;
+}
 
 /**
  * Finds the faces' masks again, in case the first time went wrong: what was found is thrown away, the editor draws again without it,
@@ -137,7 +146,7 @@ export function rescanFaceMasks() {
 
 /** Finds the hair again, in case the first time went wrong, like `rescanFaceMasks`. */
 export function rescanHair() {
-  forgetAnalysis(hairMasks);
+  forgetAnalysisGroup('hair');
   const project = openProject.value;
   if (project) openProject.next(withoutGroup(project, 'hair'));
   analysisVersion.next(analysisVersion.value + 1);
@@ -172,9 +181,9 @@ registerAiAnalysis('makeup', {
   regenerate: rescanFaceMasks,
 });
 registerAiAnalysis('hair', {
-  roles: [...HAIR_MODELS, EDGE_REFINEMENT],
+  roles: HAIR_MODELS,
   required: HAIR_MODELS,
-  usedBy: control => control.preload === hairMasks,
+  usedBy: control => control.analysisGroup === 'hair',
   regenerate: rescanHair,
 });
 registerAiAnalysis('subject', {
@@ -365,6 +374,9 @@ export async function saveEditedPhotoToGallery(fileName: string, format: ExportF
 export function openEditorSession(photo: EditablePhoto): () => void {
   let cancelled = false;
   const project = photo.project ?? null;
+  clearScrollOffsets();
+  // A newly opened project starts at the first section; closing this editor session clears the offset below.
+  editorSectionScrollOffset = 0;
   sessionProject = project;
   setPersistedCropCount(project?.savedCrops.length ?? 0);
   if (project) devLog('project', 'opened', project.id, project.dir);
@@ -467,6 +479,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       markCurrentImageRecipe(merged);
 
       const activeProject = project;
+      const initialSection = orderToolbarSections(EDIT_SECTIONS, toolbarUsage.value)[0];
 
       batch(() => {
         release(editBaseImage.value);
@@ -482,6 +495,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         }
         adjustments.next(merged.adjustments);
         appliedActions.next(merged.appliedActions);
+        if (initialSection) activeSectionKey.next(initialSection.key);
         busy.next(false);
         historyReady.next(true);
         ready.next(true);
@@ -504,8 +518,14 @@ export function openEditorSession(photo: EditablePhoto): () => void {
     replay.unsubscribe();
     live.unsubscribe();
     batch(resetSessionState);
+    clearScrollOffsets();
+    editorSectionScrollOffset = 0;
     if (sessionProject === project) sessionProject = null;
     // Some handles are let go a moment after the close (see `replaceThumbnails`), so what is still alive after that was never released.
-    if (__DEV__) setTimeout(() => warnUnreleasedSince(ledgerMark, 'the editor closed'), 3000);
+    // Only the handles this session made count: a photo opened in the meantime has images of its own.
+    if (__DEV__) {
+      const closedAt = handleLedgerMark();
+      setTimeout(() => warnUnreleasedSince(ledgerMark, 'the editor closed', closedAt), 3000);
+    }
   };
 }

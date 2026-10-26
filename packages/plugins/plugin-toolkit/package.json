@@ -1,22 +1,27 @@
 {
-  "name": "@alakazam/plugin-toolkit",
+  "name": "@alakazam/plugin",
   "version": "0.1.0",
   "description": "Build Alakazam plugins and create installable plugin packages",
   "type": "module",
-  "bin": {
-    "build-plugins": "./build-plugins.mjs"
-  },
+  "bin": "./cli.mjs",
   "files": [
     "build-plugins.mjs",
+    "cli.mjs",
+    "dev-plugin.mjs",
+    "plugin-builder.mjs",
     "plugin-toolkit.d.ts",
     "README.md"
   ],
   "types": "./plugin-toolkit.d.ts",
   "scripts": {
-    "build": "node ./build-plugins.mjs"
+    "build": "node ./build-plugins.mjs",
+    "dev": "node ./dev-plugin.mjs"
   },
   "dependencies": {
+    "chokidar": "^4.0.3",
+    "enquirer": "^2.4.1",
     "esbuild": "^0.28.2",
+    "fast-glob": "^3.3.3",
     "jszip": "^3.10.2",
     "yaml": "^2.9.1"
   },

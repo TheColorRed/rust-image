@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Repository convenience wrapper around the npm-published @alakazam/plugin-toolkit CLI.
+// Repository convenience wrapper around the npm-published @alakazam/plugin CLI.
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';

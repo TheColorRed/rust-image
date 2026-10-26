@@ -8,7 +8,7 @@
 //! A surface often appears after the session starts, so the session keeps the newest frame and draws it the moment a
 //! surface is attached.
 
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, thread::Builder};
 
 use pub_sub::{Observer, Subject};
 use vessel_engine::{Engine, Frame, GpuFrame, GpuTarget, View, surface};
@@ -35,6 +35,24 @@ struct Output {
   drawn_any: bool,
 }
 
+/// Lets go of a GPU target on a thread of its own. Dropping one tears down its swapchain, and the driver waits for the GPU to
+/// go idle first (`vkDeviceWaitIdle`); on some drivers (PowerVR on Android, for one) that wait never returns once the window's
+/// buffers have stopped moving. It was found waiting forever on the app's JavaScript thread, which froze the whole app while
+/// the native views kept moving. A thread that never returns costs a stranded thread and one leaked swapchain, and nothing else.
+fn discard(p_target: Option<Box<dyn GpuTarget>>) {
+  let Some(target) = p_target else { return };
+  let spawned = Builder::new().name("vessel-gpu-discard".to_owned()).spawn(move || drop(target));
+  if let Err(error) = spawned {
+    surface::log(&format!("vessel: could not start a thread to let go of a GPU target: {error}"));
+  }
+}
+
+impl Drop for Output {
+  fn drop(&mut self) {
+    discard(self.target.take());
+  }
+}
+
 impl Output {
   /// Shows a frame made of pixels. Returns whether it reached the surface.
   fn show_pixels(&mut self, p_frame: &Frame) -> bool {
@@ -44,7 +62,7 @@ impl Output {
         return true;
       }
       // The surface is gone; the next attach makes a new target.
-      self.target = None;
+      discard(self.target.take());
       return false;
     }
     // A blank first frame draws nothing worth showing, and drawing it with the CPU would claim the window for the CPU, which
@@ -77,7 +95,7 @@ impl Output {
         self.drawn_any = true;
         return true;
       }
-      self.target = None;
+      discard(self.target.take());
       return false;
     }
     match p_frame.read_back() {

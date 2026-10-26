@@ -83,14 +83,35 @@ export const projectSourceUri = (project: Project) => `${project.dir}/${project.
 /** What to show for a project: its final image if it has been edited, otherwise the original. */
 export const projectImageUri = (project: Project) => `${project.dir}/${project.resultFile ?? project.sourceFile}`;
 
+/**
+ * A project as the store gives it, with the lists a `project.json` saved before they existed does not have. The old file is left as it
+ * is; the lists are filled in each time it is read, and saved with the next write.
+ */
+const parseProject = (json: string): Project => {
+  const project = JSON.parse(json) as Project;
+  project.layers ??= [];
+  project.savedCrops ??= [];
+  // Keep edits made with the former Makeup plugin ID when its controls now use the Beauty ID.
+  const oldPluginPrefix = 'alakazam.makeup.';
+  const newPluginPrefix = 'alakazam.beauty.';
+  const renamedKey = (key: string) => key.startsWith(oldPluginPrefix) ? `${newPluginPrefix}${key.slice(oldPluginPrefix.length)}` : key;
+  if (project.recipe) {
+    project.recipe.adjustments = Object.fromEntries(
+      Object.entries(project.recipe.adjustments).map(([key, value]) => [renamedKey(key), value]),
+    );
+    project.recipe.appliedActions = project.recipe.appliedActions.map(renamedKey);
+  }
+  return project;
+};
+
 /** Copies an image (`content://` or `file://`) into a new project folder. */
 export async function createProject(sourceUri: string, fileName: string): Promise<Project> {
-  return JSON.parse(await native().createProject(sourceUri, fileName));
+  return parseProject(await native().createProject(sourceUri, fileName));
 }
 
 /** Every saved project, newest first. */
 export async function listProjects(): Promise<Project[]> {
-  return (await native().listProjects()).map(json => JSON.parse(json));
+  return (await native().listProjects()).map(parseProject);
 }
 
 /** Saves the project's name, edit recipe and final image's name. `dir` is not saved; the source image is never rewritten. */

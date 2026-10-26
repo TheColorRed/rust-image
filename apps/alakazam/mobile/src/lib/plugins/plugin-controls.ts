@@ -19,6 +19,10 @@ type Loaded = { version: string; undo: () => void };
  * again, so a control is put in only after one with its key is taken out: it never shows twice.
  */
 const loaded = new Map<string, Loaded>();
+const legacyBeautyKeys = new Set([
+  'group-skin', 'group-hair', 'action-skin-even-out', 'action-skin-tan', 'action-skin-tone',
+  'action-skin-smooth', 'slider-teeth-whitening', 'action-red-eye', 'action-blemish', 'slider-hair-color',
+]);
 
 const slug = (label: string) =>
   label
@@ -26,11 +30,18 @@ const slug = (label: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 
+/** Retains the owner on every contributed control so saved usage can be removed with its plugin. */
+function markPluginOwner(control: EditControl, pluginId: string): void {
+  control.pluginId = pluginId;
+  if ('controls' in control) for (const child of control.controls) markPluginOwner(child, pluginId);
+}
+
 /** Plugin control keys are persisted in editor state, so keep each one namespaced to its author and plugin. */
 function validateControlKeys(plugin: PluginInfo, control: EditControl): void {
   const prefix = `${plugin.id}.`;
   const suffix = control.key.startsWith(prefix) ? control.key.slice(prefix.length) : '';
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suffix)) {
+  const legacy = plugin.id === 'alakazam.beauty' && legacyBeautyKeys.has(control.key);
+  if (!legacy && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suffix)) {
     throw new Error(`Control key "${control.key}" must follow "${plugin.id}.<tool>" (for example, "${plugin.id}.remove-objects").`);
   }
   if ('controls' in control) for (const child of control.controls) validateControlKeys(plugin, child);
@@ -60,7 +71,7 @@ function removeControlByKey(controls: EditControl[], key: string): void {
 
 /** A tab or group that a plugin's root names and the editor does not have yet. */
 const maker: PlaceMaker = {
-  section: label => ({ key: `section-plugin-${slug(label)}`, label, controls: [] }),
+  section: label => ({ key: label.trim().toLowerCase() === 'beauty' ? 'section-beauty' : `section-plugin-${slug(label)}`, label, controls: [] }),
   group: (label, parentKey) => ({ kind: 'group', key: `group-plugin-${parentKey}-${slug(label)}`, label, controls: [] }),
 };
 
@@ -84,6 +95,7 @@ function loadControls(plugin: PluginInfo): Loaded {
       if (typeof made !== 'function') throw new Error(`${what} has no default export that is a function.`);
       // The plugin's yml says what the control is called, so the label people see is the name there.
       const placed = { ...(made as ControlScript)(), label: name } as EditControl;
+      markPluginOwner(placed, plugin.id);
       validateControlKeys(plugin, placed);
 
       const { list, undo: undoPlaces } = resolveRoot(EDIT_SECTIONS as unknown as Place[], root, maker);
@@ -117,12 +129,15 @@ function loadControls(plugin: PluginInfo): Loaded {
  * is reported in `pluginProblems` and does not stop the others. Cheap when nothing changed, so it can be called whenever a plugin is
  * installed, replaced or deleted, and when the app starts.
  */
-export function loadPlugins(): void {
+export function loadPlugins(force = false): void {
   const scan = scanPlugins(pluginsFolder());
   const problems: PluginProblem[] = scan.problems.map(problem => ({ plugin: problem.dir, message: problem.message }));
+  const hasRenamedBeauty = scan.plugins.some(plugin => plugin.id === 'alakazam.beauty');
 
   const wanted = new Map<string, PluginInfo>();
   for (const plugin of scan.plugins) {
+    // A changed plugin ID installs alongside the old package. Prefer Beauty when both IDs are present to avoid duplicate controls.
+    if (hasRenamedBeauty && plugin.id === 'alakazam.makeup') continue;
     if (plugin.controls.length === 0) continue;
     if (plugin.missingDependencies.length > 0) {
       problems.push({ plugin: plugin.name, message: `Needs ${plugin.missingDependencies.join(', ')} installed first.` });
@@ -133,7 +148,7 @@ export function loadPlugins(): void {
 
   let changed = false;
   for (const [id, was] of loaded) {
-    if (wanted.get(id)?.version === was.version) continue;
+    if (!force && wanted.get(id)?.version === was.version) continue;
     was.undo();
     loaded.delete(id);
     changed = true;
@@ -150,4 +165,15 @@ export function loadPlugins(): void {
 
   pluginProblems.next(problems);
   if (changed) pluginControlsVersion.next(pluginControlsVersion.value + 1);
+}
+
+/** Runs the plugin-owned callback for a selected custom tool, passing its host-collected interaction value. */
+export function applyPluginTool(key: string, value?: unknown): { handled: boolean; result?: unknown } {
+  for (const section of EDIT_SECTIONS) {
+    const control = leafControls(section.controls).find(each => each.kind === 'tool' && each.key === key);
+    if (control?.kind === 'tool' && control.onApply) {
+      return { handled: true, result: control.onApply(value) };
+    }
+  }
+  return { handled: false };
 }

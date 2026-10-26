@@ -4,10 +4,13 @@ import { useObservable } from 'react-rx';
 import { BehaviorSubject } from 'rxjs';
 import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { commitRetouch } from '@/src/lib/editor/editor-history';
+import { applyPluginTool } from '@/src/lib/plugins/plugin-controls';
+import { RED_EYE_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { computePreviewImagePoint } from '@/src/lib/editor/preview-coordinates';
-import { RED_EYE_MODELS, applyRedEyeStep, type RedEyeChange } from '@/src/lib/beauty/red-eye';
+import { type RedEyeChange } from '@/src/lib/beauty/red-eye';
+import { FACE_MODELS } from '@/src/lib/ai/faces';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import { aiModelsRequested } from '@/src/state/ai-models';
 import { redEyeAutoRequested$ } from '@/src/state/commands';
@@ -68,7 +71,9 @@ export function RedEyeToolController() {
       // Until the history is built the image is a project's saved picture, and a fix made on it would be lost.
       if (!image || !historyReady.value) return;
       try {
-        if (!applyRedEyeStep(image, change)) {
+        const pluginResult = applyPluginTool(RED_EYE_TOOL_KEY, change);
+        const fixed = pluginResult.handled && pluginResult.result === true;
+        if (!fixed) {
           say(nothingFound);
           return;
         }
@@ -111,8 +116,8 @@ export function RedEyeToolController() {
 
       redEyeAutoRequested$.subscribe(() => {
         // Automatic removal needs the AI models. Without them, offer to download them, and run once they are here.
-        if (missingModels(RED_EYE_MODELS).length > 0) {
-          aiModelsRequested.next({ title: 'Auto red-eye removal', roles: RED_EYE_MODELS, onReady: runAuto });
+        if (missingModels(FACE_MODELS).length > 0) {
+          aiModelsRequested.next({ title: 'Auto red-eye removal', roles: FACE_MODELS, onReady: runAuto });
           return;
         }
         runAuto();

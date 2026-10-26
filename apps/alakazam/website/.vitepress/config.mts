@@ -23,6 +23,7 @@ export default defineConfig({
           { text: 'Portraits and faces', link: '/guide/portraits' },
           { text: 'Smart features', link: '/guide/smart-features' },
           { text: 'Plugins', link: '/guide/plugins' },
+          { text: 'Develop a plugin', link: '/guide/plugin-development' },
           { text: 'Projects', link: '/guide/projects' },
           { text: 'Settings', link: '/guide/settings' },
         ],

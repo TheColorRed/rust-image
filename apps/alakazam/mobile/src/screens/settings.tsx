@@ -14,16 +14,18 @@ import {
   workerStackMegabytes,
   workerStackMegabytes$,
 } from '@/src/state/settings';
+import { clearToolbarUsage } from '@/src/state/toolbar-usage';
 import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
 import { Fragment, useMemo, useRef, useState, type ElementRef } from 'react';
 import { useObservable } from 'react-rx';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 /** The header over each card, by the name settings give their `card`. */
 const CARD_TITLES: Record<string, string> = {
   appearance: 'Display',
   export: 'Export',
   performance: 'Performance',
+  toolbar: 'Toolbar',
 };
 
 export function SettingsScreen() {
@@ -53,6 +55,8 @@ export function SettingsScreen() {
         },
         cards: { paddingBottom: 24 },
         setting: { gap: 12 },
+        toolbarHistoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+        toolbarHistoryCopy: { flex: 1, gap: 12 },
         titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
         sectionTitle: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
         cardTitle: {
@@ -102,6 +106,15 @@ export function SettingsScreen() {
         optionActive: { backgroundColor: colors.accent },
         optionText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
         optionTextActive: { color: '#fff' },
+        clearButton: {
+          alignSelf: 'center',
+          borderWidth: 1,
+          borderColor: colors.danger,
+          borderRadius: 8,
+          paddingHorizontal: 14,
+          paddingVertical: 9,
+        },
+        clearButtonText: { color: colors.danger, fontSize: 14, fontWeight: '600' },
       }),
     [colors],
   );
@@ -215,6 +228,30 @@ export function SettingsScreen() {
             </View>
           </Fragment>
         ))}
+        <Text style={styles.cardTitle}>{CARD_TITLES.toolbar}</Text>
+        <View style={styles.section}>
+          <View style={styles.setting}>
+            <View style={styles.toolbarHistoryRow}>
+              <View style={styles.toolbarHistoryCopy}>
+                <Text style={styles.sectionTitle}>Smart toolbar history</Text>
+                <Text style={styles.tooltipText}>The toolbar is ordered by what you use most.</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear smart toolbar history"
+                style={styles.clearButton}
+                onPress={() =>
+                  Alert.alert('Clear toolbar history?', 'The toolbar will return to its default order.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Clear history', style: 'destructive', onPress: clearToolbarUsage },
+                  ])
+                }
+              >
+                <Text style={styles.clearButtonText}>Clear history</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </ScrollView>
 
       <Modal

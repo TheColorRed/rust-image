@@ -6,11 +6,11 @@ import { Color } from '@abra/core/color';
 import { Brush } from '@abra/core/drawing';
 import { Area } from '@abra/core/geometry';
 import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
+import { BLEMISH_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { owning } from '@/src/lib/native/native-handles';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import { computePreviewImagePoint, unrotatePreviewPoint, type PreviewPoint } from '@/src/lib/editor/preview-coordinates';
-import { removeBlemish } from '@/src/lib/beauty/blemish';
-import { commitBlemish } from '@/src/lib/editor/editor-history';
+import { applyPluginTool } from '@/src/lib/plugins/plugin-controls';
 import { blemishApplyRequested$ } from '@/src/state/commands';
 import { isBlemishToolFocused, isBlemishToolFocused$, wasBlemishToolFocused } from '@/src/state/edits';
 import { historyReady } from '@/src/state/project-session';
@@ -107,8 +107,7 @@ export function BlemishToolController() {
         if (!image || !box || !historyReady.value) return;
         const target = computeBlemishTarget(image, box, previewScaleValue.value, previewTranslateValue.value);
         if (!target) return;
-        removeBlemish(image, target.x, target.y, target.radius);
-        commitBlemish({ x: target.x, y: target.y, radius: target.radius });
+        applyPluginTool(BLEMISH_TOOL_KEY, target);
       }),
 
       // Double-tapping a spot pans it to the reticle's center, rather than requiring a drag to line

@@ -78,11 +78,33 @@ export function installHandleLedger(target: { FinalizationRegistry?: unknown }) 
 /** A point in time: the handles made after it are the ones `unreleasedSince` reports. */
 export const handleLedgerMark = (): number => sequence;
 
-/** The handles made after `mark` that are still alive, grouped by the functions that made them, the most common first. */
-export function unreleasedSince(mark: number): { where: string; count: number; first: Error }[] {
+/**
+ * Takes `handle` off the ledger, for one that is meant to live as long as the app (a gradient a color bar makes once, say): it is
+ * made the first time it is used, which may be inside an editing session, and it is not a leak of that session. The handle is
+ * still freed if its wrapper is ever collected. Returns the handle.
+ */
+export function keptForLife<T>(handle: T): T {
+  if (typeof handle === 'object' && handle !== null) {
+    // The bindings register a small guard object they keep on the wrapper under a symbol, so that is the token to look for.
+    for (const symbol of Object.getOwnPropertySymbols(handle)) {
+      const guard = (handle as Record<symbol, unknown>)[symbol];
+      if (typeof guard !== 'object' || guard === null) continue;
+      const entry = byToken.get(guard);
+      if (entry) forget(entry);
+    }
+  }
+  return handle;
+}
+
+/**
+ * The handles made after `mark` and up to `until` (every later one, when left out) that are still alive, grouped by the functions
+ * that made them, the most common first. `until` keeps the handles of whatever started afterwards out of the report: the next
+ * photo opened within moments of closing the last one makes its own images, and those are not leaks of the one that closed.
+ */
+export function unreleasedSince(mark: number, until = Infinity): { where: string; count: number; first: Error }[] {
   const groups = new Map<string, { where: string; count: number; first: Error }>();
   for (const { sequence: made, made: error } of alive) {
-    if (made <= mark) continue;
+    if (made <= mark || made > until) continue;
     const where = whereOf(error);
     const group = groups.get(where);
     if (group) group.count++;
@@ -91,9 +113,9 @@ export function unreleasedSince(mark: number): { where: string; count: number; f
   return [...groups.values()].sort((a, b) => b.count - a.count);
 }
 
-/** Warns, once per place that made them, about the handles made after `mark` that are still alive. `label` says what ended. */
-export function warnUnreleasedSince(mark: number, label: string) {
-  const groups = unreleasedSince(mark);
+/** Warns, once per place that made them, about the handles made after `mark` (and up to `until`) that are still alive. `label` says what ended. */
+export function warnUnreleasedSince(mark: number, label: string, until = Infinity) {
+  const groups = unreleasedSince(mark, until);
   if (groups.length === 0) return;
   const total = groups.reduce((sum, group) => sum + group.count, 0);
   warn('leak', ` ${total} native handles made before ${label} are still alive, from ${groups.length} places:`);

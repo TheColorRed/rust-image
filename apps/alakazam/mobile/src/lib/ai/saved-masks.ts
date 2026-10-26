@@ -3,10 +3,9 @@ import { Mask, type MaskLike } from '@abra/core/mask';
 import { type Image as AbraPixels } from '@abra/core/image';
 import { personDetectionDownloaded, readImageAsync, type AbraImage, type PersonDetection } from '@alakazam/mobile';
 import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
-import { hairMasks } from '@/src/lib/beauty/hair-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
 import { toLocalPath } from '@/src/lib/editor/edit-source';
-import { analysisOf, buildAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
+import { analysisOf, buildAnalysis, forgetAnalysis, provideAnalysis } from '@/src/lib/editor/editor-preloads';
 import { detectPeople, detectSkin } from '@/src/lib/ai/analysis';
 import { findFaceBoxes, unloadModelsWhenIdle } from '@/src/lib/ai/faces';
 import { errorMessage } from '@/src/lib/utils/error-message';
@@ -16,28 +15,59 @@ import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { updateProject } from '@/src/state/projects';
 import { release } from '@/src/lib/native/native-handles';
+import { EDIT_SECTIONS, leafControls } from '@/src/lib/project/edit-sections';
+import type { SliderControl } from '@/src/lib/project/edit-sections';
 
 // Every mask an AI model makes for the original is kept in one list on the project (`Project.masks`), one lossless gray WebP each, so
 // a project opens and replays with no model run. A mask has one name, and the name is the whole of how it is found: `skin`,
 // `person:<id>`, and `<group>:<name>` for the masks a group of controls shares. To save a new group, add one line to `GROUPS`.
 
 /** The groups of masks that a preload makes, by the name their masks start with. */
-const GROUPS = { makeup: makeupMasks, hair: hairMasks, subject: subjectMask } as const;
+const GROUPS = { makeup: makeupMasks, subject: subjectMask } as const;
 
-/** Saves a mask as a gray image. */
-const writeMask = (mask: MaskLike, file: string) => {
-  const image = mask.toImage();
+/** Static app analyses plus plugin controls that opt into project-persisted masks. */
+export const analysisGroups = (): Map<string, NonNullable<SliderControl['preload']>> => {
+  const groups = new Map<string, NonNullable<SliderControl['preload']>>(Object.entries(GROUPS));
+  for (const section of EDIT_SECTIONS) {
+    for (const control of leafControls(section.controls)) {
+      if (control.kind === 'slider' && control.analysisGroup && control.preload) {
+        groups.set(control.analysisGroup, control.preload);
+      }
+    }
+  }
+  return groups;
+};
+
+export const forgetAnalysisGroup = (group: string) => {
+  const preload = analysisGroups().get(group);
+  if (preload) forgetAnalysis(preload);
+};
+
+type MaskSnapshot = { width: number; height: number; values: Uint8Array };
+
+/** Copies the mask data while its native handle is known to be alive. Background saves pause between files, so they must not keep
+ * borrowed UniFFI handles across those pauses: model cleanup can destroy one before the next file is written. */
+const snapshotMask = (mask: MaskLike): MaskSnapshot => ({
+  width: mask.width(),
+  height: mask.height(),
+  values: new Uint8Array(mask.values()),
+});
+
+/** Saves a snapshot as a gray image. The temporary native handles live only for this synchronous write. */
+const writeMask = (mask: MaskSnapshot, file: string) => {
+  const ownedMask = Mask.fromValues(mask.width, mask.height, mask.values.slice().buffer);
+  const image = ownedMask.toImage();
   try {
     image.write(file, undefined);
   } finally {
-    release(image);
+    release(image, ownedMask);
   }
 };
 
 const destroy = (mask: MaskLike) => release(mask);
 
 /** The project without the masks of one group (`makeup`), so the group is made again and saved over, like `rescanFaceMasks`. */
-export const withoutGroup = (project: Project, group: keyof typeof GROUPS): Project => ({
+export const withoutGroup = (project: Project, group: string): Project => ({
   ...project,
   masks: project.masks?.filter(({ name }) => !name.startsWith(`${group}:`)),
   maskGroups: project.maskGroups?.filter(saved => saved !== group),
@@ -70,7 +100,7 @@ export async function loadSavedMasks(project: Project, photo: AbraImage, isCance
   // A project saved without a person's mask has no people to give back: they are found again, rather than kept without a mask.
   const loaded = project.people?.map(person => ({ ...person, mask: byName[`person:${person.id}`] }));
   if (loaded?.every(person => person.mask)) people.next(loaded);
-  for (const [group, preload] of Object.entries(GROUPS)) {
+  for (const [group, preload] of analysisGroups()) {
     // A group that ran and found nothing is saved too, as an empty set.
     if (!project.maskGroups?.includes(group)) continue;
     const prefix = `${group}:`;
@@ -94,9 +124,18 @@ function* saveMasksSteps(project: Project): Generator<void, SavedMasks> {
   const masks = [...(project.masks ?? [])];
   const groups = [...(project.maskGroups ?? [])];
   const directory = toLocalPath(project.dir);
-  const todo: [string, MaskLike][] = [];
+  const todo: [string, MaskSnapshot][] = [];
   const add = (name: string, mask: MaskLike) => {
-    if (!masks.some(saved => saved.name === name) && !todo.some(([queued]) => queued === name)) todo.push([name, mask]);
+    if (masks.some(saved => saved.name === name) || todo.some(([queued]) => queued === name)) return true;
+    try {
+      todo.push([name, snapshotMask(mask)]);
+      return true;
+    } catch (error) {
+      // A preload can be invalidated while an async model/control is replacing its result. Do not let a dead UniFFI handle abort
+      // saving every other mask, and do not mark its analysis group complete below.
+      devWarn('masks', 'skipping a released mask:', name, errorMessage(error));
+      return false;
+    }
   };
   if (skinMask.value) add('skin', skinMask.value);
   let savedPeople = project.people;
@@ -108,11 +147,16 @@ function* saveMasksSteps(project: Project): Generator<void, SavedMasks> {
       return person;
     });
   }
-  for (const [group, preload] of Object.entries(GROUPS)) {
+  for (const [group, preload] of analysisGroups()) {
     const made = analysisOf(preload);
     if (groups.includes(group) || !made || Array.isArray(made)) continue;
-    for (const [name, mask] of Object.entries(made)) add(`${group}:${name}`, mask as MaskLike);
-    groups.push(group);
+    const start = todo.length;
+    let valid = true;
+    for (const [name, mask] of Object.entries(made)) {
+      if (!add(`${group}:${name}`, mask as MaskLike)) valid = false;
+    }
+    if (!valid) todo.splice(start);
+    else groups.push(group);
   }
   for (const [name, mask] of todo) {
     const file = `mask-${masks.length}-${Date.now()}.webp`;
@@ -184,6 +228,8 @@ export async function saveMasksInBackground() {
         error => devWarn('masks', 'could not save the project:', errorMessage(error)),
       );
     } while (saveAgain);
+  } catch (error) {
+    devWarn('masks', 'background mask save failed:', errorMessage(error));
   } finally {
     savingInBackground = false;
   }
@@ -220,5 +266,5 @@ export async function buildMasks(photo: AbraImage, isCancelled: () => boolean) {
   // The faces, the hair and the clothes are parts of people, so a photo with none has nothing for them to find. A control that is
   // used on such a photo makes them itself.
   if (!people.value?.length) return;
-  for (const preload of Object.values(GROUPS)) await step(() => buildAnalysis(preload, photo));
+  for (const preload of analysisGroups().values()) await step(() => buildAnalysis(preload, photo));
 }

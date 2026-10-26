@@ -32,7 +32,7 @@ import {
   startPreviewGestures,
   trackPreviewTransform,
 } from '@/src/state/gestures';
-import { liveSurface$, previewSize$, previewSourceImage, showingCheckpoint, topInset$ } from '@/src/state/preview';
+import { liveSurface$, previewSize$, previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { busy$, currentImage, currentImage$, editBaseImage, editBaseImage$, loadError$ } from '@/src/state/session';
 import { personOutlinesVisible$, personSelection, personSelection$ } from '@/src/state/person-selection';
 import { Gizmos } from '@alakazam/mobile';
@@ -42,13 +42,14 @@ import { VesselView } from '@vessel/react-native';
 import { useEffect, useMemo, useRef, type ElementRef } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
  * The photo itself: renders `previewSourceImage` at the preview box's size, owns pinch/pan, the
  * long-press before/after comparison, and the busy/error/saved overlays.
  */
 export function EditorPreview() {
-  const topInset = useObservable(topInset$, 0);
+  const { top: topInset } = useSafeAreaInsets();
   const photo = useObservable(previewSize$, null);
   // The size of the frames on screen while a preview is open. A tool's result can have another shape than the photo.
   const liveShown = useObservable(liveSurface$, null);
