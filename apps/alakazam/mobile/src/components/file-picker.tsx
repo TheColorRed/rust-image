@@ -1,9 +1,11 @@
 import { useTheme } from '@/src/lib/ui/theme';
 import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-native-documents/picker';
 import ImagePlus from 'lucide-react-native/icons/image-plus';
-import { useMemo, useState } from 'react';
-import { Alert, Button, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Alert, Button, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, CardHeader } from './card';
+import { ImagePreview } from './image-preview';
+import { SelectableThumb, useSelection } from './selection';
 
 export interface PickedImage {
   uri: string;
@@ -18,8 +20,15 @@ export interface FilePickerProps {
   onPick?: (assets: PickedImage[]) => void;
   title?: string;
   subtitle?: string;
-  variant?: 'default' | 'card';
+  variant?: 'default' | 'card' | 'inline';
+  /** For the inline variant: leave out the title, when the caller shows the name beside the control. The button then fills the width. */
+  hideTitle?: boolean;
   showPreview?: boolean;
+  multiple?: boolean;
+  /** Images to show as thumbnails below the control, for a caller that keeps its own picked list. */
+  thumbs?: PickedImage[];
+  /** Lets the thumbnails be selected (press and hold one). The caller owns it so it can show the `SelectionBar` at the bottom of the screen. */
+  selection?: ReturnType<typeof useSelection>;
   style?: any;
 }
 
@@ -32,7 +41,11 @@ export function FilePicker({
   title = 'Pick image from device',
   subtitle = 'Browse this device or a connected photo app',
   variant = 'default',
+  hideTitle = false,
   showPreview = true,
+  multiple = true,
+  thumbs,
+  selection,
   style,
 }: FilePickerProps) {
   const { colors } = useTheme();
@@ -41,22 +54,32 @@ export function FilePicker({
       StyleSheet.create({
         container: { width: '100%', gap: 8 },
         row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+        inlineRow: { width: '100%', minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+        inlineButton: { minHeight: 36, minWidth: 88, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
+        inlineButtonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
         badge: { color: colors.success, fontSize: 12 },
         error: { color: colors.danger },
         preview: { gap: 6 },
         label: { fontWeight: '600', color: colors.textPrimary },
+        thumbRow: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+        thumb: { width: 56, height: 56, borderRadius: 6, backgroundColor: colors.placeholder },
         image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: colors.placeholder },
         meta: { gap: 2 },
         metaText: { fontSize: 12, color: colors.textSecondary },
       }),
     [colors],
   );
+  const picking = useRef(false);
+  const unusedSelection = useSelection();
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function openPicker() {
+    if (picking.current) return;
+    picking.current = true;
     try {
-      const [first, ...rest] = await pick({ type: [types.images], allowMultiSelection: true });
+      const [first, ...rest] = await pick({ type: [types.images], allowMultiSelection: multiple });
       const files = [first, ...rest];
 
       // Android returns content:// URIs; copy them into the app cache so they have real file paths. Results come back in order.
@@ -90,11 +113,13 @@ export function FilePicker({
       }
       setError(failures.length > 0 ? `Could not copy ${failures.length} image(s):\n${failures.join('\n')}` : null);
     } catch (e: any) {
-      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+      if (isErrorWithCode(e) && (e.code === errorCodes.OPERATION_CANCELED || e.code === errorCodes.IN_PROGRESS)) {
         return;
       }
       setError(String(e?.message ?? e));
       Alert.alert('Pick failed', String(e?.message ?? e));
+    } finally {
+      picking.current = false;
     }
   }
 
@@ -104,6 +129,13 @@ export function FilePicker({
         <Card title={title} subtitle={subtitle} onPress={openPicker}>
           <CardHeader icon={ImagePlus} title={title} subtitle={subtitle} />
         </Card>
+      ) : variant === 'inline' ? (
+        <View style={styles.inlineRow}>
+          {hideTitle ? null : <Text numberOfLines={1} style={[styles.label, { flex: 1 }]}>{title}</Text>}
+          <Pressable accessibilityRole="button" accessibilityLabel={`${title}: choose image`} style={[styles.inlineButton, hideTitle && { flex: 1 }]} onPress={openPicker}>
+            <Text style={styles.inlineButtonText}>Choose</Text>
+          </Pressable>
+        </View>
       ) : (
         <View style={styles.row}>
           <Button title={title} onPress={openPicker} />
@@ -112,6 +144,32 @@ export function FilePicker({
       )}
 
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {thumbs && thumbs.length > 0 && (
+        <View style={styles.thumbRow}>
+          {thumbs.map((file, index) => (
+            <SelectableThumb
+              key={`${file.uri}-${index}`}
+              id={file.uri}
+              selection={selection ?? unusedSelection}
+              selectable={selection !== undefined}
+              onOpen={() => setPreviewIndex(index)}
+              accessibilityLabel={`Open ${file.name ?? `image ${index + 1}`}`}
+            >
+              <Image source={{ uri: file.uri }} style={styles.thumb} resizeMode="cover" />
+            </SelectableThumb>
+          ))}
+        </View>
+      )}
+
+      {thumbs && (
+        <ImagePreview
+          images={thumbs.map((file, index) => ({ id: `${file.uri}-${index}`, uri: file.uri }))}
+          visible={previewIndex != null}
+          initialIndex={previewIndex ?? 0}
+          onClose={() => setPreviewIndex(null)}
+        />
+      )}
 
       {showPreview && selected && (
         <View style={styles.preview}>

@@ -231,7 +231,7 @@ fn apply(
 #[test]
 fn eye_makeup_contact_sheet() {
   let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
-  let model = concat!(env!("CARGO_MANIFEST_DIR"), "/../../abra/ai/face-parsing/models/resnet18.onnx");
+  let model = concat!(env!("CARGO_MANIFEST_DIR"), "/../../ai/face-parsing/models/resnet18.onnx");
   // Without Git LFS the file is a small pointer, not a model.
   if std::fs::metadata(model).map(|metadata| metadata.len()).unwrap_or(0) < 1_000_000 {
     return;

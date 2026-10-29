@@ -1,5 +1,4 @@
-import { scanPlugins, type PluginInfo } from '@abra/core';
-import { pluginsFolder, readPluginScript } from '@alakazam/mobile';
+import { pluginsFolder, readPluginScript, scanPlugins, type PluginInfo } from '@alakazam/mobile';
 import { EDIT_SECTIONS, leafControls, type EditControl } from '@/src/lib/project/edit-sections';
 import { insertControls, removeControls } from '@/src/lib/plugins/control-insertion';
 import type { ControlScript } from '@/src/lib/plugins/host-api';
@@ -10,6 +9,7 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { clearControlTraits, setControlTraits } from '@/src/state/control-traits';
 import { pluginControlsVersion, pluginProblems, type PluginProblem } from '@/src/state/plugins';
 import { objectRemovalToolKey } from '@/src/state/plugin-tool-panels';
+import { removePluginInspectorItems } from '@/src/lib/plugins/plugin-inspector';
 
 /** What a plugin put in the editor, and how to take it out again. */
 type Loaded = { version: string; undo: () => void };
@@ -78,6 +78,7 @@ const maker: PlaceMaker = {
 /** Puts the controls of one plugin in the editor, each where its `plugin.yml` says. Puts nothing in when any of them fails. */
 function loadControls(plugin: PluginInfo): Loaded {
   const undos: (() => void)[] = [];
+  removePluginInspectorItems(plugin.id);
   try {
     // Plugin controls may outlive this module during Fast Refresh. Clear the whole plugin namespace before loading the current version.
     for (const section of EDIT_SECTIONS) removePluginControls(section.controls, `${plugin.id}.`);
@@ -118,9 +119,16 @@ function loadControls(plugin: PluginInfo): Loaded {
     }
   } catch (error) {
     undos.reverse().forEach(undo => undo());
+    removePluginInspectorItems(plugin.id);
     throw error;
   }
-  return { version: plugin.version, undo: () => [...undos].reverse().forEach(undo => undo()) };
+  return {
+    version: plugin.version,
+    undo: () => {
+      [...undos].reverse().forEach(undo => undo());
+      removePluginInspectorItems(plugin.id);
+    },
+  };
 }
 
 /**

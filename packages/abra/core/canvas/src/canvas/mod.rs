@@ -2,6 +2,7 @@
 
 mod anchor;
 mod canvas;
+mod cells;
 pub(crate) mod canvas_inner;
 mod canvas_transform;
 mod layer;
@@ -15,6 +16,7 @@ mod origin;
 
 pub use anchor::Anchor;
 pub use canvas::{Canvas, CanvasUnit};
+pub use cells::CanvasCell;
 pub use canvas_transform::{CanvasResizeTarget, CanvasTransform};
 pub use layer::{AdjustmentLayerType, Layer, LayerMove};
 pub use layer_transform::LayerTransform;

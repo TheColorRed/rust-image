@@ -45,6 +45,8 @@ export interface SliderProps {
   leading?: ReactNode;
   /** Shown at the end of the header line, after the reset button. */
   trailing?: ReactNode;
+  /** Leaves out the header line (label, value and reset button), for a caller that shows them itself. */
+  compact?: boolean;
 }
 
 /**
@@ -66,11 +68,14 @@ export function Slider({
   valueText,
   leading,
   trailing,
+  compact = false,
 }: SliderProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [value, setValue] = useState(initialValue);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The caller can move the slider (a number typed in beside it), and then the thumb follows.
+  useEffect(() => setValue(initialValue), [initialValue]);
 
   useEffect(
     () => () => {
@@ -108,6 +113,7 @@ export function Slider({
 
   return (
     <View>
+      {compact ? null : (
       <View style={styles.header}>
         {leading}
         <Text style={styles.label} numberOfLines={1}>
@@ -121,6 +127,7 @@ export function Slider({
         )}
         {trailing}
       </View>
+      )}
       <RNSlider
         style={styles.slider}
         minimumValue={min}

@@ -34,7 +34,7 @@ The root crate of the Abra library is located in the root of the workspace. It i
 ## Modules
 
 - `/packages/abra/abra`: This is the main entry point of the library. It doesn't contain much logic itself but re-exports the other modules for easier access.
-- `/packages/abra/ai`: This module contains functions and types related to AI-powered image processing tasks, such as image enhancement. Models describe themselves with a `.yml` manifest beside the `.onnx` file, so adding a model of a kind the library can already read needs no code. See `ai/core` (`AiModel`, `Manifest`). The library never downloads or locates models; the app passes a path.
+- `/packages/abra/core/ai`: The core of the AI support; the models themselves are crates in `/packages/ai`. It contains functions and types related to AI-powered image processing tasks, such as image enhancement. Models describe themselves with a `.yml` manifest beside the `.onnx` file, so adding a model of a kind the library can already read needs no code. See `core/ai` (`AiModel`, `Manifest`). The library never downloads or locates models; the app passes a path.
 - `/packages/abra/core`: This directory contains the core functionality of the library and is further divided into several sub-modules:
   - `adjustments`: Contains functions for adjusting image properties such as brightness, contrast, and saturation.
   - `canvas`: A canvas is a group of layers, and this module contains functions for creating and managing canvases and their layers.
@@ -52,7 +52,7 @@ The root crate of the Abra library is located in the root of the workspace. It i
 - `/packages/vessel/vessel`: The standalone view engine, package `vessel` (no abra dependency, so it can be published on its own). `Engine` runs `View`s on its own thread and decides when to draw them; each view shows a `MediaSource` (a canvas, a video, a camera, a game...). It uses `pub-sub`.
 - `/packages/vessel/gpu-passes`: Compute shader passes over RGBA pixels (`GpuPass`, `GpuAux`, `GpuSession`) and, with its `runtime` feature, the wgpu runtime that runs them (`GpuContext`, `LiveRenderer`, `Presenter`). No abra dependency. Abra supplies passes as data; it never runs the GPU itself.
 - `/packages/vessel/surface`: Surfaces that frames are drawn on, looked up by id (`Surface` trait; a native Android window is the first kind). No abra dependency.
-- `abra::plugin` (`/packages/abra/abra/src/plugin`): runtime plugins. A plugin is a folder with a `plugin.yml` that adds AI models, pipelines or scripts, found by `PluginRegistry::scan` and asked for by capability, so an app gains one by adding a folder. See `apps/docs/public/plugins`. `/packages/abra/ai/object-removal/plugins` holds two real ones (MI-GAN, LaMa).
+- Runtime plugins (`/packages/react-native/alakazam/src/plugins`, part of the Alakazam app, not of Abra): plugins. A plugin is a folder with a `plugin.yml` that adds AI models, pipelines or scripts, found by `PluginRegistry::scan` and asked for by capability, so an app gains one by adding a folder. See `apps/docs/public/plugins`. `/packages/ai/object-removal/plugins` holds two real ones (MI-GAN, LaMa).
 - `/packages/abra/plugins`: Rust library add-ons that an app links in (`collage`, `word-cloud`). They are not runtime plugins.
 
 ## Images That Wait, and Parts of Images

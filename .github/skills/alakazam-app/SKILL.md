@@ -37,6 +37,16 @@ The app is for people who are not artists. See the [usability document](./refere
 (plain words, not trade words), how common choices are offered as named swatches, what a control should show when it opens, and
 how a control that applies to a person behaves with one person or several. Read it before adding or renaming an edit control.
 
+## Image work stays off the JavaScript thread
+
+**The app's JavaScript never does the image work.** It describes what to make and changes settings; Rust (the Abra library and the Alakazam native crate) decodes, resizes, composes, filters and draws, on its own threads. A native call blocks the JavaScript thread until it returns, so every pixel operation written in TypeScript freezes the screen for as long as it takes: sliders stop following the finger, and a style switch or a pick looks like a hang. This is the same rule as "the library does the work", applied to threads, and it covers plugins as much as the editor.
+
+- **Do not run pixel work in a loop or in an event handler.** `Image.read`, `resize`, `rotate`, `asImage`, `apply(...)`, `draw...` and the like do not belong in a slider's `onChange`, a redraw, a render, or a per-cell loop that runs when a person changes a control. A loop that does image work in TypeScript is a missing library primitive: add it to the library first (`abra-library` skill) and call it once.
+- **Show a canvas, do not flatten it.** Give the preview the `Canvas` (`ImagePreview.fromCanvas`) and let the engine compose it when it has changed, on its own thread. Do not call `asImage()` and copy the result into a preview.
+- **A drag changes properties, it does not rebuild.** Build the canvas, layers and effects once for a set of inputs. A slider then calls cheap setters on what exists (`setRotation`, `setScale`, `set_live_effects`), which only mark it changed, and the engine draws it. Rebuild only for a structural change (other pictures, another style, a new size), and never once per move of a drag.
+- **Work that is slow in itself goes to a worker.** A decode, a large resize or a model run is made an async native call (as `runAiModelAsync` is) or is done by the library in the background, with the control showing progress, so the editor keeps drawing and answering touches. Cache the result for the inputs that made it, so a change that does not touch those inputs (another layout of the same photos) does not make it again.
+- **Check before adding code that touches pixels.** If it runs when a control changes, ask what thread it runs on. If the answer is the JavaScript thread, it is in the wrong place.
+
 ## AI
 
 AI models run only when a control that needs one is used, and run once per photo. Whatever they find that an edit needs is saved to the project (masks as files, data in `project.json`) so a project opens and replays with no model installed or run. See the AI rules in the [mobile structure document](./references/mobile-structure.md#ai-rules).

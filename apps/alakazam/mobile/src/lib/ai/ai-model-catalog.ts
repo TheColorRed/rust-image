@@ -1,5 +1,4 @@
 import { devWarn } from '@/src/lib/log';
-import { scanPlugins } from '@abra/core';
 import {
   aiModelPath,
   deleteAiModel,
@@ -8,6 +7,7 @@ import {
   downloadedAiModelBytes,
   installPluginPackage,
   pluginsFolder,
+  scanPlugins,
 } from '@alakazam/mobile';
 import { parse } from 'yaml';
 import { installPlan, type CatalogPlugin } from '@/src/lib/ai/plugin-dependencies';

@@ -52,6 +52,8 @@ pub(crate) struct CanvasInner<'a> {
   anchor: Option<Anchor>,
   /// The rotation in degrees for positioning within the parent canvas.
   rotation: Cell<Option<f32>>,
+  /// The factor the canvas is scaled by within the parent canvas, about its middle. 1 is its own size.
+  scale: Cell<f32>,
   /// The blend mode to use when compositing this canvas into its parent.
   /// This mirrors LayerInner::blend_mode, but for a canvas group.
   pub blend_mode: BlendMode,
@@ -87,6 +89,7 @@ impl<'a> CanvasInner<'a> {
       needs_recompose: Cell::new(true),
       anchor: None,
       rotation: Cell::new(None),
+      scale: Cell::new(1.0),
       blend_mode: abra_core::BlendMode::Normal,
       pass_through: false,
       opacity: Cell::new(1.0),
@@ -126,9 +129,9 @@ impl<'a> CanvasInner<'a> {
     self.needs_recompose.set(true);
   }
 
-  /// Whether the canvas has changed since it was last composed.
+  /// Whether the canvas, or any canvas inside it, has changed since it was last composed.
   pub fn is_dirty(&self) -> bool {
-    self.needs_recompose.get()
+    self.tree_is_dirty()
   }
 
   /// Whether this canvas or any canvas inside it has changed since it was last composed. A change inside a child canvas only
@@ -343,14 +346,32 @@ impl<'a> CanvasInner<'a> {
       let dest_x = p_offset_x + child_x;
       let dest_y = p_offset_y + child_y;
 
-      if child_inner.pass_through() && child_inner.rotation().is_none() && child_inner.mask.is_none() {
+      if child_inner.pass_through() && child_inner.rotation().is_none() && child_inner.scale() == 1.0 && child_inner.mask.is_none() {
         // Composite child's layers directly into `dest` with accumulated offsets
         child_inner.composite_into(p_dest, dest_x, dest_y, true);
       } else {
         // Composite child's flattened result
         let mut child_result = child_inner.get_result_image();
+        // Scaled from the canvas's own pixels each time it is composed, so changing the scale never loses quality, and about the
+        // middle of the canvas, so it grows and shrinks where it sits.
+        let (mut dest_x, mut dest_y) = (dest_x, dest_y);
+        let scale = child_inner.scale();
+        if scale != 1.0 {
+          let (scaled_width, scaled_height) = (((child_width as f32 * scale).round().max(1.0)), ((child_height as f32 * scale).round().max(1.0)));
+          // Every shrink is made with Lanczos, which looks at enough pixels to keep a shrunk photo smooth. The automatic choice uses
+          // bilinear for a shrink of less than half, which skips pixels and shows as a rough, pixelated picture.
+          let algorithm = if scale < 1.0 { TransformAlgorithm::Lanczos } else { TransformAlgorithm::Bicubic };
+          child_result.resize(ResizeTarget::Exact(Size::new(scaled_width, scaled_height)), algorithm);
+          dest_x += ((child_width as f32 - scaled_width) / 2.0).round() as i32;
+          dest_y += ((child_height as f32 - scaled_height) / 2.0).round() as i32;
+        }
         if let Some(rotation_degrees) = child_inner.rotation() {
+          // The rotated picture grows to hold its tilted corners, so it moves back by half the growth to turn about the middle.
+          let (before_width, before_height) = child_result.dimensions::<u32>();
           child_result.rotate(rotation_degrees, None);
+          let (after_width, after_height) = child_result.dimensions::<u32>();
+          dest_x += ((before_width as f32 - after_width as f32) / 2.0).round() as i32;
+          dest_y += ((before_height as f32 - after_height as f32) / 2.0).round() as i32;
         }
         let child_blend = child_inner.blend_mode();
         let child_opacity = child_inner.opacity();
@@ -456,6 +477,7 @@ impl<'a> CanvasInner<'a> {
   pub fn set_global_position(&mut self, p_x: i32, p_y: i32) {
     self.x.set(p_x);
     self.y.set(p_y);
+    self.mark_dirty();
   }
 
   /// Gets the position of the canvas.
@@ -466,6 +488,18 @@ impl<'a> CanvasInner<'a> {
   /// Sets the rotation in degrees for the canvas within its parent.
   pub fn set_rotation(&mut self, p_degrees: impl Into<Option<f32>>) {
     self.rotation.set(p_degrees.into());
+    self.mark_dirty();
+  }
+
+  /// Sets the factor the canvas is scaled by within its parent, about its middle. 1 is its own size; a factor below 0 is 0.
+  pub fn set_scale(&mut self, p_factor: f32) {
+    self.scale.set(p_factor.max(0.0));
+    self.mark_dirty();
+  }
+
+  /// Gets the factor the canvas is scaled by within its parent.
+  pub fn scale(&self) -> f32 {
+    self.scale.get()
   }
 
   /// Gets the rotation in degrees for the canvas within its parent.

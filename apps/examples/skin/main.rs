@@ -8,7 +8,7 @@ use abra_body_segmentation::prelude::ImageAi;
 fn main() {
   // Read the original image and prepare for skin effects.
   let image_orig = Image::read("assets/nude/freckles-blonde.jpeg").expect("Failed to read image");
-  let segmenter = BodySegmentation::load("packages/abra/ai/body-segmentation/models/selfie_multiclass_256x256.onnx")
+  let segmenter = BodySegmentation::load("packages/ai/body-segmentation/models/selfie_multiclass_256x256.onnx")
     .expect("Failed to load the skin model");
   let mask = segmenter.process(&image_orig).expect("Failed to segment skin");
 

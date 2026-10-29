@@ -16,7 +16,7 @@ For Android development, start **Plugin development server** on the app's Plugin
 npx @alakazam/plugin dev
 ```
 
-The command prompts for the server address and token shown in the app. Pass `--url <address> --token <token>` to provide them directly. By default, it searches the workspace repository root for plugin folders with JavaScript controls, including when npm launches it from the toolkit package directory. Pass `--root <directory>` or positional search roots to search elsewhere. At startup it only watches; saving a plugin file rebuilds the entry and sends `plugin.yml` and its listed files directly to the app. It does not create an archive for live sync. The app validates and installs the files, then refreshes its controls. Stop the server from the Plugins page when finished.
+The command prompts for the server address shown in the app. Pass `--url <address>` to provide it directly. By default, it searches the workspace repository root for plugin folders with JavaScript controls, including when npm launches it from the toolkit package directory. Pass `--root <directory>` or positional search roots to search elsewhere. At startup it only watches; saving a plugin file rebuilds the entry and sends `plugin.yml` and its listed files directly to the app. It does not create an archive for live sync. The app validates and installs the files, then refreshes its controls. Stop the server from the Plugins page when finished.
 
 The package also provides the TypeScript declarations for `@alakazam/plugin`, the module Alakazam exposes to plugins at runtime. Add `@alakazam/plugin` and `@abra/core` to your plugin's development dependencies to type-check its imports.
 

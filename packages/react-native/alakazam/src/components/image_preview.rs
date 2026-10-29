@@ -7,7 +7,7 @@
 
 use std::sync::{
   Arc, Mutex,
-  atomic::{AtomicBool, Ordering},
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use abra::prelude::ImageExt;
@@ -15,15 +15,47 @@ use vessel::prelude::*;
 
 
 pub(crate) struct PreviewSource {
-  /// The image that is shown. It is shared: whoever holds the other end edits it, and the picture follows.
-  image: Arc<abra_uniffi::Image>,
+  /// The picture that is shown, as it is now. For an image it is the image, which is shared: whoever holds the other end edits it, and
+  /// the picture follows. For a canvas it is the canvas composed, which is done here, on the engine's thread, each time the canvas
+  /// has changed.
+  image: Arc<dyn Fn() -> abra::prelude::Image + Send + Sync>,
+  /// Names what is shown: it is a different number each time the picture has to be made again.
+  version: Arc<dyn Fn() -> u64 + Send + Sync>,
   /// The renderer that makes the pictures, once there is one, so it can be woken when the image is edited.
   renderer: Mutex<Option<Offscreen>>,
 }
 
 impl PreviewSource {
-  pub(crate) fn new(image: Arc<abra_uniffi::Image>) -> Self {
-    Self { image, renderer: Mutex::new(None) }
+  pub(crate) fn new(p_image: Arc<abra_uniffi::Image>) -> Self {
+    let version = Arc::clone(&p_image);
+    Self {
+      image: Arc::new({
+        let image = Arc::clone(&p_image);
+        move || image.core()
+      }),
+      version: Arc::new(move || version.core().version()),
+      renderer: Mutex::new(None),
+    }
+  }
+
+  /// A source that shows a canvas, composed whenever it has changed since it was last composed.
+  pub(crate) fn of_canvas(p_canvas: Arc<abra_uniffi::Canvas>) -> Self {
+    let changes = Arc::new(AtomicU64::new(0));
+    let version = Arc::clone(&p_canvas);
+    Self {
+      image: Arc::new({
+        let canvas = Arc::clone(&p_canvas);
+        move || canvas.as_image().core()
+      }),
+      // A canvas that has changed is a new number until it has been composed, which is what the renderer is waiting for.
+      version: Arc::new(move || {
+        if version.is_dirty() {
+          changes.fetch_add(1, Ordering::SeqCst);
+        }
+        changes.load(Ordering::SeqCst)
+      }),
+      renderer: Mutex::new(None),
+    }
   }
 
   /// Draws again at once if what is shown has changed since it was drawn, such as a photo that was edited in place.
@@ -59,8 +91,8 @@ impl Trackable for PreviewSource {
     // The renderer draws again whenever the image is a different one (see `ImagePreview::refresh`), and keeps drawing while tiles
     // are still on their way; between them it sleeps.
     let version = {
-      let source = Arc::clone(&self.image);
-      move || source.core().version()
+      let source = Arc::clone(&self.version);
+      move || source()
     };
     let busy = Arc::new(AtomicBool::new(false));
     // The photos on the GPU, the one drawn last at the end. An edit that is a smaller picture (a mood, say) and then undone brings
@@ -71,7 +103,7 @@ impl Trackable for PreviewSource {
       if size.0 == 0 || size.1 == 0 { return None }
       // An image that is still a recipe is the pixels it started from and the passes over them, so the GPU keeps those pixels
       // and a drag only changes the passes.
-      let image = source.core();
+      let image = source();
       let (root, passes) = abra::abra_core::image::recipe::gpu_run(&image).unwrap_or_else(|| (image.clone(), Vec::new()));
       let (photo_width, photo_height) = root.dimensions::<u32>();
       // The view is the whole box and the viewport says which part of the photo it shows, which may reach past the photo.
@@ -235,18 +267,15 @@ impl ImagePreview {
   /// image of its own (a copy), not one that other work needs to keep as it is.
   #[uniffi::constructor]
   pub fn new(p_image: Arc<abra_uniffi::Image>) -> Arc<Self> {
-    let source = Arc::new(PreviewSource::new(p_image));
-    let image = Image::new().track(source.as_ref());
-    let presented = Arc::new(AtomicBool::new(false));
-    image.subject::<Drawn>().subscribe({
-      let presented = Arc::clone(&presented);
-      move |_| presented.store(true, Ordering::SeqCst)
-    });
-    Arc::new(Self {
-      image,
-      presented,
-      source,
-    })
+    Self::over(PreviewSource::new(p_image))
+  }
+
+  /// A view of `canvas`, composed by the engine on its own thread each time the canvas has changed: build the canvas once, change its
+  /// layers and canvases (a rotation, a position), and call [`refresh`](Self::refresh), and nothing is composed on the caller's thread.
+  /// The canvas is shared, not copied.
+  #[uniffi::constructor]
+  pub fn from_canvas(p_canvas: Arc<abra_uniffi::Canvas>) -> Arc<Self> {
+    Self::over(PreviewSource::of_canvas(p_canvas))
   }
 
   /// Draws the view again now if the image it shares was edited since it was drawn. The view looks at the version of that image
@@ -290,6 +319,24 @@ impl ImagePreview {
   /// Whether a completed photo frame has reached the mounted surface. Placeholder frames do not count.
   pub fn has_frame(&self) -> bool {
     self.presented.load(Ordering::SeqCst)
+  }
+}
+
+impl ImagePreview {
+  /// The view over a source, made to follow it and to say when a frame has been drawn.
+  fn over(p_source: PreviewSource) -> Arc<Self> {
+    let source = Arc::new(p_source);
+    let image = Image::new().track(source.as_ref());
+    let presented = Arc::new(AtomicBool::new(false));
+    image.subject::<Drawn>().subscribe({
+      let presented = Arc::clone(&presented);
+      move |_| presented.store(true, Ordering::SeqCst)
+    });
+    Arc::new(Self {
+      image,
+      presented,
+      source,
+    })
   }
 }
 
@@ -352,7 +399,7 @@ mod tests {
       if let Some(pixel) = p_surface.0.lock().unwrap().last().copied().filter(|&pixel| p_ready(pixel)) {
         return pixel;
       }
-      assert!(start.elapsed() < Duration::from_secs(5), "no matching frame arrived");
+      assert!(start.elapsed() < Duration::from_secs(5), "no matching frame arrived; drawn so far: {:?}", p_surface.0.lock().unwrap());
       std::thread::sleep(Duration::from_millis(5));
     }
   }
@@ -556,5 +603,22 @@ mod tests {
     replace(&view, &photo, made);
     assert_eq!(newest(&surface, |pixel| pixel == 150), 150);
     assert!(surface.0.lock().unwrap().len() > drawn);
+  }
+
+  #[test]
+  fn a_canvas_is_composed_by_the_view_and_drawn_again_when_it_changes_and_the_view_is_told_to_refresh() {
+    let canvas = Arc::new(abra_uniffi::Canvas::new_blank("Test".to_string(), 4, 4));
+    let gray = |value: u8| {
+      Arc::new(abra_uniffi::Image::from_core(AbraPixels::new_from_color(4, 4, abra::abra_core::Color::from_rgba(value, value, value, 255))))
+    };
+    canvas.add_layer_from_image("gray".to_string(), gray(100), None);
+    let view = ImagePreview::from_canvas(Arc::clone(&canvas));
+    view.mount(7030);
+    let surface = surface_of(7030);
+    assert_eq!(newest(&surface, |_| true), 100, "the canvas as it is composed");
+
+    canvas.add_layer_from_image("lighter".to_string(), gray(180), None);
+    view.refresh();
+    assert_eq!(newest(&surface, |pixel| pixel == 180), 180, "a layer added to the canvas is composed and drawn");
   }
 }

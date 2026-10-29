@@ -14,8 +14,8 @@ use abra::prelude::*;
 use abra_body_segmentation::prelude::{BodyParser, BodyRegion, ImageAi};
 use abra_matting::Matting;
 
-const BODY_MODEL: &str = "packages/abra/ai/body-segmentation/models/selfie_multiclass_256x256.onnx";
-const MATTING_MODEL: &str = "packages/abra/ai/matting/models/rvm_mobilenetv3_fp32.onnx";
+const BODY_MODEL: &str = "packages/ai/body-segmentation/models/selfie_multiclass_256x256.onnx";
+const MATTING_MODEL: &str = "packages/ai/matting/models/rvm_mobilenetv3_fp32.onnx";
 
 /// How a picture is made. Colors are RGB and sizes are shares of the photo's shorter side.
 #[derive(Clone, Copy)]

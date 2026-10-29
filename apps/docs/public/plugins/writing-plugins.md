@@ -6,7 +6,7 @@ outline: deep
 
 # Writing a plugin
 
-A plugin is a folder described by `plugin.yml`. Its `id` is its identity; its source folder name can be different. For the Alakazam app, TypeScript plugin sources live in `apps/alakazam/mobile/plugins/<folder>`. The build bundles their source into the files the app downloads. AI model plugins live under `packages/abra/ai/<crate>/plugins/<folder>`.
+A plugin is a folder described by `plugin.yml`. Its `id` is its identity; its source folder name can be different. For the Alakazam app, TypeScript plugin sources live in `apps/alakazam/mobile/plugins/<folder>`. The build bundles their source into the files the app downloads. AI model plugins live under `packages/ai/<crate>/plugins/<folder>`.
 
 ```text
 apps/alakazam/mobile/plugins/my-control/
@@ -15,7 +15,7 @@ apps/alakazam/mobile/plugins/my-control/
   src/
     control.ts
 
-packages/abra/ai/<crate>/plugins/ai-example/
+packages/ai/<crate>/plugins/ai-example/
   plugin.yml
   example.onnx
   example.yml
@@ -33,15 +33,15 @@ plugins/
 
 ## plugin.yml
 
-| Field         | Required | Meaning                                                                                                |
-| ------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `id`          | yes      | Names the plugin: lowercase words of letters and digits joined by dashes. No two plugins share one.                                    |
-| `name`        | yes      | The name to show.                                                                                      |
-| `version`     | yes      | The version, such as `1.0.0`.                                                                          |
-| `description` | no       | What the plugin does.                                                                                  |
-| `contributes` | yes      | What it adds: `models`, `pipelines`, `scripts` or `controls`. At least one contribution is needed.    |
-| `settings`    | no       | An ordered list of setting fields. Supports `text` and single-select `option`. |
-| `dependencies`| no       | The plugins that must be installed for this one to be used. See [Dependencies](#dependencies).         |
+| Field          | Required | Meaning                                                                                                          |
+| -------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `id`           | yes      | Names the plugin: lowercase words of letters and digits joined by dashes. No two plugins share one.              |
+| `name`         | yes      | The name to show.                                                                                                |
+| `version`      | yes      | The version, such as `1.0.0`.                                                                                    |
+| `description`  | no       | What the plugin does.                                                                                            |
+| `contributes`  | yes      | What it adds: `models`, `pipelines`, `scripts`, `controls` or `workspaces`. At least one contribution is needed. |
+| `settings`     | no       | An ordered list of setting fields. Supports `text` and single-select `option`.                                   |
+| `dependencies` | no       | The plugins that must be installed for this one to be used. See [Dependencies](#dependencies).                   |
 
 ### Settings
 
@@ -78,11 +78,11 @@ Files are written relative to the plugin's folder, with `/` between names. A pat
 
 An AI model that the AI runtime runs from its manifest.
 
-| Field      | Required | Meaning                                                                     |
-| ---------- | -------- | --------------------------------------------------------------------------- |
-| `model`    | yes      | The `.onnx` file.                                                           |
-| `manifest` | no       | The model's manifest. It is the model's name with `.yml` when left out.     |
-| `subjects` | no       | What the model finds, such as `people`, for showing it.                     |
+| Field      | Required | Meaning                                                                 |
+| ---------- | -------- | ----------------------------------------------------------------------- |
+| `model`    | yes      | The `.onnx` file.                                                       |
+| `manifest` | no       | The model's manifest. It is the model's name with `.yml` when left out. |
+| `subjects` | no       | What the model finds, such as `people`, for showing it.                 |
 
 The model's manifest says how the model is fed and what it answers with. It can describe every input tensor (a picture, a mask, a constant, as numbers or bytes), run the model on a window round a mask, and paste only the masked pixels back, so most models need no code at all. See `abra_ai_core::graph` for every setting.
 
@@ -114,6 +114,115 @@ scripts:
     entry: collage.js
 ```
 
+### Workspaces
+
+A workspace opens a full-screen plugin editor. Its JavaScript entry may export any of these, and the editor shows only the parts it exports:
+
+| Export | What it does |
+|---|---|
+| `inspectorGUI()` | Adds the controls of the inspector beside the preview. Without it there is no inspector and no toolbar button for it. |
+| `controlsGUI()` | Adds the controls of the bar under the preview, with the same functions as `inspectorGUI`. Without it there is no bar. |
+| `previewCanvas()` | Returns the canvas the preview shows, or nothing, or a promise of it. A canvas that takes a while to make is built by the library on worker threads (`canvasOfCells`, below), never with a loop of image calls on the JS thread; while the promise is pending the canvas on show stays, with a spinner over it, and only the newest call's canvas is shown. The editor shows it directly and the engine composes it on its own thread, so nothing is drawn on the JS thread. Called when the workspace opens and after each change that is not a drag. Return the same canvas again while it is still right, and change its layers in place (in a slider's `onChange`) to move something. |
+| `dispose()` | Called when the workspace closes, so the plugin can free what it made, such as the canvas. |
+
+To build a canvas of pictures, `canvasOfCells(name, width, height, cells)` makes a canvas with a child canvas for each cell, in order, each holding its picture file scaled to cover the cell (the part that does not fit is cropped). The library reads and scales the pictures on worker threads, in parallel, and reads a file that several cells use once. It returns a promise, and the child canvases are the canvas's `canvases()`, which a slider can turn, scale and move with `setRotation`, `setScale` and `setPosition`. A cell is `{ path, x, y, width, height }` in pixels of the canvas.
+
+The plugin owns the canvas it returns: free it (with `release`) when it returns another one, and in `dispose`. To add the native image picker to the inspector:
+
+```ts
+import { inspector } from '@alakazam/plugin';
+
+export function inspectorGUI() {
+  inspector.filePicker('Photos', {
+    multiple: true,
+    thumbs: true,
+    onPick(files) {
+      // `files` always has an array of copied local file URIs.
+    },
+  });
+}
+```
+
+`multiple` defaults to `false`. `thumbs` defaults to `false`; when `true` the inspector shows a thumbnail of each image the user picked below the control; tapping one opens it in a full-screen viewer that swipes through all of them, and pressing and holding one starts selecting images to remove. The callback always receives an array of copied local files: the full list of images, called again with the images that are left when the user removes some, so keep the list it gives you. Each call to `inspectorGUI` or `controlsGUI` replaces the controls it made before, and the editor calls them again after a change that is not a drag.
+
+To add a heading, like an `<h1>` to `<h6>`: `inspector.header('Options')` is an `h1`, and `inspector.header('Options', { level: 2 })` is an `h2`. The `level` option is 1 to 6 and defaults to 1.
+
+To add two number fields side by side, such as a size or a point:
+
+```ts
+inspector.size('Image Size', {
+  value: [1024, 1024],
+  labels: ['Width', 'Height'],
+  min: 1,
+  onChange(value) {
+    // `value` is `[width, height]`. The editor runs `previewCanvas` again after this.
+  },
+});
+```
+
+`value` defaults to `[0, 0]` and `labels` to `['Width', 'Height']`. `reset` (default `true`) shows a round reset button beside the name, which puts the numbers back to what they were when the editor opened. `min` and `max` are optional and limit both numbers. `onChange` is called with both numbers each time either field holds a number; a field that is empty or not a number changes nothing. Because a size changes what the plugin makes and is not a drag, the editor runs the plugin's controls and `previewCanvas` again after each change.
+
+To let the person pick one of a few choices, as a bar of buttons across the width, and to add a single number:
+
+```ts
+inspector.select('Style', {
+  options: ['Grid', 'Layered Grid', 'Random'],
+  value: 'Grid',
+  onChange(choice) {
+    // `choice` is the button that was pressed.
+  },
+});
+
+inspector.number('Images', {
+  value: 6,
+  min: 1,
+  max: 100,
+  onChange(count) {
+    // `count` is held to `min` and `max`.
+  },
+});
+```
+
+`select` takes `options` (the choices) and `value` (the one selected, the first by default). `number` takes `value` (`min`, or 0, by default), `min`, `max`, `step` (1 by default, which is also how many decimals it shows) and `reset` (true by default). Both change what the plugin makes and are not drags, so the editor runs the plugin's controls and `previewCanvas` again after each change, the way it does for `size`.
+
+To add an on/off switch:
+
+```ts
+inspector.toggle('Keep Aspect Ratio', {
+  value: true,
+  onChange(on) {
+    // `on` is whether the switch is now on.
+  },
+});
+```
+
+`toggle` takes `value` (false by default) and `onChange`. Like `select` and `number` it changes what the plugin makes and is not a drag, so the editor runs the plugin's controls and `previewCanvas` again after each change.
+
+To add a slider:
+
+```ts
+inspector.slider('Rotation', {
+  min: -360,
+  max: 360,
+  step: 1,
+  range: true,
+  onChange(value) {
+    // `value` is `[low, high]` here, because `range` is `true`.
+  },
+});
+```
+
+`max` is required. `min` defaults to `0`, `step` to `1` and `range` to `false`. `multiline` puts the name on a line of its own with the slider under it across the whole width; otherwise the name is on the left and the slider on the right. It defaults to `false`, and to `true` when `range` is `true`, since two thumbs need the width. A number field is at the end of the slider (at both ends for a range) so a value can be typed. `reset` (default `true`) shows a round reset button beside the name, which puts the slider back to where it was when the editor opened. With `range: false` the slider has one thumb and `onChange` gets a number; with `range: true` it has two thumbs and `onChange` gets `[low, high]`. `value` is where it starts: `min` by default (`[min, max]` for a range). `onChange` hears every move of a drag, and the preview is drawn again once a frame; `previewCanvas` is not called again, so change the layers of the canvas it returned.
+
+Declare the workspace entry in `plugin.yml`:
+
+```yaml
+workspaces:
+  - id: collage
+    title: Collage
+    entry: collage.js
+```
+
 ### Controls
 
 A control for the editor: a slider, with the code that paints it. The plugin says where its controls go and what they are called, and a small script makes each one.
@@ -121,13 +230,13 @@ A control for the editor: a slider, with the code that paints it. The plugin say
 ```yaml
 contributes:
   controls:
-    - root: Beauty/Makeup          # the tab, then the groups inside it, by the names people see
+    - root: Beauty/Makeup # the tab, then the groups inside it, by the names people see
       items:
-        - path: Lipstick           # the control's name, under the root
+        - path: Lipstick # the control's name, under the root
           entry: lipstick.js
-        - path: Eyes/Eyeliner      # a group Eyes is made in Makeup, and Eyeliner goes in it
+        - path: Eyes/Eyeliner # a group Eyes is made in Makeup, and Eyeliner goes in it
           entry: eyeliner.js
-    - root: Beauty/Hair            # a plugin can have more than one root
+    - root: Beauty/Hair # a plugin can have more than one root
       items:
         - path: Hair Color
           entry: hair-color.js
@@ -156,8 +265,6 @@ npx @alakazam/plugin build ./my-plugin
 Add `@alakazam/plugin` and `@abra/core` to your plugin's `devDependencies` to type-check host API imports in your own TypeScript project. The package provides the declarations for `@alakazam/plugin`; Alakazam supplies its runtime implementation when the plugin loads.
 
 The build updates the `files:` list and SHA-256 hashes in `plugin.yml`, then writes `dist/<id>.akzx`. An `.akzx` package is a ZIP archive. Plugin authors can install it from **Plugins → Local plugin package → Choose .akzx** without uploading to S3. The local installer verifies every file against its manifest hash. Declared dependencies still need to be installed before the plugin can be used.
-
-
 
 In this repository, `node scripts/build-plugins.mjs <folder>` delegates to the same npm builder and also type-checks app-owned plugins. `scripts/pack-plugins.mjs [folder ...]` is for maintainers preparing catalog uploads; plugin authors do not need it. It checks files and assembles upload folders under `target/plugin-packages/`, including model files from the AI crates when needed. Each upload folder contains exactly `plugin.yml` and `<id>.akzx`; the catalog entry has `uri`/`sha256` for the manifest and `archive_uri`/`archive_sha256` for the `.akzx` package. The app reads the manifest for metadata and dependencies, then installs the package after verifying both hashes and each file hash in the manifest.
 

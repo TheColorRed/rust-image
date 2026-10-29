@@ -4,8 +4,8 @@ import CheckIcon from 'lucide-react-native/icons/check';
 import ImageMinusIcon from 'lucide-react-native/icons/image-minus';
 import ImagesIcon from 'lucide-react-native/icons/images';
 import XIcon from 'lucide-react-native/icons/x';
-import { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
@@ -154,6 +154,48 @@ export function SelectedOverlay() {
         <CheckIcon size={16} color="#fff" strokeWidth={3} />
       </View>
     </View>
+  );
+}
+
+/**
+ * A thumbnail that takes part in Select mode: press and hold selects it, a tap opens it, and once anything is selected a
+ * tap selects or unselects instead. Put the image inside; it adds the check overlay when selected. Show a `SelectionBar`
+ * while `selection.selecting`.
+ */
+export function SelectableThumb({
+  id,
+  selection,
+  onOpen,
+  tapToSelect = false,
+  selectable = true,
+  style,
+  accessibilityLabel,
+  children,
+}: {
+  /** What tells this item apart in the selection, such as its URI. */
+  id: string;
+  selection: ReturnType<typeof useSelection>;
+  /** What a tap does when nothing is selected. */
+  onOpen?: () => void;
+  /** Every tap selects, so a grid with nothing to open needs no press and hold. */
+  tapToSelect?: boolean;
+  /** False leaves this thumbnail out of Select mode: a tap only opens it. */
+  selectable?: boolean;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={accessibilityLabel}
+      onPress={() => (selectable && (tapToSelect || selection.selecting) ? selection.toggle(id) : onOpen?.())}
+      onLongPress={selectable ? () => selection.toggle(id) : undefined}
+      style={style}
+    >
+      {children}
+      {selectable && selection.selected.includes(id) && <SelectedOverlay />}
+    </Pressable>
   );
 }
 

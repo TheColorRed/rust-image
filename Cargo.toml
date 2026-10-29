@@ -3,15 +3,15 @@ members = [
   # "packages/rxrs",
   "packages/abra/abra",
   "packages/abra/core/*",
-  "packages/abra/ai/core",
-  "packages/abra/ai/super-resolution",
-  "packages/abra/ai/body-segmentation",
-  "packages/abra/ai/find-person",
-  "packages/abra/ai/matting",
-  "packages/abra/ai/object-removal",
-  "packages/abra/ai/trimap-matting",
-  "packages/abra/ai/face-landmarks",
-  "packages/abra/ai/face-parsing",
+  "packages/abra/core/ai",
+  "packages/ai/super-resolution",
+  "packages/ai/body-segmentation",
+  "packages/ai/find-person",
+  "packages/ai/matting",
+  "packages/ai/object-removal",
+  "packages/ai/trimap-matting",
+  "packages/ai/face-landmarks",
+  "packages/ai/face-parsing",
   "packages/abra/plugins/*",
   # Examples
   "apps/examples/*",
@@ -107,15 +107,15 @@ abra-uniffi = { path = "./packages/bindings/uniffi" }
 collage ={ path = "./packages/abra/plugins/collage" }
 
 # Abra AI Packages
-abra-ai-core = { path = "./packages/abra/ai/core" }
-abra-super-resolution = { path = "./packages/abra/ai/super-resolution" }
-abra-body-segmentation = { path = "./packages/abra/ai/body-segmentation" }
-abra-find-person = { path = "./packages/abra/ai/find-person" }
-abra-matting = { path = "./packages/abra/ai/matting" }
-abra-object-removal = { path = "./packages/abra/ai/object-removal" }
-abra-trimap-matting = { path = "./packages/abra/ai/trimap-matting" }
-abra-face-landmarks = { path = "./packages/abra/ai/face-landmarks" }
-abra-face-parsing = { path = "./packages/abra/ai/face-parsing" }
+abra-ai-core = { path = "./packages/abra/core/ai" }
+abra-super-resolution = { path = "./packages/ai/super-resolution" }
+abra-body-segmentation = { path = "./packages/ai/body-segmentation" }
+abra-find-person = { path = "./packages/ai/find-person" }
+abra-matting = { path = "./packages/ai/matting" }
+abra-object-removal = { path = "./packages/ai/object-removal" }
+abra-trimap-matting = { path = "./packages/ai/trimap-matting" }
+abra-face-landmarks = { path = "./packages/ai/face-landmarks" }
+abra-face-parsing = { path = "./packages/ai/face-parsing" }
 
 [workspace.dependencies.uuid]
 version = "1.24.0"

@@ -7,7 +7,7 @@
   "files": [
     "build-plugins.mjs",
     "cli.mjs",
-    "dev-plugin.mjs",
+    "dev-server.mjs",
     "plugin-builder.mjs",
     "plugin-toolkit.d.ts",
     "README.md"
@@ -15,10 +15,11 @@
   "types": "./plugin-toolkit.d.ts",
   "scripts": {
     "build": "node ./build-plugins.mjs",
-    "dev": "node ./dev-plugin.mjs"
+    "dev": "node ./dev-server.mjs"
   },
   "dependencies": {
-    "chokidar": "^4.0.3",
+    "chalk": "^5.6.2",
+    "chokidar": "^6.0.0",
     "enquirer": "^2.4.1",
     "esbuild": "^0.28.2",
     "fast-glob": "^3.3.3",

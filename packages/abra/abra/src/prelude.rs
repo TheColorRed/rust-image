@@ -38,5 +38,3 @@ pub use crate::abra_core::{ColorStop, Gradient};
 pub use crate::abra_core::TransformAlgorithm;
 pub use crate::abra_core::TransformFit;
 
-// Plugins
-pub use crate::plugin::*;

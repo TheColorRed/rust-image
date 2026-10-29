@@ -47,7 +47,7 @@ A plugin can depend on other plugins by id, so it does not carry what another al
 `PluginRegistry::scan(folder)` reads every plugin in a folder. A plugin that cannot be used (a bad manifest, a file it names that is missing, an id that is already taken) is listed in `problems()` and does not stop the others.
 
 ```rust
-use abra::plugin::PluginRegistry;
+use crate::plugins::PluginRegistry; // inside alakazam-mobile
 
 let registry = PluginRegistry::scan("plugins");
 

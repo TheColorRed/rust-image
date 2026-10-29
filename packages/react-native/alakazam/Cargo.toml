@@ -10,6 +10,7 @@ abra-uniffi = { workspace = true }
 abra-body-segmentation = { workspace = true }
 abra-find-person = { workspace = true }
 sha2 = { version = "0.11.0" }
+saphyr = { workspace = true }
 zip = { workspace = true }
 ureq = { version = "3.4.2" }
 # The toolkit: engine, components, session and controls (the photo is an `Image`).
@@ -32,3 +33,9 @@ gpu = ["abra/gpu", "dep:gpu", "dep:gpu-passes"]
 # `lib` lets ubrn read the uniffi metadata.
 crate-type = ["lib", "cdylib"]
 name = "alakazam_mobile"
+
+[dev-dependencies]
+# The plugin tests run every shipped object removal model.
+abra-ai-core = { workspace = true, features = ["onnx"] }
+abra-core = { workspace = true }
+mask = { workspace = true }

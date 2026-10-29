@@ -8,7 +8,7 @@
 //! One file for each part of the library: [`canvas`] (`Canvas` and `Layer`), [`color`] (the `primitives` color module),
 //! [`image`] (`Image`), [`gradient`] (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest)
 //! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`drawing`] (brushes and the
-//! line they draw), [`transform`] (rotate and flip), [`plugins`] (reading a folder of runtime plugins) and [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
+//! line they draw), [`transform`] (rotate and flip), [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
 //! of the library is an array here, and an array of the wrong length panics, as the library does for input it cannot use.
 //!
 //! uniffi turns this crate into one namespace (`abra_uniffi`) of the generated TypeScript bindings. A crate that builds the
@@ -19,6 +19,7 @@ mod ai;
 mod beauty;
 mod blend;
 mod canvas;
+mod collage;
 mod color;
 mod drawing;
 mod effect;
@@ -29,13 +30,12 @@ mod geometry;
 mod gradient;
 mod image;
 mod mask;
-mod plugins;
 mod tools;
 mod transform;
 
 pub use abra::abra_core::ResizeTarget;
 pub use abra::canvas::prelude::{
-  AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
+  AdjustmentLayerType, Anchor, CanvasCell, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
 };
 pub use adjustments::{
   AutoColor, AutoTone, BlackWhite, BlackWhitePreset, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
@@ -43,10 +43,6 @@ pub use adjustments::{
   Posterize, Quantize, Saturation, SelectiveColor, SelectiveMethod, Threshold, Vibrance, auto_color, auto_tone, brightness, channel_mix, color_multiply, contrast, exposure,
   gradient_map, grayscale, highlights_shadows, hue, invert, levels, photo_filter, posterize, quantize, reduce_opacity, saturation,
   selective_color, threshold, vibrance, curves, black_white,
-};
-pub use plugins::{
-  PipelineStep, PluginControl, PluginInfo, PluginModel, PluginPipeline, PluginProblem, PluginScan, PluginScript, StepValue,
-  scan_plugins,
 };
 pub use ai::{
   AiListening, AiModel, AiOutput, AiOutputKind, BodyParser, BodySegments, ImageModel, Instance, LabelMap, Listening,
@@ -58,6 +54,7 @@ pub use canvas::{
   AddCanvasOptions, Canvas, CanvasTransform, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
   add_canvas_options, new_layer_options,
 };
+pub use collage::{Collage, CollageOptions};
 pub use color::{Bins, Color, Harmony, Histogram, Palette, luma, luma_weights};
 pub use drawing::{Brush, Painter, max_stroke_points, stroke_overlay, stroke_overlay_deferred};
 pub use fill::{Fill, FillArea, ImageRepeat, fill_area};

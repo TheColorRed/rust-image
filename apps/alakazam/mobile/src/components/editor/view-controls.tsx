@@ -70,7 +70,7 @@ const settledTurn$ = previewRotationValue$.pipe(debounceTime(120));
  * zooms; when it is on, two fingers also twist the photo, and a hint says so. "Reset zoom" and "Straighten" show only while there is
  * something to put back.
  */
-export function ViewControls() {
+export function ViewControls({ placement = 'overlay' }: { placement?: 'overlay' | 'bar' }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const zoom = useObservable(previewScaleSettled$, 1);
@@ -90,7 +90,7 @@ export function ViewControls() {
     <>
     {circling ? <CircleToZoomOverlay onDone={() => setCircling(false)} /> : null}
     <View
-      style={styles.area}
+      style={[styles.area, placement === 'bar' && styles.barArea]}
       pointerEvents="box-none"
       // The row sits 12 px above the preview's bottom edge (see `area`), so the cover includes that gap.
       onLayout={event => previewControlsCover.next(event.nativeEvent.layout.height + 12)}
@@ -298,6 +298,7 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     area: { position: 'absolute', left: 12, right: 12, bottom: 12, gap: 8, alignItems: 'flex-start' },
+    barArea: { position: 'relative', left: undefined, right: undefined, bottom: undefined, padding: 8, gap: 0 },
     rowScroll: { flex: 1, minWidth: 0 },
     barRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', gap: 8 },
     row: { flexDirection: 'row', gap: 8 },

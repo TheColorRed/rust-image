@@ -33,6 +33,8 @@ export interface RangeSliderProps {
   leading?: ReactNode;
   /** Shown at the end of the header line, after the reset button. */
   trailing?: ReactNode;
+  /** Leaves out the header line (label, values and reset button), for a caller that shows them itself. */
+  compact?: boolean;
 }
 
 const snap = (value: number, min: number, max: number, step: number) => {
@@ -57,6 +59,7 @@ export function RangeSlider({
   valueText,
   leading,
   trailing,
+  compact = false,
 }: RangeSliderProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -79,33 +82,65 @@ export function RangeSlider({
     setValue(initialValue);
   }, [initialValue[0], initialValue[1]]);
 
-  const responder = (thumb: 0 | 1) =>
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      // Nothing else on the screen should take the drag from a thumb once it is held.
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
-        start.current = latest.current;
-      },
-      onPanResponderMove: (_event, gesture) => {
-        const { width: w, min: lo, max: hi, step: st, onChange: change } = live.current;
-        if (w <= 0) return;
-        const next: [number, number] = [...start.current];
-        const raw = start.current[thumb] + (gesture.dx / w) * (highest - lowest);
-        next[thumb] = snap(raw, lo[thumb], hi[thumb], st[thumb]);
-        // The thumbs may touch but not cross.
-        if (thumb === 0) next[0] = Math.min(next[0], next[1]);
-        else next[1] = Math.max(next[1], next[0]);
-        latest.current = next;
-        setValue(next);
-        change?.(next);
-      },
-      onPanResponderRelease: () => live.current.onTrigger?.(latest.current),
-      onPanResponderTerminate: () => live.current.onTrigger?.(latest.current),
-    });
-  const lowResponder = useMemo(() => responder(0), []);
-  const highResponder = useMemo(() => responder(1), []);
+  /** Puts a thumb at `raw` (a value, not snapped yet) and tells the caller. The thumbs may touch but not cross. */
+  const place = (thumb: 0 | 1, raw: number, from: [number, number]) => {
+    const { min: lo, max: hi, step: st, onChange: change } = live.current;
+    const next: [number, number] = [...from];
+    next[thumb] = snap(raw, lo[thumb], hi[thumb], st[thumb]);
+    if (thumb === 0) next[0] = Math.min(next[0], next[1]);
+    else next[1] = Math.max(next[1], next[0]);
+    latest.current = next;
+    setValue(next);
+    change?.(next);
+  };
+
+  // One responder for the whole track. A touch on a thumb grabs it, a touch away from the thumbs moves the nearer one there (the low one
+  // when it is left of both, the high one when it is right of both), and a drag moves the thumb that was grabbed. Where the thumbs are on
+  // top of each other the drag says which one: left takes the low one and right the high one. Nothing inside the track takes touches,
+  // so the position of a touch is always on the track.
+  const grabbed = useRef<0 | 1 | null>(0);
+  const trackResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        // Nothing else on the screen should take the drag once a thumb is held.
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: event => {
+          const { width: w } = live.current;
+          start.current = latest.current;
+          if (w <= 0) return;
+          const range = highest - lowest;
+          const at = lowest + (event.nativeEvent.locationX / w) * range;
+          const [low, high] = latest.current;
+          const reach = (THUMB_SIZE / w) * range;
+          const onLow = Math.abs(at - low) <= reach;
+          const onHigh = Math.abs(at - high) <= reach;
+          if (onLow && onHigh) {
+            // Both are under the finger: the first move says which one.
+            grabbed.current = low === high ? null : Math.abs(at - low) <= Math.abs(at - high) ? 0 : 1;
+          } else if (onLow || onHigh) {
+            grabbed.current = onLow ? 0 : 1;
+          } else {
+            grabbed.current = at <= low ? 0 : at >= high ? 1 : at - low <= high - at ? 0 : 1;
+            place(grabbed.current, at, latest.current);
+            start.current = latest.current;
+          }
+        },
+        onPanResponderMove: (_event, gesture) => {
+          const { width: w } = live.current;
+          if (w <= 0) return;
+          if (grabbed.current === null) {
+            if (gesture.dx === 0) return;
+            grabbed.current = gesture.dx < 0 ? 0 : 1;
+          }
+          place(grabbed.current, start.current[grabbed.current] + (gesture.dx / w) * (highest - lowest), start.current);
+        },
+        onPanResponderRelease: () => live.current.onTrigger?.(latest.current),
+        onPanResponderTerminate: () => live.current.onTrigger?.(latest.current),
+      }),
+    [],
+  );
 
   const text = (v: number) => valueText?.(v) ?? String(Number(v.toFixed(2)));
   const trackWidth = Math.max(0, width);
@@ -121,6 +156,7 @@ export function RangeSlider({
 
   return (
     <View>
+      {compact ? null : (
       <View style={styles.header}>
         {leading}
         <Text style={styles.label} numberOfLines={1}>
@@ -134,19 +170,16 @@ export function RangeSlider({
         )}
         {trailing}
       </View>
-      <View style={styles.area}>
-        <View style={styles.track} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
-          <View style={[styles.selected, { left: lowX, width: Math.max(0, highX - lowX) }]} />
+      )}
+      <View style={styles.area} {...trackResponder.panHandlers}>
+        <View style={styles.track} pointerEvents="none" onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+          <View pointerEvents="none" style={[styles.selected, { left: lowX, width: Math.max(0, highX - lowX) }]} />
           <View
-            {...lowResponder.panHandlers}
-            hitSlop={16}
             style={[styles.thumb, { left: lowX - THUMB_SIZE / 2 }]}
             accessibilityRole="adjustable"
             accessibilityLabel={`${label} low`}
           />
           <View
-            {...highResponder.panHandlers}
-            hitSlop={16}
             style={[styles.thumb, { left: highX - THUMB_SIZE / 2 }]}
             accessibilityRole="adjustable"
             accessibilityLabel={`${label} high`}

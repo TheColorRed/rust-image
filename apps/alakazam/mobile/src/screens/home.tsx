@@ -3,7 +3,7 @@ import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dia
 import { FilePicker } from '@/src/components/file-picker';
 import { MagicalSlogan } from '@/src/components/magical-slogan';
 import {
-  SelectedOverlay,
+  SelectableThumb,
   SELECTION_BAR_CLEARANCE,
   SelectionBar,
   SelectionPreview,
@@ -17,11 +17,13 @@ import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-sto
 import { useCommonStyles } from '@/src/lib/ui/styles';
 import { useTheme } from '@/src/lib/ui/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
+import type { PluginWorkspaceScreenInfo } from '@/src/screens/plugin-editor';
 import { addProject, projects$, removeProjects } from '@/src/state/projects';
 import type { ExportFormat } from '@/src/state/settings';
-import { readImageAsync } from '@alakazam/mobile';
+import { pluginsFolder, readImageAsync, scanPlugins } from '@alakazam/mobile';
 import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
 import CameraIcon from 'lucide-react-native/icons/camera';
+import Blocks from 'lucide-react-native/icons/blocks';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,7 +31,6 @@ import {
   FlatList,
   Image,
   Linking,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -118,10 +119,9 @@ function Permissions({
           contentContainerStyle={[styles.grid, selection.selecting && { paddingBottom: SELECTION_BAR_CLEARANCE }]}
           columnWrapperStyle={styles.row}
           renderItem={({ item }) => (
-            <Pressable onPress={() => selection.toggle(item.node.id)} style={styles.thumbWrapper}>
+            <SelectableThumb id={item.node.id} selection={selection} tapToSelect style={styles.thumbWrapper}>
               <Image source={{ uri: item.node.image.uri }} style={styles.thumb} />
-              {selection.selected.includes(item.node.id) && <SelectedOverlay />}
-            </Pressable>
+            </SelectableThumb>
           )}
           onEndReachedThreshold={0.6}
           onEndReached={loadMore}
@@ -138,7 +138,16 @@ function Permissions({
 export interface HomeScreenProps {
   /** Opens the full-screen editor for a tapped photo. */
   onOpenPhoto: (photo: EditablePhoto) => void;
+  /** Opens the selected plugin workspace. */
+  onOpenPluginEditor: (workspace: PluginWorkspaceScreenInfo) => void;
 }
+
+type ScannedWorkspacePlugin = {
+  id: string;
+  name: string;
+  missingDependencies: string[];
+  workspaces: { id: string; title: string; description: string; entryPath: string }[];
+};
 
 const toEditablePhoto = (photo: PhotoIdentifier): EditablePhoto => ({
   uri: photo.node.image.uri,
@@ -206,7 +215,7 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
   const thumbSize = (innerWidth - GAP * (columns - 1)) / columns;
   const selection = useSelection();
   const [exportOpen, setExportOpen] = useState(false);
-  const { selected, selecting, toggle, clear } = selection;
+  const { selected, selecting, clear } = selection;
   const exportProjects = useMemo(() => projects.filter(project => selected.includes(project.id)), [projects, selected]);
   const exportItems = useMemo(
     () => exportProjects.map(project => ({ id: project.id, uri: projectImageUri(project), name: project.name })),
@@ -251,21 +260,17 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
           extraData={selected}
           keyExtractor={project => project.id}
           renderItem={({ item: project }) => (
-            <Pressable
-              onPress={() =>
-                selecting
-                  ? toggle(project.id)
-                  : onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project })
-              }
-              onLongPress={() => toggle(project.id)}
+            <SelectableThumb
+              id={project.id}
+              selection={selection}
+              onOpen={() => onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project })}
               style={{ width: thumbSize, height: thumbSize, marginBottom: GAP }}
             >
               <Image
                 source={{ uri: projectImageUri(project) }}
                 style={{ width: '100%', height: '100%', backgroundColor: colors.placeholder }}
               />
-              {selected.includes(project.id) && <SelectedOverlay />}
-            </Pressable>
+            </SelectableThumb>
           )}
           numColumns={columns}
           columnWrapperStyle={{ gap: GAP }}
@@ -303,9 +308,20 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
   );
 }
 
-export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
+export function HomeScreen({ onOpenPhoto, onOpenPluginEditor }: HomeScreenProps) {
   const { colors } = useTheme();
   const [showCameraRoll, setShowCameraRoll] = useState(false);
+  const workspacePlugins = scanPlugins(pluginsFolder()).plugins as unknown as ScannedWorkspacePlugin[];
+  const workspaces = workspacePlugins
+    .filter(plugin => plugin.missingDependencies.length === 0)
+    .flatMap(plugin => plugin.workspaces.map(workspace => ({
+      pluginId: plugin.id,
+      pluginName: plugin.name,
+      id: workspace.id,
+      title: workspace.title,
+      description: workspace.description,
+      entryPath: workspace.entryPath,
+    })));
 
   /** Makes a project of each photo, from the Camera Roll or the file chooser. One photo opens right away; several stay on the home page. */
   const addPhotos = async (photos: EditablePhoto[]) => {
@@ -342,6 +358,18 @@ export function HomeScreen({ onOpenPhoto }: HomeScreenProps) {
             style={{ width: 280 }}
             onPick={assets => addPhotos(assets.map(asset => ({ uri: asset.uri, fileName: asset.name ?? null })))}
           />
+          {workspaces.map(workspace => (
+            <Card
+              key={`${workspace.pluginId}.${workspace.id}`}
+              icon={Blocks}
+              title={workspace.title}
+              subtitle={workspace.description || workspace.pluginName}
+              style={{ width: 280 }}
+              onPress={() => onOpenPluginEditor(workspace)}
+            >
+              <CardHeader icon={Blocks} title={workspace.title} subtitle={workspace.description || workspace.pluginName} />
+            </Card>
+          ))}
         </ScrollView>
       </View>
 

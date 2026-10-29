@@ -26,7 +26,7 @@ export type AiModelListing = {
 
 /**
  * Where a model comes from. A `file` is one model file with its manifest. A `plugin` is a plugin that adds the model: installing it
- * downloads every file the plugin lists (see `abra::plugin`), and deleting it removes them all, including the other models it adds.
+ * downloads every file the plugin lists (see `packages/react-native/alakazam/src/plugins`), and deleting it removes them all, including the other models it adds.
  */
 export type AiModelSource =
   | {

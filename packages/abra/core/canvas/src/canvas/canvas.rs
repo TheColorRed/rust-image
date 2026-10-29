@@ -319,6 +319,19 @@ impl<'a> Canvas<'a> {
     canvas.set_rotation(p_degrees);
   }
 
+  /// Sets the factor the canvas is scaled by within its parent, about its middle. 1 is its own size. The canvas keeps its own pixels,
+  /// so changing the factor never loses quality.
+  pub fn set_scale(&self, p_factor: f32) {
+    let mut canvas = self.inner.lock().unwrap();
+    canvas.set_scale(p_factor);
+  }
+
+  /// Gets the factor the canvas is scaled by within its parent
+  pub fn scale(&self) -> f32 {
+    let canvas = self.inner.lock().unwrap();
+    canvas.scale()
+  }
+
   /// Gets the rotation in degrees for the canvas within its parent
   pub fn rotation(&self) -> Option<f32> {
     let canvas = self.inner.lock().unwrap();
@@ -394,6 +407,7 @@ impl<'a> Canvas<'a> {
       let mut canvas = self.inner.lock().unwrap();
       let (width, height) = layer_rc.lock().unwrap().dimensions::<u32>();
       canvas.layers.push(layer_rc.clone());
+      canvas.mark_dirty();
 
       // Set canvas size from first layer (before applying size options)
       if is_first_layer {
@@ -449,6 +463,13 @@ impl<'a> Canvas<'a> {
     let mut inner_canvas = self.inner.lock().unwrap();
     inner_canvas.add_canvas_rc(child_inner.clone(), p_options);
     Canvas { inner: child_inner }
+  }
+
+  /// The canvases inside this one, in the order they were added. Each is the same canvas as the one that was added, so changing it (its
+  /// rotation, scale or position) changes this canvas.
+  pub fn canvases(&self) -> Vec<Canvas<'a>> {
+    let canvas = self.inner.lock().unwrap();
+    canvas.canvases.iter().map(|child| Canvas { inner: child.clone() }).collect()
   }
 
   /// Sets the position of this canvas to the given anchor point within its parent canvas.

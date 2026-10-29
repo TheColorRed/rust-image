@@ -42,14 +42,12 @@ import { VesselView } from '@vessel/react-native';
 import { useEffect, useMemo, useRef, type ElementRef } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useObservable, useSyncObservable } from 'react-rx';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
  * The photo itself: renders `previewSourceImage` at the preview box's size, owns pinch/pan, the
  * long-press before/after comparison, and the busy/error/saved overlays.
  */
 export function EditorPreview() {
-  const { top: topInset } = useSafeAreaInsets();
   const photo = useObservable(previewSize$, null);
   // The size of the frames on screen while a preview is open. A tool's result can have another shape than the photo.
   const liveShown = useObservable(liveSurface$, null);
@@ -133,7 +131,7 @@ export function EditorPreview() {
 
   return (
     <View
-      style={[styles.area, { marginTop: topInset + 56 }]}
+      style={[styles.area, { marginTop: 56 }]}
       onLayout={handleLayout}
       {...(panResponder?.panHandlers ?? {})}
     >

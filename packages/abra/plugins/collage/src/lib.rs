@@ -6,7 +6,8 @@ use abra::drawing::prelude::*;
 use abra::prelude::*;
 
 use rand::prelude::{IndexedRandom, Rng, RngExt};
-use rand::rngs::ThreadRng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 mod grid;
 mod layered_grid;
@@ -100,7 +101,7 @@ pub struct Collage<'a> {
   /// Indices of images already selected to avoid duplicates.
   selected_images: Vec<usize>,
   /// Random number generator for consistent randomness across selections.
-  rng: ThreadRng,
+  rng: StdRng,
 }
 
 impl<'a> Collage<'a> {
@@ -113,7 +114,7 @@ impl<'a> Collage<'a> {
       images: loaded.all(),
       options: None,
       selected_images: Vec::new(),
-      rng: rand::rng(),
+      rng: StdRng::from_rng(&mut rand::rng()),
     }
   }
 

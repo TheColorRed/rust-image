@@ -60,7 +60,7 @@ presets, and keep the sliders for fine-tuning.
   looks right at its default can look muddy, flat or blown out at the far ends of a slider or for other colors. Check a grid of
   the settings people will actually use, on real photos.
 - Do that check offline, on the photos in `assets/`, and write the results to a contact sheet you can look at, instead of going
-  back to the device after every change. `packages/abra/ai/face-parsing/tests/lipstick_eval.rs` is an example: it runs the
+  back to the device after every change. `packages/ai/face-parsing/tests/lipstick_eval.rs` is an example: it runs the
   app's own maths over a grid of settings and writes one picture. Keep such a test in step with the code it mirrors.
 
 ## When there are several people

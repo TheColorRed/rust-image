@@ -19,8 +19,8 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { formatBytes } from '@/src/lib/utils/format-bytes';
 import { aiModelList, aiModelList$, type AiModelListing } from '@/src/state/ai-models';
 import { pluginList, pluginList$, type PluginListing } from '@/src/state/plugins';
-import { scanPlugins } from '@abra/core';
-import { installPluginArchive, pluginsFolder } from '@alakazam/mobile';
+import { developerModeEnabled, developerModeEnabled$ } from '@/src/state/settings';
+import { installPluginArchive, pluginsFolder, scanPlugins } from '@alakazam/mobile';
 import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-native-documents/picker';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
@@ -28,7 +28,17 @@ import Download from 'lucide-react-native/icons/download';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import Trash2 from 'lucide-react-native/icons/trash';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, NativeModules, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  NativeModules,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useObservable } from 'react-rx';
 
 const removalMessage = (name: string, targetId: string, plan: ReturnType<typeof pluginsToRemove>) => {
@@ -38,7 +48,7 @@ const removalMessage = (name: string, targetId: string, plan: ReturnType<typeof 
     : `Delete ${name}?`;
 };
 
-type PluginDevServerState = { running: boolean; port: number; token: string; addresses: string[] };
+type PluginDevServerState = { running: boolean; port: number; addresses: string[] };
 type PluginDevServerModule = {
   getPluginDevServerState(): Promise<PluginDevServerState>;
   startPluginDevServer(): Promise<PluginDevServerState>;
@@ -50,6 +60,7 @@ export function PluginsScreen() {
   const commonStyles = useCommonStyles();
   const models = useObservable(aiModelList$, aiModelList.value);
   const addons = useObservable(pluginList$, pluginList.value);
+  const developerMode = useObservable(developerModeEnabled$, developerModeEnabled.value);
   const installedPlugins = scanPlugins(pluginsFolder()).plugins;
   const installedPluginsById = new Map(installedPlugins.map(plugin => [plugin.id, plugin]));
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -91,6 +102,10 @@ export function PluginsScreen() {
         rowText: { flex: 1 },
         rowTitle: { fontSize: 16, color: colors.textPrimary },
         rowSize: { marginTop: 2, fontSize: 13, color: colors.textSecondary },
+        devServerInfo: { flex: 1, gap: 6 },
+        devServerDetails: { gap: 6 },
+        devServerDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+        devServerDetailValue: { flex: 1, marginTop: 0, textAlign: 'left' },
         button: { minWidth: 96, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
         download: { backgroundColor: colors.accent },
         remove: { borderWidth: 1, borderColor: colors.danger },
@@ -136,12 +151,18 @@ export function PluginsScreen() {
   useEffect(() => {
     const server = NativeModules.MediaFile as PluginDevServerModule | undefined;
     if (!server?.getPluginDevServerState) return;
-    server.getPluginDevServerState().then(setDevServer).catch(e => setError(errorMessage(e)));
+    server
+      .getPluginDevServerState()
+      .then(setDevServer)
+      .catch(e => setError(errorMessage(e)));
   }, []);
 
   const toggleDevServer = async () => {
     const server = NativeModules.MediaFile as PluginDevServerModule | undefined;
-    if (!server) { setError('The plugin development server is unavailable on this device.'); return; }
+    if (!server) {
+      setError('The plugin development server is unavailable on this device.');
+      return;
+    }
     setDevServerBusy(true);
     setError(null);
     try {
@@ -261,8 +282,7 @@ export function PluginsScreen() {
     setDownloadTasks({ 'local-plugin': null });
     try {
       const [picked] = await pick({ type: [types.zip] });
-      if (!picked.name?.endsWith('.akzx'))
-        throw new Error('Choose an .akzx package built with @alakazam/plugin.');
+      if (!picked.name?.endsWith('.akzx')) throw new Error('Choose an .akzx package built with @alakazam/plugin.');
       const [copy] = await keepLocalCopy({
         files: [{ uri: picked.uri, fileName: picked.name }],
         destination: 'cachesDirectory',
@@ -434,11 +454,12 @@ export function PluginsScreen() {
         <Text style={styles.rowTitle}>{item.title}</Text>
         {item.description !== '' && <Text style={styles.rowSize}>{item.description}</Text>}
         <Text style={styles.rowSize}>
-          {item.statusText ?? (item.updateAvailable
-            ? 'Update available'
-            : item.downloaded
-              ? `Downloaded · ${formatBytes(item.sizeBytes)}`
-              : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`)}
+          {item.statusText ??
+            (item.updateAvailable
+              ? 'Update available'
+              : item.downloaded
+                ? `Downloaded · ${formatBytes(item.sizeBytes)}`
+                : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`)}
         </Text>
       </View>
       {item.id in downloadTasks && !item.downloaded ? (
@@ -539,7 +560,7 @@ export function PluginsScreen() {
                 <CardHeader title="Add-ons" />
                 {addons
                   .filter(plugin => plugin.enabled || plugin.downloaded)
-                  .map((plugin, index) =>
+                  .map(plugin =>
                     renderRow({
                       id: `plugin:${plugin.id}`,
                       title: plugin.name,
@@ -549,7 +570,6 @@ export function PluginsScreen() {
                       sizeBytes: plugin.downloadSizeBytes,
                       downloadSizeBytes: plugin.downloadSizeBytes,
                       flat: true,
-                      first: index === 0,
                       onDownload: () => downloadAddon(plugin),
                       onDelete: () => removeAddon(plugin),
                     }),
@@ -629,49 +649,60 @@ export function PluginsScreen() {
             >
               {installedPluginRows.length === 0 ? (
                 <Text style={[styles.rowSize, { padding: 16 }]}>No other plugins are installed on this device.</Text>
-              ) : installedPluginRows.map(plugin =>
-                renderRow({
-                  id: `installed:${plugin.id}`,
-                  title: plugin.name,
-                  description: `${plugin.id} · ${plugin.version}${plugin.missingDependencies.length ? ` · needs ${plugin.missingDependencies.join(', ')}` : ''}`,
-                  downloaded: true,
-                  sizeBytes: 0,
-                  downloadSizeBytes: 0,
-                  statusText: 'Installed on this device',
-                  flat: true,
-                  onDownload: () => {},
-                  onDelete: () => removeInstalledPlugin(plugin.id),
-                }),
+              ) : (
+                installedPluginRows.map(plugin =>
+                  renderRow({
+                    id: `installed:${plugin.id}`,
+                    title: plugin.name,
+                    description: `${plugin.id} · ${plugin.version}${plugin.missingDependencies.length ? ` · needs ${plugin.missingDependencies.join(', ')}` : ''}`,
+                    downloaded: true,
+                    sizeBytes: 0,
+                    downloadSizeBytes: 0,
+                    statusText: 'Installed on this device',
+                    flat: true,
+                    onDownload: () => {},
+                    onDelete: () => removeInstalledPlugin(plugin.id),
+                  }),
+                )
               )}
             </Card>
             {error && <Text style={styles.error}>{error}</Text>}
-            <Card title="Developer" subtitle="Sync plugin changes from your computer over the local network.">
-              <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}>
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>Development server</Text>
-                  <Text style={styles.rowSize}>{devServer?.running ? 'On' : 'Off'}</Text>
+            {developerMode && (
+              <Card title="Developer" subtitle="Sync plugin changes from your computer over the local network.">
+                <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 }}>
+                  <View style={styles.devServerInfo}>
+                    <View style={styles.devServerDetailRow}>
+                      <Text style={[styles.rowTitle, { width: 200 }]}>Development server</Text>
+                      <Text style={[styles.rowSize, styles.devServerDetailValue]}>
+                        {devServer?.running ? 'On' : 'Off'}
+                      </Text>
+                    </View>
+                    {devServer?.running && (
+                      <View style={styles.devServerDetails}>
+                        <View style={styles.devServerDetailRow}>
+                          <Text style={[styles.rowTitle, { width: 200 }]}>Server addresses</Text>
+                          <Text selectable style={[styles.rowSize, styles.devServerDetailValue]}>
+                            {devServer.addresses.length
+                              ? devServer.addresses.join(', ')
+                              : 'No local network address found.'}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                    {devServerBusy && <ActivityIndicator color={colors.accent} />}
+                    <Switch
+                      accessibilityLabel="Plugin development server"
+                      value={devServer?.running ?? false}
+                      disabled={devServerBusy}
+                      onValueChange={toggleDevServer}
+                      trackColor={{ true: colors.accent }}
+                    />
+                  </View>
                 </View>
-                {devServerBusy && <ActivityIndicator color={colors.accent} />}
-                <Switch
-                  accessibilityLabel="Plugin development server"
-                  value={devServer?.running ?? false}
-                  disabled={devServerBusy}
-                  onValueChange={toggleDevServer}
-                  trackColor={{ true: colors.accent }}
-                />
-              </View>
-              {devServer?.running && (
-                <View style={{ paddingHorizontal: 16, paddingBottom: 16, gap: 6 }}>
-                  <Text style={styles.rowTitle}>Server addresses</Text>
-                  {devServer.addresses.length ? devServer.addresses.map(address => (
-                    <Text key={address} selectable style={styles.rowSize}>{address}</Text>
-                  )) : <Text style={styles.rowSize}>No local network address found.</Text>}
-                  <Text style={[styles.rowTitle, { marginTop: 8 }]}>Access token</Text>
-                  <Text selectable style={styles.rowSize}>{devServer.token}</Text>
-                  <Text style={[styles.rowSize, { marginTop: 6 }]}>Keep the token private and use a trusted network.</Text>
-                </View>
-              )}
-            </Card>
+              </Card>
+            )}
           </>
         )}
       </ScrollView>

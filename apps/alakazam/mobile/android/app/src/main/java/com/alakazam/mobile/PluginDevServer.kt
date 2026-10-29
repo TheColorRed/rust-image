@@ -6,22 +6,20 @@ import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.net.BindException
 import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
-import java.security.MessageDigest
-import java.security.SecureRandom
 import java.util.Collections
-import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/** A temporary, token-protected HTTP endpoint for syncing raw plugin files from a development computer. */
+/** A temporary HTTP endpoint for syncing raw plugin files from a development computer. */
 class PluginDevServer(cacheDir: File) {
-  data class State(val running: Boolean, val port: Int, val token: String, val addresses: List<String>)
+  data class State(val running: Boolean, val port: Int, val addresses: List<String>)
 
   private val root = File(cacheDir, "plugin-toolkit-server").canonicalFile
   private val staging = File(root, "staging")
@@ -29,30 +27,21 @@ class PluginDevServer(cacheDir: File) {
   private var listener: ServerSocket? = null
   private var worker: Thread? = null
   private var clients: ExecutorService? = null
-  private var token = ""
-  private val authFailures = ArrayDeque<Long>()
-  private var authLockedUntil = 0L
 
   @Synchronized
   fun start(): State {
     if (listener?.isClosed == false) return state()
     if (!staging.exists() && !staging.mkdirs()) throw IOException("Could not create the plugin sync folder")
     if (!incoming.exists() && !incoming.mkdirs()) throw IOException("Could not create the plugin inbox")
-    val socket = ServerSocket()
-    socket.reuseAddress = true
-    socket.bind(InetSocketAddress(0))
-    token = SecureRandom().nextInt(10_000).toString().padStart(4, '0')
-    authFailures.clear()
-    authLockedUntil = 0L
+    val socket = openListener()
     listener = socket
     val executor = Executors.newCachedThreadPool()
     clients = executor
-    val expectedToken = token
     worker = Thread({
       while (!socket.isClosed) {
         try {
           val client = socket.accept()
-          executor.execute { handle(client, expectedToken) }
+          executor.execute { handle(client) }
         } catch (_: IOException) {
           if (!socket.isClosed) stop()
         } catch (_: RuntimeException) {
@@ -70,14 +59,13 @@ class PluginDevServer(cacheDir: File) {
     worker = null
     clients?.shutdownNow()
     clients = null
-    token = ""
   }
 
   @Synchronized
   fun state(): State {
     val port = listener?.takeUnless { it.isClosed }?.localPort ?: 0
     val addresses = if (port == 0) emptyList() else localAddresses().map { "$it:$port" }
-    return State(port != 0, port, token, addresses)
+    return State(port != 0, port, addresses)
   }
 
   fun takeFolder(): String? {
@@ -95,7 +83,7 @@ class PluginDevServer(cacheDir: File) {
     if (target.exists() && !target.deleteRecursively()) throw IOException("Could not clear the installed plugin folder")
   }
 
-  private fun handle(client: Socket, expectedToken: String) {
+  private fun handle(client: Socket) {
     client.use { socket ->
       socket.soTimeout = 60_000
       val input = BufferedInputStream(socket.getInputStream())
@@ -124,12 +112,6 @@ class PluginDevServer(cacheDir: File) {
           val colon = line.indexOf(':')
           if (colon <= 0) null else line.substring(0, colon).trim().lowercase() to line.substring(colon + 1).trim()
         }.toMap()
-        if (isAuthLocked()) { respond(output, 429, "Too many incorrect access tokens; try again shortly"); return }
-        val supplied = headers["authorization"].orEmpty().removePrefix("Bearer ")
-        if (!MessageDigest.isEqual(expectedToken.toByteArray(), supplied.toByteArray())) {
-          recordAuthFailure()
-          respond(output, 401, "Invalid development server token"); return
-        }
         if (request[0] == "GET" && request[1] == "/health") {
           respond(output, 200, "Alakazam plugin development server is ready"); return
         }
@@ -145,20 +127,6 @@ class PluginDevServer(cacheDir: File) {
       } catch (error: Exception) {
         try { respond(output, 400, error.message ?: "Bad request") } catch (_: Exception) {}
       }
-    }
-  }
-
-  @Synchronized
-  private fun isAuthLocked(): Boolean = System.currentTimeMillis() < authLockedUntil
-
-  @Synchronized
-  private fun recordAuthFailure() {
-    val now = System.currentTimeMillis()
-    while (authFailures.isNotEmpty() && now - authFailures.first() > AUTH_WINDOW_MS) authFailures.removeFirst()
-    authFailures.addLast(now)
-    if (authFailures.size >= MAX_AUTH_FAILURES) {
-      authLockedUntil = now + AUTH_LOCKOUT_MS
-      authFailures.clear()
     }
   }
 
@@ -241,12 +209,30 @@ class PluginDevServer(cacheDir: File) {
       .distinct()
   } catch (_: Exception) { emptyList() }
 
+  private fun openListener(): ServerSocket {
+    var lastBindError: BindException? = null
+    for (port in SERVER_PORT..MAX_PORT) {
+      val socket = ServerSocket()
+      socket.reuseAddress = true
+      try {
+        socket.bind(InetSocketAddress(port))
+        return socket
+      } catch (error: BindException) {
+        socket.close()
+        lastBindError = error
+      } catch (error: IOException) {
+        socket.close()
+        throw error
+      }
+    }
+    throw IOException("No available plugin development port from $SERVER_PORT to $MAX_PORT", lastBindError)
+  }
+
   companion object {
+    private const val SERVER_PORT = 2559
+    private const val MAX_PORT = 65535
     private const val MAX_HEADER_BYTES = 16 * 1024
     private const val MAX_FILE_BYTES = 512L * 1024L * 1024L
-    private const val MAX_AUTH_FAILURES = 5
-    private const val AUTH_WINDOW_MS = 60_000L
-    private const val AUTH_LOCKOUT_MS = 60_000L
     private val PLUGIN_ID = Regex("^[a-z0-9]+(?:-[a-z0-9]+)*\\.[a-z0-9]+(?:-[a-z0-9]+)*$")
   }
 }

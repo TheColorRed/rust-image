@@ -1,0 +1,12 @@
+[package]
+name = "abra-object-removal"
+version = "1.0.0"
+edition = "2024"
+description = "Pre-trained models for object removal: fills a masked part of a photo with what belongs there"
+
+[dependencies]
+abra-ai-core = { workspace = true }
+mask = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]

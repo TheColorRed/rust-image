@@ -1,6 +1,6 @@
 // Packs the plugins of the repository into folders that are ready to upload, one folder for each plugin, in `target/plugin-packages`.
 //
-// A plugin is found as `packages/abra/ai/<crate>/plugins/<folder>/plugin.yml`, or `apps/alakazam/mobile/plugins/<folder>/plugin.yml`. Its `files` are taken from the plugin's own folder, or when
+// A plugin is found as `packages/ai/<crate>/plugins/<folder>/plugin.yml`, or `apps/alakazam/mobile/plugins/<folder>/plugin.yml`. Its `files` are taken from the plugin's own folder, or when
 // they are not there from the `models` folder of its crate, so a model that other code reads from `models` is not copied into the
 // repository twice. Every file is checked against the SHA-256 the plugin lists, and the folder is written the way the bucket holds it:
 // `plugins/<folder>/plugin.yml` and one installable ZIP. The folder's name is only where the plugin is kept: the plugin is named by the
@@ -17,7 +17,7 @@ import { parse } from 'yaml';
 import { outDirOf } from './plugin-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const aiDir = path.join(root, 'packages/abra/ai');
+const aiDir = path.join(root, 'packages/ai');
 const appDir = path.join(root, 'apps/alakazam/mobile/plugins');
 const outDir = path.join(root, 'target/plugin-packages');
 const BUCKET_URL = 'https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/authors/alakazam';

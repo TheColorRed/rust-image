@@ -4,7 +4,7 @@ const [command, ...args] = process.argv.slice(2);
 
 const scripts = {
   build: './build-plugins.mjs',
-  dev: './dev-plugin.mjs',
+  dev: './dev-server.mjs',
 };
 
 if (!scripts[command]) {

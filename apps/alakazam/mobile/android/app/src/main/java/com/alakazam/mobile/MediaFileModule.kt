@@ -56,7 +56,6 @@ class MediaFileModule(private val context: ReactApplicationContext) : ReactConte
     state.addresses.forEach(addresses::pushString)
     putBoolean("running", state.running)
     putInt("port", state.port)
-    putString("token", state.token)
     putArray("addresses", addresses)
   }
 

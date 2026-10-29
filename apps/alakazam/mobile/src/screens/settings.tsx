@@ -9,6 +9,8 @@ import {
   exportFormat$,
   exportQuality,
   exportQuality$,
+  developerModeEnabled,
+  developerModeEnabled$,
   workerStackInEffect,
   workerStackInEffect$,
   workerStackMegabytes,
@@ -18,7 +20,7 @@ import { clearToolbarUsage } from '@/src/state/toolbar-usage';
 import CircleQuestionMark from 'lucide-react-native/icons/circle-question-mark';
 import { Fragment, useMemo, useRef, useState, type ElementRef } from 'react';
 import { useObservable } from 'react-rx';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, NativeModules, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 /** The header over each card, by the name settings give their `card`. */
 const CARD_TITLES: Record<string, string> = {
@@ -26,6 +28,7 @@ const CARD_TITLES: Record<string, string> = {
   export: 'Export',
   performance: 'Performance',
   toolbar: 'Toolbar',
+  developer: 'Developer',
 };
 
 export function SettingsScreen() {
@@ -35,9 +38,21 @@ export function SettingsScreen() {
   const quality = useObservable(exportQuality$, exportQuality.value);
   const stack = useObservable(workerStackMegabytes$, workerStackMegabytes.value);
   const stackInEffect = useObservable(workerStackInEffect$, workerStackInEffect.value);
+  const developerMode = useObservable(developerModeEnabled$, developerModeEnabled.value);
   const iconRefs = useRef<Record<string, ElementRef<typeof Pressable> | null>>({});
   /** The setting whose tooltip is open and the window point just under its icon, or null. */
   const [tip, setTip] = useState<{ key: string; x: number; y: number } | null>(null);
+  const toggleDeveloperMode = async (enabled: boolean) => {
+    if (!enabled) {
+      try {
+        await NativeModules.MediaFile?.stopPluginDevServer?.();
+      } catch (error) {
+        Alert.alert('Could not stop the development server', error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+    developerModeEnabled.next(enabled);
+  };
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -250,6 +265,21 @@ export function SettingsScreen() {
                 <Text style={styles.clearButtonText}>Clear history</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+        <Text style={styles.cardTitle}>{CARD_TITLES.developer}</Text>
+        <View style={styles.section}>
+          <View style={styles.toolbarHistoryRow}>
+            <View style={styles.toolbarHistoryCopy}>
+              <Text style={styles.sectionTitle}>Developer mode</Text>
+              <Text style={styles.tooltipText}>Show developer tools, including plugin live sync and the editor developer button.</Text>
+            </View>
+            <Switch
+              accessibilityLabel="Developer mode"
+              value={developerMode}
+              onValueChange={toggleDeveloperMode}
+              trackColor={{ true: colors.accent }}
+            />
           </View>
         </View>
       </ScrollView>

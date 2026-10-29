@@ -1,12 +1,15 @@
 import { BottomTabBar, type TabItem } from '@/src/components/bottom-tab-bar';
+import { ErrorBoundary } from '@/src/components/error-boundary';
 import { ThemeProvider, useTheme } from '@/src/lib/ui/theme';
 import { EditScreen, type EditablePhoto } from '@/src/screens/editor';
 import { HomeScreen } from '@/src/screens/home';
 import { SettingsScreen } from '@/src/screens/settings';
 import { PluginsScreen } from '@/src/screens/plugins';
+import { PluginEditorScreen, type PluginWorkspaceScreenInfo } from '@/src/screens/plugin-editor';
 import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
 import { syncAiModels } from '@/src/lib/ai/ai-model-catalog';
 import { restoreProjects } from '@/src/state/projects';
+import { pluginEditorDevUpdate } from '@/src/state/plugin-editor';
 import BootSplash from 'react-native-bootsplash';
 import { useEffect, useState } from 'react';
 import { Alert, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
@@ -28,7 +31,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <AppContent />
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
       </SafeAreaProvider>
     </ThemeProvider>
   );
@@ -40,6 +45,7 @@ function AppContent() {
   // Editing takes over the whole screen (no tab bar), like a photo app's editor, so it's
   // tracked separately from the tabs rather than as one of them.
   const [editingPhoto, setEditingPhoto] = useState<EditablePhoto | null>(null);
+  const [pluginWorkspace, setPluginWorkspace] = useState<PluginWorkspaceScreenInfo | null>(null);
   // The home screen waits for the saved projects, so it never shows its empty state before they appear.
   const [restored, setRestored] = useState(false);
 
@@ -64,6 +70,9 @@ function AppContent() {
           await installDevPluginFolder(folder);
           loadPlugins(true);
           syncAiModels();
+          const folderName = folder.split(/[\\/]/).pop() ?? '';
+          const pluginId = folderName.replace(/-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.installing$/i, '');
+          if (pluginId !== folderName) pluginEditorDevUpdate.next(pluginId);
         }
       } catch (error) {
         console.warn('Could not install the received plugin files:', error);
@@ -93,18 +102,27 @@ function AppContent() {
   return (
     <>
       <StatusBar barStyle={colors.statusBarStyle} />
-      {editingPhoto ? (
-        <EditScreen photo={editingPhoto} onClose={() => setEditingPhoto(null)} />
-      ) : (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={pluginWorkspace || editingPhoto ? ['top'] : ['top', 'bottom']}
+      >
+        {pluginWorkspace ? (
+          <PluginEditorScreen workspace={pluginWorkspace} onClose={() => setPluginWorkspace(null)} />
+        ) : editingPhoto ? (
+          <EditScreen photo={editingPhoto} onClose={() => setEditingPhoto(null)} />
+        ) : (
           <View style={styles.screen}>
-            {activeTab === 'home' && <HomeScreen onOpenPhoto={setEditingPhoto} />}
+            {activeTab === 'home' && (
+              <HomeScreen onOpenPhoto={setEditingPhoto} onOpenPluginEditor={setPluginWorkspace} />
+            )}
             {activeTab === 'settings' && <SettingsScreen />}
             {activeTab === 'plugins' && <PluginsScreen />}
           </View>
+        )}
+        {!pluginWorkspace && !editingPhoto && (
           <BottomTabBar tabs={TABS} activeTab={activeTab} onTabPress={setActiveTab} />
-        </SafeAreaView>
-      )}
+        )}
+      </SafeAreaView>
     </>
   );
 }

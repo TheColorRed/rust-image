@@ -482,7 +482,7 @@ mod tests {
   fn bundled(folder: &str, file: &str) -> Option<String> {
     // A model is in its crate's `models` folder, or in a `plugins/<name>` folder when the file is given with the folder.
     let sub = if file.contains('/') { "" } else { "models/" };
-    let path = format!("{}/../../abra/ai/{folder}/{sub}{file}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../../ai/{folder}/{sub}{file}", env!("CARGO_MANIFEST_DIR"));
     (std::fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0) > 1_000_000).then_some(path)
   }
 

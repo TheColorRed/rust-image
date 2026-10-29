@@ -6,9 +6,9 @@ import Save from 'lucide-react-native/icons/save';
 import Share2 from 'lucide-react-native/icons/share-2';
 import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useObservable } from 'react-rx';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DeveloperDialog } from '@/src/components/editor/developer-dialog';
 import { ImageInfoDialog } from '@/src/components/editor/image-info-dialog';
 import { PresetDialog } from '@/src/components/editor/preset-dialog';
@@ -25,13 +25,14 @@ import { timeline$ } from '@/src/state/history';
 import { adjustments, appliedActions } from '@/src/state/edits';
 
 export interface EditorToolbarProps {
-  photo: EditablePhoto;
+  photo?: EditablePhoto;
   onClose: () => void;
+  title?: string;
+  rightActions?: ReactNode;
 }
 
 /** The buttons floating over the photo: close on the left, and on the right the photo's information and the reset of the edits. */
-export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
-  const { top: topInset } = useSafeAreaInsets();
+export function EditorToolbar({ photo, onClose, title, rightActions }: EditorToolbarProps) {
   // A reopened project restores its recipe but not its undo timeline. Include the live edit state
   // so Reset remains available for saved adjustments and actions after reopening.
   const hasTimelineEdits = useObservable(timeline$, { entries: [], cursor: 0 }).entries.length > 0;
@@ -45,8 +46,8 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
   const [sharing, setSharing] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const exportItems = useMemo(
-    () => [{ id: 'editor-photo', uri: photo.uri, name: photo.fileName ?? photo.project?.name ?? 'photo.jpg' }],
-    [photo.fileName, photo.project?.name, photo.uri],
+    () => photo ? [{ id: 'editor-photo', uri: photo.uri, name: photo.fileName ?? photo.project?.name ?? 'photo.jpg' }] : [],
+    [photo?.fileName, photo?.project?.name, photo?.uri],
   );
   const saveCurrentPhoto = async (_item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) =>
     saveEditedPhotoToGallery(fileName, format, quality);
@@ -62,21 +63,22 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
   const overlayIconColor = '#fff';
 
   return (
-    <View style={[styles.topBar, { top: topInset + 8 }]} pointerEvents="box-none">
+    <View style={[styles.topBar, { top: 8 }]} pointerEvents="box-none">
       <Pressable style={styles.iconButton} onPress={() => closeRequested.next()} hitSlop={8}>
         <X color={overlayIconColor} size={22} />
       </Pressable>
+      {title ? <View style={styles.titleWrap} pointerEvents="none"><Text style={styles.title}>{title}</Text></View> : null}
       {/* The close button stays put; the buttons beside it scroll sideways when the screen is too narrow for them all. */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rightScroll} contentContainerStyle={styles.right}>
-        <Pressable
+        {photo ? <Pressable
           accessibilityLabel="Save to device"
           style={styles.iconButton}
           onPress={() => setSaveOpen(true)}
           hitSlop={8}
         >
           <Save color={overlayIconColor} size={22} />
-        </Pressable>
-        <Pressable
+        </Pressable> : null}
+        {photo ? <Pressable
           accessibilityLabel="Share"
           style={[styles.iconButton, sharing && styles.disabled]}
           disabled={sharing}
@@ -89,19 +91,20 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
           }}
         >
           <Share2 color={overlayIconColor} size={22} />
-        </Pressable>
-        <Pressable accessibilityLabel="Presets" style={styles.iconButton} onPress={() => setPresetsOpen(true)} hitSlop={8}>
+        </Pressable> : null}
+        {photo ? <Pressable accessibilityLabel="Presets" style={styles.iconButton} onPress={() => setPresetsOpen(true)} hitSlop={8}>
           <Library color={overlayIconColor} size={22} />
-        </Pressable>
-        <Pressable accessibilityLabel="Photo information" style={styles.iconButton} onPress={() => setInfoOpen(true)} hitSlop={8}>
+        </Pressable> : null}
+        {photo ? <Pressable accessibilityLabel="Photo information" style={styles.iconButton} onPress={() => setInfoOpen(true)} hitSlop={8}>
           <CircleQuestionMark color={overlayIconColor} size={22} />
-        </Pressable>
+        </Pressable> : null}
         {__DEV__ ? (
           <Pressable accessibilityLabel="Developer" style={styles.iconButton} onPress={() => setDeveloperOpen(true)} hitSlop={8}>
             <Bug color={overlayIconColor} size={22} />
           </Pressable>
         ) : null}
-        {hasEdits ? (
+        {rightActions}
+        {photo && hasEdits ? (
           <Pressable
             accessibilityLabel="Reset all edits"
             style={styles.iconButton}
@@ -125,15 +128,15 @@ export function EditorToolbar({ photo, onClose }: EditorToolbarProps) {
           </Pressable>
         ) : null}
       </ScrollView>
-      <ImageInfoDialog photo={photo} visible={infoOpen} onClose={() => setInfoOpen(false)} />
+      {photo ? <ImageInfoDialog photo={photo} visible={infoOpen} onClose={() => setInfoOpen(false)} /> : null}
       {__DEV__ ? <DeveloperDialog visible={developerOpen} onClose={() => setDeveloperOpen(false)} /> : null}
       <PresetDialog visible={presetsOpen} onClose={() => setPresetsOpen(false)} />
-      <ExportDialog
+      {photo ? <ExportDialog
         items={exportItems}
         visible={saveOpen}
         onClose={() => setSaveOpen(false)}
         onSaveImage={saveCurrentPhoto}
-      />
+      /> : null}
     </View>
   );
 }
@@ -142,12 +145,16 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     topBar: {
       position: 'absolute',
+      zIndex: 10,
+      elevation: 10,
       left: 12,
       right: 12,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
     },
+    titleWrap: { position: 'absolute', left: 48, right: 48, alignItems: 'center' },
+    title: { color: '#fff', fontSize: 16, fontWeight: '600' },
     rightScroll: { flexGrow: 0, flexShrink: 1, marginLeft: 12 },
     right: {
       flexDirection: 'row',

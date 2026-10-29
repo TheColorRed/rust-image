@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import chalk from 'chalk';
 import { build as esbuild, transform as esbuildTransform } from 'esbuild';
 import { parse } from 'yaml';
 
@@ -25,14 +26,27 @@ async function bundle(srcDir, entry) {
     external: ['@abra/core', '@abra/core/*', '@alakazam/plugin', '@alakazam/plugin-toolkit'],
     logLevel: 'silent',
   });
-  return result.outputFiles[0].text;
+  return withPerKeyExports(result.outputFiles[0].text);
+}
+
+/**
+ * Hermes gives every closure created in esbuild's `__copyProps` loop (`for (let key of ...)`) the same `key`, so each export getter
+ * returns the last export and `renderInspector` came back as `selectedImages`. Running the loop body once per key through `forEach`
+ * gives every getter its own `key`.
+ */
+function withPerKeyExports(code) {
+  const loop = /for \(let key of __getOwnPropNames\(from\)\)\n(\s+if \(!__hasOwnProp\.call\(to, key\) && key !== except\)\n\s+__defProp\(to, key, \{[^\n]*\}\);)/;
+  if (!code.includes('for (let key of __getOwnPropNames(from))')) return code;
+  if (!loop.test(code)) throw new Error('esbuild changed its export helper; update withPerKeyExports in plugin-builder.mjs');
+  return code.replace(loop, '__getOwnPropNames(from).forEach((key) => {\n$1\n    });');
 }
 
 /** Entry JS files named by a plugin manifest, in manifest order. */
 function entriesOf(manifest) {
   const controls = (manifest.contributes?.controls ?? []).flatMap(group => (group.items ?? []).map(item => item.entry));
   const scripts = (manifest.contributes?.scripts ?? []).map(script => script.entry);
-  return [...new Set([...controls, ...scripts])];
+  const workspaces = (manifest.contributes?.workspaces ?? []).map(workspace => workspace.entry);
+  return [...new Set([...controls, ...scripts, ...workspaces])];
 }
 
 /** Replaces the manifest's files block with the built entries and their hashes. */
@@ -64,7 +78,7 @@ export async function buildPlugins(pluginDirs, { devMode = false } = {}) {
       mkdirSync(path.dirname(outputPath), { recursive: true });
       writeFileSync(outputPath, code);
       builtFiles.push({ path: entry, sha256: createHash('sha256').update(code).digest('hex') });
-      console.log(`${path.basename(dir)}/${path.relative(dir, outputPath).split(path.sep).join('/')}  ${code.length} bytes`);
+      console.log(chalk.dim(`${path.basename(dir)}/${path.relative(dir, outputPath).split(path.sep).join('/')}  ${code.length} bytes`));
     }
 
     const builtPaths = new Set(builtFiles.map(file => file.path));
@@ -101,10 +115,10 @@ export async function buildPlugins(pluginDirs, { devMode = false } = {}) {
       const archive = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
       const archivePath = path.join(outDir, `${manifest.id}.akzx`);
       writeFileSync(archivePath, archive);
-      console.log(`${path.basename(dir)}/${path.relative(dir, archivePath).split(path.sep).join('/')}  ${archive.length} bytes`);
+      console.log(chalk.dim(`${path.basename(dir)}/${path.relative(dir, archivePath).split(path.sep).join('/')}  ${archive.length} bytes`));
     }
     if (updated !== original.replace(/\r\n/g, '\n')) writeFileSync(manifestPath, updated);
     built++;
   }
-  console.log(`${built} plugin(s) built${devMode ? ' for development sync' : ' and packaged'}.`);
+  console.log(chalk.bold(`${built} plugin(s) built${devMode ? ' for development sync' : ' and packaged'}.`));
 }

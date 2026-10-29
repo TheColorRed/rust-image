@@ -17,7 +17,6 @@ typography = { workspace = true }
 tools = { workspace = true }
 gpu = { workspace = true, optional = true }
 
-saphyr = { workspace = true }
 rayon = { workspace = true }
 ndarray = { workspace = true }
 ctor = { workspace = true }

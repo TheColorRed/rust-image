@@ -35,7 +35,6 @@ dependencies = [
  "options",
  "rayon",
  "regex",
- "saphyr",
  "sha2",
  "tools",
  "typography",
@@ -126,9 +125,7 @@ dependencies = [
 name = "abra-object-removal"
 version = "1.0.0"
 dependencies = [
- "abra",
  "abra-ai-core",
- "abra-core",
  "mask",
 ]
 
@@ -158,6 +155,7 @@ dependencies = [
  "abra-body-segmentation",
  "abra-find-person",
  "canvas",
+ "collage",
  "pub-sub",
  "regex",
  "uniffi",
@@ -225,12 +223,16 @@ name = "alakazam-mobile"
 version = "0.1.0"
 dependencies = [
  "abra",
+ "abra-ai-core",
  "abra-body-segmentation",
+ "abra-core",
  "abra-find-person",
  "abra-uniffi",
  "futures",
  "gpu",
  "gpu-passes",
+ "mask",
+ "saphyr",
  "sha2",
  "uniffi",
  "ureq",

@@ -7,7 +7,7 @@ use std::sync::{
 use abra::abra_core::Rect;
 use abra::prelude::{Image as CoreImage, ImageExt};
 use abra_body_segmentation::prelude::ImageAi;
-use abra_uniffi::{AiModel, AiOutput, BodySegments, Image, Mask};
+use abra_uniffi::{AiModel, AiOutput, BodySegments, Canvas, Image, Mask};
 
 use crate::{
   AbraError,
@@ -24,6 +24,20 @@ pub struct PersonDetection {
   pub height: u32,
   pub confidence: f64,
   pub mask: Arc<Mask>,
+}
+
+/// One cell of a canvas made by `canvas_of_cells_async`: the picture file that goes in it, and where the cell is and how big it is, in pixels
+/// of the canvas. The library's own `CanvasCell` (see `Canvas.new_of_cells`) as a record of this crate, since a record can only be sent
+/// across by the crate that declares it.
+#[derive(uniffi::Record)]
+pub struct PictureCell {
+  pub path: String,
+  pub x: i32,
+  pub y: i32,
+  pub width: u32,
+  pub height: u32,
+  /// Keeps the picture's own proportions, with nothing cropped, and puts the cell in the middle of its place. See `CanvasCell`.
+  pub keep_aspect: bool,
 }
 
 type Job = Box<dyn FnOnce() + Send>;
@@ -137,6 +151,20 @@ worker! {
 }
 
 worker! {
+  /// A canvas of `width` x `height` with a child canvas for each of `cells`, each holding its picture scaled to cover the cell, made on a
+  /// worker thread so the app keeps drawing while the pictures are read and scaled. The same as `Canvas.new_of_cells`, which says how.
+  canvas_of_cells_async(name: String, width: u32, height: u32, cells: Vec<PictureCell>) -> Arc<Canvas> {
+    let cells: Vec<_> = cells
+      .into_iter()
+      .map(|cell| abra::canvas::prelude::CanvasCell { path: cell.path, x: cell.x, y: cell.y, width: cell.width, height: cell.height, keep_aspect: cell.keep_aspect })
+      .collect();
+    abra::canvas::prelude::Canvas::new_of_cells(name, width, height, &cells)
+      .map(|canvas| Arc::new(Canvas::from_core(canvas)))
+      .map_err(|message| AbraError::Io { message })
+  }
+}
+
+worker! {
   /// The mask of the skin in the photo.
   detect_skin_async(image: Arc<Image>) -> Arc<Mask> {
     Ok(Arc::new(Mask::from_core(SKIN_SEGMENTER.get()?.process(&image.core())?)))
@@ -245,5 +273,29 @@ mod tests {
         .err()
         .expect("missing image should fail");
     assert!(matches!(error, AbraError::Io { .. }));
+  }
+
+  #[test]
+  fn a_canvas_of_cells_is_made_on_a_worker_and_a_missing_picture_is_an_error() {
+    let path = std::env::temp_dir().join(format!("abra-cells-worker-{}.png", std::process::id()));
+    let picture = CoreImage::new_from_color(8, 6, abra::abra_core::Color::from_rgba(90, 90, 90, 255));
+    abra::abra_core::writer(path.to_string_lossy().into_owned()).save(&picture).unwrap();
+    let cell = |path: &str, x| PictureCell { path: path.to_owned(), x, y: 0, width: 4, height: 4, keep_aspect: false };
+    let file = path.to_string_lossy().into_owned();
+
+    let canvas = futures::executor::block_on(canvas_of_cells_async(
+      "Cells".to_owned(), 8, 4, vec![cell(&file, 0), cell(&file, 4)],
+    ))
+    .expect("two cells of one file");
+    assert_eq!(canvas.canvases().len(), 2);
+    assert_eq!(canvas.as_image().core().get_pixel(5, 1).unwrap().0, 90);
+
+    let error = futures::executor::block_on(canvas_of_cells_async(
+      "Cells".to_owned(), 8, 4, vec![cell("missing-cell-picture.png", 0)],
+    ))
+    .err()
+    .expect("a missing picture is an error");
+    assert!(matches!(error, AbraError::Io { .. }));
+    let _ = std::fs::remove_file(path);
   }
 }

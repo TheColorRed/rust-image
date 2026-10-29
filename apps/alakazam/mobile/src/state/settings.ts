@@ -35,6 +35,10 @@ export const exportFormat$ = exportFormat.asObservable();
 export const themePreference = new BehaviorSubject<ThemePreference>('system');
 export const themePreference$ = themePreference.asObservable();
 
+/** Whether developer-only tools are visible in the app. */
+export const developerModeEnabled = new BehaviorSubject(false);
+export const developerModeEnabled$ = developerModeEnabled.asObservable();
+
 /** The stack sizes, in megabytes, the developer dialog offers for the image worker threads. */
 export const WORKER_STACK_CHOICES = [4, 8, 16, 32, 64];
 
@@ -61,6 +65,7 @@ const STORAGE_KEY = 'settings';
     if (typeof savedQuality === 'number' && savedQuality >= 0 && savedQuality <= 100) exportQuality.next(savedQuality);
     if (WORKER_STACK_CHOICES.includes(saved.workerStackMegabytes)) workerStackMegabytes.next(saved.workerStackMegabytes);
     if (['system', 'light', 'dark'].includes(saved.themePreference)) themePreference.next(saved.themePreference);
+    if (typeof saved.developerModeEnabled === 'boolean') developerModeEnabled.next(saved.developerModeEnabled);
   } catch (error) {
     warn('settings', 'could not read the saved settings:', error);
   }
@@ -68,11 +73,11 @@ const STORAGE_KEY = 'settings';
   setWorkerStackMegabytes(workerStackMegabytes.value);
   workerStackInEffect.next(workerStackMegabytes.value);
   // Starts after the read, and skips the value it starts with, so the defaults never overwrite what was saved.
-  combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$])
+  combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$, developerModeEnabled$])
     .pipe(skip(1))
-    .subscribe(([format, quality, theme, stack]) => {
+    .subscribe(([format, quality, theme, stack, developerMode]) => {
       setWorkerStackMegabytes(stack);
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ exportFormat: format, exportQuality: quality, themePreference: theme, workerStackMegabytes: stack })).catch(error =>
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ exportFormat: format, exportQuality: quality, themePreference: theme, workerStackMegabytes: stack, developerModeEnabled: developerMode })).catch(error =>
         warn('settings', 'could not save the settings:', error),
       );
     });

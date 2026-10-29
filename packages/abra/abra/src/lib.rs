@@ -7,7 +7,6 @@ use ctor::ctor;
 
 pub mod ffi;
 pub mod live;
-pub mod plugin;
 
 pub use abra_core;
 

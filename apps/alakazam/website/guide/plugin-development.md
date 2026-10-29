@@ -82,6 +82,29 @@ The slider's `tool(photo, values, context)` callback receives three parameters:
 
 The optional `thumb(photo, context)` callback receives a thumbnail-sized working image and the same kind of context. Return the preview image or change `photo` in place. Here it shows maximum saturation; omit `thumb` if a preview is not useful.
 
+## Develop and test from your computer
+
+Keep the plugin project on your computer. For live testing, your Android phone and computer need to be on the same Wi-Fi network.
+
+1. In Alakazam, open **Plugins** and turn on **Plugin development server** in the developer card at the bottom of the page. Keep Alakazam open. The app shows the address to use.
+2. In a terminal, change to the folder containing your `plugin.yml` and run:
+
+   ```sh
+   npx @alakazam/plugin dev
+   ```
+
+3. Enter the address shown in Alakazam when prompted. You can provide it on the command line instead:
+
+   ```sh
+   npx @alakazam/plugin dev --url 192.168.1.20:43821
+   ```
+
+4. Wait for `Watching 1 plugin folder(s)` in the terminal, then edit and save a plugin file such as `src/example.ts`. The command searches the current folder tree for `plugin.yml` files and builds the matching plugin when you save a relevant file. It sends `plugin.yml` and the plugin's listed files directly to Alakazam; the app validates and installs the update, then refreshes its controls.
+
+The command does not build or install anything when it starts. After it says it is watching, save a plugin file once to trigger the first build and sync. Live sync sends the raw files and does not create an `.akzx` archive. Keep Alakazam open while developing, and turn off the development server from the Plugins page when you finish. Live sync updates JavaScript add-ons; install any model plugins separately.
+
+If your terminal is not in the plugin project, pass its folder to the command, for example `npx @alakazam/plugin dev ./example-plugin`. You can also pass `--root <directory>` to set the folder tree to search.
+
 ## Use an npm package in your plugin
 
 The app can run npm package code only when it is bundled into your plugin's JavaScript entry. Install the package in your plugin project:
@@ -100,7 +123,7 @@ const labelForToday = () => format(new Date(), 'yyyy-MM-dd');
 
 You do not need a separate bundler or a `vendors.js` file. The toolkit uses esbuild to bundle static npm imports directly into `dist/example.js`. When you save the source with `npx @alakazam/plugin dev` running, it also adds `example.js` and its generated hash to `plugin.yml`, then syncs those files to the app. The app runs the bundled entry; it does not receive `node_modules`.
 
-For distribution, `npx @alakazam/plugin build` also creates `dist/your-name.example-addon.akzx`, containing `plugin.yml` and the bundled `example.js`. The `dependencies` field in `plugin.yml` is for other Alakazam plugins, not npm packages. Packages that rely on Node APIs or native Node add-ons may not work in Alakazam; test them in the app.
+The `dependencies` field in `plugin.yml` is for other Alakazam plugins, not npm packages. Packages that rely on Node APIs or native Node add-ons may not work in Alakazam; test them in the app.
 
 The toolkit provides TypeScript declarations. To type-check your source, install TypeScript and create a `tsconfig.json`:
 
@@ -126,19 +149,7 @@ Then run `npx tsc --noEmit`.
 
 For the full manifest format, control types, dependencies, and runtime APIs, see the [plugin writing reference](https://github.com/TheColorRed/rust-image/blob/main/apps/docs/public/plugins/writing-plugins.md).
 
-## Test changes on Android with live sync
-
-On the phone, open **Plugins** and start **Plugin development server**. Keep the app open and connect the phone and computer to the same Wi-Fi network. The app shows one or more server addresses and an access token.
-
-In a terminal at your plugin project folder, run:
-
-```sh
-npx @alakazam/plugin dev
-```
-
-Enter an address and token shown in the app when prompted. You can pass them directly with `--url <address> --token <token>`. The watcher discovers plugin folders with JavaScript controls or scripts. At startup it only watches; it does not build or install files. Save a change to a plugin file, such as `src/example.ts`, to rebuild and send `plugin.yml` and its listed files to the app. The app validates and installs the update, then refreshes the controls. Live sync sends raw files; it does not create an `.akzx` archive. Stop the server from the Plugins page when you finish. This sync updates JavaScript add-ons; install any model plugins separately.
-
-## Package a plugin for sharing or the regular app
+## Package a plugin for sharing or manual installation
 
 Live sync is for development. To make a package that can be installed from the regular Plugins screen, run this from your plugin project folder:
 
@@ -156,5 +167,5 @@ Copy the `.akzx` file to your phone, for example into **Downloads**. In Alakazam
 - **The build says an entry is missing:** Check that each `.js` entry in `plugin.yml` has a matching `.ts` file under `src/`, with the same relative path.
 - **The app reports that it does not provide an imported module:** The built entry still has an external import that is not in the app's module list. Use a static import so the toolkit can bundle third-party code, and check whether the package depends on unsupported Node APIs or dynamic loading.
 - **Alakazam reports a missing dependency:** Install the dependency plugin separately, then reopen or reload the add-on.
-- **The computer cannot connect:** Check that the phone and computer are on the same network, the server is running in the app, and you entered the matching address and token.
+- **The computer cannot connect:** Check that the phone and computer are on the same network, the server is running in the app, and you entered the matching address.
 - **The app does not update:** Keep Alakazam open while the server is running. Check the app for an installation error, and confirm the plugin build succeeded in the terminal.

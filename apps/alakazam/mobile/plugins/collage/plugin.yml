@@ -1,0 +1,16 @@
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.collage
+name: Collage
+version: 1.0.0
+description: Create a new image from a selection of photos.
+
+contributes:
+  workspaces:
+    - id: collage
+      title: Collage
+      description: Create a collage from multiple photos.
+      entry: collage.js
+
+files:
+  - path: collage.js
+    sha256: 0713ca8e2197059b7398c3e15a2da9640f43d297a666b90f0b98d41263a8bd6d

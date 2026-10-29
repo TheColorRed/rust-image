@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use abra::abra_core::{FlipAxis, Resolution, ResizeTarget, Size, Transform, TransformAlgorithm, WriterOptions};
 use abra::canvas::prelude::{
-  self as library, AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin,
+  self as library, AdjustmentLayerType, Anchor, CanvasCell, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin,
   OutlinePosition,
 };
 
@@ -55,6 +55,17 @@ pub enum LayerSize {
   Cover(Option<TransformAlgorithm>),
   Specific(u32, u32, Option<TransformAlgorithm>),
   Percentage(f32, Option<TransformAlgorithm>),
+}
+
+// One cell of a canvas made by `Canvas.new_of_cells`: its picture file, and its place and size in pixels.
+#[uniffi::remote(Record)]
+pub struct CanvasCell {
+  pub path: String,
+  pub x: i32,
+  pub y: i32,
+  pub width: u32,
+  pub height: u32,
+  pub keep_aspect: bool,
 }
 
 // Target specifications for resizing a canvas.
@@ -285,7 +296,7 @@ impl Stroke {
 
 /// Composite effects collection for a layer or canvas.
 #[derive(Clone, Debug, uniffi::Object)]
-pub struct LayerEffects(library::LayerEffects<'static>);
+pub struct LayerEffects(pub(crate) library::LayerEffects<'static>);
 
 #[uniffi::export]
 impl LayerEffects {
@@ -311,7 +322,14 @@ impl LayerEffects {
 
 /// A canvas is a composition of image layers and child canvases.
 #[derive(uniffi::Object)]
-pub struct Canvas(library::Canvas<'static>);
+pub struct Canvas(pub(crate) library::Canvas<'static>);
+
+impl Canvas {
+  /// A handle for a canvas of the library.
+  pub fn from_core(canvas: library::Canvas<'static>) -> Self {
+    Self(canvas)
+  }
+}
 
 #[uniffi::export]
 impl Canvas {
@@ -410,6 +428,17 @@ impl Canvas {
     self.0.set_rotation(degrees);
   }
 
+  /// The factor the canvas is scaled by within a parent canvas, about its middle.
+  pub fn scale(&self) -> f32 {
+    self.0.scale()
+  }
+
+  /// Sets the factor the canvas is scaled by within a parent canvas, about its middle. 1 is its own size. The canvas keeps its own
+  /// pixels, so changing the factor never loses quality.
+  pub fn set_scale(&self, factor: f32) {
+    self.0.set_scale(factor);
+  }
+
   /// The origin point within the canvas bounds.
   pub fn origin(&self) -> Origin {
     self.0.origin()
@@ -481,6 +510,20 @@ impl Canvas {
   pub fn add_adjustment_layer(&self, name: String, adjustment_type: AdjustmentLayerType) -> Arc<Layer> {
     let layer = self.0.add_adjustment_layer(name, adjustment_type);
     Arc::new(Layer(layer))
+  }
+
+  /// A canvas of `width` x `height` with a child canvas for each of `cells`, in order, each holding its picture scaled to cover the cell
+  /// at the cell's place. The pictures are read in parallel, and a file that more than one cell uses is read once. Panics with the file
+  /// that could not be read, as `Image.read` does. Call it from a worker (`canvasOfCells`) so the app keeps drawing while it works.
+  #[uniffi::constructor]
+  pub fn new_of_cells(name: String, width: u32, height: u32, cells: Vec<CanvasCell>) -> Self {
+    Self(library::Canvas::new_of_cells(name, width, height, &cells).unwrap_or_else(|message| panic!("{message}")))
+  }
+
+  /// The canvases inside this one, in the order they were added. Each is the same canvas as the one that was added, so turning, scaling
+  /// or moving it changes this canvas.
+  pub fn canvases(&self) -> Vec<Arc<Canvas>> {
+    self.0.canvases().into_iter().map(|child| Arc::new(Canvas(child))).collect()
   }
 
   /// Adds a child canvas with optional placement options.
