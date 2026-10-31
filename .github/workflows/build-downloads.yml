@@ -305,6 +305,9 @@ jobs:
           # rav1d (NASM) and libjpeg-turbo (ASM_NASM, through cmake) assemble x86_64 code with the NASM that `npm ci` put in tools/nasm.
           export NASM="$GITHUB_WORKSPACE/tools/nasm/nasm"
           export ASM_NASM="$NASM"
+          # rav1d's x86_64 assembly refers to Rust-defined tables with plain PC-relative relocations, which a Linux shared library only
+          # accepts when its symbols bind inside the library. This copy of the library is only read for its definitions, never shipped.
+          export RUSTFLAGS="$RUSTFLAGS -C link-arg=-Wl,-Bsymbolic"
           cargo build -p alakazam-mobile
           cd packages/react-native/alakazam
           node ../../../node_modules/uniffi-bindgen-react-native/bin/cli.cjs generate jsi2 bindings --library --lib-name alakazam_mobile --ts-dir src/generated ../../../target/debug/libalakazam_mobile.so
