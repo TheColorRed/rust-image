@@ -42,6 +42,8 @@ export interface Project {
     values: Record<string, unknown>;
     /** Each file picker's pictures, by the picker's key: their names, and the files in the project folder they were copied to. */
     pickers: Record<string, { name?: string; file: string }[]>;
+    /** What the plugin kept with `app.saved`, as plain data, by the plugin's own names. */
+    state?: Record<string, unknown>;
   };
   /** The flattened result shown in project lists and while saved control images load. */
   resultFile?: string;

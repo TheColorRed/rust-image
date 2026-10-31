@@ -198,6 +198,76 @@ inspector.toggle('Keep Aspect Ratio', {
 
 `toggle` takes `value` (false by default) and `onChange`. Like `select` and `number` it changes what the plugin makes and is not a drag, so the editor runs the plugin's controls and `previewCanvas` again after each change.
 
+To add a box for a line of text:
+
+```ts
+inspector.text('Text', {
+  value: 'Summer 2026',
+  placeholder: 'Write something',
+  onChange(text) {
+    // Called a moment after typing stops.
+  },
+});
+```
+
+`text` takes `value` (nothing by default), `placeholder` and `onChange`, which is called a moment after typing stops, not for every letter. The editor then runs the plugin's controls and `previewCanvas` again.
+
+To let the person choose a font:
+
+```ts
+inspector.fontPicker('Font', {
+  value: 'Roboto',
+  onPick(family) {
+    // `family` works with app.fonts.renderText.
+  },
+});
+```
+
+`fontPicker` shows a button with the chosen family (`value`, or "Choose a font"). Tapping it opens the Fonts overlay, where the person browses the fonts on their device and downloads more from Google Fonts. `onPick` gets the family they tap, and the editor then runs the plugin's controls and `previewCanvas` again.
+
+To write text on a picture, use the fonts the person downloaded on the Fonts screen. `app.fonts.installed()` lists their family names, and `app.fonts.renderText({ text, family, size, color, width, align })` gives back a new transparent image of the text, which you release when done. It gives back `null` when there is nothing to write (no text, or a family that was deleted). The editor writes text with the same function.
+
+To let people pick a thing on the preview and edit it, the way Unity and Godot show the settings of the selected object, keep the pick in the plugin and make `inspectorGUI` show different controls for it:
+
+```ts
+let selected: number | null = null;
+
+export const inspectorGUI = () => {
+  if (selected === null) return mainControls();
+  inspector.header('Image ' + (selected + 1), { back: () => pick(null) });
+  // ...the controls of the picked image
+};
+
+const pick = (index: number | null) => {
+  selected = index;
+  inspector.refresh(); // runs inspectorGUI and previewCanvas again
+};
+
+app.events.taps.subscribe(({ imageX, imageY }) => {
+  const found = imageX === null || imageY === null ? undefined : canvas.childAt(imageX, imageY);
+  // ...find which of your canvases it is (compare `id()`), then pick(index)
+});
+```
+
+`header` takes `back`, which shows a Back button with the heading, and `inspector.refresh()` runs `inspectorGUI` and `previewCanvas` again for a change that did not come from one of the controls (a tap on the preview). `canvas.childAt(x, y)` gives the canvas on top at a point (in the canvas's own pixels), and `canvas.quadInParent()` gives the four corners of a canvas as it sits in its parent, after its position, scale and rotation. `app.events.taps` gives `imageX` and `imageY` in the pixels of the canvas `previewCanvas` returned.
+
+To show what is picked, draw a frame with a gizmo:
+
+```ts
+const corners = quadCorners(cell.quadInParent()).map(corner => [corner.x, corner.y]);
+app.gizmos.setBox('selection', corners);
+
+const red = Color.red();
+app.gizmos.color(red); // the gizmos drawn from here on are red
+app.gizmos.setBox('problem', otherCorners);
+app.gizmos.color(null); // back to white, the default
+release(red);
+
+// later: app.gizmos.remove('selection');
+```
+
+`app.gizmos.setBox(name, corners)` draws a frame round four corners (top left, top right, bottom right, bottom left) in pixels of the canvas, and the app keeps it on the picture as the preview is zoomed, moved and turned. It is drawn in the color set with `app.gizmos.color(color)`, which stays until it is set again (`null` goes back to white), and as wide as `app.gizmos.size(pixels)` says (3 screen pixels by default). A gizmo that is already drawn keeps the color it was drawn in. A soft dark line is drawn under each frame so it shows on any picture. Setting a name again moves it, and `app.gizmos.remove(name)` takes it away. They go away when the workspace closes. Move a frame again when what it frames moves (a slider that turns the cell).
+
 To add a slider:
 
 ```ts
@@ -212,7 +282,7 @@ inspector.slider('Rotation', {
 });
 ```
 
-`max` is required. `min` defaults to `0`, `step` to `1` and `range` to `false`. `multiline` puts the name on a line of its own with the slider under it across the whole width; otherwise the name is on the left and the slider on the right. It defaults to `false`, and to `true` when `range` is `true`, since two thumbs need the width. A number field is at the end of the slider (at both ends for a range) so a value can be typed. `reset` (default `true`) shows a round reset button beside the name, which puts the slider back to where it was when the editor opened. With `range: false` the slider has one thumb and `onChange` gets a number; with `range: true` it has two thumbs and `onChange` gets `[low, high]`. `value` is where it starts: `min` by default (`[min, max]` for a range). `onChange` hears every move of a drag, and the preview is drawn again once a frame; `previewCanvas` is not called again, so change the layers of the canvas it returned.
+`max` is required. `min` defaults to `0`, `step` to `1` and `range` to `false`. `multiline` puts the name on a line of its own with the slider under it across the whole width; otherwise the name is on the left and the slider on the right. It defaults to `false`, and to `true` when `range` is `true`, since two thumbs need the width. A number field is at the end of the slider (at both ends for a range) so a value can be typed. `reset` (default `true`) shows a round reset button beside the name, which puts the slider back to where it was when the editor opened. With `range: false` the slider has one thumb and `onChange` gets a number; with `range: true` it has two thumbs and `onChange` gets `[low, high]`. `value` is where it starts: `min` by default (`[min, max]` for a range). `onChange` hears every move of a drag, and the preview is drawn again once a frame; `previewCanvas` is not called again, so change the layers of the canvas it returned. Set `rebuild: true` for a value that changes how the picture is made (a size, where resizing a finished piece would blur it): `previewCanvas` is then called on each move.
 
 Declare the workspace entry in `plugin.yml`:
 

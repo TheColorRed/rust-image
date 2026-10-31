@@ -9,6 +9,7 @@ uniffi::setup_scaffolding!();
 
 pub mod components;
 mod consts;
+pub mod fonts;
 mod image_workers;
 pub mod models;
 mod plugins;

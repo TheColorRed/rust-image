@@ -51,6 +51,13 @@ pub(crate) struct CanvasInner<'a> {
   /// Whether how the canvas sits in its parent (position, rotation, scale, blend mode, opacity) changed since the parent last composed.
   /// The canvas's own picture does not depend on these, so only the parent has to compose again.
   placement_changed: Cell<bool>,
+  /// Where the canvas's own top-left corner is in `result`: more than (0, 0) when its effects added room round it (a drop shadow reaches
+  /// past the edge). The parent draws `result` that far up and to the left so the canvas itself is where it was placed.
+  result_offset: Cell<(i32, i32)>,
+  /// Whether the parent left this canvas out the last time it composed, because nothing of it could show (see [`Self::is_out_of_sight`]).
+  /// A canvas that is left out is not brought up to date, and its changes do not make the parent compose again, until it is placed
+  /// somewhere it shows.
+  out_of_sight: Cell<bool>,
   /// The anchor point for positioning relative to the parent canvas.
   anchor: Option<Anchor>,
   /// The rotation in degrees for positioning within the parent canvas.
@@ -91,6 +98,8 @@ impl<'a> CanvasInner<'a> {
       y: Cell::new(0),
       needs_recompose: Cell::new(true),
       placement_changed: Cell::new(false),
+      out_of_sight: Cell::new(false),
+      result_offset: Cell::new((0, 0)),
       anchor: None,
       rotation: Cell::new(None),
       scale: Cell::new(1.0),
@@ -146,8 +155,61 @@ impl<'a> CanvasInner<'a> {
     self.needs_recompose.get()
       || self.canvases.iter().any(|child| {
         let child = child.lock().unwrap();
-        child.placement_changed.get() || child.tree_is_dirty()
+        child.placement_changed.get() || (!child.out_of_sight.get() && child.tree_is_dirty())
       })
+  }
+
+  /// The four corners of this canvas as it sits in its parent, in the parent's pixels: moved to its position, scaled about its middle and
+  /// turned about its middle, the way the parent draws it. They are the corners of the canvas's own picture, in the order top-left,
+  /// top-right, bottom-right, bottom-left, so a turn carries each one round. A positive turn is clockwise.
+  pub(crate) fn quad_in_parent(&self) -> abra_core::Quad {
+    let (width, height) = self.dimensions::<u32>();
+    let (width, height) = (width as f32, height as f32);
+    let (x, y) = self.position();
+    let (middle_x, middle_y) = (x as f32 + width / 2.0, y as f32 + height / 2.0);
+    let (half_width, half_height) = (width * self.scale().max(0.0) / 2.0, height * self.scale().max(0.0) / 2.0);
+    let (sin, cos) = self.rotation().unwrap_or(0.0).to_radians().sin_cos();
+    let corner = |p_dx: f32, p_dy: f32| (middle_x + p_dx * cos - p_dy * sin, middle_y + p_dx * sin + p_dy * cos);
+    abra_core::Quad::new(
+      corner(-half_width, -half_height),
+      corner(half_width, -half_height),
+      corner(half_width, half_height),
+      corner(-half_width, half_height),
+    )
+  }
+
+  /// Whether this canvas, placed in a parent picture of the given size at `p_x`, `p_y` from its top-left corner, is certain not to
+  /// show: it is invisible (opacity 0 or scale 0), or it lies wholly outside the parent. Its picture then need not be made or drawn.
+  /// It errs towards false: the turned canvas is taken as its circle (it can lie anywhere in it), and a canvas with effects, which
+  /// draw outside its edges, or one that is drawn straight into its parent, which its layers can reach outside of, is never left out.
+  fn is_out_of_sight(&self, p_parent_width: u32, p_parent_height: u32, p_x: i32, p_y: i32) -> bool {
+    let (width, height) = self.dimensions::<u32>();
+    if width == 0 || height == 0 {
+      return false;
+    }
+    let has_effects = !self.effects.drop_shadow.is_none() || !self.effects.stroke.is_none();
+    let drawn_straight_in = self.pass_through() && self.rotation().is_none() && self.scale() == 1.0 && self.mask.is_none();
+    if has_effects || drawn_straight_in {
+      return false;
+    }
+    let (scale, rotates) = (self.scale().max(0.0), self.rotation().is_some());
+    if self.opacity() <= 0.0 || scale == 0.0 {
+      return true;
+    }
+    let (width, height) = (width as f32 * scale, height as f32 * scale);
+    // Rounding when it is scaled and turned can move an edge by a pixel or two.
+    let margin = 2.0;
+    let (reach_x, reach_y) = if rotates {
+      let reach = width.hypot(height) / 2.0;
+      (reach, reach)
+    } else {
+      (width / 2.0, height / 2.0)
+    };
+    let (middle_x, middle_y) = (p_x as f32 + self.width.get() as f32 / 2.0, p_y as f32 + self.height.get() as f32 / 2.0);
+    middle_x + reach_x + margin <= 0.0
+      || middle_x - reach_x - margin >= p_parent_width as f32
+      || middle_y + reach_y + margin <= 0.0
+      || middle_y - reach_y - margin >= p_parent_height as f32
   }
 
   /// Queues proportional scaling for direct layers, then recurses into child canvases.
@@ -305,7 +367,10 @@ impl<'a> CanvasInner<'a> {
     for child_inner_rc in self.canvases.iter() {
       let mut child_inner = child_inner_rc.lock().unwrap();
       child_inner.apply_anchor_with_parent_dimensions(width as i32, height as i32);
-      if child_inner.tree_is_dirty() {
+      let (child_x, child_y) = child_inner.position();
+      let out_of_sight = child_inner.is_out_of_sight(width, height, child_x, child_y);
+      child_inner.out_of_sight.set(out_of_sight);
+      if !out_of_sight && child_inner.tree_is_dirty() {
         child_inner.update_canvas();
       }
     }
@@ -327,10 +392,13 @@ impl<'a> CanvasInner<'a> {
     if !self.effects.drop_shadow.is_none() || !self.effects.stroke.is_none() {
       // We need to compute padding/offset and update origin/position as necessary.
       // offset currently unused; keep underscore to suppress unused variable warning while keeping layout
-      let (img, _offset, _content_dims) = self.effects.apply_with_offset(Arc::new(final_image)).into_tuple();
-      // offset is padding that indicates where the original content is placed inside img
+      let (img, offset, _content_dims) = self.effects.apply_with_offset(Arc::new(final_image)).into_tuple();
+      // The offset is the room added before the content, where the canvas's own top-left corner is in the picture. The parent needs it
+      // to put the canvas where it belongs, and not the picture, which is bigger than the canvas.
+      self.result_offset.set(offset);
       final_image = (*img).clone();
-      // If the canvas has a parent, we may need to set anchor offset on this canvas; for now we just store result
+    } else {
+      self.result_offset.set((0, 0));
     }
 
     final_image.set_resolution(self.resolution);
@@ -359,6 +427,10 @@ impl<'a> CanvasInner<'a> {
       let (child_x, child_y) = child_inner.position();
       let dest_x = p_offset_x + child_x;
       let dest_y = p_offset_y + child_y;
+      let (dest_width, dest_height) = p_dest.dimensions::<u32>();
+      if child_inner.is_out_of_sight(dest_width, dest_height, dest_x, dest_y) {
+        continue;
+      }
 
       if child_inner.pass_through() && child_inner.rotation().is_none() && child_inner.scale() == 1.0 && child_inner.mask.is_none() {
         // Composite child's layers directly into `dest` with accumulated offsets
@@ -366,27 +438,37 @@ impl<'a> CanvasInner<'a> {
       } else {
         // Composite child's flattened result
         let mut child_result = child_inner.get_result_image();
+        // The picture is the canvas's own pixels with the room its effects need round them (a shadow reaches past the edge), and
+        // `result_offset` is where the canvas's own top-left corner is in it. Scaling and turning are about the canvas's own middle,
+        // so that point is followed through them, and the picture is put where the middle of the canvas goes in the parent.
+        let (offset_x, offset_y) = child_inner.result_offset.get();
+        let (mut middle_x, mut middle_y) = (offset_x as f32 + child_width as f32 / 2.0, offset_y as f32 + child_height as f32 / 2.0);
         // Scaled from the canvas's own pixels each time it is composed, so changing the scale never loses quality, and about the
         // middle of the canvas, so it grows and shrinks where it sits.
-        let (mut dest_x, mut dest_y) = (dest_x, dest_y);
         let scale = child_inner.scale();
         if scale != 1.0 {
-          let (scaled_width, scaled_height) = (((child_width as f32 * scale).round().max(1.0)), ((child_height as f32 * scale).round().max(1.0)));
+          let (before_width, before_height) = child_result.dimensions::<u32>();
+          let (scaled_width, scaled_height) = (((before_width as f32 * scale).round().max(1.0)), ((before_height as f32 * scale).round().max(1.0)));
           // Every shrink is made with Lanczos, which looks at enough pixels to keep a shrunk photo smooth. The automatic choice uses
           // bilinear for a shrink of less than half, which skips pixels and shows as a rough, pixelated picture.
           let algorithm = if scale < 1.0 { TransformAlgorithm::Lanczos } else { TransformAlgorithm::Bicubic };
           child_result.resize(ResizeTarget::Exact(Size::new(scaled_width, scaled_height)), algorithm);
-          dest_x += ((child_width as f32 - scaled_width) / 2.0).round() as i32;
-          dest_y += ((child_height as f32 - scaled_height) / 2.0).round() as i32;
+          middle_x *= scaled_width / before_width as f32;
+          middle_y *= scaled_height / before_height as f32;
         }
         if let Some(rotation_degrees) = child_inner.rotation() {
-          // The rotated picture grows to hold its tilted corners, so it moves back by half the growth to turn about the middle.
+          // The picture turns about its own middle and grows to hold its tilted corners, so the canvas's middle, which is not always the
+          // picture's middle, is carried round it.
           let (before_width, before_height) = child_result.dimensions::<u32>();
           child_result.rotate(rotation_degrees, None);
           let (after_width, after_height) = child_result.dimensions::<u32>();
-          dest_x += ((before_width as f32 - after_width as f32) / 2.0).round() as i32;
-          dest_y += ((before_height as f32 - after_height as f32) / 2.0).round() as i32;
+          let (across, down) = (middle_x - before_width as f32 / 2.0, middle_y - before_height as f32 / 2.0);
+          let (sin, cos) = rotation_degrees.to_radians().sin_cos();
+          middle_x = after_width as f32 / 2.0 + across * cos - down * sin;
+          middle_y = after_height as f32 / 2.0 + across * sin + down * cos;
         }
+        let dest_x = (dest_x as f32 + child_width as f32 / 2.0 - middle_x).round() as i32;
+        let dest_y = (dest_y as f32 + child_height as f32 / 2.0 - middle_y).round() as i32;
         let child_blend = child_inner.blend_mode();
         let child_opacity = child_inner.opacity();
         blend_images(&child_result)

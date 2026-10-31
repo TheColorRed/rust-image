@@ -1,10 +1,13 @@
 import { RangeSlider } from '@/src/components/range-slider';
 import { Slider } from '@/src/components/slider';
-import { pluginEditorItems, pluginEditorRedraw } from '@/src/state/plugin-editor';
+import { pluginEditorItems, pluginEditorRebuild, pluginEditorRedraw } from '@/src/state/plugin-editor';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { InspectorNumberField } from './inspector-number-field';
 import { InspectorRow } from './inspector-row';
+
+/** How long a slider that rebuilds must be still before the plugin is run again. */
+const REBUILD_DELAY_MS = 200;
 
 /**
  * A slider a plugin put in its inspector, with one thumb or two, and a number to type at the end of it (at both ends for two
@@ -20,6 +23,7 @@ export const InspectorSlider = memo(function InspectorSlider({
   range,
   multiline,
   reset,
+  rebuild,
   value,
 }: {
   /** Names the slider among the plugin's controls, which is how its current `onChange` is found. */
@@ -33,6 +37,8 @@ export const InspectorSlider = memo(function InspectorSlider({
   multiline: boolean;
   /** Shows a reset button beside the name. */
   reset: boolean;
+  /** Moving it runs the plugin again, not only the preview. */
+  rebuild: boolean;
   /** Where the thumb or thumbs start. */
   value: number | [number, number];
 }) {
@@ -47,12 +53,20 @@ export const InspectorSlider = memo(function InspectorSlider({
     [min, max, step],
   );
 
-  /** The slider was moved or a number was typed: keeps it, tells the plugin and has the preview drawn again. */
+  // A slider that rebuilds waits for the moves to stop, so a drag is one rebuild. The plugin shows the moves meanwhile.
+  const settle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(settle.current), []);
+
+  /** The slider was moved or a number was typed: keeps it, tells the plugin and has the preview drawn again, and rebuilt once it stops moving if the slider asks. */
   const move = (next: [number, number]) => {
     setCurrent(next);
     const item = pluginEditorItems.value.find(each => each.key === itemKey);
     if (item?.kind === 'slider') item.onChange?.(range ? next : next[0]);
     pluginEditorRedraw.next();
+    if (rebuild) {
+      clearTimeout(settle.current);
+      settle.current = setTimeout(() => pluginEditorRebuild.next(), REBUILD_DELAY_MS);
+    }
   };
   const limit = (typed: number) => Math.min(max, Math.max(min, typed));
 

@@ -14,15 +14,16 @@ export const isHandle = (value: unknown): value is Handle =>
 
 /**
  * Frees native objects now, for the ones that outlive a function or a component (caches, the open photo): whoever replaces or drops
- * one releases it. Nothing (`null`, `undefined`) is skipped. This and `keep` are the only ways a handle is freed; nothing else
- * calls `uniffiDestroy`.
+ * one releases it. Nothing (`null`, `undefined`) is skipped, and so is a plain record (a point, a quad, a color's numbers): it is data
+ * and has nothing to free, which lets code that releases everything the library gave it do so without asking which is which. This and
+ * `keep` are the only ways a handle is freed; nothing else calls `uniffiDestroy`.
  */
 export function release(...values: unknown[]) {
   for (const value of values) {
     if (value == null) continue;
     // A subscription that lives and ends with a handle can be kept beside it, so the two never get out of step.
     if (typeof (value as { unsubscribe?: unknown }).unsubscribe === 'function') (value as { unsubscribe(): void }).unsubscribe();
-    else (value as Handle).uniffiDestroy();
+    else if (isHandle(value)) value.uniffiDestroy();
   }
 }
 

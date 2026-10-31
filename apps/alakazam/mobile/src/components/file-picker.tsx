@@ -4,9 +4,7 @@ import ImagePlus from 'lucide-react-native/icons/image-plus';
 import { useMemo, useRef, useState } from 'react';
 import { Alert, Button, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, CardHeader } from './card';
-import { ImagePreview } from './image-preview';
 import { ProjectImagePicker } from './project-image-picker';
-import { SelectableThumb, useSelection } from './selection';
 
 export interface PickedImage {
   uri: string;
@@ -30,10 +28,6 @@ export interface FilePickerProps {
   source?: 'file-system' | 'projects' | 'both';
   /** A project to leave out of the project grid, such as the one being edited. */
   excludeProjectId?: string;
-  /** Images to show as thumbnails below the control, for a caller that keeps its own picked list. */
-  thumbs?: PickedImage[];
-  /** Lets the thumbnails be selected (press and hold one). The caller owns it so it can show the `SelectionBar` at the bottom of the screen. */
-  selection?: ReturnType<typeof useSelection>;
   style?: any;
 }
 
@@ -51,8 +45,6 @@ export function FilePicker({
   multiple = true,
   source = 'file-system',
   excludeProjectId,
-  thumbs,
-  selection,
   style,
 }: FilePickerProps) {
   const { colors } = useTheme();
@@ -68,8 +60,6 @@ export function FilePicker({
         error: { color: colors.danger },
         preview: { gap: 6 },
         label: { fontWeight: '600', color: colors.textPrimary },
-        thumbRow: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-        thumb: { width: 56, height: 56, borderRadius: 6, backgroundColor: colors.placeholder },
         image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: colors.placeholder },
         meta: { gap: 2 },
         metaText: { fontSize: 12, color: colors.textSecondary },
@@ -77,8 +67,6 @@ export function FilePicker({
     [colors],
   );
   const picking = useRef(false);
-  const unusedSelection = useSelection();
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
@@ -167,32 +155,6 @@ export function FilePicker({
             onPick?.(assets);
           }}
           onClose={() => setProjectsOpen(false)}
-        />
-      )}
-
-      {thumbs && thumbs.length > 0 && (
-        <View style={styles.thumbRow}>
-          {thumbs.map((file, index) => (
-            <SelectableThumb
-              key={`${file.uri}-${index}`}
-              id={file.uri}
-              selection={selection ?? unusedSelection}
-              selectable={selection !== undefined}
-              onOpen={() => setPreviewIndex(index)}
-              accessibilityLabel={`Open ${file.name ?? `image ${index + 1}`}`}
-            >
-              <Image source={{ uri: file.uri }} style={styles.thumb} resizeMode="cover" />
-            </SelectableThumb>
-          ))}
-        </View>
-      )}
-
-      {thumbs && (
-        <ImagePreview
-          images={thumbs.map((file, index) => ({ id: `${file.uri}-${index}`, uri: file.uri }))}
-          visible={previewIndex != null}
-          initialIndex={previewIndex ?? 0}
-          onClose={() => setPreviewIndex(null)}
         />
       )}
 

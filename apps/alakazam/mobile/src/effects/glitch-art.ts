@@ -11,5 +11,5 @@ export const glitchArt = (photo: AbraImageLike, strength: number, offsetX: numbe
   owning(keep => {
     const copy = keep(photo.clone());
     const shifted = keep(keep(blend(copy)).withOffset({ x: offsetX, y: offsetY }));
-    keep(shifted.withOpacity(strength).withChannels({ red: false, green: true, blue: true })).apply(photo);
+    keep(keep(shifted.withOpacity(strength)).withChannels({ red: false, green: true, blue: true })).apply(photo);
   });

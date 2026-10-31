@@ -27,8 +27,8 @@ export const chiaroscuro = (photo: AbraImageLike, amount: number, color = 1): vo
     if (amount <= 0) return;
     const toned = keep(photo.clone());
     keep(contrast(amount * 60)).apply(toned);
-    keep(exposure(-amount * 0.5).withGamma(1 + amount * 0.5)).apply(toned);
-    const tones = keep(toneAdjustment(amount * 20, -amount * 100).withTone(TONE_WIDTH));
+    keep(keep(exposure(-amount * 0.5)).withGamma(1 + amount * 0.5)).apply(toned);
+    const tones = keep(keep(toneAdjustment(amount * 20, -amount * 100)).withTone(TONE_WIDTH));
     keep(tones.withRadius(toned.width() * SHADOW_RADIUS)).apply(toned);
     const smoothColor = keep(photo.clone());
     keep(gaussianBlur(Math.max(2, toned.width() * COLOR_SMOOTH))).apply(smoothColor);

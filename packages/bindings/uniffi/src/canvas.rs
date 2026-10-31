@@ -507,6 +507,18 @@ impl Canvas {
     self.0.canvases().into_iter().map(|child| Arc::new(Canvas(child))).collect()
   }
 
+  /// The four corners of this canvas as it sits in its parent, in the parent's pixels: top left, top right, bottom right, bottom left of
+  /// its own picture, after its position, its scale about its middle and its rotation about its middle.
+  pub fn quad_in_parent(&self) -> abra::abra_core::Quad {
+    self.0.quad_in_parent()
+  }
+
+  /// The canvas inside this one that is on top at the point (x, y) of this canvas, or nothing. It is the same canvas as the one that was
+  /// added. A canvas that cannot be seen is not found.
+  pub fn child_at(&self, x: f32, y: f32) -> Option<Arc<Canvas>> {
+    self.0.child_at((x, y)).map(|child| Arc::new(Canvas(child)))
+  }
+
   /// Adds a child canvas with optional placement options.
   pub fn add_canvas(&self, canvas: Arc<Canvas>, options: Option<AddCanvasOptions>) -> Arc<Canvas> {
     let child = self.0.add_canvas(canvas.0.clone(), options.map(|o| o.to_core()));
@@ -889,6 +901,19 @@ mod tests {
 
   fn test_image(width: u32, height: u32, color: Arc<Color>) -> Arc<Image> {
     Arc::new(Image::new_from_color(width, height, color))
+  }
+
+  #[test]
+  fn a_child_canvas_says_where_it_is_and_is_found_at_a_point() {
+    let root = Canvas::new_blank("Root".into(), 40, 20);
+    let child = Arc::new(Canvas::new_blank("Child".into(), 10, 10));
+    child.add_layer_from_image("red".into(), test_image(10, 10, Arc::new(Color::from_rgba(255, 0, 0, 255))), None);
+    let child = root.add_canvas(child, Some(AddCanvasOptions { position: Some(vec![5, 5]), ..Default::default() }));
+
+    let corners = child.quad_in_parent();
+    assert_eq!((corners.top_left.x, corners.top_left.y, corners.bottom_right.x, corners.bottom_right.y), (5.0, 5.0, 15.0, 15.0));
+    assert_eq!(root.child_at(8.0, 8.0).map(|found| found.id()), Some(child.id()));
+    assert!(root.child_at(30.0, 8.0).is_none());
   }
 
   #[test]

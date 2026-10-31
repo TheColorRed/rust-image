@@ -1,3 +1,4 @@
+import { ImageThumbs } from '@/src/components/image-thumbs';
 import type { useSelection } from '@/src/components/selection';
 import type { PluginSurface } from '@/src/lib/plugins/plugin-inspector';
 import { useTheme } from '@/src/lib/ui/theme';
@@ -11,15 +12,18 @@ import {
   pluginEditorPicked,
   pluginEditorPicked$,
 } from '@/src/state/plugin-editor';
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useObservable } from 'react-rx';
 import { InspectorFilePicker, type InspectorFiles } from './inspector-file-picker';
+import { InspectorFontPicker } from './inspector-font-picker';
 import { InspectorHeader } from './inspector-header';
 import { InspectorNumber } from './inspector-number';
+import { InspectorPictures } from './inspector-pictures';
 import { InspectorSelect, joinChoices } from './inspector-select';
 import { InspectorSlider } from './inspector-slider';
 import { InspectorSize } from './inspector-size';
+import { InspectorText } from './inspector-text';
 import { InspectorToggle } from './inspector-toggle';
 
 /** The controls a plugin made for one surface (`inspectorGUI` for the inspector, `controlsGUI` for the controls bar): headings, file pickers and sliders, in the order it made them. */
@@ -51,21 +55,24 @@ export function Inspector({
       ) : null}
       {items.map((item, index) => {
         if (item.kind === 'header') {
-          return <InspectorHeader key={item.key} text={item.label} level={item.level} first={index === 0} />;
+          return <InspectorHeader key={item.key} text={item.label} level={item.level} first={index === 0} onBack={item.back} />;
         }
         if (item.kind === 'file-picker') {
           return (
-            <InspectorFilePicker
-              key={item.key}
-              itemKey={item.key}
-              label={item.label}
-              source={item.source}
-              multiple={item.multiple}
-              files={item.thumbs ? picked[item.key] : undefined}
-              selection={selection}
-              onFiles={onFiles}
-            />
+            <Fragment key={item.key}>
+              <InspectorFilePicker
+                itemKey={item.key}
+                label={item.label}
+                source={item.source}
+                multiple={item.multiple}
+                onFiles={onFiles}
+              />
+              {item.thumbs && picked[item.key]?.length ? <ImageThumbs files={picked[item.key]} selection={selection} /> : null}
+            </Fragment>
           );
+        }
+        if (item.kind === 'pictures') {
+          return <InspectorPictures key={item.key} itemKey={item.key} label={item.label} files={item.files} rows={item.rows} />;
         }
         if (item.kind === 'select') {
           return (
@@ -75,8 +82,15 @@ export function Inspector({
               label={item.label}
               choices={joinChoices(item.options)}
               value={item.value}
+              momentary={item.momentary}
             />
           );
+        }
+        if (item.kind === 'text') {
+          return <InspectorText key={item.key} itemKey={item.key} label={item.label} value={item.value} placeholder={item.placeholder} />;
+        }
+        if (item.kind === 'font-picker') {
+          return <InspectorFontPicker key={item.key} itemKey={item.key} label={item.label} value={item.value} />;
         }
         if (item.kind === 'toggle') {
           return <InspectorToggle key={item.key} itemKey={item.key} label={item.label} value={item.value} />;
@@ -121,6 +135,7 @@ export function Inspector({
             range={item.range}
             multiline={item.multiline}
             reset={item.reset}
+            rebuild={item.rebuild}
             value={item.value}
           />
         );

@@ -12,10 +12,18 @@ import {
   previewTranslateValue,
   previewTranslateX,
   previewTranslateY,
+  MIN_PREVIEW_ZOOM,
+  MIN_SHOWN_SIZE,
+  previewFit,
+  previewLimit,
+  previewRestFloor,
+  previewZoomFloor,
   type PreviewBox,
 } from '@/src/state/gestures';
+import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
 import type { ImagePreview } from '@alakazam/mobile';
 import { useEffect, useRef, type RefObject } from 'react';
+import { PixelRatio } from 'react-native';
 import { animationFrameScheduler, combineLatest } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 
@@ -37,13 +45,24 @@ const blend = (from: Camera, to: Camera, share: number): Camera => ({
 
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
+/** What the gizmos are told about the camera: the photo's size, and the viewport and turn last sent to the photo's views, so a gizmo placed on the photo follows it. */
+const gizmoCamera = { photo: { width: 0, height: 0 }, viewport: [0, 0, 1, 1] as Viewport, angle: 0 };
+const sendGizmoCamera = () => {
+  const { photo, viewport, angle } = gizmoCamera;
+  if (photo.width > 0 && photo.height > 0) editorGizmos.value?.setCamera(photo.width, photo.height, ...viewport, angle);
+};
+
 const setViewports = (viewport: Viewport, baseView: ImagePreview | null) => {
+  gizmoCamera.viewport = viewport;
+  sendGizmoCamera();
   baseView?.setViewport(...viewport);
   // The live preview that is open now: another effect in the same commit may have replaced it (`ensure`) and let go of the old one.
   editorPreview.view.value?.setViewport(...viewport);
 };
 
 const setRotations = (angle: number, baseView: ImagePreview | null) => {
+  gizmoCamera.angle = angle;
+  sendGizmoCamera();
   baseView?.setRotation(angle);
   editorPreview.view.value?.setRotation(angle);
 };
@@ -77,6 +96,11 @@ export function usePreviewCamera({
     const shown = liveShown ?? photo;
     if (!shown || !box) return;
     const fit = Math.min(box.width / shown.width, box.height / shown.height);
+    previewFit.next(fit * PixelRatio.get());
+    gizmoCamera.photo = { width: shown.width, height: shown.height };
+    // The photo can be zoomed out until it is shown at 1% of its size. A tool that owns the zoom (the crop frame) keeps its own floor.
+    previewRestFloor.next(Math.min(MIN_PREVIEW_ZOOM, MIN_SHOWN_SIZE / previewFit.value));
+    if (!previewLimit.value) previewZoomFloor.next(previewRestFloor.value);
     const size = { width: Math.max(1, shown.width * fit), height: Math.max(1, shown.height * fit) };
     const cameraOf = (zoom: number, move: { x: number; y: number }): Camera => ({
       x: 0.5 - move.x / (zoom * size.width),
@@ -108,6 +132,8 @@ export function usePreviewCamera({
         if (gliding) return;
         setViewports(viewportOf(cameraOf(zoom, move)), base());
       });
+    // Gizmos that appear later (the preview makes them when it shows) learn where the camera is at once.
+    subscription.add(editorGizmos$.subscribe(() => sendGizmoCamera()));
 
     // While a turn glides, Vessel's tween turns the views and the outlines follow the same curve from here.
     let turning = false;

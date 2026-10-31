@@ -19,7 +19,8 @@
     "./image": { "types": "./dist/entries/image.d.ts" },
     "./mask": { "types": "./dist/entries/mask.d.ts" },
     "./tools": { "types": "./dist/entries/tools.d.ts" },
-    "./transform": { "types": "./dist/entries/transform.d.ts" }
+    "./transform": { "types": "./dist/entries/transform.d.ts" },
+    "./typography": { "types": "./dist/entries/typography.d.ts" }
   },
   "files": ["dist"],
   "scripts": {

@@ -1,25 +1,31 @@
 import { BottomTabBar, type TabItem } from '@/src/components/bottom-tab-bar';
 import { ErrorBoundary } from '@/src/components/error-boundary';
+import { syncAiModels } from '@/src/lib/ai/ai-model-catalog';
+import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
 import { ThemeProvider, useTheme } from '@/src/lib/ui/theme';
 import { EditScreen, type EditablePhoto } from '@/src/screens/editor';
+import { FontsScreen } from '@/src/screens/fonts';
 import { HomeScreen } from '@/src/screens/home';
-import { SettingsScreen } from '@/src/screens/settings';
-import { PluginsScreen } from '@/src/screens/plugins';
 import { PluginEditorScreen, type PluginWorkspaceScreenInfo } from '@/src/screens/plugin-editor';
-import { loadPlugins } from '@/src/lib/plugins/plugin-controls';
-import { syncAiModels } from '@/src/lib/ai/ai-model-catalog';
-import { restoreProjects } from '@/src/state/projects';
+import { PluginsScreen } from '@/src/screens/plugins';
+import { SettingsScreen } from '@/src/screens/settings';
 import { pluginEditorDevUpdate } from '@/src/state/plugin-editor';
-import BootSplash from 'react-native-bootsplash';
+import { restoreProjects } from '@/src/state/projects';
+import { installDevPluginFolder } from '@alakazam/mobile';
+import HomeIcon from 'lucide-react-native/icons/house';
+import PluginsIcon from 'lucide-react-native/icons/plug';
+import SettingsIcon from 'lucide-react-native/icons/settings';
+import TypeIcon from 'lucide-react-native/icons/type';
 import { useEffect, useState } from 'react';
 import { Alert, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
-import { installDevPluginFolder } from '@alakazam/mobile';
+import BootSplash from 'react-native-bootsplash';
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const TABS: TabItem[] = [
-  { name: 'home', label: 'Home' },
-  { name: 'settings', label: 'Settings' },
-  { name: 'plugins', label: 'Plugins' },
+  { name: 'home', label: 'Home', icon: HomeIcon },
+  { name: 'settings', label: 'Settings', icon: SettingsIcon },
+  { name: 'fonts', label: 'Fonts', icon: TypeIcon },
+  { name: 'plugins', label: 'Plugins', icon: PluginsIcon },
 ];
 
 type DevPluginSync = {
@@ -71,7 +77,10 @@ function AppContent() {
           loadPlugins(true);
           syncAiModels();
           const folderName = folder.split(/[\\/]/).pop() ?? '';
-          const pluginId = folderName.replace(/-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.installing$/i, '');
+          const pluginId = folderName.replace(
+            /-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.installing$/i,
+            '',
+          );
           if (pluginId !== folderName) pluginEditorDevUpdate.next(pluginId);
         }
       } catch (error) {
@@ -79,7 +88,9 @@ function AppContent() {
         Alert.alert('Plugin update failed', error instanceof Error ? error.message : String(error));
       } finally {
         if (folder) {
-          await sync.clearDevPluginFolder(folder).catch(error => console.warn('Could not clear the received plugin folder:', error));
+          await sync
+            .clearDevPluginFolder(folder)
+            .catch(error => console.warn('Could not clear the received plugin folder:', error));
         }
         busy = false;
       }
@@ -116,6 +127,7 @@ function AppContent() {
               <HomeScreen onOpenPhoto={setEditingPhoto} onOpenPluginEditor={setPluginWorkspace} />
             )}
             {activeTab === 'settings' && <SettingsScreen />}
+            {activeTab === 'fonts' && <FontsScreen />}
             {activeTab === 'plugins' && <PluginsScreen />}
           </View>
         )}

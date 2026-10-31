@@ -6,6 +6,7 @@ use primitives::Image;
 use swash::{
   GlyphId,
   scale::{Render, ScaleContext, Source},
+  zeno::Vector,
 };
 
 use crate::font::Font;
@@ -101,9 +102,10 @@ abra_core::impl_into_number!(TextSize);
 #[derive(Clone, Copy)]
 struct ShapedGlyph {
   id: GlyphId,
-  advance: i32,
-  x_offset: i32,
-  y_offset: i32,
+  /// Kept in fractions of a pixel: rounding each one to a whole pixel makes the spacing uneven.
+  advance: f32,
+  x_offset: f32,
+  y_offset: f32,
   cluster: usize,
 }
 
@@ -513,7 +515,7 @@ impl Font {
     let mut scaler = context
       .builder(font_ref)
       .size(size_px)
-      .hint(true)
+      .hint(false)
       .variations(variations.iter().map(|(axis, value)| (axis.as_str(), *value)))
       .build();
 
@@ -531,24 +533,21 @@ impl Font {
         .zip(shaped.glyph_positions())
         .map(|(info, position)| ShapedGlyph {
           id: info.glyph_id as GlyphId,
-          advance: (position.x_advance as f32 * shaping_scale).round() as i32,
-          x_offset: (position.x_offset as f32 * shaping_scale).round() as i32,
-          y_offset: (position.y_offset as f32 * shaping_scale).round() as i32,
+          advance: position.x_advance as f32 * shaping_scale,
+          x_offset: position.x_offset as f32 * shaping_scale,
+          y_offset: position.y_offset as f32 * shaping_scale,
           cluster: info.cluster as usize,
         })
         .collect::<Vec<_>>()
     };
     let measure_line = |line: &str| {
-      shape_line(line).iter().fold(0i32, |width, glyph| {
+      shape_line(line).iter().fold(0.0f32, |width, glyph| {
         let is_space = line.get(glyph.cluster..).and_then(|cluster| cluster.chars().next()).is_some_and(|ch| ch == ' ');
-        width
-          + glyph.advance
-          + p_text.layout.letter_spacing.round() as i32
-          + if is_space { p_text.layout.word_spacing.round() as i32 } else { 0 }
+        width + glyph.advance + p_text.layout.letter_spacing + if is_space { p_text.layout.word_spacing } else { 0.0 }
       })
     };
 
-    let wrap_width = p_text.layout.width.map(|width| width.round() as i32).filter(|width| *width > 0);
+    let wrap_width = p_text.layout.width.filter(|width| *width > 0.0);
     let word_wrap = p_text.layout.word_wrap.unwrap_or_default();
     let mut lines = Vec::new();
     for (paragraph_index, paragraph) in p_text.content.paragraphs.iter().enumerate() {
@@ -680,7 +679,7 @@ impl Font {
     }
 
     let mut line_widths = Vec::with_capacity(lines.len());
-    let mut max_line_width = 0i32;
+    let mut max_line_width = 0.0f32;
     for line in &lines {
       let line_width = measure_line(&line.text);
       line_widths.push(line_width);
@@ -689,13 +688,14 @@ impl Font {
     let shaped_lines: Vec<Vec<ShapedGlyph>> = lines.iter().map(|line| shape_line(&line.text)).collect();
 
     let mut placements = Vec::new();
-    let mut min_x = 0i32;
-    let mut min_y = 0i32;
-    let mut max_x = 0i32;
-    let mut max_y = 0i32;
+    // The image is sized around what is drawn, so these start empty and not at the origin: text centered in a wide layout would
+    // otherwise get a blank margin on the side it is aligned away from, and no caller could center the image by its own size.
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
     let mut decoration_rects = Vec::new();
-    let target_width =
-      p_text.layout.width.map(|width| width.round() as i32).filter(|width| *width > 0).unwrap_or(max_line_width);
+    let target_width = p_text.layout.width.filter(|width| *width > 0.0).unwrap_or(max_line_width);
     let mut baseline = metrics.ascent.round() as i32;
     for (line_index, line) in lines.iter().enumerate() {
       let line_text = &line.text;
@@ -705,18 +705,18 @@ impl Font {
         matches!(p_text.layout.justify, Some(TextJustify::InterWord)) || align_mode == TextAlign::Justify;
       let target_line_width = target_width.max(line_width);
       let align_offset = match align_mode {
-        TextAlign::Left => 0,
-        TextAlign::Center => ((target_line_width - line_width) / 2).max(0),
-        TextAlign::Right => (target_line_width - line_width).max(0),
-        TextAlign::Justify => 0,
+        TextAlign::Left => 0.0,
+        TextAlign::Center => ((target_line_width - line_width) / 2.0).max(0.0),
+        TextAlign::Right => (target_line_width - line_width).max(0.0),
+        TextAlign::Justify => 0.0,
       };
 
       let inter_word_gap = if should_justify {
         let word_count = line_text.split_whitespace().count();
         if word_count > 1 && target_width > line_width {
-          let gap_slots = (word_count - 1) as i32;
+          let gap_slots = (word_count - 1) as f32;
           let gap_budget = target_width - line_width;
-          Some((gap_budget / gap_slots, gap_budget % gap_slots))
+          Some(gap_budget / gap_slots)
         } else {
           None
         }
@@ -729,22 +729,25 @@ impl Font {
         && line_text.chars().count() > 1
         && target_width > line_width
       {
-        let letter_slots = (line_text.chars().count() - 1) as i32;
+        let letter_slots = (line_text.chars().count() - 1) as f32;
         let gap_budget = target_width - line_width;
-        Some((gap_budget / letter_slots, gap_budget % letter_slots))
+        Some(gap_budget / letter_slots)
       } else {
         None
       };
 
       let mut pen_x = align_offset;
-      let mut space_index = 0usize;
       let glyphs = &shaped_lines[line_index];
       for (glyph_index, glyph) in glyphs.iter().enumerate() {
-        if let Some(glyph_image) = Render::new(&[Source::Outline]).render(&mut scaler, glyph.id) {
+        // The glyph is drawn at its exact place: the whole pixels are the image's, and the fraction is given to the rasterizer.
+        let origin_x = pen_x + glyph.x_offset;
+        let whole_x = origin_x.floor();
+        let fraction = Vector::new(origin_x - whole_x, 0.0);
+        if let Some(glyph_image) = Render::new(&[Source::Outline]).offset(fraction).render(&mut scaler, glyph.id) {
           let placement = glyph_image.placement;
           if placement.width > 0 && placement.height > 0 {
-            let x = pen_x + glyph.x_offset + placement.left;
-            let y = baseline - glyph.y_offset - placement.top;
+            let x = whole_x as i32 + placement.left;
+            let y = baseline - glyph.y_offset.round() as i32 - placement.top;
             min_x = min_x.min(x);
             min_y = min_y.min(y);
             max_x = max_x.max(x + placement.width as i32);
@@ -754,31 +757,19 @@ impl Font {
         }
 
         pen_x += glyph.advance;
-        pen_x += p_text.layout.letter_spacing.round() as i32;
+        pen_x += p_text.layout.letter_spacing;
         let is_space =
           line.text.get(glyph.cluster..).and_then(|cluster| cluster.chars().next()).is_some_and(|ch| ch == ' ');
 
         if is_space {
-          let extra_gap = inter_word_gap
-            .map(|(base, remainder)| {
-              let extra = if space_index < remainder as usize { 1 } else { 0 };
-              space_index += 1;
-              p_text.layout.word_spacing.round() as i32 + base + extra
-            })
-            .unwrap_or_else(|| p_text.layout.word_spacing.round() as i32);
-          pen_x += extra_gap;
-        } else if glyph_index + 1 < glyphs.len() && letter_gap.is_some() {
-          let extra_gap = letter_gap
-            .map(|(base, remainder)| {
-              let extra = if glyph_index < remainder as usize { 1 } else { 0 };
-              base + extra
-            })
-            .unwrap_or(0);
-          pen_x += extra_gap;
+          pen_x += p_text.layout.word_spacing + inter_word_gap.unwrap_or(0.0);
+        } else if glyph_index + 1 < glyphs.len() {
+          pen_x += letter_gap.unwrap_or(0.0);
         }
       }
 
-      let decoration_width = (pen_x - align_offset).max(0) as u32;
+      let decoration_left = align_offset.round() as i32;
+      let decoration_width = (pen_x - align_offset).max(0.0).round() as u32;
       let decoration_thickness = (size_px * 0.05).round().max(1.0) as u32;
       for decoration in &p_text.appearance.decorations {
         let y = match decoration {
@@ -786,11 +777,11 @@ impl Font {
           TextDecoration::Strikethrough => baseline - (metrics.ascent * 0.3).round() as i32,
         };
         if decoration_width > 0 {
-          min_x = min_x.min(align_offset);
+          min_x = min_x.min(decoration_left);
           min_y = min_y.min(y);
-          max_x = max_x.max(align_offset + decoration_width as i32);
+          max_x = max_x.max(decoration_left + decoration_width as i32);
           max_y = max_y.max(y + decoration_thickness as i32);
-          decoration_rects.push((align_offset, y, decoration_width, decoration_thickness));
+          decoration_rects.push((decoration_left, y, decoration_width, decoration_thickness));
         }
       }
 
@@ -802,6 +793,10 @@ impl Font {
 
     // Glyph bitmaps (e.g. tall ascenders on bold weights) can extend beyond the font's
     // nominal ascent/descent, so size the image from the actual rendered bounds instead.
+    // Nothing drawn (an empty string, or only spaces) leaves a one pixel transparent image.
+    if min_x > max_x {
+      (min_x, min_y, max_x, max_y) = (0, 0, 0, 0);
+    }
     let offset_x = -min_x;
     let offset_y = -min_y;
     let width = (max_x + offset_x).max(1) as u32;
@@ -843,5 +838,52 @@ impl Font {
     }
 
     image
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A font from the system, or `None` on a machine with none of these, where the tests that need one do nothing.
+  fn font() -> Option<Font> {
+    ["C:/Windows/Fonts/arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"]
+      .into_iter()
+      .find(|path| std::path::Path::new(path).is_file())
+      .map(|path| Font::from_path(path).unwrap())
+  }
+
+  /// How many pixels of this column of the image are drawn on (not fully transparent).
+  fn ink_in_column(p_image: &Image, p_column: u32) -> usize {
+    let (width, height): (u32, u32) = p_image.dimensions();
+    let rgba = p_image.rgba();
+    (0..height).filter(|row| rgba[((row * width + p_column) * 4 + 3) as usize] > 0).count()
+  }
+
+  #[test]
+  fn text_centered_in_a_wide_layout_is_an_image_around_its_letters() {
+    let Some(font) = font() else { return };
+    let image: Image = font.text("Hi").with_size(TextSize::pixels(60)).with_width(800).with_alignment(TextAlign::Center).into();
+    let (width, _): (u32, u32) = image.dimensions();
+    assert!(width < 200, "the image is as wide as its letters, not as the layout: {width}");
+    assert!(ink_in_column(&image, 0) > 0 && ink_in_column(&image, width - 1) > 0, "both edges of the image touch a letter");
+  }
+
+  #[test]
+  fn text_with_nothing_to_draw_is_one_clear_pixel() {
+    let Some(font) = font() else { return };
+    let image: Image = font.text("   ").with_size(TextSize::pixels(40)).into();
+    assert_eq!(image.dimensions::<u32>(), (1, 1));
+  }
+
+  #[test]
+  fn a_line_is_as_wide_as_its_letters_added_up() {
+    let Some(font) = font() else { return };
+    // Exact advances: four letters are about four times one, not four rounded gaps.
+    let one: Image = font.text("i").with_size(TextSize::pixels(33)).into();
+    let four: Image = font.text("iiii").with_size(TextSize::pixels(33)).into();
+    let (one_width, _): (u32, u32) = one.dimensions();
+    let (four_width, _): (u32, u32) = four.dimensions();
+    assert!(four_width > 3 * one_width, "{four_width} vs {one_width}");
   }
 }

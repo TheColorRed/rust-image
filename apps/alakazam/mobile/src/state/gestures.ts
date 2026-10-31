@@ -35,6 +35,9 @@ export const previewScaleValue = new BehaviorSubject(1);
 export const previewScaleValue$ = previewScaleValue.asObservable();
 /** The zoom once it stops changing, for overlays that would stutter the pinch if they re-rendered every frame. */
 export const previewScaleSettled$ = previewScaleValue.pipe(debounceTime(120));
+/** How many of the screen's pixels one pixel of the photo takes when the whole photo is in the box (zoom 1). Times the zoom, it is the size the photo is shown at: 1 is 100%. Set by the camera, which knows both sizes. */
+export const previewFit = new BehaviorSubject(1);
+export const previewFit$ = previewFit.asObservable();
 /** How far two fingers have turned the photo, clockwise, in radians. The overlay turns with the Animated value and the native views take the number. */
 export const previewRotation = new BehaviorSubject(new Animated.Value(0));
 export const previewRotation$ = previewRotation.asObservable();
@@ -74,6 +77,9 @@ const panIsHeld = (fingers: number) => {
 };
 /** Whether "Circle to zoom" is drawing. The preview's pan and pinch leave every touch alone meanwhile, so the loop is not taken as a pan. */
 export const previewCircling = new BehaviorSubject(false);
+/** Whether "Circle to zoom" is switched on. The preview that is under the controls draws the overlay for it. */
+export const previewCircleMode = new BehaviorSubject(false);
+export const previewCircleMode$ = previewCircleMode.asObservable();
 /** Whether an area is being drawn on the photo (see `DrawAreaOverlay`). One finger draws, so it does not pan; two fingers still pinch and pan. */
 export const previewDrawing = new BehaviorSubject(false);
 /** Maps a zoom and pan to the ones the preview should use, e.g. to keep a crop frame covered by the photo. `null` leaves them alone. */
@@ -102,7 +108,14 @@ export const previewPanResponder$ = previewPanResponder.asObservable();
 // #region: Preview gesture events
 
 export const MIN_PREVIEW_ZOOM = 1;
-/** The lowest zoom the preview may reach. The crop tool lowers it so the whole photo can sit above the gestures row. */
+/** The smallest the photo may be shown, as a share of its own size: 1%. */
+export const MIN_SHOWN_SIZE = 0.01;
+/**
+ * The lowest zoom when no tool asks for another: the one that shows the photo at `MIN_SHOWN_SIZE`. The camera sets it, as it is the
+ * one that knows how big the photo is on the screen. A photo that fits its box at 5% needs a zoom of 0.2 to be shown at 1%.
+ */
+export const previewRestFloor = new BehaviorSubject(MIN_PREVIEW_ZOOM);
+/** The lowest zoom the preview may reach now. It is `previewRestFloor` until a tool asks for another: the crop tool lowers it so the whole photo can sit above the gestures row. */
 export const previewZoomFloor = new BehaviorSubject(MIN_PREVIEW_ZOOM);
 export const MAX_PREVIEW_ZOOM = 100;
 /** How far (screen px) a single finger must move before it's treated as a pan instead of a
@@ -309,7 +322,8 @@ export function startPreviewGestures(): Subscription {
       // leaving it a hair off — a deliberate zoom-out should feel like it actually reset.
       // A limit (the crop frame) owns the zoom and pan, so the snap-back and the coast would both move the photo off it.
       if (previewLimit.value) return;
-      if (event.type === 'release' && !isBlemishToolFocused() && previewScaleValue.value <= MIN_PREVIEW_ZOOM + 0.05) {
+      // Only near the photo that fits its box: a photo zoomed out further stays where it was left.
+      if (event.type === 'release' && !isBlemishToolFocused() && Math.abs(previewScaleValue.value - MIN_PREVIEW_ZOOM) <= 0.05) {
         springPreview({ x: 0, y: 0, scale: 1 });
       } else if (event.type === 'release' && event.velocity && previewScaleValue.value > MIN_PREVIEW_ZOOM && !panIsHeld(gestureStart.value.touchCount)) {
         // Keep gliding the way the fingers were going, slowing down like a game camera coasting to a stop.
@@ -360,7 +374,7 @@ export function createPreviewPanResponder() {
       // At 1x, normal editing leaves taps alone, but blemish work needs to pan an edge under its
       // fixed center reticle without making the user zoom first.
       if (isBlemishToolFocused()) return moved;
-      if (previewScaleValue.value <= MIN_PREVIEW_ZOOM + 0.01) return false;
+      if (Math.abs(previewScaleValue.value - MIN_PREVIEW_ZOOM) <= 0.01) return false;
       return moved;
     },
     onPanResponderGrant: event => previewTouch.next({ type: 'grant', touches: event.nativeEvent.touches }),

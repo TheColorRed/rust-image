@@ -15,7 +15,7 @@ const MAX_SHARE = 0.3;
  * How far a picture may hang over an edge of the collage, as a share of its own side. Pictures kept wholly inside can only have their
  * middles in the inner part of the collage, which leaves the edges bare and crowds the center.
  */
-const OVERHANG = 0.25;
+const OVERHANG = 0.66;
 
 /** How many places are tried for each picture before the best one is kept. More tries spread the pictures more evenly. */
 const TRIES = 40;
@@ -54,7 +54,10 @@ export const randomStyle: CollageStyle = {
     const rand = seededRandom(SEED);
     const shorter = Math.min(width, height);
     const pictures = dealt(count, images, rand)
-      .map(image => ({ image, side: Math.max(1, Math.round(shorter * (MIN_SHARE + (MAX_SHARE - MIN_SHARE) * rand.next()))) }))
+      .map(image => ({
+        image,
+        side: Math.max(1, Math.round(shorter * (MIN_SHARE + (MAX_SHARE - MIN_SHARE) * rand.next()))),
+      }))
       .sort((a, b) => b.side - a.side);
 
     const placed: { x: number; y: number; side: number }[] = [];
@@ -66,7 +69,10 @@ export const randomStyle: CollageStyle = {
         const x = inset + rand.next() * (width - 2 * inset);
         const y = inset + rand.next() * (height - 2 * inset);
         // How many half-sides of the two pictures fit between the middles: 1 is touching, under 1 is overlapping. The tightest neighbor decides.
-        const room = placed.reduce((least, other) => Math.min(least, Math.hypot(x - other.x, y - other.y) / ((side + other.side) / 2)), Infinity);
+        const room = placed.reduce(
+          (least, other) => Math.min(least, Math.hypot(x - other.x, y - other.y) / ((side + other.side) / 2)),
+          Infinity,
+        );
         if (room > best.room) best = { x, y, room };
       }
       placed.push({ x: best.x, y: best.y, side });

@@ -44,6 +44,10 @@ export const pluginEditorBuilding$ = pluginEditorBuilding.asObservable();
 export const pluginEditorPicked = new BehaviorSubject<Record<string, PickedImage[]>>({});
 export const pluginEditorPicked$ = pluginEditorPicked.asObservable();
 
+/** What the open plugin asked the project to keep (`app.saved`), by the plugin's own names. It is put back from the project before the plugin runs. */
+export const pluginEditorSaved = new BehaviorSubject<Record<string, unknown>>({});
+export const pluginEditorSaved$ = pluginEditorSaved.asObservable();
+
 /** The id of the project the open workspace saves into. `undefined` until the first picture is picked, which is when the project is made. */
 export const pluginEditorProjectId = new BehaviorSubject<string | undefined>(undefined);
 export const pluginEditorProjectId$ = pluginEditorProjectId.asObservable();

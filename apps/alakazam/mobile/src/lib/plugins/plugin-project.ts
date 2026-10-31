@@ -11,6 +11,8 @@ import {
   pluginEditorPicked$,
   pluginEditorProjectId,
   pluginEditorRedraw$,
+  pluginEditorSaved,
+  pluginEditorSaved$,
 } from '@/src/state/plugin-editor';
 import { addPluginProject, projects, updateProject } from '@/src/state/projects';
 import type { CanvasLike } from '@abra/core/canvas';
@@ -26,12 +28,21 @@ const SAVE_DELAY_MS = 800;
 const RESULT_QUALITY = 85;
 
 /** What a control holds that is worth saving, or `undefined` for one that holds nothing (a heading, a file picker). */
-const valueOf = (item: PluginInspectorItem): unknown => (item.kind === 'header' || item.kind === 'file-picker' ? undefined : item.value);
+const valueOf = (item: PluginInspectorItem): unknown =>
+  item.kind === 'header' || item.kind === 'file-picker' || item.kind === 'pictures' || (item.kind === 'select' && item.momentary)
+    ? undefined
+    : item.value;
 
 /** Every control's value and every picker's pictures, in one string, to tell whether anything changed since the last write. */
-const snapshotOf = (items: PluginInspectorItem[], picked: Record<string, PickedImage[]>, drawn: number) =>
+const snapshotOf = (
+  items: PluginInspectorItem[],
+  picked: Record<string, PickedImage[]>,
+  kept: Record<string, unknown>,
+  drawn: number,
+) =>
   JSON.stringify({
     drawn,
+    kept,
     values: items.flatMap(item => (valueOf(item) === undefined ? [] : [[item.key, valueOf(item)]])),
     pickers: Object.entries(picked).map(([key, files]) => [key, files.map(file => file.uri)]),
   });
@@ -46,7 +57,11 @@ export function restorePluginProject(project: Project, rebuild: () => void): voi
   const applied = new Set<string>();
   for (let round = 0; round < 4; round++) {
     const fresh = pluginEditorItems.value.filter(
-      item => !applied.has(item.key) && (item.key in saved.values || item.key in saved.pickers),
+      // A row of buttons holds no value: a project saved before that was known has its first button saved, and pressing it would act.
+      item =>
+        !applied.has(item.key) &&
+        !(item.kind === 'select' && item.momentary) &&
+        (item.key in saved.values || item.key in saved.pickers),
     );
     if (fresh.length === 0) return;
     for (const item of fresh) {
@@ -55,6 +70,8 @@ export function restorePluginProject(project: Project, rebuild: () => void): voi
         const files = saved.pickers[item.key].map(({ name, file }) => ({ uri: `${project.dir}/${file}`, name, fileCopyUri: `${project.dir}/${file}` }));
         pluginEditorPicked.next({ ...pluginEditorPicked.value, [item.key]: files });
         item.onPick(files);
+      } else if (item.kind === 'font-picker') {
+        item.onPick?.(saved.values[item.key] as string);
       } else if (item.kind !== 'header') {
         (item.onChange as ((value: unknown) => void) | undefined)?.(saved.values[item.key]);
       }
@@ -73,15 +90,21 @@ export function autosavePluginProject(
   ref: PluginProjectRef,
 ): () => void {
   // What was last written, so a rebuild that changed nothing writes nothing.
-  let written = snapshotOf(pluginEditorItems.value, pluginEditorPicked.value, 0);
+  let written = snapshotOf(pluginEditorItems.value, pluginEditorPicked.value, pluginEditorSaved.value, 0);
   // Pictures already copied into the project, by the cache file they came from.
   const copied = new Map<string, string>();
   let queue = Promise.resolve();
 
-  const save = async (items: PluginInspectorItem[], picked: Record<string, PickedImage[]>, canvas: CanvasLike | null, drawn: number) => {
+  const save = async (
+    items: PluginInspectorItem[],
+    picked: Record<string, PickedImage[]>,
+    kept: Record<string, unknown>,
+    canvas: CanvasLike | null,
+    drawn: number,
+  ) => {
     // No controls means the workspace is still opening or has been cleared, and saving that would erase what the project holds.
     if (items.length === 0) return;
-    const snapshot = snapshotOf(items, picked, drawn);
+    const snapshot = snapshotOf(items, picked, kept, drawn);
     if (snapshot === written) return;
     const hasPictures = Object.values(picked).some(files => files.length > 0);
     if (!ref.current && !hasPictures) return;
@@ -105,7 +128,11 @@ export function autosavePluginProject(
         pickers[key].push({ name: file.name, file: stored });
       }
     }
-    const values = Object.fromEntries(items.flatMap(item => (valueOf(item) === undefined ? [] : [[item.key, valueOf(item)]])));
+    // The controls on show are only some of the plugin's (a sub-inspector hides the rest), so what the project held for the others stays.
+    const values = {
+      ...project.plugin?.values,
+      ...Object.fromEntries(items.flatMap(item => (valueOf(item) === undefined ? [] : [[item.key, valueOf(item)]]))),
+    };
     // The home grid shows the whole result. If the canvas is not made yet or cannot be written, it shows the first picture.
     let resultFile = Object.values(pickers).flat()[0]?.file ?? project.resultFile;
     if (canvas) {
@@ -123,7 +150,7 @@ export function autosavePluginProject(
     const saved: Project = {
       ...project,
       resultFile,
-      plugin: { pluginId: workspace.pluginId, workspaceId: workspace.id, values, pickers },
+      plugin: { pluginId: workspace.pluginId, workspaceId: workspace.id, values, pickers, state: kept },
     };
     // A project with no picture to show is not put in the grid.
     if (!saved.resultFile) return;
@@ -136,18 +163,29 @@ export function autosavePluginProject(
   // Counts how many times the preview was drawn, so a canvas that changed with nothing else changing is still written.
   let drawn = 0;
   const redraws = pluginEditorRedraw$.subscribe(() => drawn++);
-  const subscription = combineLatest([pluginEditorItems$, pluginEditorPicked$, pluginEditorRedraw$.pipe(startWith(undefined))])
+  const subscription = combineLatest([
+    pluginEditorItems$,
+    pluginEditorPicked$,
+    pluginEditorSaved$,
+    pluginEditorRedraw$.pipe(startWith(undefined)),
+  ])
     .pipe(debounceTime(SAVE_DELAY_MS))
-    .subscribe(([items, picked]) => {
+    .subscribe(([items, picked, kept]) => {
       const [canvas, count] = [pluginEditorCanvas.value, drawn];
-      queue = queue.then(() => save(items, picked, canvas, count)).catch(error => console.warn('Could not save the plugin project:', error));
+      queue = queue.then(() => save(items, picked, kept, canvas, count)).catch(error => console.warn('Could not save the plugin project:', error));
     });
 
   return () => {
     redraws.unsubscribe();
     subscription.unsubscribe();
     // The workspace is closing and is about to clear its state, so what the user did in the last moments is written from what is there now.
-    const [items, picked, canvas, count] = [pluginEditorItems.value, pluginEditorPicked.value, pluginEditorCanvas.value, drawn];
-    void queue.then(() => save(items, picked, canvas, count)).catch(error => console.warn('Could not save the plugin project:', error));
+    const [items, picked, kept, canvas, count] = [
+      pluginEditorItems.value,
+      pluginEditorPicked.value,
+      pluginEditorSaved.value,
+      pluginEditorCanvas.value,
+      drawn,
+    ];
+    void queue.then(() => save(items, picked, kept, canvas, count)).catch(error => console.warn('Could not save the plugin project:', error));
   };
 }

@@ -14,6 +14,11 @@ export interface CardProps {
   selected?: boolean;
   /** Anything at all, shown below the header (or on its own when there is no header). */
   children?: ReactNode;
+  /**
+   * Shows the children edge to edge, without the padding around them, and lets them take the height left in the card. Use it for a
+   * list that scrolls inside the card, or for rows that bring their own padding.
+   */
+  flush?: boolean;
   /** Applied to the outer container, so a card can size itself in a row, a grid or a list. */
   style?: StyleProp<ViewStyle>;
 }
@@ -86,7 +91,7 @@ export function CardHeader({
 CardHeader.slot = 'header';
 
 /** A surface with an optional header (icon, title, subtitle), any content below it, and an optional tap target. */
-export function Card({ icon: Icon, title, subtitle, onPress, children, style, selected = false }: CardProps) {
+export function Card({ icon: Icon, title, subtitle, onPress, children, style, flush = false, selected = false }: CardProps) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>
@@ -124,7 +129,8 @@ export function Card({ icon: Icon, title, subtitle, onPress, children, style, se
   const content = (
     <>
       {Header != null && Header}
-      {Content.length > 0 && <CardContent>{Content}</CardContent>}
+      {Content.length > 0 &&
+        (flush ? <View style={{ flexGrow: 1, flexShrink: 1 }}>{Content}</View> : <CardContent>{Content}</CardContent>)}
     </>
   );
 

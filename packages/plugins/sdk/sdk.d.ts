@@ -1,5 +1,6 @@
 import type { AiModel } from '@abra/core';
 import type { BlendMode } from '@abra/core/blend';
+import type { ColorLike } from '@abra/core/color';
 import type { Rect } from '@abra/core/geometry';
 import type { Image, ImageLike } from '@abra/core/image';
 import type { MaskLike } from '@abra/core/mask';
@@ -29,8 +30,12 @@ export type PickedFile = {
 export declare const inspector: {
   /** Add a file picker. Set `source` to choose where images come from (`'file-system'` by default, `'projects'` for the app's saved projects, whose edited image is picked, or `'both'`), `multiple` to allow multiple files and `thumbs` to show image thumbnails. */
   filePicker(label: string, options: { source?: 'file-system' | 'projects' | 'both'; multiple?: boolean; thumbs?: boolean; onPick(files: PickedFile[]): void }): void;
-  /** Adds a heading to the plugin editor inspector, like an <h1> to <h6>. `level` defaults to 1. */
-  header(text: string, options?: { level?: 1 | 2 | 3 | 4 | 5 | 6 }): void;
+  /** Adds a heading to the plugin editor inspector, like an <h1> to <h6>. `level` defaults to 1. `back` shows a Back button with the heading and calls it when it is tapped: for the top of a sub-inspector, to return to the main one. */
+  header(text: string, options?: { level?: 1 | 2 | 3 | 4 | 5 | 6; back?(): void }): void;
+  /** Runs the plugin's `inspectorGUI` and `previewCanvas` again, for a change that did not come from one of its controls (a tap on the preview, say). The inspector can then show another set of controls, such as one for what was tapped. */
+  refresh(): void;
+  /** Opens the inspector over the preview, on a screen too narrow to show it beside the preview, for when the plugin has something to show there (the settings of what was tapped). It does nothing where the inspector is always showing. */
+  open(): void;
   /** Adds two number fields side by side, like a size or a point. `value` defaults to `[0, 0]` and `labels` to `['Width', 'Height']`. `min` and `max` limit both numbers. `onChange` gets both numbers each time one is changed to a number. */
   size(
     label: string,
@@ -43,8 +48,14 @@ export declare const inspector: {
       onChange?(value: [number, number]): void;
     },
   ): void;
-  /** Adds a bar of buttons to pick one of `options`, across the whole width. `value` defaults to the first. The editor runs the plugin again after `onChange`. */
-  select(label: string, options: { options: string[]; value?: string; onChange?(value: string): void }): void;
+  /** Adds a bar of buttons to pick one of `options`, across the whole width. `value` defaults to the first. With `momentary` the bar is a row of buttons that act when tapped and never stay selected. The editor runs the plugin again after `onChange`. */
+  select(label: string, options: { options: string[]; value?: string; momentary?: boolean; onChange?(value: string): void }): void;
+  /** Adds a box for a line of text. `value` defaults to nothing and `placeholder` is shown while it is empty. `onChange` gets the text a moment after typing stops, and the editor runs the plugin again after it. */
+  text(label: string, options?: { value?: string; placeholder?: string; onChange?(value: string): void }): void;
+  /** Adds a button showing the chosen font family (`value`, or "Choose a font"). Tapping it opens the Fonts overlay, where the user browses the fonts on the device and downloads more. `onPick` gets the family, which works with `app.fonts.renderText`; the editor runs the plugin again after it. */
+  fontPicker(label: string, options?: { value?: string; onPick?(family: string): void }): void;
+  /** Adds a grid of thumbnails of `files` to choose from, `rows` high (default 2) with the rest reached by scrolling sideways, or every one of them when `rows` is `'all'`. `onPick` gets the place in `files` of the one tapped, and the editor runs the plugin again after it. */
+  pictures(label: string, options: { files: readonly PickedFile[]; rows?: number | 'all'; onPick?(index: number): void }): void;
   /** Adds an on/off switch. `value` defaults to false. The editor runs the plugin again after `onChange`, which gets whether it is on. */
   toggle(label: string, options?: { value?: boolean; onChange?(value: boolean): void }): void;
   /** Adds one number field.`value` defaults to `min` (or 0), `step` to 1, and `reset` to true. `min` and `max` limit the number. The editor runs the plugin again after `onChange`. */
@@ -68,6 +79,7 @@ export declare const inspector: {
       step?: number;
       /** The name on a line of its own with the slider under it. Defaults to false, and to true when `range` is true. */ multiline?: boolean;
       /** A reset button beside the name, which puts the slider back to where it was when the editor opened. Defaults to true. */ reset?: boolean;
+      /** Runs the plugin again once the slider stops moving, for a value that changes how the picture is made. Defaults to false. */ rebuild?: boolean;
     } & (
       | { range?: false; value?: number; onChange?(value: number): void }
       | { range: true; value?: [number, number]; onChange?(value: [number, number]): void }
@@ -91,6 +103,31 @@ export type AppModel = {
 };
 /** Generic app services available to plugin controls. */
 export declare const app: {
+  /** What a plugin keeps with its project, for state no control holds (which picture a cell was swapped for, say). Plain data only; saved with the project a moment after it changes and given back, before the plugin runs, when the project opens. */
+  saved: {
+    /** What was kept under `name`, or `undefined` when nothing was. */
+    get(name: string): unknown;
+    /** Keeps `value` under `name`. */
+    set(name: string, value: unknown): void;
+  };
+  /** Gizmos: shapes the app draws over the preview. They follow the picture as it is zoomed, moved and turned, and go away when the workspace closes. Positions are in pixels of the canvas `previewCanvas` returned. */
+  gizmos: {
+    /** Sets the color of the gizmos drawn from now on, until it is set again. Gizmos already drawn keep theirs. `null` goes back to the default, white. */
+    color(color: ColorLike | null): void;
+    /** Sets how wide the lines of the gizmos drawn from now on are, in screen pixels. The default is 3. */
+    size(pixels: number): void;
+    /** Draws a frame round four corners (each `[x, y]`: top left, top right, bottom right, bottom left) as the gizmo `name`, in the color and width set. A soft dark line is drawn under it so it shows on any picture. Setting a name again moves it. `canvas.quadInParent()` gives the corners of a canvas inside another, and `canvas.childAt(x, y)` finds the canvas on top at a point. */
+    setBox(name: string, corners: number[][]): void;
+    /** Takes the gizmo `name` away. */
+    remove(name: string): void;
+  };
+  /** Fonts downloaded on the Fonts screen, and text set in them. */
+  fonts: {
+    /** The names of the families on this device. */
+    installed(): string[];
+    /** Writes `text` in a family of `installed` as a new transparent image sized around the letters, which the caller releases. `size` is the size of the letters in pixels, `width` wraps the text to that many pixels and `align` lines it up (left by default). Null when there is nothing to write: no text, or a family that is not on this device. */
+    renderText(spec: { text: string; family: string; size: number; color?: import('@abra/core/color').ColorLike; width?: number; align?: 'left' | 'center' | 'right' }): ImageLike | null;
+  };
   /** Access the current editor image, selection areas, and editor state. */
   editor: {
     /** Current editor image, or null when no image is open. */

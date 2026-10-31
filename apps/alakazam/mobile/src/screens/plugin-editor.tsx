@@ -1,13 +1,17 @@
 import { EditorToolbar } from '@/src/components/editor/editor-toolbar';
 import { ViewControls } from '@/src/components/editor/view-controls';
+import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dialog';
 import { Inspector } from '@/src/components/plugin-editor/inspector/inspector';
 import { SelectionBar, useSelection } from '@/src/components/selection';
 import { WorkspacePreview } from '@/src/components/workspace-preview';
+import { cacheFileUri, shareImageFile, writeImageToGallery } from '@/src/lib/native/media-file';
+import { release } from '@/src/lib/native/native-handles';
 import { openPluginWorkspace, updatePluginFiles, type PluginWorkspaceInfo } from '@/src/lib/plugins/plugin-workspace';
 import { useTheme } from '@/src/lib/ui/theme';
+import { errorMessage } from '@/src/lib/utils/error-message';
 import {
-  pluginEditorBuilding$,
   pluginEditorBuilding,
+  pluginEditorBuilding$,
   pluginEditorCanvas,
   pluginEditorCanvas$,
   pluginEditorDevUpdate$,
@@ -23,19 +27,15 @@ import {
   pluginEditorPreviewError,
   pluginEditorPreviewError$,
 } from '@/src/state/plugin-editor';
-import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dialog';
-import { cacheFileUri, shareImageFile, writeImageToGallery } from '@/src/lib/native/media-file';
-import { errorMessage } from '@/src/lib/utils/error-message';
-import { release } from '@/src/lib/native/native-handles';
 import { exportFormat, exportQuality, type ExportFormat } from '@/src/state/settings';
 import ListSortDescending from 'lucide-react-native/icons/list-sort-descending';
 import Save from 'lucide-react-native/icons/save';
 import Share2 from 'lucide-react-native/icons/share-2';
 import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useObservable } from 'react-rx';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useObservable } from 'react-rx';
 
 export type PluginWorkspaceScreenInfo = PluginWorkspaceInfo;
 
@@ -63,7 +63,10 @@ export function PluginEditorScreen({
   const [saveOpen, setSaveOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [exportUri, setExportUri] = useState('');
-  const exportItems = useMemo(() => [{ id: 'workspace', uri: exportUri, name: `${workspace.title}.jpg` }], [exportUri, workspace.title]);
+  const exportItems = useMemo(
+    () => [{ id: 'workspace', uri: exportUri, name: `${workspace.title}.jpg` }],
+    [exportUri, workspace.title],
+  );
 
   /** The save menu shows its picture from a file, so the canvas on show is written to the cache once, as the menu opens. */
   const openSave = async () => {
@@ -205,12 +208,10 @@ export function PluginEditorScreen({
               <Text style={[styles.label, { color: colors.textSecondary }]}>Image Preview</Text>
             )}
             {building ? <ActivityIndicator style={styles.building} color={colors.accent} /> : null}
-            {previewError ? (
-              <Text style={[styles.previewError, { color: colors.danger }]}>{previewError}</Text>
-            ) : null}
+            {previewError ? <Text style={[styles.previewError, { color: colors.danger }]}>{previewError}</Text> : null}
           </View>
           <View style={[styles.toolsBar, { borderColor: colors.border }]}>
-            <ViewControls placement="bar" />
+            <ViewControls />
           </View>
         </View>
         {wideLayout && hasInspector ? inspector : null}
@@ -248,7 +249,9 @@ export function PluginEditorScreen({
                   <X size={24} color={colors.textPrimary} />
                 </Pressable>
               </View>
-              <View style={styles.drawerContent}><Inspector surface="inspector" selection={selection} onFiles={updatePluginFiles} /></View>
+              <View style={styles.drawerContent}>
+                <Inspector surface="inspector" selection={selection} onFiles={updatePluginFiles} />
+              </View>
             </View>
           </View>
         ) : null}

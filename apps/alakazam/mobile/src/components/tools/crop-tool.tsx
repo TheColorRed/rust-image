@@ -45,7 +45,6 @@ import { cropAspect, cropAspect$, cropFrame, cropFrame$, cropHandleGrabbed } fro
 import { focusedControlKey, isCropToolFocused$ } from '@/src/state/edits';
 import {
   MAX_PREVIEW_ZOOM,
-  MIN_PREVIEW_ZOOM,
   previewBox,
   previewBox$,
   previewControlsCover,
@@ -59,6 +58,7 @@ import {
   previewScale,
   previewScaleValue,
   previewScaleValue$,
+  previewRestFloor,
   previewZoomFloor,
   previewTranslateValue,
   previewTranslateValue$,
@@ -613,7 +613,7 @@ export function CropToolController() {
           turnAtOpen = null;
           followingZoom = null;
           previewLimit.next(null);
-          previewZoomFloor.next(MIN_PREVIEW_ZOOM);
+          previewZoomFloor.next(previewRestFloor.value);
           cropFrame.next(null);
         }
         springPreview(rest);
@@ -659,7 +659,7 @@ export function CropToolController() {
     return () => {
       subscriptions.forEach(subscription => subscription.unsubscribe());
       previewLimit.next(null);
-      previewZoomFloor.next(MIN_PREVIEW_ZOOM);
+      previewZoomFloor.next(previewRestFloor.value);
     };
   }, []);
 

@@ -219,7 +219,9 @@ function LoadedImages({ onOpenPhoto, onOpenPluginProject }: { onOpenPhoto: (phot
   const { selected, selecting, clear } = selection;
   const exportProjects = useMemo(() => projects.filter(project => selected.includes(project.id)), [projects, selected]);
   const exportItems = useMemo(
-    () => exportProjects.map(project => ({ id: project.id, uri: projectImageUri(project), name: project.name })),
+    () => exportProjects
+      .filter(project => project.resultFile ?? project.sourceFile)
+      .map(project => ({ id: project.id, uri: projectImageUri(project), name: project.name })),
     [exportProjects],
   );
   const saveProjectImage = async (item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) => {
@@ -267,8 +269,9 @@ function LoadedImages({ onOpenPhoto, onOpenPluginProject }: { onOpenPhoto: (phot
               onOpen={() => (project.plugin ? onOpenPluginProject(project) : onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project }))}
               style={{ width: thumbSize, height: thumbSize, marginBottom: GAP }}
             >
+              {/* A plugin project saved before it made a picture has no image yet. */}
               <Image
-                source={{ uri: projectImageUri(project) }}
+                source={project.resultFile ?? project.sourceFile ? { uri: projectImageUri(project) } : undefined}
                 style={{ width: '100%', height: '100%', backgroundColor: colors.placeholder }}
               />
             </SelectableThumb>
@@ -299,7 +302,7 @@ function LoadedImages({ onOpenPhoto, onOpenPluginProject }: { onOpenPhoto: (phot
         selection={selection}
         uriOf={id => {
           const project = projects.find(candidate => candidate.id === id);
-          return project && projectImageUri(project);
+          return project && (project.resultFile ?? project.sourceFile) ? projectImageUri(project) : undefined;
         }}
         doneLabel="Delete"
         destructive

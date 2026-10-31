@@ -8,7 +8,7 @@
 //! One file for each part of the library: [`canvas`] (`Canvas` and `Layer`), [`color`] (the `primitives` color module),
 //! [`image`] (`Image`), [`gradient`] (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest)
 //! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`drawing`] (brushes and the
-//! line they draw), [`transform`] (rotate and flip), [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
+//! line they draw), [`transform`] (rotate and flip), [`typography`] (fonts and text), [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
 //! of the library is an array here, and an array of the wrong length panics, as the library does for input it cannot use.
 //!
 //! uniffi turns this crate into one namespace (`abra_uniffi`) of the generated TypeScript bindings. A crate that builds the
@@ -32,6 +32,7 @@ mod image;
 mod mask;
 mod tools;
 mod transform;
+mod typography;
 
 pub use abra::abra_core::ResizeTarget;
 pub use abra::canvas::prelude::{
@@ -81,5 +82,6 @@ pub use abra::mask::prelude::{Blob, Falloff};
 pub use mask::{Mask, apply_mask_to_image, apply_mask_to_pixels_rgba, mask_value_to_alpha, rgba_to_gray};
 pub use tools::{Remover, RemoverShape, remover};
 pub use transform::{FlipImage, ResizeImage, RotateImage, flip, resize, rotate};
+pub use typography::{Font, Text};
 
 uniffi::setup_scaffolding!();

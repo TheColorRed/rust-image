@@ -22,7 +22,8 @@
     "./image": "./entries/image.ts",
     "./mask": "./entries/mask.ts",
     "./tools": "./entries/tools.ts",
-    "./transform": "./entries/transform.ts"
+    "./transform": "./entries/transform.ts",
+    "./typography": "./entries/typography.ts"
   },
   "peerDependencies": {
     "@alakazam/mobile": "*"

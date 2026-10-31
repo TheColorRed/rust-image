@@ -1,17 +1,23 @@
 import {
   addPluginFilePicker,
+  addPluginFontPicker,
   addPluginHeader,
   addPluginNumber,
   addPluginSelect,
   addPluginSize,
   addPluginSlider,
+  addPluginText,
   addPluginToggle,
   type PluginFilePickerOptions,
+  type PluginFontPickerOptions,
+  type PluginPicturesOptions,
+  addPluginPictures,
   type PluginHeaderOptions,
   type PluginNumberOptions,
   type PluginSelectOptions,
   type PluginSizeOptions,
   type PluginSliderOptions,
+  type PluginTextOptions,
   type PluginToggleOptions,
 } from '@/src/lib/plugins/plugin-inspector';
 import type { ScriptModules } from '@/src/lib/plugins/plugin-script';
@@ -31,6 +37,7 @@ import * as image from '@abra/core/image';
 import * as mask from '@abra/core/mask';
 import * as tools from '@abra/core/tools';
 import * as transform from '@abra/core/transform';
+import * as typography from '@abra/core/typography';
 import type { Observable, Subscription } from 'rxjs';
 
 /**
@@ -53,6 +60,7 @@ const BASE_PLUGIN_MODULES: ScriptModules = {
   '@abra/core/mask': mask,
   '@abra/core/tools': tools,
   '@abra/core/transform': transform,
+  '@abra/core/typography': typography,
   '@alakazam/sdk': sdk,
 };
 
@@ -68,6 +76,9 @@ export const pluginModules = (
     select: (label: string, options: PluginSelectOptions) => void;
     number: (label: string, options?: PluginNumberOptions) => void;
     toggle: (label: string, options?: PluginToggleOptions) => void;
+    text: (label: string, options?: PluginTextOptions) => void;
+    fontPicker: (label: string, options?: PluginFontPickerOptions) => void;
+    pictures: (label: string, options: PluginPicturesOptions) => void;
   } = {
     filePicker: (label, options) => addPluginFilePicker(pluginId, label, options),
     slider: (label, options) => addPluginSlider(pluginId, label, options),
@@ -76,6 +87,9 @@ export const pluginModules = (
     select: (label, options) => addPluginSelect(pluginId, label, options),
     number: (label, options) => addPluginNumber(pluginId, label, options),
     toggle: (label, options) => addPluginToggle(pluginId, label, options),
+    text: (label, options) => addPluginText(pluginId, label, options),
+    fontPicker: (label, options) => addPluginFontPicker(pluginId, label, options),
+    pictures: (label, options) => addPluginPictures(pluginId, label, options),
   },
 ): ScriptModules => {
   // Every subscription a plugin makes is added to `subscriptions`, which the caller cancels when the plugin closes.
@@ -95,7 +109,8 @@ export const pluginModules = (
     ...sdk,
     app: { ...sdk.app, events },
     toolKey: (id: string) => `${pluginId}.${id}`,
-    inspector,
+    // `refresh` and `open` are the same for every plugin; the controls are the plugin's own.
+    inspector: { refresh: sdk.inspector.refresh, open: sdk.inspector.open, ...inspector },
   };
   return { ...BASE_PLUGIN_MODULES, '@alakazam/sdk': pluginApi, '@alakazam/plugin-toolkit': pluginApi };
 };

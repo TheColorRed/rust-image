@@ -3,11 +3,14 @@ import type { PickedImage } from '@/src/components/file-picker';
 import { pluginModules } from '@/src/lib/plugins/plugin-host';
 import {
   createPluginFilePickerItem,
+  createPluginFontPickerItem,
+  createPluginPicturesItem,
   createPluginHeaderItem,
   createPluginSliderItem,
   createPluginNumberItem,
   createPluginSelectItem,
   createPluginSizeItem,
+  createPluginTextItem,
   createPluginToggleItem,
   removePluginInspectorItems,
   type PluginInspectorItem,
@@ -28,6 +31,7 @@ import {
   pluginEditorPreviewError,
   pluginEditorProjectId,
   pluginEditorRebuild$,
+  pluginEditorSaved,
   pluginEditorRedraw,
 } from '@/src/state/plugin-editor';
 import type { CanvasLike } from '@abra/core/canvas';
@@ -81,6 +85,8 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
   pluginEditorPreviewError.next(null);
   pluginEditorBuilding.next(false);
   pluginEditorPicked.next({});
+  // What the plugin kept with the project is there before its script runs, so it can read it the first time it needs it.
+  pluginEditorSaved.next(project.current?.plugin?.state ?? {});
   pluginEditorProjectId.next(project.current?.id);
   removePluginInspectorItems(workspace.pluginId);
   open = null;
@@ -103,6 +109,9 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
         select: (label, options) => collecting?.push(createPluginSelectItem(workspace.pluginId, label, options)),
         number: (label, options) => collecting?.push(createPluginNumberItem(workspace.pluginId, label, options)),
         toggle: (label, options) => collecting?.push(createPluginToggleItem(workspace.pluginId, label, options)),
+        text: (label, options) => collecting?.push(createPluginTextItem(workspace.pluginId, label, options)),
+        fontPicker: (label, options) => collecting?.push(createPluginFontPickerItem(workspace.pluginId, label, options)),
+        pictures: (label, options) => collecting?.push(createPluginPicturesItem(workspace.pluginId, label, options)),
       }),
       `${workspace.title} workspace`,
     ) as WorkspaceModule;
@@ -143,6 +152,8 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
         if (run !== previewRun || open === null) return;
         pluginEditorCanvas.next(made ?? null);
         pluginEditorPreviewError.next(null);
+        // The controls were made before this canvas, so a control that depends on what the canvas made (a cell's frame) is made again.
+        if (typeof script.inspectorGUI === 'function') makeControls(SURFACES[0]);
         // The plugin may have changed the canvas it returned again, so the preview looks at it again.
         pluginEditorRedraw.next();
       } catch (failure) {
@@ -182,6 +193,7 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
     removePluginInspectorItems(workspace.pluginId);
     pluginEditorItems.next([]);
     pluginEditorCanvas.next(null);
+    pluginEditorSaved.next({});
     pluginEditorProjectId.next(undefined);
   };
 }

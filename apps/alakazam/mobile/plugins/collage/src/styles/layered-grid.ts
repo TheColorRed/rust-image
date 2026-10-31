@@ -13,7 +13,7 @@ let keepAspect = true;
  * turns about, so the pictures overlap their neighbours on every side.
  */
 export const layeredGridStyle: CollageStyle = {
-  name: 'Layered Grid',
+  name: 'Layered',
   scales: true,
   scaleFrom: 'middle',
   key: () => `layered:${grid.join('x')}:${keepAspect}`,

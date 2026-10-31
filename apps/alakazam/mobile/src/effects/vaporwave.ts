@@ -100,7 +100,7 @@ export const vaporwave = (
       const pixels = new Uint8Array(height * 4);
       for (let y = 0; y < height; y++) pixels.set([...colorAt(y + 0.5), 255], y * 4);
       const column = keep(Image.newFromPixels(1, height, pixels.buffer, Channels.Rgba));
-      return keep(Fill.image(column).withRepeat(ImageRepeat.Both));
+      return keep(keep(Fill.image(column)).withRepeat(ImageRepeat.Both));
     };
 
     const short = Math.min(width, height);

@@ -20,6 +20,7 @@ export const InspectorSelect = memo(function InspectorSelect({
   label,
   choices,
   value,
+  momentary,
 }: {
   /** Names the control among the plugin's controls, which is how its current `onChange` is found. */
   itemKey: string;
@@ -28,6 +29,8 @@ export const InspectorSelect = memo(function InspectorSelect({
   choices: string;
   /** The choice that is selected when the control shows. The control keeps its own choice after that. */
   value: string;
+  /** Buttons that act when tapped and never show a choice as selected. */
+  momentary?: boolean;
 }) {
   const { colors } = useTheme();
   const [selected, setSelected] = useState(value);
@@ -45,7 +48,7 @@ export const InspectorSelect = memo(function InspectorSelect({
     <InspectorRow label={label} stacked>
       <View style={[styles.bar, { borderColor: colors.border, backgroundColor: colors.chip }]}>
         {choices.split(SEPARATOR).map(choice => {
-          const chosen = choice === selected;
+          const chosen = !momentary && choice === selected;
           return (
             <Pressable
               key={choice}

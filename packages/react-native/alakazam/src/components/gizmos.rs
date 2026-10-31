@@ -28,12 +28,48 @@ enum Gizmo {
   Outline(abra::prelude::Area, Brush<'static>),
   /// The inside of an area.
   Fill(abra::prelude::Area, Brush<'static>),
+  /// A frame round a four-cornered shape, such as the box round a selected picture. Its corners are in pixels of the photo, not of the
+  /// view, so it stays on the photo while the photo is zoomed, moved or turned (see [`Camera`]). `drawn` is whether the GPU's canvas
+  /// already has it.
+  Box { corners: [(f32, f32); 4], brush: Brush<'static>, drawn: bool },
+}
+
+/// Where the view looks at the photo, so a gizmo placed on the photo is drawn where that part of the photo is on the screen. Set with the
+/// same numbers as the photo's own view, so the two always agree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Camera {
+  /// The size of the photo in pixels.
+  photo: (f32, f32),
+  /// The part of the photo the view shows, as shares of the photo: left, top, width, height. It can reach past the photo's edges.
+  viewport: [f32; 4],
+  /// How far the photo is turned, clockwise, in radians, about the middle of the view.
+  angle: f32,
+}
+
+impl Camera {
+  /// A point of the photo, in photo pixels, as a point of a view of `size` pixels.
+  fn to_view(&self, p_point: (f32, f32), p_size: (u32, u32)) -> (f32, f32) {
+    let (width, height) = (p_size.0 as f32, p_size.1 as f32);
+    let across = (p_point.0 / self.photo.0 - self.viewport[0]) / self.viewport[2] * width - width / 2.0;
+    let down = (p_point.1 / self.photo.1 - self.viewport[1]) / self.viewport[3] * height - height / 2.0;
+    let (sin, cos) = self.angle.sin_cos();
+    (width / 2.0 + across * cos - down * sin, height / 2.0 + across * sin + down * cos)
+  }
+}
+
+/// The corners of a box on the photo as points of the view: through the camera when there is one, and as they are when there is not.
+fn box_in_view(p_corners: &[(f32, f32); 4], p_camera: Option<Camera>, p_size: (u32, u32)) -> [(f32, f32); 4] {
+  p_corners.map(|corner| p_camera.map_or(corner, |camera| camera.to_view(corner, p_size)))
 }
 
 impl Gizmo {
   /// The gizmo as a picture of `width` x `height` pixels: transparent everywhere except where it is.
-  fn layer(&self, width: u32, height: u32) -> Pixels {
+  fn layer(&self, width: u32, height: u32, p_camera: Option<Camera>) -> Pixels {
     match self {
+      Gizmo::Box { corners, brush, .. } => {
+        let [first, second, third, fourth] = box_in_view(corners, p_camera, (width, height));
+        stroke_overlay_deferred(width, height, &[first, second, third, fourth, first], brush)
+      }
       Gizmo::Line { points, brush, .. } => stroke_overlay_deferred(width, height, points, brush),
       Gizmo::Outline(area, brush) => {
         let mut layer = Pixels::new(width, height);
@@ -59,15 +95,18 @@ struct GizmoList {
   /// The renderer that makes the pictures, once there is one, so it can be woken when a gizmo changes. Weak, because the renderer's
   /// drawing code holds this list, and a strong link back would keep the renderer and its last frame alive after the component is gone.
   renderer: Mutex<Option<WeakOffscreen>>,
+  /// Where the view looks at the photo, once the photo's view says. Gizmos placed on the photo wait for it.
+  camera: Mutex<Option<Camera>>,
 }
 
 impl GizmoList {
   /// Every gizmo over a clear picture of `width` x `height` pixels, the newest on top.
   fn frame(&self, width: u32, height: u32) -> Frame {
     let gizmos = self.gizmos.lock().unwrap();
+    let camera = *self.camera.lock().unwrap();
     let mut picture = Pixels::new(width, height);
     for (_, gizmo) in gizmos.iter() {
-      picture = blended(&picture, &gizmo.layer(width, height), BlendMode::Normal, 1.0);
+      picture = blended(&picture, &gizmo.layer(width, height, camera), BlendMode::Normal, 1.0);
     }
     frame_of(&picture)
   }
@@ -84,6 +123,21 @@ impl GizmoList {
     }
     drop(gizmos);
     self.changed();
+  }
+
+  /// Moves the camera. A frame that was drawn with the old one is wrong, so everything is drawn again.
+  fn look(&self, p_camera: Camera) {
+    let mut camera = self.camera.lock().unwrap();
+    if *camera == Some(p_camera) {
+      return;
+    }
+    *camera = Some(p_camera);
+    drop(camera);
+    // Only gizmos on the photo move with the camera, so a view with just lines (a finger's loop) is not drawn again for nothing.
+    if self.gizmos.lock().unwrap().iter().any(|(_, gizmo)| matches!(gizmo, Gizmo::Box { .. })) {
+      self.rebuild.store(true, Ordering::SeqCst);
+      self.changed();
+    }
   }
 
   fn changed(&self) {
@@ -107,7 +161,7 @@ impl GizmoList {
   /// the caller draws the frame on the CPU then.
   fn gpu_frame(&self, size: (u32, u32), held: &mut Option<OnTheGpu>) -> Option<RenderedFrame> {
     let mut gizmos = self.gizmos.lock().unwrap();
-    if gizmos.is_empty() || gizmos.iter().any(|(_, gizmo)| !matches!(gizmo, Gizmo::Line { .. })) {
+    if gizmos.is_empty() || gizmos.iter().any(|(_, gizmo)| !matches!(gizmo, Gizmo::Line { .. } | Gizmo::Box { .. })) {
       self.rebuild.store(true, Ordering::SeqCst);
       return None;
     }
@@ -121,7 +175,21 @@ impl GizmoList {
     if rebuild {
       canvas.clear();
     }
+    let camera = *self.camera.lock().unwrap();
     for (_, gizmo) in gizmos.iter_mut() {
+      if let Gizmo::Box { corners, brush, drawn } = gizmo {
+        if rebuild {
+          *drawn = false;
+        }
+        if !*drawn {
+          let [first, second, third, fourth] = box_in_view(corners, camera, size);
+          let edges = [[first.0, first.1, second.0, second.1], [second.0, second.1, third.0, third.1], [third.0, third.1, fourth.0, fourth.1], [fourth.0, fourth.1, first.0, first.1]];
+          let look = StrokeLook::of(brush);
+          canvas.draw(&edges, &StrokeStyle { radius: look.radius, edge: look.edge, color: look.color });
+          *drawn = true;
+        }
+        continue;
+      }
       let Gizmo::Line { points, brush, drawn } = gizmo else { continue };
       if rebuild {
         *drawn = 0;
@@ -205,7 +273,7 @@ impl Gizmos {
   /// A view with no gizmos on it.
   #[uniffi::constructor]
   pub fn new() -> Arc<Self> {
-    let list = Arc::new(GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None) });
+    let list = Arc::new(GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None), camera: Mutex::new(None) });
     let image = Image::new().track(&GizmoSource(Arc::clone(&list)));
     Arc::new(Self { image, list })
   }
@@ -248,6 +316,30 @@ impl Gizmos {
     self.list.set(name, Gizmo::Fill(area.core(), brush.0.clone()));
   }
 
+  /// Draws a frame round the four corners (each `[x, y]`, top left, top right, bottom right, bottom left) with the brush, as the gizmo
+  /// `name`. The corners are in pixels of the photo, not of the view: the frame stays on the photo as the camera (`set_camera`) moves.
+  /// Panics when there are not four corners of two numbers each.
+  pub fn set_box(&self, name: String, corners: Vec<Vec<f32>>, brush: Arc<abra_uniffi::Brush>) {
+    let points: Vec<(f32, f32)> = corners
+      .iter()
+      .map(|point| {
+        let [x, y] = point[..] else { panic!("a corner is [x, y], not {} numbers", point.len()) };
+        (x, y)
+      })
+      .collect();
+    let corners: [(f32, f32); 4] = points.try_into().unwrap_or_else(|points: Vec<(f32, f32)>| panic!("a box has four corners, not {}", points.len()));
+    self.list.set(name, Gizmo::Box { corners, brush: brush.0.clone(), drawn: false });
+  }
+
+  /// Tells the gizmos where the view looks at the photo, with the same numbers the photo's own view is given: the photo's size in
+  /// pixels, the part of it that shows (`left`, `top`, `width`, `height`, each as a share of the photo) and how far it is turned,
+  /// clockwise, in radians. Call it whenever the camera moves; gizmos placed on the photo (`set_box`) follow.
+  pub fn set_camera(&self, photo_width: f32, photo_height: f32, left: f32, top: f32, width: f32, height: f32, angle: f32) {
+    if photo_width > 0.0 && photo_height > 0.0 && width > 0.0 && height > 0.0 {
+      self.list.look(Camera { photo: (photo_width, photo_height), viewport: [left, top, width, height], angle });
+    }
+  }
+
   /// Takes the gizmo `name` away, if there is one.
   pub fn remove(&self, name: String) {
     self.list.gizmos.lock().unwrap().retain(|(existing, _)| *existing != name);
@@ -277,7 +369,7 @@ mod tests {
   use abra::abra_core::Color;
 
   fn list() -> GizmoList {
-    GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None) }
+    GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None), camera: Mutex::new(None) }
   }
 
   fn brush(color: &Color, size: u32) -> Brush<'static> {
@@ -287,6 +379,38 @@ mod tests {
   fn pixel(frame: &Frame, x: usize, y: usize) -> [u8; 4] {
     let at = (y * frame.width as usize + x) * 4;
     [frame.pixels[at], frame.pixels[at + 1], frame.pixels[at + 2], frame.pixels[at + 3]]
+  }
+
+  #[test]
+  fn the_camera_puts_a_point_of_the_photo_where_it_is_on_the_screen() {
+    // A 200 x 100 photo seen whole in a 400 x 200 view: everything is twice as far from the corner.
+    let whole = Camera { photo: (200.0, 100.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 };
+    assert_eq!(whole.to_view((50.0, 25.0), (400, 200)), (100.0, 50.0));
+    // Zoomed to its right half, the middle of the photo is the left edge of the view.
+    let right_half = Camera { viewport: [0.5, 0.0, 0.5, 1.0], ..whole };
+    assert_eq!(right_half.to_view((100.0, 50.0), (400, 200)), (0.0, 100.0));
+    // Turned a quarter, clockwise, about the middle of the view: the top-left corner goes to the top-right.
+    let turned = Camera { angle: std::f32::consts::FRAC_PI_2, ..Camera { photo: (100.0, 100.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 } };
+    let (x, y) = turned.to_view((0.0, 0.0), (100, 100));
+    assert!((x - 100.0).abs() < 1e-3 && y.abs() < 1e-3, "{x} {y}");
+  }
+
+  #[test]
+  fn a_box_follows_the_camera_and_is_drawn_on_the_cpu_without_a_gpu() {
+    let list = list();
+    let color = Color::from_rgba(255, 0, 0, 255);
+    let corners = [(10.0, 10.0), (30.0, 10.0), (30.0, 20.0), (10.0, 20.0)];
+    list.set("box".into(), Gizmo::Box { corners, brush: brush(&color, 2), drawn: false });
+    // With the photo seen whole at the view's size, the frame is where its corners say.
+    list.look(Camera { photo: (100.0, 50.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 });
+    let frame = list.frame(100, 50);
+    assert_eq!(pixel(&frame, 20, 10)[3], 255, "the top edge");
+    assert_eq!(pixel(&frame, 20, 15)[3], 0, "inside the frame is clear");
+    // The camera moves to the right half of the photo: the same frame is now off the left of the view, and a box that is not in view
+    // draws nothing.
+    list.look(Camera { photo: (100.0, 50.0), viewport: [0.5, 0.0, 0.5, 1.0], angle: 0.0 });
+    let moved = list.frame(100, 50);
+    assert_eq!(pixel(&moved, 20, 10)[3], 0, "the frame moved with the photo");
   }
 
   #[test]

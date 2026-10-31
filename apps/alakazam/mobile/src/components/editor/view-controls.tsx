@@ -1,18 +1,21 @@
 // @refresh reset
+import { DrawAreaButtons, useDrawAreaHint } from '@/src/components/area-tool';
+import { useOwning } from '@/src/lib/native/native-handles';
 import { useTheme } from '@/src/lib/ui/theme';
 import {
+  currentPanOverride,
   MAX_PREVIEW_ZOOM,
   MIN_PREVIEW_ZOOM,
   previewBox,
+  previewCircleMode,
+  previewCircleMode$,
   previewCircling,
   previewControlsCover,
-  previewOrigin,
-  previewZoomFloor,
-  previewScaleValue,
-  previewTranslateValue,
+  previewFit,
+  previewFit$,
   previewMoveMode,
   previewMoveMode$,
-  currentPanOverride,
+  previewOrigin,
   previewPanOverride$,
   previewRotationGlide,
   previewRotationLocked,
@@ -20,10 +23,16 @@ import {
   previewRotationValue,
   previewRotationValue$,
   previewScaleSettled$,
+  previewScaleValue,
+  previewTranslateValue,
+  previewZoomFloor,
   springPreview,
 } from '@/src/state/gestures';
-import Grab from 'lucide-react-native/icons/hand-grab';
+import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
+import { Color } from '@abra/core/color';
+import { Brush } from '@abra/core/drawing';
 import Hand from 'lucide-react-native/icons/hand';
+import Grab from 'lucide-react-native/icons/hand-grab';
 import Lock from 'lucide-react-native/icons/lock';
 import Maximize from 'lucide-react-native/icons/maximize';
 import Minus from 'lucide-react-native/icons/minus';
@@ -32,25 +41,20 @@ import Pointer from 'lucide-react-native/icons/pointer';
 import RotateCw from 'lucide-react-native/icons/rotate-cw';
 import Undo2 from 'lucide-react-native/icons/undo-2';
 import ZoomIn from 'lucide-react-native/icons/zoom-in';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useOwning } from '@/src/lib/native/native-handles';
-import { PanResponder, PixelRatio, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Color } from '@abra/core/color';
-import { Brush } from '@abra/core/drawing';
-import { editorGizmos, editorGizmos$ } from '@/src/state/gizmos';
+import { useEffect, useMemo, useRef, useState, type ElementRef } from 'react';
+import {
+  Modal,
+  PanResponder,
+  PixelRatio,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useObservable } from 'react-rx';
 import { debounceTime } from 'rxjs/operators';
-import {
-  activeSectionKey,
-  activeSectionKey$,
-  adjustments,
-  adjustments$,
-  focusedControlKey,
-  focusedControlKey$,
-  openSliderState,
-  openSliderState$,
-} from '@/src/state/edits';
-import { DrawAreaButtons, useDrawAreaHint } from '@/src/components/area-tool';
 
 const ICON = '#fff';
 
@@ -74,129 +78,221 @@ export function ViewControls({ placement = 'overlay' }: { placement?: 'overlay' 
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const zoom = useObservable(previewScaleSettled$, 1);
+  const fit = useObservable(previewFit$, previewFit.value);
+  // The size the photo is shown at: 100% is one pixel of the photo to one pixel of the screen.
+  const shownAt = `${Math.round(fit * zoom * 100)}%`;
   const turn = useObservable(settledTurn$, previewRotationValue.value);
   const locked = useObservable(previewRotationLocked$, previewRotationLocked.value);
   const moveMode = useObservable(previewMoveMode$, previewMoveMode.value);
   const panOverride = useObservable(previewPanOverride$, currentPanOverride());
   const move = panOverride ? { label: `Pan: locked by ${panOverride.tool}`, icon: Lock } : MOVE_MODES[moveMode];
   const MoveIcon = move.icon;
-  const [circling, setCircling] = useState(false);
+  const circling = useObservable(previewCircleMode$, previewCircleMode.value);
+  const setCircling = (on: boolean) => previewCircleMode.next(on);
   const drawHint = useDrawAreaHint();
-  const zoomed = zoom > 1.01;
+  const zoomed = Math.abs(zoom - 1) > 0.01;
   const turned = Math.abs(turn) > 0.01;
 
   const wholeTurns = () => Math.round(previewRotationValue.value / (2 * Math.PI)) * 2 * Math.PI;
   return (
     <>
-    {circling ? <CircleToZoomOverlay onDone={() => setCircling(false)} /> : null}
-    <View
-      style={[styles.area, placement === 'bar' && styles.barArea]}
-      pointerEvents="box-none"
-      // The row sits 12 px above the preview's bottom edge (see `area`), so the cover includes that gap.
-      onLayout={event => previewControlsCover.next(event.nativeEvent.layout.height + 12)}
-    >
-      {circling ? <Text style={styles.hint}>Draw a circle around what to zoom into</Text> : null}
-      {!circling && drawHint ? <Text style={styles.hint}>{drawHint}</Text> : null}
-      {!circling && !locked && !turned ? <Text style={styles.hint}>Twist with two fingers to turn the photo</Text> : null}
-      <View style={styles.barRow}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rowScroll} contentContainerStyle={styles.row}>
-        <View style={styles.group}>
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: circling }}
-            accessibilityLabel="Circle to zoom"
-            style={[styles.segment, circling && styles.pillOn]}
-            hitSlop={8}
-            onPress={() => setCircling(!circling)}
+      {circling && placement === 'overlay' ? <CircleToZoomOverlay /> : null}
+      <View
+        style={[styles.area, placement === 'bar' && styles.barArea]}
+        pointerEvents="box-none"
+        // The row sits 12 px above the preview's bottom edge (see `area`), so the cover includes that gap.
+        onLayout={event => previewControlsCover.next(event.nativeEvent.layout.height + 12)}
+      >
+        {circling ? <Text style={styles.hint}>Draw a circle around what to zoom into</Text> : null}
+        {!circling && drawHint ? <Text style={styles.hint}>{drawHint}</Text> : null}
+        {!circling && !locked && !turned ? (
+          <Text style={styles.hint}>Twist with two fingers to turn the photo</Text>
+        ) : null}
+        <View style={styles.barRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.rowScroll}
+            contentContainerStyle={styles.row}
           >
-            <ZoomIn color={ICON} size={16} />
-            <Text style={styles.label}>Circle to zoom</Text>
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Zoom out"
-            style={styles.segment}
-            hitSlop={8}
-            onPress={() => {
-              const floor = previewZoomFloor.value;
-              const next = Math.max(floor, previewScaleValue.value / ZOOM_STEP);
-              const ratio = next / previewScaleValue.value;
-              springPreview(
-                next <= floor && floor >= MIN_PREVIEW_ZOOM
-                  ? { x: 0, y: 0, scale: 1 }
-                  : { x: previewTranslateValue.value.x * ratio, y: previewTranslateValue.value.y * ratio, scale: next },
-              );
-            }}
-          >
-            <Minus color={ICON} size={16} />
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Zoom in"
-            style={styles.segment}
-            hitSlop={8}
-            onPress={() => {
-              const next = Math.min(MAX_PREVIEW_ZOOM, previewScaleValue.value * ZOOM_STEP);
-              const ratio = next / previewScaleValue.value;
-              springPreview({ x: previewTranslateValue.value.x * ratio, y: previewTranslateValue.value.y * ratio, scale: next });
-            }}
-          >
-            <Plus color={ICON} size={16} />
-          </Pressable>
+            <View style={styles.group}>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: circling }}
+                accessibilityLabel="Circle to zoom"
+                style={[styles.segment, circling && styles.pillOn]}
+                hitSlop={8}
+                onPress={() => setCircling(!circling)}
+              >
+                <ZoomIn color={ICON} size={16} />
+                <Text style={styles.label}>Circle to zoom</Text>
+              </Pressable>
+              <View style={styles.divider} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Zoom out"
+                style={styles.segment}
+                hitSlop={8}
+                onPress={() => {
+                  const floor = previewZoomFloor.value;
+                  const next = Math.max(floor, previewScaleValue.value / ZOOM_STEP);
+                  const ratio = next / previewScaleValue.value;
+                  springPreview(
+                    next <= floor && floor >= MIN_PREVIEW_ZOOM
+                      ? { x: 0, y: 0, scale: 1 }
+                      : {
+                          x: previewTranslateValue.value.x * ratio,
+                          y: previewTranslateValue.value.y * ratio,
+                          scale: next,
+                        },
+                  );
+                }}
+              >
+                <Minus color={ICON} size={16} />
+              </Pressable>
+              <View style={styles.divider} />
+              <ZoomPercent label={shownAt} percent={fit * zoom * 100} />
+              <View style={styles.divider} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Zoom in"
+                style={styles.segment}
+                hitSlop={8}
+                onPress={() => {
+                  const next = Math.min(MAX_PREVIEW_ZOOM, previewScaleValue.value * ZOOM_STEP);
+                  const ratio = next / previewScaleValue.value;
+                  springPreview({
+                    x: previewTranslateValue.value.x * ratio,
+                    y: previewTranslateValue.value.y * ratio,
+                    scale: next,
+                  });
+                }}
+              >
+                <Plus color={ICON} size={16} />
+              </Pressable>
+            </View>
+            <Pressable
+              accessibilityRole="switch"
+              accessibilityState={{ checked: !locked }}
+              accessibilityLabel="Turnable"
+              style={[styles.pill, !locked && styles.pillOn]}
+              hitSlop={8}
+              onPress={() => {
+                // Turning off a photo that is turned brings it upright first, so it is not left crooked with no way to twist it back.
+                if (!locked) previewRotationGlide.next(wholeTurns());
+                previewRotationLocked.next(!locked);
+              }}
+            >
+              <RotateCw color={ICON} size={16} />
+              <Text style={styles.label}>Turnable</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                panOverride
+                  ? `Move: locked by ${panOverride.tool}`
+                  : `Move: ${MOVE_MODES[moveMode].label}. Tap to change`
+              }
+              accessibilityState={{ disabled: !!panOverride }}
+              disabled={!!panOverride}
+              style={[styles.pill, panOverride && styles.pillLocked]}
+              hitSlop={8}
+              onPress={() => previewMoveMode.next(MOVE_MODES[moveMode].next)}
+            >
+              <MoveIcon color={ICON} size={16} />
+              <Text style={styles.label}>{move.label}</Text>
+            </Pressable>
+            {turned ? (
+              <Pressable style={styles.pill} hitSlop={8} onPress={() => previewRotationGlide.next(wholeTurns())}>
+                <Undo2 color={ICON} size={16} />
+                <Text style={styles.label}>Straighten</Text>
+              </Pressable>
+            ) : null}
+            {zoomed ? (
+              <Pressable style={styles.pill} hitSlop={8} onPress={() => springPreview({ x: 0, y: 0, scale: 1 })}>
+                <Maximize color={ICON} size={16} />
+                <Text style={styles.label}>Reset zoom</Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+          <DrawAreaButtons />
         </View>
-        <Pressable
-          accessibilityRole="switch"
-          accessibilityState={{ checked: !locked }}
-          accessibilityLabel="Turnable"
-          style={[styles.pill, !locked && styles.pillOn]}
-          hitSlop={8}
-          onPress={() => {
-            // Turning off a photo that is turned brings it upright first, so it is not left crooked with no way to twist it back.
-            if (!locked) previewRotationGlide.next(wholeTurns());
-            previewRotationLocked.next(!locked);
-          }}
-        >
-          <RotateCw color={ICON} size={16} />
-          <Text style={styles.label}>Turnable</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            panOverride ? `Move: locked by ${panOverride.tool}` : `Move: ${MOVE_MODES[moveMode].label}. Tap to change`
-          }
-          accessibilityState={{ disabled: !!panOverride }}
-          disabled={!!panOverride}
-          style={[styles.pill, panOverride && styles.pillLocked]}
-          hitSlop={8}
-          onPress={() => previewMoveMode.next(MOVE_MODES[moveMode].next)}
-        >
-          <MoveIcon color={ICON} size={16} />
-          <Text style={styles.label}>{move.label}</Text>
-        </Pressable>
-        {turned ? (
-          <Pressable style={styles.pill} hitSlop={8} onPress={() => previewRotationGlide.next(wholeTurns())}>
-            <Undo2 color={ICON} size={16} />
-            <Text style={styles.label}>Straighten</Text>
-          </Pressable>
-        ) : null}
-        {zoomed ? (
-          <Pressable style={styles.pill} hitSlop={8} onPress={() => springPreview({ x: 0, y: 0, scale: 1 })}>
-            <Maximize color={ICON} size={16} />
-            <Text style={styles.label}>Reset zoom</Text>
-          </Pressable>
-        ) : null}
-      </ScrollView>
-      <DrawAreaButtons />
       </View>
-    </View>
     </>
   );
 }
 
 /** How much one tap of − or + zooms. */
 const ZOOM_STEP = 1.5;
+/** The sizes the list offers, as a percent of the photo's own size. Fit is always offered; one the zoom cannot reach is left out. */
+const ZOOM_SIZES = [25, 50, 100, 200, 400];
+
+/**
+ * The size the photo is shown at. Tapping it opens a short list of sizes to jump to: Fit, which shows the whole photo, and the
+ * percentages in `ZOOM_SIZES`. A jump keeps the middle of the screen where it is, as the − and + buttons do.
+ */
+function ZoomPercent({ label, percent }: { label: string; percent: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { height: windowHeight } = useWindowDimensions();
+  const button = useRef<ElementRef<typeof View> | null>(null);
+  // Where the menu opens: above the button's left edge, in the window. Null while it is closed.
+  const [openAt, setOpenAt] = useState<{ x: number; above: number } | null>(null);
+  const open = () =>
+    button.current?.measureInWindow((x, y) => setOpenAt({ x, above: windowHeight - y + 8 }));
+  const close = () => setOpenAt(null);
+
+  const choose = (size: number | 'fit') => {
+    close();
+    if (size === 'fit') return springPreview({ x: 0, y: 0, scale: 1 });
+    const next = Math.min(MAX_PREVIEW_ZOOM, Math.max(previewZoomFloor.value, size / 100 / previewFit.value));
+    const ratio = next / previewScaleValue.value;
+    springPreview({ x: previewTranslateValue.value.x * ratio, y: previewTranslateValue.value.y * ratio, scale: next });
+  };
+  const reachable = ZOOM_SIZES.filter(size => {
+    const zoom = size / 100 / previewFit.value;
+    return zoom >= previewZoomFloor.value && zoom <= MAX_PREVIEW_ZOOM;
+  });
+  // A photo at its fit size can be at one of the sizes too (a photo that fits at 100% is both). The number is the one selected then.
+  const atFit = Math.abs(previewScaleValue.value - 1) < 0.01 && !ZOOM_SIZES.includes(Math.round(percent));
+
+  return (
+    <>
+      <Pressable
+        ref={button}
+        accessibilityRole="button"
+        accessibilityLabel={`Shown at ${label}. Tap to choose a size`}
+        style={styles.percent}
+        hitSlop={8}
+        onPress={open}
+      >
+        <Text style={styles.label}>{label}</Text>
+      </Pressable>
+      <Modal transparent visible={openAt !== null} animationType="fade" statusBarTranslucent onRequestClose={close}>
+        <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={close}>
+          {openAt ? (
+            <View style={[styles.menu, { left: openAt.x, bottom: openAt.above }]}>
+              {(['fit', ...reachable] as const).map(size => {
+                const chosen = size === 'fit' ? atFit : Math.round(percent) === size;
+                return (
+                  <Pressable
+                    key={size}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: chosen }}
+                    style={[styles.menuItem, chosen && styles.pillOn]}
+                    onPress={() => choose(size)}
+                  >
+                    <Text style={styles.label}>{size === 'fit' ? 'Fit' : `${size}%`}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
 /** How much of the box the circled area fills once zoomed, so the circle's edge is not touching the sides. */
 const CIRCLE_FILL = 0.9;
 /** A circle smaller than this (screen px across) is taken as a stray touch. */
@@ -206,15 +302,27 @@ const MIN_CIRCLE = 24;
  * Covers the photo while "Circle to zoom" is on. One finger draws a loop; when it lifts, the photo glides so the area inside the
  * loop's bounds fills the box, and the mode turns itself off.
  */
-function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
+export function CircleToZoomOverlay() {
+  const onDone = () => previewCircleMode.next(false);
   const points = useRef<{ x: number; y: number }[]>([]);
   // The library draws the loop: a soft glow under a crisp line, on the gizmos view over the photo. Its sizes are in the view's pixels.
   const gizmos = useObservable(editorGizmos$, editorGizmos.value);
   const brushes = useOwning(keep => {
     const density = PixelRatio.get();
     return {
-      glow: keep(new Brush().withColor(Color.white()).withSize(Math.round(5 * density)).withHardness(0).withOpacity(0.5) as Brush),
-      line: keep(new Brush().withColor(Color.white()).withSize(Math.round(1 * density)).withHardness(1) as Brush),
+      glow: keep(
+        new Brush()
+          .withColor(Color.white())
+          .withSize(Math.round(5 * density))
+          .withHardness(0)
+          .withOpacity(0.5) as Brush,
+      ),
+      line: keep(
+        new Brush()
+          .withColor(Color.white())
+          .withSize(Math.round(1 * density))
+          .withHardness(1) as Brush,
+      ),
     };
   }, []);
   // The loop goes away with the mode.
@@ -247,12 +355,18 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
         onPanResponderGrant: event => {
           gizmos?.remove('glow');
           gizmos?.remove('line');
-          const point = { x: event.nativeEvent.pageX - previewOrigin.value.x, y: event.nativeEvent.pageY - previewOrigin.value.y };
+          const point = {
+            x: event.nativeEvent.pageX - previewOrigin.value.x,
+            y: event.nativeEvent.pageY - previewOrigin.value.y,
+          };
           points.current = [point];
           draw(point.x, point.y);
         },
         onPanResponderMove: event => {
-          const point = { x: event.nativeEvent.pageX - previewOrigin.value.x, y: event.nativeEvent.pageY - previewOrigin.value.y };
+          const point = {
+            x: event.nativeEvent.pageX - previewOrigin.value.x,
+            y: event.nativeEvent.pageY - previewOrigin.value.y,
+          };
           points.current.push(point);
           draw(point.x, point.y);
         },
@@ -279,7 +393,10 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
           if (across * scale >= MIN_CIRCLE) {
             const next = Math.min(
               MAX_PREVIEW_ZOOM,
-              Math.max(MIN_PREVIEW_ZOOM, Math.min((box.width * CIRCLE_FILL) / (right - left), (box.height * CIRCLE_FILL) / (bottom - top))),
+              Math.max(
+                MIN_PREVIEW_ZOOM,
+                Math.min((box.width * CIRCLE_FILL) / (right - left), (box.height * CIRCLE_FILL) / (bottom - top)),
+              ),
             );
             springPreview({ x: (-(left + right) / 2) * next, y: (-(top + bottom) / 2) * next, scale: next });
           }
@@ -290,9 +407,7 @@ function CircleToZoomOverlay({ onDone }: { onDone: () => void }) {
     [gizmos, brushes],
   );
 
-  return (
-    <View style={StyleSheet.absoluteFill} {...responder.panHandlers} />
-  );
+  return <View style={StyleSheet.absoluteFill} {...responder.panHandlers} />;
 }
 
 function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
@@ -311,8 +426,31 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderRadius: 17,
       backgroundColor: colors.overlayButton,
     },
-    group: { flexDirection: 'row', alignItems: 'center', height: 34, borderRadius: 17, overflow: 'hidden', backgroundColor: colors.overlayButton },
-    segment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 34, paddingHorizontal: 12 },
+    group: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: 34,
+      borderRadius: 17,
+      overflow: 'hidden',
+      backgroundColor: colors.overlayButton,
+    },
+    segment: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      height: 34,
+      paddingHorizontal: 12,
+    },
+    menu: {
+      position: 'absolute',
+      minWidth: 96,
+      padding: 4,
+      borderRadius: 14,
+      backgroundColor: 'rgba(0,0,0,0.85)',
+    },
+    menuItem: { height: 34, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 10 },
+    percent: { minWidth: 56, height: 34, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
     divider: { width: 1, alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.35)' },
     pillOn: { backgroundColor: colors.accent },
     pillLocked: { opacity: 0.6 },

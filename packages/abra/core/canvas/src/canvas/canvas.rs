@@ -472,6 +472,33 @@ impl<'a> Canvas<'a> {
     canvas.canvases.iter().map(|child| Canvas { inner: child.clone() }).collect()
   }
 
+  /// The four corners of this canvas as it sits in its parent, in the parent's pixels, for drawing an outline around it or testing a
+  /// touch against it. They follow its position, its scale about its middle and its rotation about its middle. Top-left, top-right,
+  /// bottom-right, bottom-left of the canvas's own picture, so a turn carries each corner round.
+  pub fn quad_in_parent(&self) -> abra_core::Quad {
+    self.inner.lock().unwrap().quad_in_parent()
+  }
+
+  /// The canvas inside this one that is on top at `p_point` (in this canvas's pixels): the last added of the canvases that cover it,
+  /// as they are drawn. A canvas that cannot be seen (no opacity, or scaled to nothing) is not found. `None` when no canvas is there.
+  /// Layers are not looked at, only the canvases inside.
+  pub fn child_at(&self, p_point: impl Into<abra_core::PointF>) -> Option<Canvas<'a>> {
+    let point = p_point.into();
+    let canvas = self.inner.lock().unwrap();
+    canvas
+      .canvases
+      .iter()
+      .rev()
+      .find(|child| {
+        let child = child.lock().unwrap();
+        let quad = child.quad_in_parent();
+        child.opacity() > 0.0
+          && child.scale() > 0.0
+          && abra_core::polygon_contains(&[quad.top_left, quad.top_right, quad.bottom_right, quad.bottom_left], point)
+      })
+      .map(|child| Canvas { inner: child.clone() })
+  }
+
   /// Sets the position of this canvas to the given anchor point within its parent canvas.
   pub fn anchor_to_canvas(&self, p_anchor: crate::Anchor) {
     let mut canvas = self.inner.lock().unwrap();
@@ -652,6 +679,139 @@ mod tests {
 
     assert_eq!(image.get_pixel(0, 0).unwrap().3, 255, "inside the mask");
     assert_eq!(image.get_pixel(1, 0).unwrap().3, 0, "outside the mask");
+  }
+
+  /// A red 4 x 4 canvas in a 20 x 20 root, at `x`, `y`.
+  fn red_child_at(x: i32, y: i32) -> (Canvas<'static>, Canvas<'static>) {
+    let root = Canvas::new_blank("root", 20, 20);
+    let child = Canvas::new_blank("child", 4, 4);
+    child.add_layer_from_image("red", Image::new_from_color(4, 4, Color::from_rgba(255, 0, 0, 255)), None);
+    let child = root.add_canvas(child, Some(AddCanvasOptions { position: Some((x, y)), ..Default::default() }));
+    (root, child)
+  }
+
+  #[test]
+  fn a_canvas_outside_its_parent_is_not_made_and_shows_when_moved_in() {
+    let (root, child) = red_child_at(100, 100);
+    root.as_image();
+    // It was never brought up to date, so it is still waiting to be, but that does not keep the parent dirty.
+    assert!(!root.is_dirty(), "a canvas that is out of sight does not make the parent compose again");
+
+    child.set_position(5, 5);
+    let image = root.as_image();
+
+    assert_eq!(image.get_pixel(6, 6), Some((255, 0, 0, 255)), "it shows once it is moved in");
+  }
+
+  #[test]
+  fn a_canvas_scaled_or_turned_into_view_is_drawn() {
+    let (root, child) = red_child_at(30, 8);
+    assert_eq!(root.as_image().get_pixel(18, 10), Some((0, 0, 0, 0)), "out of sight at first");
+
+    // Scaled about its middle (32, 10) by 8, it reaches back over the root.
+    child.set_scale(8.0);
+    // The scaled edge is soft, so the pixel is mostly, not wholly, red.
+    assert!(root.as_image().get_pixel(19, 10).unwrap().3 > 100, "scaled into view");
+  }
+
+  #[test]
+  fn a_canvas_knows_its_corners_as_placed_in_its_parent() {
+    let (_root, child) = red_child_at(10, 6);
+    let upright = child.quad_in_parent();
+    assert_eq!((upright.top_left.x, upright.top_left.y, upright.bottom_right.x, upright.bottom_right.y), (10.0, 6.0, 14.0, 10.0));
+
+    // Scaled by 2 about its middle (12, 8): it reaches 2 further each way.
+    child.set_scale(2.0);
+    let scaled = child.quad_in_parent();
+    assert_eq!((scaled.top_left.x, scaled.top_left.y, scaled.bottom_right.x, scaled.bottom_right.y), (8.0, 4.0, 16.0, 12.0));
+
+    // A quarter turn clockwise about the middle carries the top-left corner to where the top-right was.
+    child.set_scale(1.0);
+    child.set_rotation(90.0);
+    let turned = child.quad_in_parent();
+    assert!((turned.top_left.x - 14.0).abs() < 1e-3 && (turned.top_left.y - 6.0).abs() < 1e-3, "{turned:?}");
+  }
+
+  /// Where the red marker in the top-left corner of a 20 x 20 child turns up in the root, as its center, after the child is placed at
+  /// (30, 30) in a 80 x 80 root, scaled and turned.
+  fn marker_after(p_scale: f32, p_degrees: f32) -> ((f32, f32), (f32, f32)) {
+    marker_after_with(p_scale, p_degrees, false)
+  }
+
+  /// [], with a drop shadow on the child when  is set.
+  fn marker_after_with(p_scale: f32, p_degrees: f32, p_shadow: bool) -> ((f32, f32), (f32, f32)) {
+    let root = Canvas::new_blank("root", 80, 80);
+    let child = Canvas::new_blank("child", 20, 20);
+    let marker = child.add_layer_from_image("marker", Image::new_from_color(4, 4, Color::from_rgba(255, 0, 0, 255)), None);
+    marker.set_global_position(0, 0);
+    let child = root.add_canvas(child, Some(AddCanvasOptions { position: Some((30, 30)), ..Default::default() }));
+    if p_shadow {
+      child.set_effects(crate::LayerEffects::new().with_drop_shadow(crate::DropShadow::new().with_distance(3).with_size(4)));
+    }
+    child.set_scale(p_scale);
+    child.set_rotation(p_degrees);
+    let image = root.as_image();
+    let (mut sum_x, mut sum_y, mut count) = (0.0, 0.0, 0.0);
+    for y in 0..80 {
+      for x in 0..80 {
+        let (r, _, _, a) = image.get_pixel(x, y).unwrap();
+        if r > 200 && a > 200 {
+          (sum_x, sum_y, count) = (sum_x + x as f32, sum_y + y as f32, count + 1.0);
+        }
+      }
+    }
+    assert!(count > 0.0, "the marker is drawn");
+    let corner = child.quad_in_parent().top_left;
+    ((sum_x / count, sum_y / count), (corner.x, corner.y))
+  }
+
+  #[test]
+  fn the_corners_are_where_the_canvas_is_drawn_when_it_is_scaled_and_turned() {
+    // The marker sits in the top-left corner, so it is drawn near the quad's top-left corner, a little way in along each edge of the canvas.
+    for (scale, degrees) in [(1.0, 0.0), (2.0, 0.0), (1.0, 90.0), (1.0, 45.0), (1.5, 30.0), (1.0, -60.0)] {
+      let ((drawn_x, drawn_y), (corner_x, corner_y)) = marker_after(scale, degrees);
+      let distance = ((drawn_x - corner_x).powi(2) + (drawn_y - corner_y).powi(2)).sqrt();
+      // The marker's middle is 2 pixels along each edge from the corner, so about 2.8 away, times the scale.
+      assert!(distance < 2.9 * scale + 2.0, "scale {scale} turn {degrees}: the marker is at ({drawn_x}, {drawn_y}) and the corner is at ({corner_x}, {corner_y})");
+    }
+  }
+
+  #[test]
+  fn the_corners_are_where_the_canvas_is_drawn_with_a_shadow_on_it() {
+    for (scale, degrees) in [(1.0, 0.0), (1.0, 90.0), (1.5, 30.0)] {
+      let ((drawn_x, drawn_y), (corner_x, corner_y)) = marker_after_with(scale, degrees, true);
+      let distance = ((drawn_x - corner_x).powi(2) + (drawn_y - corner_y).powi(2)).sqrt();
+      assert!(distance < 2.9 * scale + 2.0, "shadow, scale {scale} turn {degrees}: the marker is at ({drawn_x}, {drawn_y}) and the corner is at ({corner_x}, {corner_y})");
+    }
+  }
+
+  #[test]
+  fn the_canvas_on_top_at_a_point_is_found() {
+    let root = Canvas::new_blank("root", 40, 20);
+    let make = |x: i32| {
+      let child = Canvas::new_blank("child", 10, 10);
+      child.add_layer_from_image("red", Image::new_from_color(10, 10, Color::from_rgba(255, 0, 0, 255)), None);
+      root.add_canvas(child, Some(AddCanvasOptions { position: Some((x, 5)), ..Default::default() }))
+    };
+    let (under, over) = (make(0), make(6));
+    assert_eq!(root.child_at((2.0, 8.0)).map(|found| found.id()), Some(under.id()));
+    assert_eq!(root.child_at((8.0, 8.0)).map(|found| found.id()), Some(over.id()), "the one added last is on top where they overlap");
+    assert!(root.child_at((30.0, 8.0)).is_none());
+
+    // A turned canvas is found where it is, not where its upright box was.
+    over.set_rotation(45.0);
+    assert_eq!(root.child_at((6.2, 5.2)).map(|found| found.id()), Some(under.id()), "its upright corner was turned away, so the one below shows there");
+    assert_eq!(root.child_at((11.0, 4.0)).map(|found| found.id()), Some(over.id()), "its top corner now reaches above where it was");
+    assert_eq!(root.child_at((11.0, 10.0)).map(|found| found.id()), Some(over.id()));
+    over.set_opacity(0.0);
+    assert_eq!(root.child_at((11.0, 10.0)).map(|found| found.id()), None, "an invisible canvas is not found");
+  }
+
+  #[test]
+  fn an_invisible_canvas_is_not_drawn() {
+    let (root, child) = red_child_at(5, 5);
+    child.set_opacity(0.0);
+    assert_eq!(root.as_image().get_pixel(6, 6), Some((0, 0, 0, 0)));
   }
 
   #[test]

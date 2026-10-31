@@ -23,6 +23,8 @@ export type PluginSliderOptions = {
   reset?: boolean;
   /** Puts the name on a line of its own with the slider under it, across the whole width. Defaults to false for a slider with one thumb, where the name is on the left and the slider on the right, and to true for a range slider, which needs the width. */
   multiline?: boolean;
+  /** Runs the plugin again once the slider stops moving (the preview is drawn on every move meanwhile), for a value that changes how the picture is made (not only where a finished piece sits). Defaults to false. */
+  rebuild?: boolean;
 } & (
   | {
       /** One thumb. This is the default. */
@@ -63,6 +65,8 @@ export type PluginSelectOptions = {
   options: string[];
   /** The choice that starts selected. Defaults to the first. */
   value?: string;
+  /** Makes the bar a row of buttons that act when tapped and do not stay selected (previous, next, random). Defaults to false. */
+  momentary?: boolean;
   /** Called with the choice each time one is picked. The editor runs the plugin again after it, since a choice changes what it makes. */
   onChange?: (value: string) => void;
 };
@@ -80,6 +84,31 @@ export type PluginNumberOptions = {
   reset?: boolean;
   /** Called with the number each time what is typed is one. The editor runs the plugin again after it. */
   onChange?: (value: number) => void;
+};
+
+export type PluginTextOptions = {
+  /** What the box starts with. Defaults to nothing. */
+  value?: string;
+  /** Shown in the box while it is empty. */
+  placeholder?: string;
+  /** Called with the text a moment after typing stops (not on every letter). The editor runs the plugin again after it. */
+  onChange?: (value: string) => void;
+};
+
+export type PluginFontPickerOptions = {
+  /** The family that starts chosen. Shows "Choose a font" when it is left out. */
+  value?: string;
+  /** Called with the family each time one is picked on the Fonts overlay. The editor runs the plugin again after it. */
+  onPick?: (family: string) => void;
+};
+
+export type PluginPicturesOptions = {
+  /** The pictures to show, in order. */
+  files: PickedImage[];
+  /** How many rows of thumbnails there are, with the rest reached by scrolling sideways, or `'all'` to show every picture. Defaults to 2. */
+  rows?: number | 'all';
+  /** Called with the place in `files` of the picture that was tapped. The editor runs the plugin again after it. */
+  onPick?: (index: number) => void;
 };
 
 export type PluginToggleOptions = {
@@ -103,9 +132,12 @@ export type PluginInspectorItem =
       thumbs: boolean;
       onPick: (files: PickedImage[]) => void;
     })
-  | (PluginInspectorBase & { kind: 'header'; level: PluginHeaderLevel })
-  | (PluginInspectorBase & { kind: 'select'; options: string[]; value: string; onChange?: (value: string) => void })
+  | (PluginInspectorBase & { kind: 'header'; level: PluginHeaderLevel; back?: () => void })
+  | (PluginInspectorBase & { kind: 'select'; options: string[]; value: string; momentary?: boolean; onChange?: (value: string) => void })
+  | (PluginInspectorBase & { kind: 'font-picker'; value?: string; onPick?: (family: string) => void })
+  | (PluginInspectorBase & { kind: 'pictures'; files: PickedImage[]; rows: number | 'all'; onPick?: (index: number) => void })
   | (PluginInspectorBase & { kind: 'toggle'; value: boolean; onChange?: (value: boolean) => void })
+  | (PluginInspectorBase & { kind: 'text'; value: string; placeholder?: string; onChange?: (value: string) => void })
   | (PluginInspectorBase & {
       kind: 'number';
       value: number;
@@ -132,6 +164,7 @@ export type PluginInspectorItem =
       range: boolean;
       multiline: boolean;
       reset: boolean;
+      rebuild: boolean;
       /** Where the thumb or thumbs start. */
       value: number | [number, number];
       onChange?: (value: number | [number, number]) => void;
@@ -144,10 +177,12 @@ const activeLayouts = new Map<string, PluginInspectorItem[]>();
 export type PluginHeaderOptions = {
   /** Which heading it is. Defaults to 1. */
   level?: PluginHeaderLevel;
+  /** Shows a Back button with the heading, which calls this when it is tapped. For the top of a sub-inspector, to return to the main one. */
+  back?: () => void;
 };
 
 export function createPluginHeaderItem(pluginId: string, text: string, options: PluginHeaderOptions = {}): PluginInspectorItem {
-  return { id: nextId++, key: text, surface: 'inspector', pluginId, kind: 'header', label: text, level: options.level ?? 1 };
+  return { id: nextId++, key: text, surface: 'inspector', pluginId, kind: 'header', label: text, level: options.level ?? 1, back: options.back };
 }
 
 export function addPluginHeader(pluginId: string, text: string, options?: PluginHeaderOptions): void {
@@ -197,12 +232,55 @@ export function createPluginSelectItem(pluginId: string, label: string, options:
     label,
     options: options.options,
     value: options.value ?? options.options[0] ?? '',
+    momentary: options.momentary,
     onChange: options.onChange,
   };
 }
 
 export function addPluginSelect(pluginId: string, label: string, options : PluginSelectOptions): void {
   const item = createPluginSelectItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+export function createPluginTextItem(pluginId: string, label: string, options: PluginTextOptions = {}): PluginInspectorItem {
+  return { id: nextId++, key: label, surface: 'inspector', pluginId, kind: 'text', label, value: options.value ?? '', placeholder: options.placeholder, onChange: options.onChange };
+}
+
+export function addPluginText(pluginId: string, label: string, options?: PluginTextOptions): void {
+  const item = createPluginTextItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+export function createPluginFontPickerItem(pluginId: string, label: string, options: PluginFontPickerOptions = {}): PluginInspectorItem {
+  return { id: nextId++, key: label, surface: 'inspector', pluginId, kind: 'font-picker', label, value: options.value, onPick: options.onPick };
+}
+
+export function addPluginFontPicker(pluginId: string, label: string, options?: PluginFontPickerOptions): void {
+  const item = createPluginFontPickerItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+export function createPluginPicturesItem(pluginId: string, label: string, options: PluginPicturesOptions): PluginInspectorItem {
+  return { id: nextId++, key: label, surface: 'inspector', pluginId, kind: 'pictures', label, files: options.files, rows: options.rows ?? 2, onPick: options.onPick };
+}
+
+export function addPluginPictures(pluginId: string, label: string, options: PluginPicturesOptions): void {
+  const item = createPluginPicturesItem(pluginId, label, options);
   const layout = activeLayouts.get(pluginId);
   if (layout) {
     layout.push(item);
@@ -266,6 +344,7 @@ export function createPluginSliderItem(pluginId: string, label: string, options:
     range: options.range ?? false,
     multiline: options.multiline ?? options.range ?? false,
     reset: options.reset ?? true,
+    rebuild: options.rebuild ?? false,
     value: options.value ?? (options.range ? [options.min ?? 0, options.max] : options.min ?? 0),
     onChange: options.onChange as ((value: number | [number, number]) => void) | undefined,
   };
@@ -325,7 +404,7 @@ export function renderPluginInspector(pluginId: string, render: () => void): Plu
         item.thumbs === replacement.thumbs && item.onPick === replacement.onPick;
     }
     if (item.kind === 'header' && replacement.kind === 'header') {
-      return item.label === replacement.label && item.level === replacement.level;
+      return item.label === replacement.label && item.level === replacement.level && item.back === replacement.back;
     }
     if (item.kind === 'select' && replacement.kind === 'select') {
       return item.label === replacement.label && item.value === replacement.value && item.onChange === replacement.onChange &&
@@ -333,6 +412,17 @@ export function renderPluginInspector(pluginId: string, render: () => void): Plu
     }
     if (item.kind === 'toggle' && replacement.kind === 'toggle') {
       return item.label === replacement.label && item.value === replacement.value && item.onChange === replacement.onChange;
+    }
+    if (item.kind === 'text' && replacement.kind === 'text') {
+      return item.label === replacement.label && item.value === replacement.value && item.placeholder === replacement.placeholder &&
+        item.onChange === replacement.onChange;
+    }
+    if (item.kind === 'pictures' && replacement.kind === 'pictures') {
+      return item.label === replacement.label && item.files === replacement.files && item.rows === replacement.rows &&
+        item.onPick === replacement.onPick;
+    }
+    if (item.kind === 'font-picker' && replacement.kind === 'font-picker') {
+      return item.label === replacement.label && item.value === replacement.value && item.onPick === replacement.onPick;
     }
     if (item.kind === 'number' && replacement.kind === 'number') {
       return item.label === replacement.label && item.value === replacement.value && item.min === replacement.min &&
@@ -346,7 +436,7 @@ export function renderPluginInspector(pluginId: string, render: () => void): Plu
     }
     if (item.kind === 'slider' && replacement.kind === 'slider') {
       return item.label === replacement.label && item.min === replacement.min && item.max === replacement.max &&
-        item.step === replacement.step && item.range === replacement.range && item.multiline === replacement.multiline && item.reset === replacement.reset && item.onChange === replacement.onChange;
+        item.step === replacement.step && item.range === replacement.range && item.multiline === replacement.multiline && item.reset === replacement.reset && item.rebuild === replacement.rebuild && item.onChange === replacement.onChange;
     }
     return false;
   });
