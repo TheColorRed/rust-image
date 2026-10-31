@@ -1,5 +1,5 @@
 import { BlendMode } from '@abra/core/blend';
-import { swatchesOf, toolKey, type EditControl } from '@alakazam/plugin';
+import { swatchesOf, toolKey, type EditControl } from '@alakazam/sdk';
 import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 import { faceColors } from './face-colors';
 import { applyBlush } from './blush';

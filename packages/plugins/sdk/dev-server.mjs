@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Watches plugin folders and uploads built files to an Alakazam app development server.
-import Enquirer from 'enquirer';
 import chalk from 'chalk';
 import chokidar from 'chokidar';
+import Enquirer from 'enquirer';
 import fg from 'fast-glob';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -35,8 +35,8 @@ for (let index = 0; index < args.length; index++) {
 function workspaceRootFrom(start) {
   let current = path.resolve(start);
   while (true) {
-    if (existsSync(path.join(current, 'packages', 'plugins', 'plugin-toolkit', 'package.json')) &&
-        existsSync(path.join(current, 'apps', 'alakazam', 'mobile'))) return current;
+    if (existsSync(path.join(current, 'packages', 'plugins', 'sdk', 'package.json')) &&
+      existsSync(path.join(current, 'apps', 'alakazam', 'mobile'))) return current;
     const parent = path.dirname(current);
     if (parent === current) return undefined;
     current = parent;
@@ -87,7 +87,7 @@ function discoverPlugins(manifests = findManifestFiles()) {
       return skipInvalidManifest(manifestFile, 'the plugin id is missing or invalid');
     }
     if (typeof manifest.name !== 'string' || manifest.name.trim() === '' ||
-        !(['string', 'number'].includes(typeof manifest.version)) || String(manifest.version).trim() === '') {
+      !(['string', 'number'].includes(typeof manifest.version)) || String(manifest.version).trim() === '') {
       return skipInvalidManifest(manifestFile, 'name and version are required');
     }
     const contributes = manifest.contributes ?? {};
@@ -98,21 +98,21 @@ function discoverPlugins(manifests = findManifestFiles()) {
     const scripts = contributes.scripts ?? [];
     const workspaces = contributes.workspaces ?? [];
     if ((contributes.controls !== undefined && !Array.isArray(contributes.controls)) ||
-        (contributes.scripts !== undefined && !Array.isArray(contributes.scripts)) ||
-        (contributes.workspaces !== undefined && !Array.isArray(contributes.workspaces)) ||
-        controls.some(group => !group || typeof group !== 'object' || typeof group.root !== 'string' || group.root.trim() === '' ||
-          !Array.isArray(group.items) || group.items.length === 0 || group.items.some(item =>
-            !item || typeof item !== 'object' || typeof item.path !== 'string' || item.path.trim() === '' ||
-            typeof item.entry !== 'string' || !item.entry.endsWith('.js'))) ||
-        scripts.some(script => !script || typeof script !== 'object' ||
-          typeof script.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(script.id) ||
-          typeof script.title !== 'string' || script.title.trim() === '' ||
-          !Array.isArray(script.capabilities) || script.capabilities.length === 0 ||
-          typeof script.entry !== 'string' || !script.entry.endsWith('.js')) ||
-        workspaces.some(workspace => !workspace || typeof workspace !== 'object' ||
-          typeof workspace.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(workspace.id) ||
-          typeof workspace.title !== 'string' || workspace.title.trim() === '' ||
-          typeof workspace.entry !== 'string' || !workspace.entry.endsWith('.js'))) {
+      (contributes.scripts !== undefined && !Array.isArray(contributes.scripts)) ||
+      (contributes.workspaces !== undefined && !Array.isArray(contributes.workspaces)) ||
+      controls.some(group => !group || typeof group !== 'object' || typeof group.root !== 'string' || group.root.trim() === '' ||
+        !Array.isArray(group.items) || group.items.length === 0 || group.items.some(item =>
+          !item || typeof item !== 'object' || typeof item.path !== 'string' || item.path.trim() === '' ||
+          typeof item.entry !== 'string' || !item.entry.endsWith('.js'))) ||
+      scripts.some(script => !script || typeof script !== 'object' ||
+        typeof script.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(script.id) ||
+        typeof script.title !== 'string' || script.title.trim() === '' ||
+        !Array.isArray(script.capabilities) || script.capabilities.length === 0 ||
+        typeof script.entry !== 'string' || !script.entry.endsWith('.js')) ||
+      workspaces.some(workspace => !workspace || typeof workspace !== 'object' ||
+        typeof workspace.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(workspace.id) ||
+        typeof workspace.title !== 'string' || workspace.title.trim() === '' ||
+        typeof workspace.entry !== 'string' || !workspace.entry.endsWith('.js'))) {
       return skipInvalidManifest(manifestFile, 'controls, scripts and workspaces must list JavaScript entries');
     }
     invalidManifestWarnings.delete(manifestFile);
@@ -310,7 +310,7 @@ async function buildAndPush(plugin) {
     }
     if (plugin.removed) return;
     await appRequest(serverUrl, 'POST', '/complete', undefined, pluginHeader);
-    console.log(chalk.green(`Sent ${plugin.manifest.id} to Alakazam.`));
+    console.log(chalk.green(`Sent ${plugin.manifest.id} to Alakazam at ${new Date().toLocaleString()}.`));
   } catch (error) {
     console.error(error.message);
   } finally {
@@ -329,7 +329,7 @@ function pluginChangeIsRelevant(plugin, relativePath) {
   const parts = relativePath.split('/');
   if (parts.some(part => part === 'dist' || part === 'node_modules' || part === 'target' || part === '.git')) return false;
   if (relativePath === 'plugin.yml' || relativePath === 'package.json' || relativePath === 'package-lock.json' ||
-      relativePath === 'src' || relativePath.startsWith('src/')) return true;
+    relativePath === 'src' || relativePath.startsWith('src/')) return true;
   const builtEntries = new Set([
     ...(plugin.manifest.contributes?.controls ?? []).flatMap(group => (group.items ?? []).map(item => item.entry)),
     ...(plugin.manifest.contributes?.scripts ?? []).map(script => script.entry),
@@ -343,14 +343,14 @@ function handlePluginChange(plugin, changedPath) {
   if (!pluginChangeIsRelevant(plugin, relativePath)) return;
   if (relativePath === 'plugin.yml') {
     let manifestText = '';
-    try { manifestText = readFileSync(plugin.manifestPath, 'utf8'); } catch {}
+    try { manifestText = readFileSync(plugin.manifestPath, 'utf8'); } catch { }
     if (manifestText === plugin.lastBuiltManifestText) return;
     if (plugin.building) {
       clearTimeout(plugin.manifestEventTimer);
       plugin.manifestEventTimer = setTimeout(() => {
         plugin.manifestEventTimer = undefined;
         let latest = '';
-        try { latest = readFileSync(plugin.manifestPath, 'utf8'); } catch {}
+        try { latest = readFileSync(plugin.manifestPath, 'utf8'); } catch { }
         if (latest !== plugin.lastBuiltManifestText) queuePluginChange(plugin);
       }, 400);
       return;

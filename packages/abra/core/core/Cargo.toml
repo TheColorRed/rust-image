@@ -8,6 +8,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 rayon = { workspace = true }
+futures = { workspace = true }
 rand = { workspace = true }
 saphyr = { workspace = true }
 paste = { workspace = true }

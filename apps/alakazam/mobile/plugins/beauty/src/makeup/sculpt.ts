@@ -9,7 +9,7 @@ import {
   paintSheet,
   type Painting,
   type ToolContext,
-} from '@alakazam/plugin';
+} from '@alakazam/sdk';
 import { glowColorAt, shadeColorAt } from './makeup-gradients';
 
 type Sculpt = 'highlighter' | 'contour';

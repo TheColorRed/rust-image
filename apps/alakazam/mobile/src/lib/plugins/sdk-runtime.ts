@@ -1,9 +1,14 @@
 /**
- * Runtime values the app offers a plugin script as the module `@alakazam/plugin`. The public types live in the workspace npm package
+ * Runtime values the app offers a plugin script as the module `@alakazam/sdk`. The public types live in the workspace npm package
  * so plugin authors can install them without the app source.
  *
  * Keep it small and stable. Anything added here is something every plugin can depend on.
  */
+import { map } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { computePreviewImagePoint } from '@/src/lib/editor/preview-coordinates';
+import { previewBox, previewPressed$, previewRotationValue, previewScaleValue, previewTranslateValue } from '@/src/state/gestures';
+import { pluginTouch$, pluginTouchListeners, type PluginTouch } from '@/src/state/plugin-touch';
 import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { framedPeople } from '@/src/lib/ai/analysis';
 import { aiModelLifetimes, registerAiModel, releaseAiModel, runWithAiModel } from '@/src/lib/ai/model-warmth';
@@ -14,21 +19,24 @@ import { release } from '@/src/lib/native/native-handles';
 import {
   addPluginFilePicker,
   addPluginHeader,
-  addPluginSlider,
   addPluginNumber,
   addPluginSelect,
   addPluginSize,
+  addPluginSlider,
   type PluginFilePickerOptions,
   type PluginHeaderOptions,
-  type PluginSliderOptions,
   type PluginNumberOptions,
   type PluginSelectOptions,
   type PluginSizeOptions,
+  type PluginSliderOptions,
 } from '@/src/lib/plugins/plugin-inspector';
 import { aiModelList, aiModelsRequested } from '@/src/state/ai-models';
-import { aiProgress } from '@/src/state/ai-progress';
-import { areaRings, areas, setArea } from '@/src/state/draw-area';
-import { historyReady } from '@/src/state/project-session';
+import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
+import { people$ } from '@/src/state/analysis';
+import { adjustments$ } from '@/src/state/edits';
+import { timeline$ } from '@/src/state/history';
+import { areaRings, areas, areas$, setArea } from '@/src/state/draw-area';
+import { historyReady, historyReady$ } from '@/src/state/project-session';
 import { busy, currentImage } from '@/src/state/session';
 import { setToolAiModel, toolAiModelSelections } from '@/src/state/tool-ai-models';
 import { setToolMessage } from '@/src/state/tool-messages';
@@ -36,8 +44,7 @@ import { AiModel, type AiModel as AiModelType } from '@abra/core';
 import { type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
 import { aiModelPath, runAiModelAsync, runAiModelGuidedAsync, type AbraImageLike } from '@alakazam/mobile';
-export { default as Rand } from 'rand-seed';
-export { canvasOfCellsAsync as canvasOfCells, type PictureCell } from '@alakazam/mobile';
+import Rand from 'rand-seed';
 export { belongsTo, findFaces } from '@/src/lib/ai/faces';
 export { paintSheet, type Painting } from '@/src/lib/beauty/layers';
 export { makeupMasks as faceMasks } from '@/src/lib/beauty/makeup-masks';
@@ -46,7 +53,13 @@ export { areaMask } from '@/src/lib/native/area-mask';
 export { owning, release } from '@/src/lib/native/native-handles';
 export { swatchesOf } from '@/src/lib/project/edit-sections/swatches';
 export { setAiPendingNotice } from '@/src/state/ai-progress';
-export type { ControlScript, EditControl, SliderControl, ToolContext } from '@alakazam/plugin';
+export type { ControlScript, EditControl, SliderControl, ToolContext } from '@alakazam/sdk';
+/**
+ * Creates a seeded random number generator using the provided seed string.
+ * @param s The seed string used to initialize the random number generator.
+ * @returns A seeded random number generator instance.
+ */
+export const seededRandom = (s: string) => new Rand(s);
 
 /** Plugin-authored controls that the host renders in the plugin editor inspector. */
 export const inspector = {
@@ -59,6 +72,17 @@ export const inspector = {
 };
 
 /** Generic app capabilities for plugin controls: editor state, AI models and runs, history, and tool feedback. */
+/** Where a point in the preview's pixels is on the open photo, in the photo's pixels, or null for both when it is off the photo. */
+const onPhoto = (point: { x: number; y: number }) => {
+  const image = currentImage.value as AbraImageLike | null;
+  const box = previewBox.value;
+  const at =
+    image && box
+      ? computePreviewImagePoint(image.width(), image.height(), box, previewScaleValue.value, previewTranslateValue.value, point, previewRotationValue.value)
+      : null;
+  return { imageX: at?.x ?? null, imageY: at?.y ?? null };
+};
+
 export const app = {
   editor: {
     currentImage: () => currentImage.value,
@@ -70,6 +94,24 @@ export const app = {
     replaceImage: (image: AbraImageLike, result: ImageLike) =>
       image.replaceWith(result as Parameters<AbraImageLike['replaceWith']>[0]),
     subjects: () => framedPeople() ?? [],
+  },
+  /** Read-only streams of what changes in the editor. `plugin-host.ts` hands each plugin a copy that cancels its subscriptions when it closes. */
+  events: {
+    areas: areas$,
+    history: timeline$,
+    historyReady: historyReady$,
+    adjustments: adjustments$,
+    people: people$,
+    aiProgress: aiProgress$,
+    taps: previewPressed$.pipe(map(tap => ({ x: tap.x, y: tap.y, ...onPhoto(tap) }))),
+    touches: new Observable<PluginTouch>(subscriber => {
+      pluginTouchListeners.next(pluginTouchListeners.value + 1);
+      const subscription = pluginTouch$.subscribe(subscriber);
+      return () => {
+        subscription.unsubscribe();
+        pluginTouchListeners.next(pluginTouchListeners.value - 1);
+      };
+    }).pipe(map(touch => ({ type: touch.type, x: touch.x, y: touch.y, ...onPhoto(touch) }))),
   },
   ai: {
     models: () => aiModelList.value,

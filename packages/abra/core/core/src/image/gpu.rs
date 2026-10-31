@@ -235,6 +235,33 @@ pub fn clear_gpu_provider() {
   *GPU_PROVIDER.write().unwrap() = None;
 }
 
+/// Warm-ups waiting for the GPU: each makes the passes of a tiny effect, whose shader is compiled by running them once.
+static WARMUPS: std::sync::Mutex<Vec<fn() -> Vec<GpuPass>>> = std::sync::Mutex::new(Vec::new());
+
+/// Has the GPU compile a shader ahead of its first use, so the first real image does not wait for it. `p_passes` makes the passes
+/// of a tiny effect (they run over a 2x2 image). It runs on a background thread as soon as the GPU is ready, and not at all when
+/// the GPU is off or missing. Safe to call at any time, from anywhere, and any number of times: a shader that is already compiled
+/// costs nothing to run again.
+pub fn register_warmup(p_passes: fn() -> Vec<GpuPass>) {
+  WARMUPS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(p_passes);
+  // No provider yet means the one that registers later runs what is waiting.
+  if get_gpu_provider().is_some() {
+    std::thread::spawn(run_pending_warmups);
+  }
+}
+
+/// Runs every waiting warm-up once. Called by the GPU provider's crate when it registers.
+pub fn run_pending_warmups() {
+  let Some(provider) = ready_gpu_provider(Hardware::Auto) else {
+    return;
+  };
+  let waiting = std::mem::take(&mut *WARMUPS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+  let tiny = [[255u8, 0, 0, 255]; 4].concat();
+  for passes in waiting {
+    let _ = (provider.process)(&[passes()], 2, 2, &tiny);
+  }
+}
+
 /// The registered provider when `p_hardware` allows the GPU and it has finished starting, else `None` (use the CPU).
 /// `Auto` follows the `gpu.enabled` setting. Blocks until the GPU has finished starting up.
 pub fn ready_gpu_provider(p_hardware: Hardware) -> Option<GpuProvider> {

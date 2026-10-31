@@ -39,6 +39,10 @@ export const themePreference$ = themePreference.asObservable();
 export const developerModeEnabled = new BehaviorSubject(false);
 export const developerModeEnabled$ = developerModeEnabled.asObservable();
 
+/** Whether installing a plugin from the catalog skips every SHA-256 check (the package's, the manifest's and each file's). For developing plugins. */
+export const skipPluginHashChecks = new BehaviorSubject(false);
+export const skipPluginHashChecks$ = skipPluginHashChecks.asObservable();
+
 /** The stack sizes, in megabytes, the developer dialog offers for the image worker threads. */
 export const WORKER_STACK_CHOICES = [4, 8, 16, 32, 64];
 
@@ -66,6 +70,7 @@ const STORAGE_KEY = 'settings';
     if (WORKER_STACK_CHOICES.includes(saved.workerStackMegabytes)) workerStackMegabytes.next(saved.workerStackMegabytes);
     if (['system', 'light', 'dark'].includes(saved.themePreference)) themePreference.next(saved.themePreference);
     if (typeof saved.developerModeEnabled === 'boolean') developerModeEnabled.next(saved.developerModeEnabled);
+    if (typeof saved.skipPluginHashChecks === 'boolean') skipPluginHashChecks.next(saved.skipPluginHashChecks);
   } catch (error) {
     warn('settings', 'could not read the saved settings:', error);
   }
@@ -73,11 +78,11 @@ const STORAGE_KEY = 'settings';
   setWorkerStackMegabytes(workerStackMegabytes.value);
   workerStackInEffect.next(workerStackMegabytes.value);
   // Starts after the read, and skips the value it starts with, so the defaults never overwrite what was saved.
-  combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$, developerModeEnabled$])
+  combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$, developerModeEnabled$, skipPluginHashChecks$])
     .pipe(skip(1))
-    .subscribe(([format, quality, theme, stack, developerMode]) => {
+    .subscribe(([format, quality, theme, stack, developerMode, skipHashes]) => {
       setWorkerStackMegabytes(stack);
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ exportFormat: format, exportQuality: quality, themePreference: theme, workerStackMegabytes: stack, developerModeEnabled: developerMode })).catch(error =>
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ exportFormat: format, exportQuality: quality, themePreference: theme, workerStackMegabytes: stack, developerModeEnabled: developerMode, skipPluginHashChecks: skipHashes })).catch(error =>
         warn('settings', 'could not save the settings:', error),
       );
     });

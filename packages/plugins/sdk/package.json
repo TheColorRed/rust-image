@@ -1,5 +1,5 @@
 {
-  "name": "@alakazam/plugin",
+  "name": "@alakazam/sdk",
   "version": "0.1.0",
   "description": "Build Alakazam plugins and create installable plugin packages",
   "type": "module",
@@ -9,21 +9,22 @@
     "cli.mjs",
     "dev-server.mjs",
     "plugin-builder.mjs",
-    "plugin-toolkit.d.ts",
+    "sdk.d.ts",
     "README.md"
   ],
-  "types": "./plugin-toolkit.d.ts",
+  "types": "./sdk.d.ts",
   "scripts": {
     "build": "node ./build-plugins.mjs",
     "dev": "node ./dev-server.mjs"
   },
   "dependencies": {
-    "chalk": "^5.6.2",
+    "chalk": "^6.0.1",
     "chokidar": "^6.0.0",
     "enquirer": "^2.4.1",
     "esbuild": "^0.28.2",
     "fast-glob": "^3.3.3",
     "jszip": "^3.10.2",
+    "rand-seed": "^3.0.0",
     "yaml": "^2.9.1"
   },
   "peerDependencies": {

@@ -1,4 +1,4 @@
-import type { Rand } from '@alakazam/plugin';
+import { type Rand } from '@alakazam/sdk';
 
 /** A whole number from `min` to `max`, either of which it can be. */
 export const between = (rand: Rand, min: number, max: number) => min + Math.floor(rand.next() * (max - min + 1));

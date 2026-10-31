@@ -1,0 +1,19 @@
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.depth
+name: Photo depth
+version: 1.0.0
+description: Works out how far away each part of a photo is, for lighting and other effects that need the shape of a scene.
+contributes:
+  models:
+    - id: depth
+      title: Photo depth
+      description: Works out how far away each part of a photo is, for lighting and other effects that need the shape of a scene.
+      capabilities: [estimate-depth]
+      subjects: [depth]
+      model: depth_anything_v2_small.onnx
+      manifest: depth_anything_v2_small.yml
+files:
+  - path: depth_anything_v2_small.onnx
+    sha256: afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c
+  - path: depth_anything_v2_small.yml
+    sha256: 976c53832b5c200189271fd64a72f4420dc8c481f3134870b520fccdcd7096ef

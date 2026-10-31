@@ -1,3 +1,4 @@
+import { Subscription } from 'rxjs';
 import type { PickedImage } from '@/src/components/file-picker';
 import { pluginModules } from '@/src/lib/plugins/plugin-host';
 import {
@@ -11,7 +12,9 @@ import {
   removePluginInspectorItems,
   type PluginInspectorItem,
 } from '@/src/lib/plugins/plugin-inspector';
+import { autosavePluginProject, restorePluginProject, type PluginProjectRef } from '@/src/lib/plugins/plugin-project';
 import { runPluginScript } from '@/src/lib/plugins/plugin-script';
+import type { Project } from '@/src/lib/project/project-store';
 import {
   pluginEditorBuilding,
   pluginEditorCanvas,
@@ -23,14 +26,15 @@ import {
   pluginEditorItems,
   pluginEditorPicked,
   pluginEditorPreviewError,
+  pluginEditorProjectId,
   pluginEditorRebuild$,
   pluginEditorRedraw,
 } from '@/src/state/plugin-editor';
 import type { CanvasLike } from '@abra/core/canvas';
 import { readPluginScript } from '@alakazam/mobile';
 
-/** A workspace a plugin adds, as the plugins screen lists it. */
-export type PluginWorkspaceInfo = { pluginId: string; id: string; title: string; entryPath: string };
+/** A workspace a plugin adds, as the plugins screen lists it. `project` is the saved project it opens, when it opens one. */
+export type PluginWorkspaceInfo = { pluginId: string; id: string; title: string; entryPath: string; project?: Project };
 
 /** What the open workspace's script exports. Every export is optional, and a workspace shows only the parts it exports. */
 type WorkspaceModule = {
@@ -38,8 +42,8 @@ type WorkspaceModule = {
   inspectorGUI?: () => void;
   /** Adds the controls of the bar under the preview. Made the way `inspectorGUI` is. */
   controlsGUI?: () => void;
-  /** Returns the canvas the preview shows, or nothing, or a promise of it, for a canvas that takes a while to make (build it with the
-   * library's workers, such as `canvasOfCells`, and not with a loop on the JavaScript thread). Called when the workspace opens and after
+  /** Returns the canvas the preview shows, or nothing, or a promise of it, for a canvas that takes a while to make (read pictures with
+   * `Image.readAsync`, which runs off the JavaScript thread, and not with a loop of image work on it). Called when the workspace opens and after
    * each change that is not a drag; the canvas the plugin returns again is the one already on show, with whatever the plugin changed in
    * it. While a promise is pending the canvas on show stays, with a spinner over it, and only the newest call's canvas is shown. The
    * plugin owns every canvas it makes, including one that arrives after a newer call or after the workspace closed. */
@@ -62,8 +66,11 @@ const message = (error: unknown) => String((error as Error)?.message ?? error);
 /**
  * Opens a workspace: runs its script, lets it make its controls and its canvas, and puts what it made in the plugin editor state, which
  * the screen only shows. Returns the function that closes it, which tells the plugin and clears the state.
+ *
+ * What the user does is saved into `project` (see `plugin-project`), which the workspace makes when the first picture is picked. The
+ * screen owns the reference so a workspace that opens again, as when the plugin is updated while it is open, keeps the same project.
  */
-export function openPluginWorkspace(workspace: PluginWorkspaceInfo): () => void {
+export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: PluginProjectRef): () => void {
   pluginEditorInspectorOpen.next(false);
   pluginEditorHasInspector.next(false);
   pluginEditorHasControls.next(false);
@@ -74,17 +81,21 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo): () => void 
   pluginEditorPreviewError.next(null);
   pluginEditorBuilding.next(false);
   pluginEditorPicked.next({});
+  pluginEditorProjectId.next(project.current?.id);
   removePluginInspectorItems(workspace.pluginId);
   open = null;
   let module: WorkspaceModule | null = null;
+  let stopSaving: (() => void) | undefined;
   // A control that needs the plugin run again (a size typed in) says so here.
   const rebuilds = pluginEditorRebuild$.subscribe(() => open?.rebuild());
+  // What the plugin listens to through `events` ends when the workspace closes.
+  const events = new Subscription();
   try {
     // The controls a plugin adds while one of its exports runs are collected here, for the surface that export is for.
     let collecting: PluginInspectorItem[] | null = null;
     module = runPluginScript(
       readPluginScript(workspace.entryPath),
-      pluginModules(workspace.pluginId, {
+      pluginModules(workspace.pluginId, events, {
         filePicker: (label, options) => collecting?.push(createPluginFilePickerItem(workspace.pluginId, label, options)),
         header: (text, options) => collecting?.push(createPluginHeaderItem(workspace.pluginId, text, options)),
         slider: (label, options) => collecting?.push(createPluginSliderItem(workspace.pluginId, label, options)),
@@ -149,6 +160,8 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo): () => void 
     };
     for (const surface of SURFACES) surface.has.next(typeof script[surface.run] === 'function');
     open.rebuild();
+    if (project.current) restorePluginProject(project.current, open.rebuild);
+    stopSaving = autosavePluginProject(workspace, project);
   } catch (failure) {
     console.warn(`Could not open the ${workspace.title} workspace:`, failure);
     // A workspace that fails to load still opens its inspector, which says why.
@@ -156,7 +169,10 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo): () => void 
     pluginEditorHasInspector.next(true);
   }
   return () => {
+    // Before the state is cleared below, so the last changes are written.
+    stopSaving?.();
     rebuilds.unsubscribe();
+    events.unsubscribe();
     open = null;
     try {
       module?.dispose?.();
@@ -166,6 +182,7 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo): () => void 
     removePluginInspectorItems(workspace.pluginId);
     pluginEditorItems.next([]);
     pluginEditorCanvas.next(null);
+    pluginEditorProjectId.next(undefined);
   };
 }
 

@@ -89,6 +89,11 @@ pub struct GpuPass {
   /// The pass reads other pixels, or depends on where a pixel is, and has no `window` version: it is only right when the
   /// image is drawn at its own size. A renderer that draws part of a photo at another size refuses it.
   pub pixel_exact: bool,
+  /// The size of the image this pass writes, when that is not the size of the image it reads (a resize, a rotation that grows
+  /// the image to hold its corners). Only the last pass of a chain can have one, because the textures the passes before it
+  /// write are the source's size. The pass is dispatched over this size, so the shader's own size is `textureDimensions(output_tex)`
+  /// and the size of what it reads is `textureDimensions(input_tex)`. `None` writes an image the size of the one it reads.
+  pub output: Option<(u32, u32)>,
 }
 
 impl GpuPass {
@@ -104,7 +109,14 @@ impl GpuPass {
       window: false,
       reach: 0.0,
       pixel_exact: false,
+      output: None,
     }
+  }
+
+  /// Says the pass writes an image of `p_width` x `p_height`, which is not the size of the image it reads. See [`GpuPass::output`].
+  pub fn with_output(mut self, p_width: u32, p_height: u32) -> GpuPass {
+    self.output = Some((p_width, p_height));
+    self
   }
 
   /// Says how far, in photo pixels, the pass reads beyond a pixel. See [`GpuPass::reach`].
@@ -153,6 +165,11 @@ pub trait GpuSession: Send {
 
   /// Waits for the last [`render`](Self::render) and returns the result as RGBA pixels.
   fn read_pixels(&mut self) -> Result<Vec<u8>, String>;
+
+  /// The width and height of what the last [`render`](Self::render) made, which [`read_pixels`](Self::read_pixels) returns
+  /// `width * height` pixels of. That is the source's size unless the last pass has an [`output`](GpuPass::output). `None`
+  /// before a source is set.
+  fn output_size(&self) -> Option<(u32, u32)>;
 }
 
 impl<S: GpuSession + ?Sized> GpuSession for Box<S> {
@@ -166,5 +183,9 @@ impl<S: GpuSession + ?Sized> GpuSession for Box<S> {
 
   fn read_pixels(&mut self) -> Result<Vec<u8>, String> {
     (**self).read_pixels()
+  }
+
+  fn output_size(&self) -> Option<(u32, u32)> {
+    (**self).output_size()
   }
 }

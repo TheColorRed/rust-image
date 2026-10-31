@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Repository convenience wrapper around the npm-published @alakazam/plugin CLI.
+// Repository convenience wrapper around the npm-published @alakazam/sdk CLI.
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pluginsDir = path.join(root, 'apps/alakazam/mobile/plugins');
-const tool = path.join(root, 'packages/plugins/plugin-toolkit/build-plugins.mjs');
+const tool = path.join(root, 'packages/plugins/sdk/build-plugins.mjs');
 const requested = process.argv.slice(2);
 const args = requested.length ? requested.map(value => {
   const direct = path.resolve(value);

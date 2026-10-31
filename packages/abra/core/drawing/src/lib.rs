@@ -40,7 +40,7 @@ mod stroke_overlay;
 mod performance;
 
 pub use brush::brush::Brush;
-pub use core::compositor::{Compositor, SourceOverCompositor};
+pub use core::compositor::{Blend, Compositor, SourceOverCompositor};
 pub use core::coverage::{CoverageMask, PolygonCoverage, RectCoverage, StrokeCoverage};
 pub use core::coverage_map::CoverageMap;
 pub use core::painter::*;

@@ -1,0 +1,24 @@
+# Depth Anything V2 (small), float32
+#
+# Purpose: How far away each part of a photo is, from one photo. It gives relative depth: which parts are nearer than
+#   others, not distances in meters. Used for lighting, background blur and other effects that need the shape of a scene.
+# Origin: depth-anything/Depth-Anything-V2-Small (Yang et al., "Depth Anything V2"), ONNX export by onnx-community
+# Input: pixel_values [1, 3, height, width]: RGB float32, (value / 255 - mean) / standard deviation. Height and width are
+#   multiples of 14.
+# Output: predicted_depth [1, height, width], larger is nearer, in no fixed range. The `depth` decoder stretches it to a
+#   mask where the nearest pixel is 255 and the farthest is 0.
+
+name: depth-anything-v2-small
+decoder: depth
+description: Relative depth of a photo with Depth Anything V2 (small)
+source: https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx
+license: Apache-2.0
+sha256: afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c
+
+# How Abra feeds the model (see abra-ai-core: InputSpec). The photo is stretched to input_size by input_size, which is
+# the model's own size (37 x 14), and the depth is scaled back to the photo.
+params:
+  input_size: 518
+  input_fit: stretch
+  input_mean: [0.485, 0.456, 0.406]
+  input_standard_deviation: [0.229, 0.224, 0.225]

@@ -13,7 +13,7 @@ import { areaRings, areas, areas$, setArea, type DrawMode, type DrawnPoint } fro
 import { objectRemovalToolKey, objectRemovalToolKey$ } from '@/src/state/plugin-tool-panels';
 import { toolAiModelSelections, toolAiModelSelections$, setToolAiModel } from '@/src/state/tool-ai-models';
 import { toolMessages, toolMessages$ } from '@/src/state/tool-messages';
-import { app } from '@/src/lib/plugins/host-api';
+import { app } from '@/src/lib/plugins/sdk-runtime';
 
 /** Every model the catalog lists with the capability to fill a masked part of a photo, in the catalog's order. */
 const removersIn = (models: readonly AiModelListing[]) =>

@@ -66,6 +66,7 @@ name = "abra-core"
 version = "1.0.0"
 dependencies = [
  "avif-decode",
+ "futures",
  "gif 0.14.0",
  "globwalk",
  "gpu-passes",
@@ -1209,6 +1210,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "depth"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "abra-ai-core",
+ "tools",
+]
+
+[[package]]
 name = "der"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2282,6 +2292,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lighting"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "gpu",
+ "rayon",
+]
+
+[[package]]
+name = "lighting-example"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "abra-ai-core",
+ "lighting",
+ "tools",
+]
+
+[[package]]
 name = "link-section"
 version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3158,6 +3187,25 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "particle-system"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "anyhow",
+ "gpu",
+ "rand 0.10.3",
+ "rayon",
+]
+
+[[package]]
+name = "particle-system-test"
+version = "1.0.0"
+dependencies = [
+ "abra",
+ "particle-system",
 ]
 
 [[package]]

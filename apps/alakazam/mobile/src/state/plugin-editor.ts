@@ -44,6 +44,10 @@ export const pluginEditorBuilding$ = pluginEditorBuilding.asObservable();
 export const pluginEditorPicked = new BehaviorSubject<Record<string, PickedImage[]>>({});
 export const pluginEditorPicked$ = pluginEditorPicked.asObservable();
 
+/** The id of the project the open workspace saves into. `undefined` until the first picture is picked, which is when the project is made. */
+export const pluginEditorProjectId = new BehaviorSubject<string | undefined>(undefined);
+export const pluginEditorProjectId$ = pluginEditorProjectId.asObservable();
+
 /** Said when a control changed something that needs the plugin run again (a size typed in), as opposed to a drag, which only moves what
  * the canvas already has. The open workspace runs its controls and `previewCanvas` again. */
 export const pluginEditorRebuild = new Subject<void>();

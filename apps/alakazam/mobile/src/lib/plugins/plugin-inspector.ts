@@ -1,7 +1,12 @@
 import type { PickedImage } from '@/src/components/file-picker';
 import { BehaviorSubject } from 'rxjs';
 
+/** Where a file picker looks: the device's files, the app's saved projects (their edited images), or both. */
+export type PluginFilePickerSource = 'file-system' | 'projects' | 'both';
+
 export type PluginFilePickerOptions = {
+  /** Where the user can pick from. Defaults to `'file-system'`. */
+  source?: PluginFilePickerSource;
   multiple?: boolean;
   /** Show a thumbnail of each picked image below the control. Defaults to false. */
   thumbs?: boolean;
@@ -93,6 +98,7 @@ type PluginInspectorBase = { id: number; key: string; surface: PluginSurface; pl
 export type PluginInspectorItem =
   | (PluginInspectorBase & {
       kind: 'file-picker';
+      source: PluginFilePickerSource;
       multiple: boolean;
       thumbs: boolean;
       onPick: (files: PickedImage[]) => void;
@@ -283,6 +289,7 @@ export function createPluginFilePickerItem(pluginId: string, label: string, opti
     pluginId,
     kind: 'file-picker',
     label,
+    source: options.source ?? 'file-system',
     multiple: options.multiple ?? false,
     thumbs: options.thumbs ?? false,
     onPick: options.onPick,
@@ -314,7 +321,7 @@ export function renderPluginInspector(pluginId: string, render: () => void): Plu
   const unchanged = previous.length === layout.length && previous.every((item, index) => {
     const replacement = layout[index];
     if (item.kind === 'file-picker' && replacement.kind === 'file-picker') {
-      return item.label === replacement.label && item.multiple === replacement.multiple &&
+      return item.label === replacement.label && item.source === replacement.source && item.multiple === replacement.multiple &&
         item.thumbs === replacement.thumbs && item.onPick === replacement.onPick;
     }
     if (item.kind === 'header' && replacement.kind === 'header') {

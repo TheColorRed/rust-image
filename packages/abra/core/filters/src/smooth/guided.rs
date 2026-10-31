@@ -66,10 +66,6 @@ fn box_mean(p_plane: &[f32], p_width: usize, p_height: usize, p_radius: usize) -
 ///   values (`0.0001`) follow even faint edges; larger ones (`0.01`) follow only strong ones and smooth the rest.
 pub fn guided_filter(p_mask: &Mask, p_guide: &Image, p_radius: u32, p_epsilon: f32) -> Mask {
   let (width, height) = p_guide.dimensions::<u32>();
-  let (w, h) = (width as usize, height as usize);
-  if w == 0 || h == 0 {
-    return Mask::from_values(width, height, Vec::new());
-  }
   let resized;
   let source = if p_mask.dimensions::<u32>() == (width, height) {
     p_mask
@@ -77,12 +73,31 @@ pub fn guided_filter(p_mask: &Mask, p_guide: &Image, p_radius: u32, p_epsilon: f
     resized = p_mask.resized(width, height, TransformAlgorithm::Bilinear);
     &resized
   };
+  let plane: Vec<f32> = source.values().iter().map(|value| *value as f32 / 255.0).collect();
+  let values =
+    guided_filter_plane(&plane, p_guide, p_radius, p_epsilon).into_iter().map(|q| (q * 255.0).round() as u8).collect();
+  Mask::from_values(width, height, values)
+}
+
+/// [`guided_filter`] on a plane of numbers instead of a mask, so the result keeps more than 256 levels: smoothing a slow ramp, such
+/// as the distance of a wall, stays a smooth ramp and does not turn into steps.
+///
+/// - `p_plane`: One number from `0` to `1` for each pixel of the guide, row by row from the top left.
+/// - `p_guide`, `p_radius`, `p_epsilon`: As in [`guided_filter`].
+/// Returns the refined plane, from `0` to `1`.
+pub fn guided_filter_plane(p_plane: &[f32], p_guide: &Image, p_radius: u32, p_epsilon: f32) -> Vec<f32> {
+  let (width, height) = p_guide.dimensions::<u32>();
+  let (w, h) = (width as usize, height as usize);
+  assert_eq!(p_plane.len(), w * h, "the plane needs one number for each pixel of the guide");
+  if w == 0 || h == 0 {
+    return Vec::new();
+  }
   let radius = p_radius as usize;
   let count = w * h;
   let rgba = p_guide.rgba();
   let channel = |p_offset: usize| (0..count).map(|i| rgba[i * 4 + p_offset] as f32 / 255.0).collect::<Vec<f32>>();
   let (red, green, blue) = (channel(0), channel(1), channel(2));
-  let p: Vec<f32> = source.values().iter().map(|value| *value as f32 / 255.0).collect();
+  let p = p_plane.to_vec();
   let times = |p_a: &[f32], p_b: &[f32]| p_a.iter().zip(p_b).map(|(a, b)| a * b).collect::<Vec<f32>>();
 
   // The means over every window of the photo's colors, the mask, and how they vary together.
@@ -135,14 +150,13 @@ pub fn guided_filter(p_mask: &Mask, p_guide: &Image, p_radius: u32, p_epsilon: f
   // Each pixel is in many windows, so it averages the fits of them all.
   let fit_planes: Vec<Vec<f32>> = (0..4).map(|k| fit.iter().map(|each| each[k]).collect()).collect();
   let smoothed: Vec<Vec<f32>> = fit_planes.par_iter().map(|plane| box_mean(plane, w, h, radius)).collect();
-  let values = (0..count)
+  (0..count)
     .into_par_iter()
     .map(|i| {
       let q = smoothed[0][i] * red[i] + smoothed[1][i] * green[i] + smoothed[2][i] * blue[i] + smoothed[3][i];
-      (q.clamp(0.0, 1.0) * 255.0).round() as u8
+      q.clamp(0.0, 1.0)
     })
-    .collect();
-  Mask::from_values(width, height, values)
+    .collect()
 }
 
 /// A mask made to follow the edges of a photo, using only the photo's brightness (0.299 red + 0.587 green + 0.114 blue). This is

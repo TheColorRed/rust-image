@@ -1,0 +1,15 @@
+[package]
+name = "lighting"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+gpu = { workspace = true }
+
+[lib]
+name = "abra_lighting"
+crate-type = ["rlib"]

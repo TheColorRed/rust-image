@@ -67,51 +67,6 @@ pub enum Contribution<'a> {
   Workspace(&'a Plugin, &'a WorkspaceContribution),
 }
 
-impl<'a> Contribution<'a> {
-  /// The plugin this came from.
-  pub fn plugin(&self) -> &'a Plugin {
-    match self {
-      Contribution::Model(plugin, _)
-      | Contribution::Pipeline(plugin, _)
-      | Contribution::Script(plugin, _)
-      | Contribution::Control(plugin, _)
-      | Contribution::Workspace(plugin, _) => plugin,
-    }
-  }
-
-  /// Its id in the plugin.
-  pub fn id(&self) -> &'a str {
-    match self {
-      Contribution::Model(_, model) => &model.id,
-      Contribution::Pipeline(_, pipeline) => &pipeline.id,
-      Contribution::Script(_, script) => &script.id,
-      Contribution::Control(_, control) => &control.path,
-      Contribution::Workspace(_, workspace) => &workspace.id,
-    }
-  }
-
-  /// The name to show for it.
-  pub fn title(&self) -> &'a str {
-    match self {
-      Contribution::Model(_, model) => &model.title,
-      Contribution::Pipeline(_, pipeline) => &pipeline.title,
-      Contribution::Script(_, script) => &script.title,
-      Contribution::Control(_, control) => control.name(),
-      Contribution::Workspace(_, workspace) => &workspace.title,
-    }
-  }
-
-  /// What a feature can ask for to find it.
-  pub fn capabilities(&self) -> &'a [String] {
-    match self {
-      Contribution::Model(_, model) => &model.capabilities,
-      Contribution::Pipeline(_, pipeline) => &pipeline.capabilities,
-      Contribution::Script(_, script) => &script.capabilities,
-      Contribution::Control(..) | Contribution::Workspace(..) => &[],
-    }
-  }
-}
-
 /// The plugins found in a folder. Features ask it for a capability and offer whatever plugins give it.
 #[derive(Clone, Debug, Default)]
 pub struct PluginRegistry {
@@ -222,21 +177,77 @@ impl PluginRegistry {
       })
       .collect()
   }
-
-  /// Everything the plugins add that has a capability, such as `inpaint`: what a feature offers.
-  /// - `p_capability`: The capability to ask for.
-  pub fn with_capability(&self, p_capability: &str) -> Vec<Contribution<'_>> {
-    self
-      .contributions()
-      .into_iter()
-      .filter(|contribution| contribution.capabilities().iter().any(|capability| capability == p_capability))
-      .collect()
-  }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  // What the tests ask the registry, which nothing else does yet.
+  impl<'a> Contribution<'a> {
+    /// The plugin this came from.
+    pub fn plugin(&self) -> &'a Plugin {
+      match self {
+        Contribution::Model(plugin, _)
+        | Contribution::Pipeline(plugin, _)
+        | Contribution::Script(plugin, _)
+        | Contribution::Control(plugin, _)
+        | Contribution::Workspace(plugin, _) => plugin,
+      }
+    }
+
+    /// Its id in the plugin.
+    pub fn id(&self) -> &'a str {
+      match self {
+        Contribution::Model(_, model) => &model.id,
+        Contribution::Pipeline(_, pipeline) => &pipeline.id,
+        Contribution::Script(_, script) => &script.id,
+        Contribution::Control(_, control) => &control.path,
+        Contribution::Workspace(_, workspace) => &workspace.id,
+      }
+    }
+
+    /// The name to show for it.
+    pub fn title(&self) -> &'a str {
+      match self {
+        Contribution::Model(_, model) => &model.title,
+        Contribution::Pipeline(_, pipeline) => &pipeline.title,
+        Contribution::Script(_, script) => &script.title,
+        Contribution::Control(_, control) => control.name(),
+        Contribution::Workspace(_, workspace) => &workspace.title,
+      }
+    }
+
+    /// What a feature can ask for to find it.
+    pub fn capabilities(&self) -> &'a [String] {
+      match self {
+        Contribution::Model(_, model) => &model.capabilities,
+        Contribution::Pipeline(_, pipeline) => &pipeline.capabilities,
+        Contribution::Script(_, script) => &script.capabilities,
+        Contribution::Control(..) | Contribution::Workspace(..) => &[],
+      }
+    }
+  }
+
+  impl PluginRegistry {
+    /// Everything the plugins add that has a capability, such as `inpaint`: what a feature offers.
+    /// - `p_capability`: The capability to ask for.
+    pub fn with_capability(&self, p_capability: &str) -> Vec<Contribution<'_>> {
+      self
+        .contributions()
+        .into_iter()
+        .filter(|contribution| contribution.capabilities().iter().any(|capability| capability == p_capability))
+        .collect()
+    }
+  }
+
+  impl ControlContribution {
+    /// The control's name: the last name in its path, which is what people see.
+    pub fn name(&self) -> &str {
+      self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+  }
+
 
   /// A folder of plugins in the system's temporary folder that is removed when the test ends.
   struct Folder(PathBuf);

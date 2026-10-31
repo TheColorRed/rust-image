@@ -8,7 +8,7 @@ const scripts = {
 };
 
 if (!scripts[command]) {
-  console.error('Usage: npx @alakazam/plugin <dev|build> [plugin-directory ...]');
+  console.error('Usage: npx @alakazam/sdk <dev|build> [plugin-directory ...]');
   process.exitCode = 1;
 } else {
   process.argv.splice(2, 1);

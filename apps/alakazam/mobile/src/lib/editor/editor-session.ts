@@ -74,8 +74,8 @@ import {
   ready,
   sessionBaseImage,
 } from '@/src/state/session';
-import { type Image as AbraPixels } from '@abra/core/image';
-import { AbraImage, readImageAsync } from '@alakazam/mobile';
+import { Image as AbraPixels } from '@abra/core/image';
+import { AbraImage } from '@alakazam/mobile';
 import { Alert, AppState } from 'react-native';
 import { merge, type BehaviorSubject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
@@ -405,7 +405,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         throw new Error('This project is missing its saved image.');
       }
       if (project?.resultFile) {
-        const result = ownedImage(await readImageAsync(toLocalPath(projectImageUri(project))));
+        const result = ownedImage(await AbraPixels.readAsync(toLocalPath(projectImageUri(project))));
         if (cancelled) {
           release(result);
           return;
@@ -422,7 +422,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
       if (cancelled) return;
       const started = Date.now();
       // A saved skin mask is loaded as it was, rather than running the skin model again.
-      const original = ownedImage(await readImageAsync(path));
+      const original = ownedImage(await AbraPixels.readAsync(path));
       if (cancelled) {
         release(original);
         return;
@@ -436,7 +436,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
 
       let base: AbraImage;
       if (project?.baseFile) {
-        base = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${project.baseFile}`)));
+        base = ownedImage(await AbraPixels.readAsync(toLocalPath(`${project.dir}/${project.baseFile}`)));
       } else {
         base = original.clone() as AbraImage;
       }
@@ -453,7 +453,7 @@ export function openEditorSession(photo: EditablePhoto): () => void {
         const screenBase = shrunkOf('base', base);
         try {
           for (const layer of project.layers) {
-            const fullLayer = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${layer.file}`)));
+            const fullLayer = ownedImage(await AbraPixels.readAsync(toLocalPath(`${project.dir}/${layer.file}`)));
             if (cancelled) {
               release(fullLayer);
               savedLayerImages.forEach(saved => release(saved.image));

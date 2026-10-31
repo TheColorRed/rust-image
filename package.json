@@ -20,7 +20,7 @@
     "apps/docs",
     "packages/node/*",
     "packages/react-native/*",
-    "packages/plugins/plugin-toolkit"
+    "packages/plugins/sdk"
   ],
   "devDependencies": {
     "anser": "^2.3.5",

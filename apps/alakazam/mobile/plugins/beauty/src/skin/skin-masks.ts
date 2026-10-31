@@ -1,6 +1,6 @@
 ﻿import { gaussianBlur } from '@abra/core/filters';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { owning, release, type Preloaded } from '@alakazam/plugin';
+import { owning, release, type Preloaded } from '@alakazam/sdk';
 import { makeupMasks } from '../makeup/makeup-models';
 
 export { makeupMasks };

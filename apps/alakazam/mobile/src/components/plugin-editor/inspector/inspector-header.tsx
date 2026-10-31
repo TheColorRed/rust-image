@@ -10,15 +10,18 @@ const HEADER_SIZES = { 1: 24, 2: 20, 3: 18, 4: 16, 5: 14, 6: 12 } as const;
 export const InspectorHeader = memo(function InspectorHeader({
   text,
   level,
+  first,
 }: {
   text: string;
   level: PluginHeaderLevel;
+  /** The first thing in the inspector, so there is nothing above it to leave a gap from. */
+  first: boolean;
 }) {
   const { colors } = useTheme();
   return (
     <Text
       accessibilityRole="header"
-      style={{ color: colors.textPrimary, fontWeight: '700', marginTop: 20 /*  fontSize: HEADER_SIZES[level] */ }}
+      style={{ color: colors.textPrimary, fontWeight: '700', marginTop: first ? 0 : 36, marginBottom: -6 /*  fontSize: HEADER_SIZES[level] */ }}
     >
       {text}
     </Text>

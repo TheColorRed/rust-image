@@ -24,6 +24,12 @@ export async function addProject(photo: EditablePhoto): Promise<Project | undefi
   }
 }
 
+/** Saves a plugin project that is not in `projects` yet: writes it, then adds it, so the grid never shows it without its picture. */
+export async function addPluginProject(project: Project): Promise<void> {
+  await writeProject(project);
+  projects.next([...projects.value, project].sort(byLastModified));
+}
+
 /** Deletes the projects and takes them off the list. The photos they were made from are never touched. */
 export async function removeProjects(ids: string[]): Promise<void> {
   projects.next(projects.value.filter(project => !ids.includes(project.id)));
@@ -38,7 +44,11 @@ export async function removeProjects(ids: string[]): Promise<void> {
 export async function restoreProjects(): Promise<void> {
   try {
     const known = new Set(projects.value.map(project => project.id));
-    const restored = (await listProjects()).filter(project => !known.has(project.id));
+    const listed = await listProjects();
+    // A plugin project whose first save never finished has no picture and nothing to open, so it is removed instead of breaking the grid.
+    const empty = listed.filter(project => !project.sourceFile && !project.resultFile);
+    if (empty.length > 0) await Promise.all(empty.map(project => deleteProject(project.id)));
+    const restored = listed.filter(project => !known.has(project.id) && !empty.includes(project));
     projects.next([...projects.value, ...restored].sort(byLastModified));
   } catch (error) {
     Alert.alert('Could not restore the projects', errorMessage(error));

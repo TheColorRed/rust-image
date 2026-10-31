@@ -16,6 +16,7 @@ members = [
   # Examples
   "apps/examples/*",
   "apps/examples/ai/super-resolution",
+  "apps/examples/ai/depth",
   # Bindings for different platforms
   "packages/bindings/uniffi",
   "packages/node/alakazam",
@@ -105,6 +106,8 @@ abra-uniffi = { path = "./packages/bindings/uniffi" }
 
 # Abra Plugins
 collage ={ path = "./packages/abra/plugins/collage" }
+lighting = { path = "./packages/abra/plugins/lighting" }
+particle-system = { path = "./packages/abra/plugins/particle-system" }
 
 # Abra AI Packages
 abra-ai-core = { path = "./packages/abra/core/ai" }

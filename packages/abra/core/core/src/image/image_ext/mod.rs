@@ -16,6 +16,10 @@ use crate::{Area, Image, PointF, Rect, Size, polygon_contains, reader, writer};
 pub trait ImageExt {
   /// Reads an image, choosing the decoder from its file extension.
   fn read(p_file: impl AsRef<Path>) -> Result<Image, String>;
+  /// Reads an image on a rayon thread and gives back a future for it, so the caller keeps running while the file is decoded. The result
+  /// is that of [`read`](ImageExt::read), and the read starts when this is called, not when the future is first polled. The future
+  /// waits on a channel, so any executor can run it. Dropping it does not stop the decode: it finishes and its result is dropped.
+  fn read_async(p_file: impl AsRef<Path>) -> impl std::future::Future<Output = Result<Image, String>> + Send;
   /// Writes the image, choosing the encoder from its file extension.
   fn write(&self, p_file: impl AsRef<Path>, p_options: impl Into<Option<WriterOptions>>) -> Result<(), String>;
   /// The width and height of the image.
@@ -34,6 +38,16 @@ pub trait ImageExt {
 impl ImageExt for Image {
   fn read(p_file: impl AsRef<Path>) -> Result<Image, String> {
     reader(p_file).load()
+  }
+
+  fn read_async(p_file: impl AsRef<Path>) -> impl std::future::Future<Output = Result<Image, String>> + Send {
+    let file = p_file.as_ref().to_path_buf();
+    let (sender, receiver) = futures::channel::oneshot::channel();
+    rayon::spawn(move || {
+      // A caller that stopped waiting no longer needs the image.
+      let _ = sender.send(<Image as ImageExt>::read(file));
+    });
+    async move { receiver.await.map_err(|_| "The image read stopped before it finished".to_owned())? }
   }
 
   fn write(&self, p_file: impl AsRef<Path>, p_options: impl Into<Option<WriterOptions>>) -> Result<(), String> {
@@ -100,6 +114,23 @@ mod tests {
       }
     }
     img
+  }
+
+  #[test]
+  fn read_async_gives_the_image_that_read_gives_and_the_same_error_for_a_missing_file() {
+    let path = std::env::temp_dir().join(format!("abra-read-async-{}.png", std::process::id()));
+    let file = path.to_string_lossy().into_owned();
+    let written = coordinate_image(5, 3);
+    written.write(&file, None).unwrap();
+
+    let read = futures::executor::block_on(Image::read_async(&file)).expect("a written picture reads back");
+    assert_eq!(read.dimensions::<u32>(), (5, 3));
+    assert_eq!(read.rgba(), Image::read(&file).unwrap().rgba());
+    let _ = std::fs::remove_file(path);
+
+    let missing = "missing-read-async-picture.png";
+    let error = futures::executor::block_on(Image::read_async(missing)).err().expect("a missing file is an error");
+    assert_eq!(error, Image::read(missing).err().unwrap());
   }
 
   #[test]

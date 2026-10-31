@@ -49,9 +49,9 @@ export function Inspector({
       {items.length === 0 && !error ? (
         <Text style={{ color: colors.textSecondary }}>This plugin added no inspector controls.</Text>
       ) : null}
-      {items.map(item => {
+      {items.map((item, index) => {
         if (item.kind === 'header') {
-          return <InspectorHeader key={item.key} text={item.label} level={item.level} />;
+          return <InspectorHeader key={item.key} text={item.label} level={item.level} first={index === 0} />;
         }
         if (item.kind === 'file-picker') {
           return (
@@ -59,6 +59,7 @@ export function Inspector({
               key={item.key}
               itemKey={item.key}
               label={item.label}
+              source={item.source}
               multiple={item.multiple}
               files={item.thumbs ? picked[item.key] : undefined}
               selection={selection}
@@ -130,5 +131,5 @@ export function Inspector({
 
 const styles = StyleSheet.create({
   tools: { width: '100%', flex: 1 },
-  toolList: { padding: 12, gap: 12 },
+  toolList: { padding: 12, gap: 4 },
 });

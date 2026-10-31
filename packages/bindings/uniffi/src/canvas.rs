@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use abra::abra_core::{FlipAxis, Resolution, ResizeTarget, Size, Transform, TransformAlgorithm, WriterOptions};
 use abra::canvas::prelude::{
-  self as library, AdjustmentLayerType, Anchor, CanvasCell, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin,
+  self as library, AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin,
   OutlinePosition,
 };
 
@@ -55,17 +55,6 @@ pub enum LayerSize {
   Cover(Option<TransformAlgorithm>),
   Specific(u32, u32, Option<TransformAlgorithm>),
   Percentage(f32, Option<TransformAlgorithm>),
-}
-
-// One cell of a canvas made by `Canvas.new_of_cells`: its picture file, and its place and size in pixels.
-#[uniffi::remote(Record)]
-pub struct CanvasCell {
-  pub path: String,
-  pub x: i32,
-  pub y: i32,
-  pub width: u32,
-  pub height: u32,
-  pub keep_aspect: bool,
 }
 
 // Target specifications for resizing a canvas.
@@ -510,14 +499,6 @@ impl Canvas {
   pub fn add_adjustment_layer(&self, name: String, adjustment_type: AdjustmentLayerType) -> Arc<Layer> {
     let layer = self.0.add_adjustment_layer(name, adjustment_type);
     Arc::new(Layer(layer))
-  }
-
-  /// A canvas of `width` x `height` with a child canvas for each of `cells`, in order, each holding its picture scaled to cover the cell
-  /// at the cell's place. The pictures are read in parallel, and a file that more than one cell uses is read once. Panics with the file
-  /// that could not be read, as `Image.read` does. Call it from a worker (`canvasOfCells`) so the app keeps drawing while it works.
-  #[uniffi::constructor]
-  pub fn new_of_cells(name: String, width: u32, height: u32, cells: Vec<CanvasCell>) -> Self {
-    Self(library::Canvas::new_of_cells(name, width, height, &cells).unwrap_or_else(|message| panic!("{message}")))
   }
 
   /// The canvases inside this one, in the order they were added. Each is the same canvas as the one that was added, so turning, scaling

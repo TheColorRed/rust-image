@@ -282,7 +282,7 @@ export function PluginsScreen() {
     setDownloadTasks({ 'local-plugin': null });
     try {
       const [picked] = await pick({ type: [types.zip] });
-      if (!picked.name?.endsWith('.akzx')) throw new Error('Choose an .akzx package built with @alakazam/plugin.');
+      if (!picked.name?.endsWith('.akzx')) throw new Error('Choose an .akzx package built with @alakazam/sdk.');
       const [copy] = await keepLocalCopy({
         files: [{ uri: picked.uri, fileName: picked.name }],
         destination: 'cachesDirectory',

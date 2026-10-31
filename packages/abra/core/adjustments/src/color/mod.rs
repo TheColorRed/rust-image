@@ -26,7 +26,7 @@ pub use multiply::{ColorMultiply, color_multiply};
 pub use opacity::{Opacity, reduce_opacity};
 pub use posterize::{Posterize, posterize};
 pub use quantize::{Quantize, quantize};
-pub use radial_gradient::{radial_gradient, radial_gradient_deferred};
+pub use radial_gradient::{radial_gradient, radial_gradient_deferred, vignette};
 pub use selective_color::{ColorRange, SelectiveColor, SelectiveMethod, selective_color};
 pub use threshold::{Threshold, threshold};
 

@@ -1,5 +1,7 @@
 use abra_core::{Area, Color, Fill, StrokeOpacity, StrokeWidth};
 
+use crate::Blend;
+
 /// A brush represents a drawing tool with a specific size.
 /// It encapsulates properties such as size, shape (area), and fill color.
 /// Brushes can be used for painting, drawing, and other graphical operations.
@@ -25,6 +27,8 @@ pub struct Brush<'a> {
   hardness: f32,
   /// How opaque the brush is: one number, or stops along a stroke, where `0` is the start of the stroke and `1` is its end.
   opacity: StrokeOpacity,
+  /// How the brush's color is combined with what is under it.
+  blend: Blend,
 }
 
 impl<'a> Default for Brush<'a> {
@@ -36,6 +40,7 @@ impl<'a> Default for Brush<'a> {
       color: Fill::Solid(Color::black()),
       hardness: 0.0,
       opacity: StrokeOpacity::default(),
+      blend: Blend::default(),
     }
   }
 }
@@ -93,6 +98,13 @@ impl<'a> Brush<'a> {
     self.opacity = p_opacity.into();
     self
   }
+  /// Sets how the brush's color is combined with what is under it: any of abra's blend modes, or [`Blend::Additive`] to add its
+  /// light. It defaults to `Normal`, plain painting.
+  /// - `p_blend`: A [`Blend`], or a [`BlendMode`](abra_core::BlendMode).
+  pub fn with_blend(mut self, p_blend: impl Into<Blend>) -> Self {
+    self.blend = p_blend.into();
+    self
+  }
   /// Returns the size of the brush.
   pub fn size(&self) -> u32 {
     self.size
@@ -116,5 +128,9 @@ impl<'a> Brush<'a> {
   /// Returns how opaque the brush is along a stroke.
   pub fn opacity(&self) -> StrokeOpacity {
     self.opacity.clone()
+  }
+  /// Returns how the brush's color is combined with what is under it.
+  pub fn blend(&self) -> Blend {
+    self.blend
   }
 }

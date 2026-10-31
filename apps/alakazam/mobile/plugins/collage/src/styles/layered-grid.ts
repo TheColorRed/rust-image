@@ -1,4 +1,4 @@
-import { Rand, inspector } from '@alakazam/plugin';
+import { inspector, seededRandom } from '@alakazam/sdk';
 import { dealt, shuffled } from './randomness';
 import { SEED, type CollageStyle } from './style';
 
@@ -39,7 +39,7 @@ export const layeredGridStyle: CollageStyle = {
     const [columns, rows] = grid;
     const cellWidth = Math.floor(width / columns);
     const cellHeight = Math.floor(height / rows);
-    const rand = new Rand(SEED);
+    const rand = seededRandom(SEED);
     const places = shuffled(columns * rows, rand);
     return dealt(columns * rows, images, rand).map((image, cell) => ({
       image,

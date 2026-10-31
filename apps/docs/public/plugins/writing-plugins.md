@@ -122,15 +122,15 @@ A workspace opens a full-screen plugin editor. Its JavaScript entry may export a
 |---|---|
 | `inspectorGUI()` | Adds the controls of the inspector beside the preview. Without it there is no inspector and no toolbar button for it. |
 | `controlsGUI()` | Adds the controls of the bar under the preview, with the same functions as `inspectorGUI`. Without it there is no bar. |
-| `previewCanvas()` | Returns the canvas the preview shows, or nothing, or a promise of it. A canvas that takes a while to make is built by the library on worker threads (`canvasOfCells`, below), never with a loop of image calls on the JS thread; while the promise is pending the canvas on show stays, with a spinner over it, and only the newest call's canvas is shown. The editor shows it directly and the engine composes it on its own thread, so nothing is drawn on the JS thread. Called when the workspace opens and after each change that is not a drag. Return the same canvas again while it is still right, and change its layers in place (in a slider's `onChange`) to move something. |
+| `previewCanvas()` | Returns the canvas the preview shows, or nothing, or a promise of it. A canvas that takes a while to make reads its pictures with `Image.readAsync` (below), which the library runs off the JS thread, never with a loop of image work on it; while the promise is pending the canvas on show stays, with a spinner over it, and only the newest call's canvas is shown. The editor shows it directly and the engine composes it on its own thread, so nothing is drawn on the JS thread. Called when the workspace opens and after each change that is not a drag. Return the same canvas again while it is still right, and change its layers in place (in a slider's `onChange`) to move something. |
 | `dispose()` | Called when the workspace closes, so the plugin can free what it made, such as the canvas. |
 
-To build a canvas of pictures, `canvasOfCells(name, width, height, cells)` makes a canvas with a child canvas for each cell, in order, each holding its picture file scaled to cover the cell (the part that does not fit is cropped). The library reads and scales the pictures on worker threads, in parallel, and reads a file that several cells use once. It returns a promise, and the child canvases are the canvas's `canvases()`, which a slider can turn, scale and move with `setRotation`, `setScale` and `setPosition`. A cell is `{ path, x, y, width, height }` in pixels of the canvas.
+To build a canvas of pictures, read each file once with `await Image.readAsync(path)` (a promise, decoded off the JS thread, so `Promise.all` reads several in parallel). Give each picture a cell: a blank canvas of the cell's size, holding a canvas of the picture's own size that you add with `addCanvas` and scale with `setScale` to cover or fit the cell (a canvas keeps its own pixels, so scaling never loses quality). Put the cells in the collage canvas with `addCanvas(cell, { position: [x, y] })`. The cells are the collage canvas's `canvases()`, which a slider can turn, scale and move with `setRotation`, `setScale` and `setPosition`.
 
 The plugin owns the canvas it returns: free it (with `release`) when it returns another one, and in `dispose`. To add the native image picker to the inspector:
 
 ```ts
-import { inspector } from '@alakazam/plugin';
+import { inspector } from '@alakazam/sdk';
 
 export function inspectorGUI() {
   inspector.filePicker('Photos', {
@@ -143,7 +143,7 @@ export function inspectorGUI() {
 }
 ```
 
-`multiple` defaults to `false`. `thumbs` defaults to `false`; when `true` the inspector shows a thumbnail of each image the user picked below the control; tapping one opens it in a full-screen viewer that swipes through all of them, and pressing and holding one starts selecting images to remove. The callback always receives an array of copied local files: the full list of images, called again with the images that are left when the user removes some, so keep the list it gives you. Each call to `inspectorGUI` or `controlsGUI` replaces the controls it made before, and the editor calls them again after a change that is not a drag.
+`source` is where the user picks from: `'file-system'` (the default) opens the device's file chooser, `'projects'` shows the saved projects and picks each one's edited image (its original if it was never edited), and `'both'` shows the projects with a button to browse the device's files instead. `multiple` defaults to `false`. `thumbs` defaults to `false`; when `true` the inspector shows a thumbnail of each image the user picked below the control; tapping one opens it in a full-screen viewer that swipes through all of them, and pressing and holding one starts selecting images to remove. The callback always receives an array of copied local files: the full list of images, called again with the images that are left when the user removes some, so keep the list it gives you. Each call to `inspectorGUI` or `controlsGUI` replaces the controls it made before, and the editor calls them again after a change that is not a drag.
 
 To add a heading, like an `<h1>` to `<h6>`: `inspector.header('Options')` is an `h1`, and `inspector.header('Options', { level: 2 })` is an `h2`. The `level` option is 1 to 6 and defaults to 1.
 
@@ -245,24 +245,24 @@ contributes:
 - **The root** is matched to the names in the app, ignoring case. A tab or group that is not there is made, so a plugin can add a tab of its own. If the plugin is taken away, a tab or group it made goes with it once it is empty.
 - **The path** is the control's name, which is what people see, and so the script does not need to say it. A path with more names puts the control in groups under the root.
 - **The order** is the order written here.
-- **The script** is TypeScript in `src/` named like its entry (`src/lipstick.ts` builds to `lipstick.js`). Its default export is a function that returns the control, in the same shape the app's own controls use. It can import the Abra library (`@abra/core/...`), `@alakazam/plugin` (what the app offers plugins: the face masks, the layer painter and a few helpers), and other files of the plugin by relative path, which are built into the same file.
+- **The script** is TypeScript in `src/` named like its entry (`src/lipstick.ts` builds to `lipstick.js`). Its default export is a function that returns the control, in the same shape the app's own controls use. It can import the Abra library (`@abra/core/...`), `@alakazam/sdk` (what the app offers plugins: the face masks, the layer painter and a few helpers), and other files of the plugin by relative path, which are built into the same file.
 - **Types** in app-owned plugins are checked with the app's plugin config. The public npm builder does not require the Alakazam app source: it transpiles TypeScript and leaves documented runtime imports external. Plugin authors can add their own type-checking setup if they want one.
 
 ## Build and package
 
 For a plugin with TypeScript controls or scripts, put its source in `src/` beside `plugin.yml`. The npm build tool bundles its TypeScript entries and relative imports without needing the Alakazam app source code.
 
-Each source file matches its manifest entry: `entry: color.js` is built from `src/color.ts`. Relative imports are bundled into the entry. Imports such as `@abra/core/color` and `@alakazam/plugin` stay external for Alakazam to provide at runtime.
+Each source file matches its manifest entry: `entry: color.js` is built from `src/color.ts`. Relative imports are bundled into the entry. Imports such as `@abra/core/color` and `@alakazam/sdk` stay external for Alakazam to provide at runtime.
 
 Build from the plugin folder, or pass the folder path:
 
 ```sh
-npx @alakazam/plugin build
+npx @alakazam/sdk build
 # or
-npx @alakazam/plugin build ./my-plugin
+npx @alakazam/sdk build ./my-plugin
 ```
 
-Add `@alakazam/plugin` and `@abra/core` to your plugin's `devDependencies` to type-check host API imports in your own TypeScript project. The package provides the declarations for `@alakazam/plugin`; Alakazam supplies its runtime implementation when the plugin loads.
+Add `@alakazam/sdk` and `@abra/core` to your plugin's `devDependencies` to type-check host API imports in your own TypeScript project. The package provides the declarations for `@alakazam/sdk`; Alakazam supplies its runtime implementation when the plugin loads.
 
 The build updates the `files:` list and SHA-256 hashes in `plugin.yml`, then writes `dist/<id>.akzx`. An `.akzx` package is a ZIP archive. Plugin authors can install it from **Plugins → Local plugin package → Choose .akzx** without uploading to S3. The local installer verifies every file against its manifest hash. Declared dependencies still need to be installed before the plugin can be used.
 

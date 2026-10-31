@@ -223,9 +223,9 @@ impl AiModelFile {
 
     let result = fs::create_dir_all(model_dir())
       .map_err(|e| format!("Cannot create the model folder: {e}"))
-      .and_then(|_| Self::ensure_file(&label, &self.url, &self.sha256, &path, p_listener))
+      .and_then(|_| Self::ensure_file(&label, &self.url, Some(self.sha256.as_str()), &path, p_listener))
       .and_then(|_| match (&self.manifest_url, &self.manifest_sha256) {
-        (Some(url), Some(sha256)) => Self::ensure_file(&label, url, sha256, &self.local_manifest_path(), None),
+        (Some(url), Some(sha256)) => Self::ensure_file(&label, url, Some(sha256.as_str()), &self.local_manifest_path(), None),
         _ => Ok(()),
       });
     match result {
@@ -248,16 +248,17 @@ impl AiModelFile {
 
   /// Makes sure `p_path` holds the file at `p_url` with hash `p_sha256`: keeps a file that already matches, otherwise
   /// downloads it, telling `p_listener` how far it has got. `p_label` names what is downloaded in an error, such as `the skin model`.
+  /// With no hash the download is not checked, and a file that is already there is always downloaded again, as nothing says it is the right one.
   pub(crate) fn ensure_file(
     p_label: &str,
     p_url: &str,
-    p_sha256: &str,
+    p_sha256: Option<&str>,
     p_path: &Path,
     p_listener: Option<&dyn DownloadListener>,
   ) -> Result<(), String> {
     if p_path.exists() {
-      match hash_file(p_path) {
-        Ok(hash) if hash == p_sha256 => return Ok(()),
+      match (p_sha256, hash_file(p_path)) {
+        (Some(expected), Ok(hash)) if hash == expected => return Ok(()),
         _ => {
           let _ = fs::remove_file(p_path);
         }
@@ -276,12 +277,12 @@ impl AiModelFile {
     result
   }
 
-  /// Downloads the file at `p_url` to `p_partial` and checks its hash. `p_listener` hears the share downloaded, once for each
-  /// whole percent, when the server says how big the file is.
+  /// Downloads the file at `p_url` to `p_partial` and checks its hash, when there is one. `p_listener` hears the share downloaded, once
+  /// for each whole percent, when the server says how big the file is.
   fn download(
     p_label: &str,
     p_url: &str,
-    p_sha256: &str,
+    p_sha256: Option<&str>,
     p_partial: &Path,
     p_listener: Option<&dyn DownloadListener>,
   ) -> Result<(), String> {
@@ -313,7 +314,7 @@ impl AiModelFile {
     file.flush().map_err(|e| format!("Cannot write {p_label}: {e}"))?;
 
     let hash = hex(&hasher.finalize());
-    if hash != p_sha256 {
+    if p_sha256.is_some_and(|expected| hash != expected) {
       return Err(format!("The download of {p_label} does not match its hash (got {hash})"));
     }
     Ok(())

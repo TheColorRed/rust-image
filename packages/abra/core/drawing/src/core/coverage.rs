@@ -52,6 +52,12 @@ pub trait CoverageMask: Sync {
   fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
     None
   }
+  /// Returns, for the whole-pixel row `p_row`, the leftmost and rightmost `x` any sample on that row can be covered at, so the
+  /// rasterizer can skip the empty parts of the row. A span with its left past its right means nothing on the row is covered. If None, the
+  /// mask does not say, and the rasterizer looks at the whole of the row inside [`CoverageMask::bounds`].
+  fn row_span(&self, _p_row: usize) -> Option<(f32, f32)> {
+    None
+  }
 }
 
 /// A polygon-based coverage mask.
@@ -69,6 +75,9 @@ pub struct PolygonCoverage {
   bounds: Option<(f32, f32, f32, f32)>,
   /// The whole-pixel row that `rows[0]` is for: the row of the top of the polygon.
   first_row: i32,
+  /// For each whole-pixel row from `first_row`, the leftmost and rightmost `x` the edges that reach into it are at on that row. A point on
+  /// the row can only be inside the polygon between them. Empty when `rows` is.
+  spans: Vec<(f32, f32)>,
   /// For each whole-pixel row from `first_row`, the places of the edges that reach into it, an edge being named by the place of the vertex it
   /// ends at (it starts at the one before). Edges that are level cross nothing and are left out. Empty when the polygon reaches over too many
   /// rows to list, which is then tested edge by edge.
@@ -104,7 +113,7 @@ impl PolygonCoverage {
       });
       polygon.push((point.x, point.y));
     }
-    let mut coverage = PolygonCoverage { polygon, bounds, first_row: 0, rows: Vec::new() };
+    let mut coverage = PolygonCoverage { polygon, bounds, first_row: 0, spans: Vec::new(), rows: Vec::new() };
     coverage.sort_edges_into_rows();
     coverage
   }
@@ -120,18 +129,26 @@ impl PolygonCoverage {
     self.first_row = min_y.floor() as i32;
     let last_row = max_y.floor() as i32;
     let mut rows = vec![Vec::new(); (last_row - self.first_row + 1) as usize];
+    let mut spans = vec![(f32::MAX, f32::MIN); rows.len()];
     let count = self.polygon.len();
     for end in 0..count {
-      let (start_y, end_y) = (self.polygon[(end + count - 1) % count].1, self.polygon[end].1);
+      let ((start_x, start_y), (end_x, end_y)) = (self.polygon[(end + count - 1) % count], self.polygon[end]);
       if start_y == end_y {
         continue;
       }
       let (low, high) = (start_y.min(end_y).floor() as i32, start_y.max(end_y).floor() as i32);
       for row in low..=high {
-        rows[(row - self.first_row) as usize].push(end as u32);
+        let at = (row - self.first_row) as usize;
+        rows[at].push(end as u32);
+        // Where the edge is, left to right, between the top and the bottom of this row.
+        let x_at = |y: f32| start_x + (end_x - start_x) * ((y - start_y) / (end_y - start_y));
+        let (top, bottom) = (start_y.min(end_y).max(row as f32), start_y.max(end_y).min(row as f32 + 1.0));
+        let (a, b) = (x_at(top), x_at(bottom));
+        spans[at] = (spans[at].0.min(a.min(b)), spans[at].1.max(a.max(b)));
       }
     }
     self.rows = rows;
+    self.spans = spans;
   }
 
   /// Ray-casting point-in-polygon test using the non-zero winding rule.
@@ -147,7 +164,7 @@ impl PolygonCoverage {
     }
     // Only the edges that reach into this row can cross it; a point above or below the polygon is not in it.
     let row = p_point.1.floor();
-    if !(row >= self.first_row as f32 && row < (self.first_row as usize + self.rows.len()) as f32) {
+    if !(row >= self.first_row as f32 && row < (self.first_row as i64 + self.rows.len() as i64) as f32) {
       return false;
     }
     self.winding_over(p_point, self.rows[(row as i32 - self.first_row) as usize].iter().map(|end| *end as usize))
@@ -195,6 +212,16 @@ impl CoverageMask for PolygonCoverage {
   }
   fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
     self.bounds
+  }
+  fn row_span(&self, p_row: usize) -> Option<(f32, f32)> {
+    if self.rows.is_empty() {
+      return None;
+    }
+    // A row the polygon does not reach has nothing in it.
+    Some(match (p_row as i64 - self.first_row as i64).try_into().ok().and_then(|at: usize| self.spans.get(at)) {
+      Some(span) => *span,
+      None => (1.0, 0.0),
+    })
   }
 }
 
@@ -279,6 +306,42 @@ fn bounds_of(p_points: &[PointF]) -> Option<(f32, f32, f32, f32)> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_polygon_that_starts_above_the_image_can_be_tested() {
+    // Its first row is negative, which must not wrap around when the rows are counted.
+    let triangle = PolygonCoverage::new(vec![PointF::new(10.0, -30.0), PointF::new(40.0, 20.0), PointF::new(-5.0, 20.0)]);
+    assert!(triangle.contains(15.0, 5.0));
+    assert!(!triangle.contains(15.0, -40.0));
+    assert!(!triangle.contains(15.0, 30.0));
+    assert!(triangle.row_span(0).is_some_and(|(left, right)| left <= right));
+  }
+
+  #[test]
+  fn a_rows_span_holds_every_sample_that_is_inside() {
+    // A thin diagonal sliver, so that most of every row is empty.
+    let sliver = PolygonCoverage::new(vec![
+      PointF::new(2.0, 3.0),
+      PointF::new(9.0, 3.0),
+      PointF::new(95.0, 90.0),
+      PointF::new(88.0, 90.0),
+    ]);
+    let mut inside = 0;
+    for row in 0..100usize {
+      let span = sliver.row_span(row).expect("a polygon says where it is in a row");
+      for step in 0..2000 {
+        let (x, y) = (step as f32 * 0.05, row as f32 + 0.37);
+        if sliver.contains(x, y) {
+          inside += 1;
+          assert!(span.0 <= x && x <= span.1, "row {row}: {x} is inside but the span is {span:?}");
+        }
+      }
+    }
+    assert!(inside > 500);
+    // A row the polygon does not reach is empty, and so is a row past the end.
+    assert!(sliver.row_span(0).is_some_and(|(left, right)| left > right));
+    assert!(sliver.row_span(99).is_some_and(|(left, right)| left > right));
+  }
 
   /// A ring of `p_count` points around `(50, 50)` with a hole in it: out around an irregular outline and back round a smaller one.
   fn ring_with_a_hole(p_count: usize) -> Vec<PointF> {

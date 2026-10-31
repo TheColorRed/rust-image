@@ -1,4 +1,4 @@
-import { app, areaMask, owning, setAiPendingNotice, toolKey, type EditControl } from '@alakazam/plugin';
+import { app, areaMask, owning, setAiPendingNotice, toolKey, type EditControl } from '@alakazam/sdk';
 
 const TOOL_KEY = toolKey('remove-objects');
 const INPAINT = 'inpaint';

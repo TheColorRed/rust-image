@@ -1,6 +1,7 @@
 // Builds and deploys the Android app in one go:
 //   1. finds every connected device (or the one named with --device),
-//   2. builds libalakazam_mobile.so and regenerates the TypeScript bindings (packages/react-native/alakazam),
+//   2. builds libalakazam_mobile.so, regenerates the TypeScript bindings (packages/react-native/alakazam) and rebuilds the
+//      @abra/core plugin types from them (packages/plugins/abra),
 //   3. installs the app on each device with Gradle,
 //   4. forwards Metro to each device and launches the app.
 //
@@ -120,6 +121,8 @@ if (!metroOnly) {
       ['run', release ? 'build:android:release' : 'build:android', '-w', 'packages/react-native/alakazam', '--', ...(forwardedArgs.some((arg) => arg.startsWith('--targets')) ? [] : ['--targets', 'arm64-v8a']), ...forwardedArgs],
       root,
     );
+    // The @abra/core types plugins are written against come from those bindings, so they are rebuilt with them.
+    run('Build the @abra/core plugin types', 'node', [path.join('packages', 'plugins', 'abra', 'build.mjs')], root);
   }
 
   // 4. Install with Gradle. Reusing the Gradle build means later device installs

@@ -7,10 +7,19 @@
 
 use std::sync::Arc;
 
+use abra::abra_core::image::gpu::Hardware;
 use abra::abra_core::{ResizeTarget, TransformAlgorithm};
 use abra::transform::prelude::{self as library, FlipAxis, TransformFit};
 
 use crate::Image;
+
+// Which hardware does the work: the CPU, the GPU (the CPU when there is none, or it fails), or `Auto`, which follows the `gpu.enabled` setting.
+#[uniffi::remote(Enum)]
+pub enum Hardware {
+  Auto,
+  Cpu,
+  Gpu,
+}
 
 // How the canvas is sized after a transform that leaves areas the source image does not cover.
 #[uniffi::remote(Enum)]
@@ -41,12 +50,23 @@ pub fn rotate(degrees: f64) -> Arc<RotateImage> {
 impl RotateImage {
   /// A copy of the rotation that sizes the canvas as `fit` says. The library defaults to `Expand`.
   pub fn with_fit(&self, fit: TransformFit) -> Arc<RotateImage> {
-    Arc::new(RotateImage(library::rotate(self.0.degrees).with_fit(fit).with_algorithm(self.0.algorithm)))
+    Arc::new(RotateImage(
+      library::rotate(self.0.degrees).with_fit(fit).with_algorithm(self.0.algorithm).with_hardware(self.0.hardware),
+    ))
   }
 
   /// A copy of the rotation that samples with this algorithm. Without one, the best is picked automatically.
   pub fn with_algorithm(&self, algorithm: Option<TransformAlgorithm>) -> Arc<RotateImage> {
-    Arc::new(RotateImage(library::rotate(self.0.degrees).with_fit(self.0.fit).with_algorithm(algorithm)))
+    Arc::new(RotateImage(
+      library::rotate(self.0.degrees).with_fit(self.0.fit).with_algorithm(algorithm).with_hardware(self.0.hardware),
+    ))
+  }
+
+  /// A copy of the rotation that runs on this hardware. The library defaults to `Auto`.
+  pub fn with_hardware(&self, hardware: Hardware) -> Arc<RotateImage> {
+    Arc::new(RotateImage(
+      library::rotate(self.0.degrees).with_fit(self.0.fit).with_algorithm(self.0.algorithm).with_hardware(hardware),
+    ))
   }
 
   /// Rotates the image in place.
@@ -87,7 +107,12 @@ pub fn resize(target: ResizeTarget) -> Arc<ResizeImage> {
 impl ResizeImage {
   /// A copy of the resize that samples with this algorithm. Without one, the best is picked automatically.
   pub fn with_algorithm(&self, algorithm: Option<TransformAlgorithm>) -> Arc<ResizeImage> {
-    Arc::new(ResizeImage(library::resize(self.0.target).with_algorithm(algorithm)))
+    Arc::new(ResizeImage(library::resize(self.0.target).with_algorithm(algorithm).with_hardware(self.0.hardware)))
+  }
+
+  /// A copy of the resize that runs on this hardware. The library defaults to `Auto`.
+  pub fn with_hardware(&self, hardware: Hardware) -> Arc<ResizeImage> {
+    Arc::new(ResizeImage(library::resize(self.0.target).with_algorithm(self.0.algorithm).with_hardware(hardware)))
   }
 
   /// Resizes the image in place.
@@ -141,6 +166,14 @@ mod tests {
     library::resize(target).apply(&mut expected);
     assert_eq!(handle.core().dimensions::<u32>(), (10, 5));
     assert_eq!(handle.core().rgba(), expected.rgba());
+  }
+
+  #[test]
+  fn the_hardware_survives_the_other_builders() {
+    let rotation = rotate(20.0).with_hardware(Hardware::Cpu).with_algorithm(None).with_fit(TransformFit::Fill);
+    assert_eq!(rotation.0.hardware, Hardware::Cpu);
+    let resizing = resize(ResizeTarget::Scale(2.0)).with_hardware(Hardware::Gpu).with_algorithm(None);
+    assert_eq!(resizing.0.hardware, Hardware::Gpu);
   }
 
   #[test]

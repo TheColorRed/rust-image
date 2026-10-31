@@ -1,7 +1,8 @@
 //! The object removal plugins that ship in `packages/ai/object-removal/plugins` are found by their capability, and every one with the
 //! `inpaint` capability does what it says. A new remover is a new folder there, and these tests run it without being changed.
 
-use super::{Contribution, PluginError, PluginRegistry};
+use super::error::PluginError;
+use super::{Contribution, PluginRegistry};
 use abra_ai_core::{AiModel, AiOutput};
 use abra_core::{Channels, Image};
 use mask::Mask;

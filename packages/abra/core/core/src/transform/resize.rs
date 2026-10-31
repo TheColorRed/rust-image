@@ -1,6 +1,10 @@
+use crate::image::gpu::{CpuProcessor, GpuPass, GpuProcessor, Hardware, ready_gpu_provider};
 use crate::transform::TransformAlgorithm;
 use crate::transform::interpolation;
 use crate::{Channels, Image, Size};
+
+/// The shader that resizes on the GPU, with the samplers it shares with rotating in front. See the comments in the files.
+const RESIZE_SHADER: &str = concat!(include_str!("./sampling.wgsl"), include_str!("./resize.wgsl"));
 
 /// Describes how an image should be resized.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,9 +55,9 @@ pub(crate) fn get_resize_algorithm(
   }
 }
 
-/// Resolves an image resize target to exact pixel dimensions.
-fn target_dimensions(p_image: &Image, p_target: ResizeTarget) -> Option<(u32, u32)> {
-  let (old_width, old_height) = p_image.dimensions::<u32>();
+/// Resolves an image resize target to exact pixel dimensions, for an image of `p_old_width` x `p_old_height`.
+fn target_dimensions(p_old_width: u32, p_old_height: u32, p_target: ResizeTarget) -> Option<(u32, u32)> {
+  let (old_width, old_height) = (p_old_width, p_old_height);
   match p_target {
     ResizeTarget::Exact(size) => Some((size.width.max(0.0) as u32, size.height.max(0.0) as u32)),
     ResizeTarget::FitWidth(width) => {
@@ -66,15 +70,15 @@ fn target_dimensions(p_image: &Image, p_target: ResizeTarget) -> Option<(u32, u3
     }
     ResizeTarget::Fit(size) => {
       let scale = (size.width / old_width as f32).min(size.height / old_height as f32);
-      target_dimensions(p_image, ResizeTarget::Scale(scale))
+      target_dimensions(p_old_width, p_old_height, ResizeTarget::Scale(scale))
     }
     ResizeTarget::RelativeWidth(amount) => {
       let width = (old_width as i32 + amount).max(1) as u32;
-      target_dimensions(p_image, ResizeTarget::FitWidth(width))
+      target_dimensions(p_old_width, p_old_height, ResizeTarget::FitWidth(width))
     }
     ResizeTarget::RelativeHeight(amount) => {
       let height = (old_height as i32 + amount).max(1) as u32;
-      target_dimensions(p_image, ResizeTarget::FitHeight(height))
+      target_dimensions(p_old_width, p_old_height, ResizeTarget::FitHeight(height))
     }
     ResizeTarget::Scale(scale) if scale > 0.0 => {
       Some(((old_width as f32 * scale).max(1.0) as u32, (old_height as f32 * scale).max(1.0) as u32))
@@ -88,6 +92,9 @@ fn target_dimensions(p_image: &Image, p_target: ResizeTarget) -> Option<(u32, u3
 pub struct ResizeImage {
   pub target: ResizeTarget,
   pub algorithm: Option<TransformAlgorithm>,
+  /// Which hardware resizes. `Auto`, the default, follows the `gpu.enabled` setting and uses the CPU when no GPU is ready or the GPU
+  /// fails.
+  pub hardware: Hardware,
 }
 
 impl ResizeImage {
@@ -97,10 +104,34 @@ impl ResizeImage {
     self
   }
 
-  /// Resizes the image. Nothing happens when the resolved dimensions are the same as the image's.
+  /// Chooses the hardware that resizes: the CPU, the GPU (the CPU when there is no GPU, or it fails), or `Auto`, which follows the
+  /// `gpu.enabled` setting.
+  pub fn with_hardware(mut self, p_hardware: Hardware) -> Self {
+    self.hardware = p_hardware;
+    self
+  }
+
+  /// The resized pixels of `p_image` at `p_width` x `p_height`, from the GPU when `p_hardware` allows it, and from the CPU
+  /// otherwise, including when the GPU fails.
+  fn resample(
+    &self, p_image: &Image, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm, p_hardware: Hardware,
+  ) -> Vec<u8> {
+    let (old_width, old_height) = p_image.dimensions::<u32>();
+    if let Some(gpu) = self.gpu()
+      && let Some(provider) = ready_gpu_provider(p_hardware)
+      && let Ok(pixels) =
+        (provider.process)(&[gpu.passes(old_width, old_height)], old_width, old_height, p_image.rgba())
+    {
+      return pixels;
+    }
+    interpolation::resample(p_image, p_width, p_height, p_algorithm.interpolation())
+  }
+
+  /// Resizes the image on the hardware set with [`ResizeImage::with_hardware`]. Nothing happens when the resolved dimensions are the
+  /// same as the image's.
   pub fn apply(&self, p_image: &mut Image) {
     let (old_width, old_height) = p_image.dimensions::<u32>();
-    let Some((width, height)) = target_dimensions(p_image, self.target) else {
+    let Some((width, height)) = target_dimensions(old_width, old_height, self.target) else {
       return;
     };
     if width == old_width && height == old_height {
@@ -108,7 +139,7 @@ impl ResizeImage {
     }
 
     let algorithm = get_resize_algorithm(self.algorithm, old_width, old_height, width, height);
-    let pixels = interpolation::resample(p_image, width, height, algorithm.interpolation());
+    let pixels = self.resample(p_image, width, height, algorithm, self.hardware);
     p_image.set_pixels(width, height, pixels, Channels::RGBA);
   }
 
@@ -116,7 +147,7 @@ impl ResizeImage {
   /// than cloning and then calling [`ResizeImage::apply`].
   pub fn resized(&self, p_image: &Image) -> Image {
     let (old_width, old_height) = p_image.dimensions::<u32>();
-    let Some((width, height)) = target_dimensions(p_image, self.target) else {
+    let Some((width, height)) = target_dimensions(old_width, old_height, self.target) else {
       return p_image.clone();
     };
     if width == old_width && height == old_height {
@@ -124,8 +155,45 @@ impl ResizeImage {
     }
 
     let algorithm = get_resize_algorithm(self.algorithm, old_width, old_height, width, height);
-    let pixels = interpolation::resample(p_image, width, height, algorithm.interpolation());
+    let pixels = self.resample(p_image, width, height, algorithm, self.hardware);
     Image::new_from_pixels(width, height, pixels, Channels::RGBA)
+  }
+}
+
+impl CpuProcessor for ResizeImage {
+  /// Resizes on the CPU, whatever the hardware setting.
+  fn process(&self, p_image: &mut Image) {
+    ResizeImage {
+      target: self.target,
+      algorithm: self.algorithm,
+      hardware: Hardware::Cpu,
+    }
+    .apply(p_image);
+  }
+
+  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+
+  /// The size of the result depends on the size of the image, so the resize cannot be run on a part of it.
+  fn positional(&self) -> bool {
+    true
+  }
+}
+
+impl GpuProcessor for ResizeImage {
+  /// One pass that writes the resized image (see [`GpuPass::output`]), or none when the resize changes nothing.
+  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
+    let Some((width, height)) = target_dimensions(p_width, p_height, self.target) else {
+      return Vec::new();
+    };
+    if (width == p_width && height == p_height) || width == 0 || height == 0 {
+      return Vec::new();
+    }
+    let algorithm = get_resize_algorithm(self.algorithm, p_width, p_height, width, height);
+    // The shader finds the spot an output pixel reads from the sizes of its two textures, so all it is told is the algorithm.
+    let uniforms: Vec<u8> = [algorithm.interpolation().shader_mode().to_le_bytes(), [0; 4], [0; 4], [0; 4]].concat();
+    vec![GpuPass::new(RESIZE_SHADER, uniforms).with_output(width, height).with_pixel_exact()]
   }
 }
 
@@ -138,6 +206,7 @@ pub fn resize(p_target: ResizeTarget) -> ResizeImage {
   ResizeImage {
     target: p_target,
     algorithm: None,
+    hardware: Hardware::Auto,
   }
 }
 

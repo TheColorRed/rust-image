@@ -1,7 +1,7 @@
-use abra_core::{Area, Image, LineCap, LineJoin, Path, Performance, PointF};
+use abra_core::{Area, BlendMode, Image, LineCap, LineJoin, Path, Performance, PointF};
 
 use crate::{
-  CoverageMask, PolygonCoverage, Rasterizer, SampleGrid, Shader, SourceOverCompositor,
+  Blend, CoverageMask, PolygonCoverage, Rasterizer, SampleGrid, Shader,
   brush::brush::Brush,
   performance::{DrawingAlgorithm, ResolvedPerformance, configured_performance},
   shader_from_fill_with_path,
@@ -56,7 +56,7 @@ impl<'a> Painter<'a> {
     let max_distance = size / 2.0;
     let shader: Box<dyn Shader + Send + Sync> =
       Box::new(BrushShader::new(inner_shader, p_x, p_y, max_distance, p_brush.hardness()));
-    let compositor = SourceOverCompositor;
+    let compositor = p_brush.blend();
     let sample_grid = SampleGrid::from_aa_level(self.performance.anti_aliasing);
     let rasterizer = Rasterizer::new(&coverage, shader.as_ref(), &compositor, sample_grid);
 
@@ -98,6 +98,7 @@ impl<'a> Painter<'a> {
     if self.performance.algorithm != DrawingAlgorithm::Rasterizer
       && width.constant_width() == Some(p_brush.size() as f32)
       && opacity.constant_opacity().is_some()
+      && p_brush.blend() == Blend::Mode(BlendMode::Normal)
       && let Some((cx, cy, rx, ry)) = detect_ellipse(p_path)
     {
       // Only fast-path for solid-color brushes
@@ -128,10 +129,16 @@ impl<'a> Painter<'a> {
     // gradients are oriented along the stroke centerline.
     let inner_shader = shader_from_fill_with_path(p_brush.color().clone(), Some(p_path.clone()));
     // Path stroke shading falloff radius is half the width where the stroke is
-    let shader: Box<dyn Shader + Send + Sync> =
-      Box::new(StrokeBrushShader::new(inner_shader, p_path, width, opacity, p_brush.hardness()));
+    let mut stroke_shader = StrokeBrushShader::new(inner_shader, p_path, width, opacity, p_brush.hardness());
+    // A gradient that runs along this stroke's own path is read where the stroke shader has already found the closest place on it.
+    if let abra_core::Fill::Gradient(gradient) = p_brush.color()
+      && gradient.direction().is_some_and(|direction| direction.flatten(1.0) == p_path.flatten(1.0))
+    {
+      stroke_shader = stroke_shader.with_gradient_along_path(gradient.clone().into_owned());
+    }
+    let shader: Box<dyn Shader + Send + Sync> = Box::new(stroke_shader);
 
-    let compositor = SourceOverCompositor;
+    let compositor = p_brush.blend();
     let sample_grid = SampleGrid::from_aa_level(self.performance.anti_aliasing);
     let rasterizer = Rasterizer::new(&coverage, shader.as_ref(), &compositor, sample_grid);
 
@@ -188,7 +195,7 @@ impl<'a> Painter<'a> {
         let inner_shader = shader_from_fill_with_path(p_brush.color().clone(), Some(bounds_path));
         let shader: Box<dyn Shader + Send + Sync> =
           Box::new(BrushDabsShader::new(inner_shader, centers, radius, p_brush.hardness()));
-        let compositor = SourceOverCompositor;
+        let compositor = p_brush.blend();
         let sample_grid = SampleGrid::from_aa_level(self.performance.anti_aliasing);
         let rasterizer = Rasterizer::new(&coverage, shader.as_ref(), &compositor, sample_grid);
         rasterizer.rasterize(self.image);
@@ -214,6 +221,30 @@ mod tests {
     let rgba = img.rgba();
     let idx = ((600 * 1200 + 1000) as usize) * 4 + 3;
     assert!(rgba[idx] != 0, "expected alpha written by fast-path stroke");
+  }
+
+  #[test]
+  fn a_brush_blend_decides_how_a_stroke_meets_what_is_under_it() {
+    let line = || {
+      let mut path = Path::new();
+      path.move_to((10.0, 20.0)).line_to((90.0, 20.0));
+      path
+    };
+    let gray = || Image::new_from_color(100, 40, Color::from_rgb(100, 100, 100));
+    let white = Color::white();
+    let brush = || Brush::new().with_size(10).with_color(&white).with_hardness(1.0).with_opacity(0.5);
+    let middle = |image: &Image| image.get_pixel(50, 20).unwrap();
+
+    let (mut normal, mut additive, mut multiply) = (gray(), gray(), gray());
+    Painter::new(&mut normal).stroke_with_brush(&line(), &brush());
+    Painter::new(&mut additive).stroke_with_brush(&line(), &brush().with_blend(Blend::Additive));
+    Painter::new(&mut multiply).stroke_with_brush(&line(), &brush().with_blend(BlendMode::Multiply));
+    // Half opaque white: painted over, it is the mean of 100 and 255; added, it is 100 plus half of 255; multiplied, it changes nothing.
+    assert!((176..=180).contains(&middle(&normal).0), "normal gave {}", middle(&normal).0);
+    assert!((225..=230).contains(&middle(&additive).0), "additive gave {}", middle(&additive).0);
+    assert!((99..=101).contains(&middle(&multiply).0), "multiply gave {}", middle(&multiply).0);
+    // Away from the stroke nothing changed.
+    assert_eq!(additive.get_pixel(50, 2).unwrap().0, 100);
   }
 
   /// How many pixels of a column of the image have anything painted on them.

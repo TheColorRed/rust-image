@@ -64,28 +64,41 @@ fn is_sha256(p_hash: &str) -> bool {
   p_hash.len() == 64 && p_hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Installs a ZIP downloaded from the catalog after checking its archive hash.
+/// Installs a ZIP downloaded from the catalog after checking its archive hash. With `p_verify_hashes` false, none of the hashes are
+/// checked: not the archive's, the manifest's, or those of the files the manifest lists.
 fn install_archive_url(
   p_archive_url: &str,
   p_archive_sha256: &str,
   p_manifest_sha256: &str,
+  p_verify_hashes: bool,
   p_listener: &dyn DownloadListener,
 ) -> Result<(), String> {
-  if !is_sha256(p_archive_sha256) || !is_sha256(p_manifest_sha256) {
+  if p_verify_hashes && (!is_sha256(p_archive_sha256) || !is_sha256(p_manifest_sha256)) {
     return Err(format!("The catalog hashes for {p_archive_url} are not lowercase SHA-256 values"));
   }
   let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
   let root = plugins_dir();
   fs::create_dir_all(&root).map_err(|error| format!("Cannot create the plugin folder: {error}"))?;
   let archive_path = root.join(".download.plugin.zip");
-  let download = AiModelFile::ensure_file("the plugin package", p_archive_url, p_archive_sha256, &archive_path, Some(p_listener));
+  let download = AiModelFile::ensure_file(
+    "the plugin package",
+    p_archive_url,
+    p_verify_hashes.then_some(p_archive_sha256),
+    &archive_path,
+    Some(p_listener),
+  );
   if let Err(error) = download {
     let _ = fs::remove_file(&archive_path);
     return Err(error);
   }
   // install_archive takes the same lock, so release it before calling the shared local archive installer.
   drop(_guard);
-  let result = install_archive(&archive_path.to_string_lossy(), Some(p_manifest_sha256), p_listener);
+  let result = install_archive(
+    &archive_path.to_string_lossy(),
+    p_verify_hashes.then_some(p_manifest_sha256),
+    p_verify_hashes,
+    p_listener,
+  );
   let _ = fs::remove_file(archive_path);
   result
 }
@@ -106,7 +119,7 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
   fs::create_dir_all(&staging).map_err(|e| format!("Cannot create the plugin folder: {e}"))?;
 
   let built = (|| {
-    AiModelFile::ensure_file("the plugin manifest", p_manifest_url, p_manifest_sha256, &staging.join("plugin.yml"), None)?;
+    AiModelFile::ensure_file("the plugin manifest", p_manifest_url, Some(p_manifest_sha256), &staging.join("plugin.yml"), None)?;
     let text = fs::read_to_string(staging.join("plugin.yml")).map_err(|e| format!("Cannot read the plugin manifest: {e}"))?;
     let manifest = PluginManifest::parse(&text).map_err(|e| e.to_string())?;
 
@@ -132,7 +145,7 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
       }
       let label = format!("{} of the plugin {}", file.path, manifest.id);
       let share = Share { listener: p_listener, done, count };
-      AiModelFile::ensure_file(&label, &format!("{base}/{}", file.path), &file.sha256, &destination, Some(&share))?;
+      AiModelFile::ensure_file(&label, &format!("{base}/{}", file.path), Some(file.sha256.as_str()), &destination, Some(&share))?;
     }
 
     // Read it back as the app will, so a plugin that cannot be used is never put in place.
@@ -154,8 +167,14 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
 }
 
 /// Installs a plugin package chosen from this device. The ZIP contains `plugin.yml` at its root and every file listed by its manifest.
-/// Files are copied into staging and checked against their declared SHA-256 before the plugin replaces an installed version.
-fn install_archive(p_archive_path: &str, p_manifest_sha256: Option<&str>, p_listener: &dyn DownloadListener) -> Result<(), String> {
+/// Files are copied into staging and checked against their declared SHA-256 before the plugin replaces an installed version, unless
+/// `p_verify_files` is false.
+fn install_archive(
+  p_archive_path: &str,
+  p_manifest_sha256: Option<&str>,
+  p_verify_files: bool,
+  p_listener: &dyn DownloadListener,
+) -> Result<(), String> {
   const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 
   let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -235,7 +254,7 @@ fn install_archive(p_archive_path: &str, p_manifest_sha256: Option<&str>, p_list
           .map_err(|error| format!("Cannot save {}: {error}", listed.path))?;
       }
       let actual = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-      if actual != listed.sha256 {
+      if p_verify_files && actual != listed.sha256 {
         return Err(format!("{} does not match its SHA-256 in plugin.yml", listed.path));
       }
       Share { listener: p_listener, done, count }.update(1.0);
@@ -281,7 +300,7 @@ pub async fn install_plugin_archive(
   listener: Arc<dyn DownloadListener>,
 ) -> Result<(), AbraError> {
   image_workers::run(move || {
-    install_archive(&archive_path, None, listener.as_ref()).map_err(|message| AbraError::Ai { message })
+    install_archive(&archive_path, None, true, listener.as_ref()).map_err(|message| AbraError::Ai { message })
   })
   .await
 }
@@ -336,16 +355,19 @@ pub async fn install_dev_plugin_folder(folder: String) -> Result<(), AbraError> 
   .await
 }
 
-/// Downloads and installs a catalog `.akzx` package, verifying its archive SHA-256 and every listed file.
+/// Downloads and installs a catalog `.akzx` package, verifying its archive SHA-256 and every listed file. With `verify_hashes` false
+/// none of those checks are made, for developing a plugin whose hashes change faster than the catalog.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn install_plugin_package(
   archive_url: String,
   archive_sha256: String,
   manifest_sha256: String,
+  verify_hashes: bool,
   listener: Arc<dyn DownloadListener>,
 ) -> Result<(), AbraError> {
   image_workers::run(move || {
-    install_archive_url(&archive_url, &archive_sha256, &manifest_sha256, listener.as_ref()).map_err(|message| AbraError::Ai { message })
+    install_archive_url(&archive_url, &archive_sha256, &manifest_sha256, verify_hashes, listener.as_ref())
+      .map_err(|message| AbraError::Ai { message })
   })
   .await
 }

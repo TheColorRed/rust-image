@@ -1,3 +1,4 @@
+use crate::image::gpu::{CpuProcessor, GpuPass, GpuProcessor, Hardware, ready_gpu_provider};
 use crate::{Channels, Image, IntoNumber, Size};
 
 use super::{
@@ -5,6 +6,9 @@ use super::{
   interpolation::{EdgeMode, Interpolation, remap},
   resize::get_resize_algorithm,
 };
+
+/// The shader that rotates on the GPU, with the samplers it shares with resizing in front. See the comments in the files.
+const ROTATE_SHADER: &str = concat!(include_str!("./sampling.wgsl"), include_str!("./rotate.wgsl"));
 
 /// The part of the rotated canvas that becomes the output, and the size it is drawn at.
 struct RotateWindow {
@@ -103,9 +107,19 @@ pub struct RotateImage {
   pub degrees: f32,
   pub fit: TransformFit,
   pub algorithm: Option<TransformAlgorithm>,
+  /// Which hardware rotates. `Auto`, the default, follows the `gpu.enabled` setting and uses the CPU when no GPU is ready or the GPU
+  /// fails.
+  pub hardware: Hardware,
 }
 
 impl RotateImage {
+  /// Chooses the hardware that rotates: the CPU, the GPU (the CPU when there is no GPU, or it fails), or `Auto`, which follows the
+  /// `gpu.enabled` setting.
+  pub fn with_hardware(mut self, p_hardware: Hardware) -> Self {
+    self.hardware = p_hardware;
+    self
+  }
+
   /// Sets how the canvas is sized after rotating. Defaults to [`TransformFit::Expand`].
   pub fn with_fit(mut self, p_fit: TransformFit) -> Self {
     self.fit = p_fit;
@@ -118,10 +132,16 @@ impl RotateImage {
     self
   }
 
-  /// Rotates the image in place.
+  /// Rotates the image in place, on the hardware set with [`RotateImage::with_hardware`].
   pub fn apply(&self, p_image: &mut Image) {
     let (width, height) = p_image.dimensions::<u32>();
     let window = RotateWindow::new(width, height, self.degrees, self.fit);
+    if let Some(provider) = ready_gpu_provider(self.hardware)
+      && let Ok(pixels) = (provider.process)(&[self.passes(width, height)], width, height, p_image.rgba())
+    {
+      p_image.set_pixels(window.output_width, window.output_height, pixels, Channels::RGBA);
+      return;
+    }
     // The kept area is what gets resampled, so the automatic algorithm is picked from how much it is scaled.
     let algorithm = get_resize_algorithm(
       self.algorithm,
@@ -131,6 +151,66 @@ impl RotateImage {
       window.output_height,
     );
     apply_rotation(p_image, self.degrees, &window, algorithm.interpolation());
+  }
+}
+
+impl CpuProcessor for RotateImage {
+  /// Rotates on the CPU, whatever the hardware setting.
+  fn process(&self, p_image: &mut Image) {
+    RotateImage {
+      degrees: self.degrees,
+      fit: self.fit,
+      algorithm: self.algorithm,
+      hardware: Hardware::Cpu,
+    }
+    .apply(p_image);
+  }
+
+  fn gpu(&self) -> Option<&dyn GpuProcessor> {
+    Some(self)
+  }
+
+  /// The size of the result depends on the size of the image, so the rotation cannot be run on a part of it.
+  fn positional(&self) -> bool {
+    true
+  }
+}
+
+impl GpuProcessor for RotateImage {
+  /// One pass that writes the rotated image (see [`GpuPass::output`]).
+  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
+    let window = RotateWindow::new(p_width, p_height, self.degrees, self.fit);
+    let algorithm = get_resize_algorithm(
+      self.algorithm,
+      window.width as u32,
+      window.height as u32,
+      window.output_width,
+      window.output_height,
+    );
+    // The same spot as `apply_rotation`, as a function of the output pixel's center `(x, y)`, with the half pixel that puts the first
+    // pixel's center at 0 folded in.
+    let (sin, cos) = (self.degrees as f64).to_radians().sin_cos();
+    let scale_x = window.width / window.output_width as f64;
+    let scale_y = window.height / window.output_height as f64;
+    let (from_x, from_y) = (window.left - window.canvas_width as f64 / 2.0, window.top - window.canvas_height as f64 / 2.0);
+    let (source_center_x, source_center_y) = (p_width as f64 / 2.0, p_height as f64 / 2.0);
+    let row_x = [
+      scale_x * cos,
+      scale_y * sin,
+      from_x * cos + from_y * sin + source_center_x - 0.5,
+      0.0,
+    ];
+    let row_y = [
+      -scale_x * sin,
+      scale_y * cos,
+      -from_x * sin + from_y * cos + source_center_y - 0.5,
+      0.0,
+    ];
+    let mut uniforms = [algorithm.interpolation().shader_mode().to_le_bytes(), [0; 4], [0; 4], [0; 4]].concat();
+    for value in row_x.into_iter().chain(row_y) {
+      uniforms.extend((value as f32).to_le_bytes());
+    }
+    vec![GpuPass::new(ROTATE_SHADER, uniforms).with_output(window.output_width, window.output_height).with_pixel_exact()]
   }
 }
 
@@ -145,6 +225,7 @@ pub fn rotate(p_degrees: impl IntoNumber) -> RotateImage {
     degrees: p_degrees.into::<f32>(),
     fit: TransformFit::Expand,
     algorithm: None,
+    hardware: Hardware::Auto,
   }
 }
 

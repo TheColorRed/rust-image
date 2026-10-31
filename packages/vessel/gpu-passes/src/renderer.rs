@@ -158,6 +158,8 @@ struct Readback {
 enum Output {
   Source,
   Work(usize),
+  /// The last pass changed the size of the image, and wrote `LiveRenderer::resized`.
+  Resized,
 }
 
 /// Renders a source image through a chain of effects, each given as its [`GpuPass`]es, on the GPU, reusing every GPU resource across frames.
@@ -176,6 +178,8 @@ pub struct LiveRenderer {
   float_work: Option<[Target; 2]>,
   /// A copy of the image an effect started from, for passes that combine the effect's result with its input.
   base: Option<Target>,
+  /// What a last pass with an `output` size writes, and that size. Made when a chain has one, and kept while its size stays.
+  resized: Option<(Target, u32, u32)>,
   uniforms: Vec<Option<UniformSlot>>,
   aux: Vec<Option<AuxSlot>>,
   readback: Option<Readback>,
@@ -197,6 +201,7 @@ impl LiveRenderer {
       work: None,
       float_work: None,
       base: None,
+      resized: None,
       uniforms: Vec::new(),
       aux: Vec::new(),
       readback: None,
@@ -229,6 +234,15 @@ impl LiveRenderer {
   /// The source image size, or `None` before [`set_source`](Self::set_source).
   pub fn size(&self) -> Option<(u32, u32)> {
     self.source.as_ref().map(|(_, width, height)| (*width, *height))
+  }
+
+  /// The size of what the last [`render`](Self::render) made: the source's size, unless the chain ended with a pass that has an
+  /// [`output`](GpuPass::output) size. `None` before [`set_source`](Self::set_source).
+  pub fn output_size(&self) -> Option<(u32, u32)> {
+    match self.output {
+      Output::Resized => self.resized.as_ref().map(|(_, width, height)| (*width, *height)),
+      Output::Source | Output::Work(_) => self.size(),
+    }
   }
 
   /// Uploads the image that effects are applied to. Working textures are only reallocated when the size changes.
@@ -313,6 +327,24 @@ impl LiveRenderer {
       }
     }
 
+    // Only the last pass can write an image of another size, since the textures the passes before it write are the source's size.
+    let resized_to = match passes.iter().position(|(pass, _)| pass.output.is_some()) {
+      None => None,
+      Some(index) if index + 1 == passes.len() => passes[index].0.output,
+      Some(_) => return Err(anyhow!("only the last pass of a chain can write an image of another size")),
+    };
+    if let Some((output_width, output_height)) = resized_to {
+      if output_width == 0 || output_height == 0 {
+        return Err(anyhow!("a pass cannot write an empty image"));
+      }
+      if self.resized.as_ref().is_none_or(|(_, width, height)| (*width, *height) != (output_width, output_height)) {
+        let usage =
+          wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC;
+        self.resized =
+          Some((Target::new(&self.ctx, "live::resized", output_width, output_height, usage), output_width, output_height));
+      }
+    }
+
     // A pass that writes `rgba32float` hands its numbers to the pass after it, so a chain cannot end on one, and a pass that wants the
     // effect's input image (`base`, which is 8-bit) cannot come straight after one.
     let floats: Vec<bool> = passes.iter().map(|(pass, _)| writes_float(pass)).collect();
@@ -335,6 +367,7 @@ impl LiveRenderer {
     }
 
     let float_work = &self.float_work;
+    let resized = &self.resized;
     let (Some((source, _, _)), Some(work), Some(base)) = (&self.source, &self.work, &self.base) else {
       return Err(anyhow!("set_source must be called before render"));
     };
@@ -352,7 +385,10 @@ impl LiveRenderer {
       } else {
         (&work[previous].texture, &work[previous].view)
       };
-      let output = if floats[ordinal] {
+      let last_resizes = resized_to.is_some() && ordinal + 1 == passes.len();
+      let output = if last_resizes {
+        &resized.as_ref().expect("made for the chain").0.view
+      } else if floats[ordinal] {
         &float_work.as_ref().expect("made for the chain")[ordinal % 2].view
       } else {
         &work[ordinal % 2].view
@@ -430,17 +466,25 @@ impl LiveRenderer {
       });
       compute.set_pipeline(&pipeline.pipeline);
       compute.set_bind_group(0, &bind_group, &[]);
-      compute.dispatch_workgroups(width.div_ceil(WORKGROUP_SIZE), height.div_ceil(WORKGROUP_SIZE), 1);
+      let (dispatch_width, dispatch_height) = if last_resizes { resized_to.unwrap_or((width, height)) } else { (width, height) };
+      compute.dispatch_workgroups(dispatch_width.div_ceil(WORKGROUP_SIZE), dispatch_height.div_ceil(WORKGROUP_SIZE), 1);
     }
     self.ctx.submit(encoder.finish());
 
-    self.output = if passes.is_empty() { Output::Source } else { Output::Work((passes.len() - 1) % 2) };
+    self.output = if resized_to.is_some() {
+      Output::Resized
+    } else if passes.is_empty() {
+      Output::Source
+    } else {
+      Output::Work((passes.len() - 1) % 2)
+    };
     Ok(())
   }
 
   /// The texture holding the last rendered frame, for presenting or copying on the GPU.
   pub fn output_texture(&self) -> Option<&wgpu::Texture> {
     match (self.output, &self.source, &self.work) {
+      (Output::Resized, _, _) => self.resized.as_ref().map(|(target, _, _)| &target.texture),
       (Output::Source, Some((source, _, _)), _) => Some(&source.texture),
       (Output::Work(index), _, Some(work)) => Some(&work[index].texture),
       _ => None,
@@ -493,7 +537,7 @@ impl LiveRenderer {
   /// id. Returns `None` when every staging buffer is still in flight; try again after a later
   /// [`poll_frame`](Self::poll_frame).
   pub fn request_frame(&mut self) -> Result<Option<u64>> {
-    let (width, height) = self.size().ok_or_else(|| anyhow!("set_source must be called before request_frame"))?;
+    let (width, height) = self.output_size().ok_or_else(|| anyhow!("set_source must be called before request_frame"))?;
     let texture = self.output_texture().cloned().ok_or_else(|| anyhow!("nothing has been rendered"))?;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
     let padded = (4 * width as usize).div_ceil(align) * align;
@@ -845,6 +889,10 @@ impl GpuSession for LiveRenderer {
   fn read_pixels(&mut self) -> std::result::Result<Vec<u8>, String> {
     LiveRenderer::read_pixels(self).map_err(|e| e.to_string())
   }
+
+  fn output_size(&self) -> Option<(u32, u32)> {
+    LiveRenderer::output_size(self)
+  }
 }
 
 #[cfg(test)]
@@ -898,6 +946,56 @@ mod tests {
     let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
     let result = renderer.process(&[vec![GpuPass::new(SCALE_UP, Vec::new())]], 8, 8, &ramp(8, 8));
     assert!(result.is_err());
+    Ok(())
+  }
+
+  /// Writes each pixel of a larger image from the nearest pixel of the one it reads.
+  const NEAREST: &str = "
+    @group(0) @binding(0) var input_tex: texture_2d<f32>;
+    @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let source = vec2<i32>(textureDimensions(input_tex));
+      let size = vec2<i32>(textureDimensions(output_tex));
+      let pos = vec2<i32>(gid.xy);
+      if (pos.x >= size.x || pos.y >= size.y) { return; }
+      let taken = min(pos * source / size, source - vec2<i32>(1));
+      textureStore(output_tex, pos, textureLoad(input_tex, taken, 0));
+    }";
+
+  #[test]
+  fn a_last_pass_with_an_output_size_makes_an_image_of_that_size() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels = ramp(3, 2);
+    renderer.set_source(3, 2, &pixels)?;
+    assert_eq!(renderer.output_size(), Some((3, 2)));
+    renderer.render(&[vec![GpuPass::new(NEAREST, Vec::new()).with_output(6, 4)]])?;
+    assert_eq!(renderer.output_size(), Some((6, 4)), "the size of what was made, not of the source");
+    assert_eq!(renderer.size(), Some((3, 2)), "the source is still its own size");
+    let out = renderer.read_pixels()?;
+    assert_eq!(out.len(), 6 * 4 * 4);
+    // Every pixel of the 6 x 4 image is the pixel of the 3 x 2 one it covers.
+    for y in 0..4usize {
+      for x in 0..6usize {
+        let from = (y / 2 * 3 + x / 2) * 4;
+        assert_eq!(out[(y * 6 + x) * 4..(y * 6 + x) * 4 + 4], pixels[from..from + 4], "pixel {x},{y}");
+      }
+    }
+    // Rendering again without an output size goes back to the source's size.
+    renderer.render(&[])?;
+    assert_eq!(renderer.output_size(), Some((3, 2)));
+    assert_eq!(renderer.read_pixels()?, pixels);
+    Ok(())
+  }
+
+  #[test]
+  fn only_the_last_pass_can_write_an_image_of_another_size() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let resize = GpuPass::new(NEAREST, Vec::new()).with_output(6, 4);
+    let copy = GpuPass::new(NEAREST, Vec::new());
+    assert!(renderer.process(&[vec![resize.clone(), copy.clone()]], 3, 2, &ramp(3, 2)).is_err());
+    assert!(renderer.process(&[vec![copy.clone(), resize]], 3, 2, &ramp(3, 2)).is_ok());
+    assert!(renderer.process(&[vec![GpuPass::new(NEAREST, Vec::new()).with_output(0, 4)]], 3, 2, &ramp(3, 2)).is_err());
     Ok(())
   }
 

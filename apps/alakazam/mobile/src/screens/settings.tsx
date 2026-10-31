@@ -11,6 +11,8 @@ import {
   exportQuality$,
   developerModeEnabled,
   developerModeEnabled$,
+  skipPluginHashChecks,
+  skipPluginHashChecks$,
   workerStackInEffect,
   workerStackInEffect$,
   workerStackMegabytes,
@@ -39,6 +41,7 @@ export function SettingsScreen() {
   const stack = useObservable(workerStackMegabytes$, workerStackMegabytes.value);
   const stackInEffect = useObservable(workerStackInEffect$, workerStackInEffect.value);
   const developerMode = useObservable(developerModeEnabled$, developerModeEnabled.value);
+  const skipHashes = useObservable(skipPluginHashChecks$, skipPluginHashChecks.value);
   const iconRefs = useRef<Record<string, ElementRef<typeof Pressable> | null>>({});
   /** The setting whose tooltip is open and the window point just under its icon, or null. */
   const [tip, setTip] = useState<{ key: string; x: number; y: number } | null>(null);
@@ -51,6 +54,8 @@ export function SettingsScreen() {
         return;
       }
     }
+    // The hash switch is only shown in developer mode, so leaving it must not leave the checks off out of sight.
+    if (!enabled) skipPluginHashChecks.next(false);
     developerModeEnabled.next(enabled);
   };
   const styles = useMemo(
@@ -281,6 +286,22 @@ export function SettingsScreen() {
               trackColor={{ true: colors.accent }}
             />
           </View>
+          {developerMode && (
+            <View style={styles.toolbarHistoryRow}>
+              <View style={styles.toolbarHistoryCopy}>
+                <Text style={styles.sectionTitle}>Skip plugin hash checks</Text>
+                <Text style={styles.tooltipText}>
+                  Install plugins without checking their SHA-256 hashes. Only use this for plugins you are building yourself.
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Skip plugin hash checks"
+                value={skipHashes}
+                onValueChange={enabled => skipPluginHashChecks.next(enabled)}
+                trackColor={{ true: colors.accent }}
+              />
+            </View>
+          )}
         </View>
       </ScrollView>
 

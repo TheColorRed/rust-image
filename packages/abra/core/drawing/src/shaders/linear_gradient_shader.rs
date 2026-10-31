@@ -1,13 +1,12 @@
 use crate::Shader;
-use abra_core::{Gradient, Path};
+use abra_core::{ClosestQuery, Gradient, Path};
 
 /// Linear gradient shader that maps a parameter t along a `Path` to a color.
 ///
-/// The path is used to compute a 0..1 parameter `t` for each sample via
-/// `Path::closest_time`, then the gradient returns the interpolated color
-/// for `t`.
+/// The path is flattened once and used to compute a 0..1 parameter `t` for each sample the
+/// way `Path::closest_time` does, then the gradient returns the interpolated color for `t`.
 pub(crate) struct LinearGradientShader {
-  path: Path,
+  path: ClosestQuery,
   gradient: Gradient,
 }
 
@@ -24,7 +23,7 @@ impl LinearGradientShader {
   /// ```
   pub fn new(p_path: Path, p_gradient: Gradient) -> Self {
     LinearGradientShader {
-      path: p_path,
+      path: p_path.closest_query(1.0),
       gradient: p_gradient,
     }
   }

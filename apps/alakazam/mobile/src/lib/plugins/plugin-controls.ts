@@ -1,7 +1,8 @@
+import { Subscription } from 'rxjs';
 import { pluginsFolder, readPluginScript, scanPlugins, type PluginInfo } from '@alakazam/mobile';
 import { EDIT_SECTIONS, leafControls, type EditControl } from '@/src/lib/project/edit-sections';
 import { insertControls, removeControls } from '@/src/lib/plugins/control-insertion';
-import type { ControlScript } from '@/src/lib/plugins/host-api';
+import type { ControlScript } from '@/src/lib/plugins/sdk-runtime';
 import { pluginModules } from '@/src/lib/plugins/plugin-host';
 import { runPluginScript } from '@/src/lib/plugins/plugin-script';
 import { resolveRoot, type Place, type PlaceMaker } from '@/src/lib/plugins/root-path';
@@ -78,6 +79,9 @@ const maker: PlaceMaker = {
 /** Puts the controls of one plugin in the editor, each where its `plugin.yml` says. Puts nothing in when any of them fails. */
 function loadControls(plugin: PluginInfo): Loaded {
   const undos: (() => void)[] = [];
+  // What the plugin's controls listen to through `events` ends when they are taken out.
+  const events = new Subscription();
+  undos.push(() => events.unsubscribe());
   removePluginInspectorItems(plugin.id);
   try {
     // Plugin controls may outlive this module during Fast Refresh. Clear the whole plugin namespace before loading the current version.
@@ -92,7 +96,7 @@ function loadControls(plugin: PluginInfo): Loaded {
       // The controls go under the root, and under the groups of their own path, if the path has any.
       const root = [control.root, ...names.slice(0, -1)].join('/');
       const what = `${plugin.name}: ${control.path}`;
-      const made = runPluginScript(readPluginScript(control.entryPath), pluginModules(plugin.id), what).default;
+      const made = runPluginScript(readPluginScript(control.entryPath), pluginModules(plugin.id, events), what).default;
       if (typeof made !== 'function') throw new Error(`${what} has no default export that is a function.`);
       // The plugin's yml says what the control is called, so the label people see is the name there.
       const placed = { ...(made as ControlScript)(), label: name } as EditControl;

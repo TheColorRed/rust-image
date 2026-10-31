@@ -8,6 +8,10 @@ pub type RGBA = (u8, u8, u8, u8);
 
 /// How a source color combines with the destination color beneath it, before the source's alpha composites the
 /// result over the destination. The names and behavior follow the common image-editor blend modes.
+/// The WGSL of every blend mode and of the source-over step that puts the result on the destination: `blend_rgb` and `composite`. A shader
+/// that blends something over an image starts with it, since WGSL has no include, and its blend mode is [`BlendMode::shader_index`].
+pub const BLEND_MODES_WGSL: &str = include_str!("./blend_modes.wgsl");
+
 #[derive(Clone, Copy, Debug, Default)]
 pub enum BlendMode {
   /// The source color replaces the destination. Default.

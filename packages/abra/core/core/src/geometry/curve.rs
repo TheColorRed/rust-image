@@ -118,6 +118,31 @@ impl Curve {
     }
   }
 
+  /// A straight line from `p_start` at `x` of `0` to `p_end` at `x` of `255`. The values are not limited to `0..=255`,
+  /// so it can be any quantity that changes steadily across the range, such as a size that shrinks, and a start equal to
+  /// the end gives a level line.
+  /// - `p_start`: The `y` at the start.
+  /// - `p_end`: The `y` at the end.
+  pub fn from_to(p_start: f32, p_end: f32) -> Curve {
+    Curve {
+      path: Path::line((0.0, p_start), (255.0, p_end)),
+    }
+  }
+
+  /// A cosine wave across `x` of `0` to `255`: it starts at its peak, `p_amplitude`, and falls to `-p_amplitude` and
+  /// back up `p_cycles` times. The values are not limited to `0..=255`. Used as a velocity, one cycle adds up to an
+  /// "S": the thing it moves swings one way, back across where it started and out the other way.
+  /// - `p_amplitude`: How high and how low the wave goes, around `0`.
+  /// - `p_cycles`: How many full waves fit across the range. It should be above `0`.
+  pub fn cosine(p_amplitude: f32, p_cycles: f32) -> Curve {
+    // Four points per half wave keep the line smooth and put the peaks and the zero crossings on a point.
+    let points = ((p_cycles.max(0.0) * 4.0).ceil() as u32).max(1);
+    Curve::new((0..=points).map(|step| {
+      let t = step as f32 / points as f32;
+      (255.0 * t, p_amplitude * (std::f32::consts::TAU * p_cycles * t).cos())
+    }))
+  }
+
   /// Creates a smooth curve that goes through every point.
   ///
   /// The points can be in any order. A point that shares its `x` with another replaces it, the last one given winning,
@@ -273,6 +298,25 @@ mod tests {
   fn no_points_is_the_curve_that_changes_nothing() {
     let table = Curve::new(Vec::<(f32, f32)>::new()).to_table();
     assert!((0..256).all(|index| table[index] == index as u8));
+  }
+
+  #[test]
+  fn from_to_is_a_straight_line_between_the_values() {
+    let curve = Curve::from_to(10.0, 70.0);
+    assert!(close(curve.value(0.0), 10.0));
+    assert!(close(curve.value(127.5), 40.0));
+    assert!(close(curve.value(255.0), 70.0));
+    assert!(close(Curve::from_to(0.0, 255.0).value(100.0), Curve::identity().value(100.0)));
+  }
+
+  #[test]
+  fn a_cosine_wave_peaks_crosses_zero_and_falls() {
+    let curve = Curve::cosine(100.0, 1.0);
+    assert!(close(curve.value(0.0), 100.0));
+    assert!(close(curve.value(63.75), 0.0));
+    assert!(close(curve.value(127.5), -100.0));
+    assert!(close(curve.value(191.25), 0.0));
+    assert!(close(curve.value(255.0), 100.0));
   }
 
   #[test]

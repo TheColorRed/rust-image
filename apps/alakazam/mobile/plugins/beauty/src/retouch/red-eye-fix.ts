@@ -15,7 +15,7 @@ import {
 } from '@abra/core/geometry';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { findFaces, app, owning, release } from '@alakazam/plugin';
+import { findFaces, app, owning, release } from '@alakazam/sdk';
 import { MAKEUP_MODELS } from '../makeup/makeup-models';
 
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */

@@ -1,7 +1,7 @@
 import { devDebug, devWarn } from '@/src/lib/log';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { type Image as AbraPixels } from '@abra/core/image';
-import { personDetectionDownloaded, readImageAsync, type AbraImage, type PersonDetection } from '@alakazam/mobile';
+import { Image as AbraPixels } from '@abra/core/image';
+import { personDetectionDownloaded, type AbraImage, type PersonDetection } from '@alakazam/mobile';
 import { makeupMasks } from '@/src/lib/beauty/makeup-masks';
 import { subjectMask } from '@/src/lib/ai/subject';
 import { toLocalPath } from '@/src/lib/editor/edit-source';
@@ -84,7 +84,7 @@ export const withoutPeople = (project: Project): Project => ({
 /** Reads the saved masks back as they were, so the edits replay with the same masks without running the models. */
 export async function loadSavedMasks(project: Project, photo: AbraImage, isCancelled: () => boolean) {
   const readMask = async (file: string, sameSize: boolean) => {
-    const image = ownedImage(await readImageAsync(toLocalPath(`${project.dir}/${file}`)));
+    const image = ownedImage(await AbraPixels.readAsync(toLocalPath(`${project.dir}/${file}`)));
     const mask = Mask.fromImage(image);
     release(image);
     if (sameSize && (mask.width() !== photo.width() || mask.height() !== photo.height())) {

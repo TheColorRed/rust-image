@@ -1,10 +1,13 @@
 import type { AiModel } from '@abra/core';
 import type { BlendMode } from '@abra/core/blend';
-import type { CanvasLike } from '@abra/core/canvas';
 import type { Rect } from '@abra/core/geometry';
 import type { Image, ImageLike } from '@abra/core/image';
 import type { MaskLike } from '@abra/core/mask';
 
+/** A stream of values from the editor that a plugin can listen to. */
+export type PluginStream<T> = {
+  subscribe(listener: (value: T) => void): { unsubscribe(): void };
+};
 /** Set temporary text for the app's AI pending notice. Set to null to restore its generic text. */
 export declare function setAiPendingNotice(value: AiPendingNoticeText | null): void;
 /** Prefix a plugin-owned control key with the current plugin ID. */
@@ -24,14 +27,21 @@ export type PickedFile = {
 };
 /** Adds a native image picker to the plugin editor inspector. The callback receives the full list of copied local files each time images are added or removed. */
 export declare const inspector: {
-  /** Add a file picker. Set `multiple` to allow multiple files and `thumbs` to show image thumbnails. */
-  filePicker(label: string, options: { multiple?: boolean; thumbs?: boolean; onPick(files: PickedFile[]): void }): void;
+  /** Add a file picker. Set `source` to choose where images come from (`'file-system'` by default, `'projects'` for the app's saved projects, whose edited image is picked, or `'both'`), `multiple` to allow multiple files and `thumbs` to show image thumbnails. */
+  filePicker(label: string, options: { source?: 'file-system' | 'projects' | 'both'; multiple?: boolean; thumbs?: boolean; onPick(files: PickedFile[]): void }): void;
   /** Adds a heading to the plugin editor inspector, like an <h1> to <h6>. `level` defaults to 1. */
   header(text: string, options?: { level?: 1 | 2 | 3 | 4 | 5 | 6 }): void;
   /** Adds two number fields side by side, like a size or a point. `value` defaults to `[0, 0]` and `labels` to `['Width', 'Height']`. `min` and `max` limit both numbers. `onChange` gets both numbers each time one is changed to a number. */
   size(
     label: string,
-    options?: { value?: [number, number]; labels?: [string, string]; reset?: boolean; min?: number; max?: number; onChange?(value: [number, number]): void },
+    options?: {
+      value?: [number, number];
+      labels?: [string, string];
+      reset?: boolean;
+      min?: number;
+      max?: number;
+      onChange?(value: [number, number]): void;
+    },
   ): void;
   /** Adds a bar of buttons to pick one of `options`, across the whole width. `value` defaults to the first. The editor runs the plugin again after `onChange`. */
   select(label: string, options: { options: string[]; value?: string; onChange?(value: string): void }): void;
@@ -40,41 +50,35 @@ export declare const inspector: {
   /** Adds one number field.`value` defaults to `min` (or 0), `step` to 1, and `reset` to true. `min` and `max` limit the number. The editor runs the plugin again after `onChange`. */
   number(
     label: string,
-    options?: { value?: number; min?: number; max?: number; step?: number; reset?: boolean; onChange?(value: number): void },
+    options?: {
+      value?: number;
+      min?: number;
+      max?: number;
+      step?: number;
+      reset?: boolean;
+      onChange?(value: number): void;
+    },
   ): void;
   /** Adds a slider to the plugin editor inspector. `min` defaults to 0, `step` to 1 and `range` to false (one thumb). */
   slider(
     label: string,
-    options: { min?: number; max: number; step?: number; /** The name on a line of its own with the slider under it. Defaults to false, and to true when `range` is true. */ multiline?: boolean; /** A reset button beside the name, which puts the slider back to where it was when the editor opened. Defaults to true. */ reset?: boolean } & (
+    options: {
+      min?: number;
+      max: number;
+      step?: number;
+      /** The name on a line of its own with the slider under it. Defaults to false, and to true when `range` is true. */ multiline?: boolean;
+      /** A reset button beside the name, which puts the slider back to where it was when the editor opened. Defaults to true. */ reset?: boolean;
+    } & (
       | { range?: false; value?: number; onChange?(value: number): void }
       | { range: true; value?: [number, number]; onChange?(value: [number, number]): void }
     ),
   ): void;
 };
-/** One cell of a canvas made by `canvasOfCells`: the picture file that goes in it, and where the cell is and how big it is, in pixels of the canvas. */
-export type PictureCell = {
-  path: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  /** True keeps the picture's own proportions with nothing cropped: the cell shrinks to the largest picture that fits in `width` x `height` and sits in the middle of that place. False scales the picture to cover the cell and crops the rest. */
-  keepAspect: boolean;
-};
-/**
- * A canvas of `width` x `height` with a child canvas for each of `cells`, in order, each holding its picture scaled to cover the cell
- * (the part that does not fit is cropped), at the cell's place. The pictures are read and scaled by the library on worker threads, in
- * parallel, and a file that more than one cell uses is read once, so the app keeps drawing while it works. The child canvases are the
- * canvas's `canvases()`, which can be turned, scaled and moved afterwards. Rejects with the file that could not be read. The plugin owns
- * the canvas and frees it with `release`.
- */
-export declare function canvasOfCells(name: string, width: number, height: number, cells: PictureCell[]): Promise<CanvasLike>;
-/** A random number generator that makes the same numbers every time it is given the same seed, the one the editor's effects use (bokeh, say), so what a plugin makes comes out the same when it is made again. Without a seed it is different each time. */
-export declare class Rand {
-  constructor(seed?: string);
-  /** The next number, from 0 up to and not including 1. */
-  next(): number;
-}
+/** A random number generator that makes the same numbers every time it is given the same seed. */
+export declare function seededRandom(s: string | number): import('rand-seed').default;
+/** A seeded random number generator instance, created by `seededRandom`. */
+export type Rand = import('rand-seed').default;
+
 export type AiPendingNoticeText = { text: string; subText?: string; detail?: string };
 /** Summary of an AI model available to the app. */
 export type AppModel = {
@@ -105,6 +109,36 @@ export declare const app: {
     replaceImage(image: ImageLike, result: ImageLike): void;
     /** Detected subjects with their bounds and masks when analysis is available. */
     subjects(): { id: number; x: number; y: number; width: number; height: number; mask: MaskLike }[];
+  };
+  /**
+   * Read-only streams of what changes in the editor. Call `subscribe` on one to listen; the app cancels every subscription when the plugin
+   * closes, so a plugin never has to unsubscribe. The returned subscription can still be cancelled earlier with `unsubscribe()`. A stream that
+   * holds a current value (areas, history, adjustments, people, aiProgress, historyReady) calls the listener once right away with it.
+   */
+  events: {
+    /** Every area the user has drawn, as polygon points per area key. */
+    areas: PluginStream<{ key: string; points: [number, number][] }[]>;
+    /** The edit history: every step, and how many are applied. */
+    history: PluginStream<{ entries: readonly unknown[]; cursor: number }>;
+    /** Whether the edit history is ready. It is false until the editor session has opened. */
+    historyReady: PluginStream<boolean>;
+    /** The value of every adjustment control, by control key. */
+    adjustments: PluginStream<Record<string, unknown>>;
+    /** People found in the image, or null before analysis has run. */
+    people: PluginStream<{ id: number; x: number; y: number; width: number; height: number }[] | null>;
+    /** Progress of each running AI task from 0 to 1, or null while its length is unknown. */
+    aiProgress: PluginStream<Record<string, number | null>>;
+    /**
+     * A tap on the preview. `x` and `y` are in the preview's pixels from its top-left; `imageX` and `imageY` are the same spot in the photo's
+     * pixels, or null when the tap was off the photo. Does not fire while a plugin listens to `touches`.
+     */
+    taps: PluginStream<{ x: number; y: number; imageX: number | null; imageY: number | null }>;
+    /**
+     * One finger on the preview, from `down` through `move` to `up` (or `cancel` if a second finger or the app took it). Coordinates are as in
+     * `taps`. While a plugin listens, a single finger belongs to the plugin and does not pan the photo; two fingers still pinch and pan. The
+     * touch layer is removed again when the plugin closes.
+     */
+    touches: PluginStream<{ type: 'down' | 'move' | 'up' | 'cancel'; x: number; y: number; imageX: number | null; imageY: number | null }>;
   };
   /** Select, prepare, run, and release AI models. */
   ai: {

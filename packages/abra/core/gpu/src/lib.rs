@@ -10,14 +10,16 @@ pub use gpu_passes::{
   Frame, GpuContext, LiveRenderer, PresentOptions, Presenter, Regions, TileOptions, TiledRenderer, Window, context, present, renderer, tiles,
 };
 
-use abra_core::Settings;
-use abra_core::image::gpu::{GpuPass, GpuProvider, GpuSession, register_gpu_provider};
+use abra_core::image::gpu::{GpuPass, GpuProcessor, GpuProvider, GpuSession, register_gpu_provider, register_warmup};
+use abra_core::transform::{ResizeTarget, resize, rotate};
+use abra_core::Size;
 use std::sync::{Mutex, OnceLock};
 
 /// Register this crate as `core`'s GPU provider.
 ///
 /// When GPU is enabled in settings, the GPU context is created on a background thread so that
-/// startup cost (~200ms) overlaps with other work. A GPU operation that runs before it is ready
+/// startup cost (~200ms) overlaps with other work, and the shaders that were registered with
+/// `register_warmup` are compiled there. A GPU operation that runs before it is ready
 /// waits for it to finish.
 pub fn register() {
   register_gpu_provider(GpuProvider {
@@ -25,9 +27,10 @@ pub fn register() {
     process,
     new_session,
   });
-  if Settings::gpu_enabled() {
-    std::thread::spawn(context);
-  }
+  // Resizing and rotating compile big shaders, which cost the first photo to be scaled or turned about half a second. Warming them up
+  // compiles them now, while the app starts. Other crates add theirs with `register_warmup`. A warm-up also starts the GPU context.
+  register_warmup(|| resize(ResizeTarget::Exact(Size::new(1, 1))).passes(2, 2));
+  register_warmup(|| rotate(45.0).passes(2, 2));
 }
 
 /// The shared GPU context, created once (waiting for it if it is still starting). `None` when no adapter is available.

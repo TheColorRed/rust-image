@@ -78,7 +78,7 @@ mod image_model;
 mod progress;
 
 pub use ai_model::AiModel;
-pub use decode::{AiOutput, Bounds, Decoder, Instance, LabelMap, Landmark, Landmarks};
+pub use decode::{AiOutput, Bounds, Decoder, DepthMap, Instance, LabelMap, Landmark, Landmarks};
 pub use error::AiError;
 pub use input::{Fit, InputSpec, Layout, Placement};
 pub use manifest::{Entry, Manifest};

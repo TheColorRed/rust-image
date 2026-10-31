@@ -103,13 +103,6 @@ pub struct ControlContribution {
   pub entry: String,
 }
 
-impl ControlContribution {
-  /// The control's name: the last name in its path, which is what people see.
-  pub fn name(&self) -> &str {
-    self.path.rsplit('/').next().unwrap_or(&self.path)
-  }
-}
-
 /// A file of a plugin that is downloaded to install it, and the SHA-256 it must have.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PluginFile {

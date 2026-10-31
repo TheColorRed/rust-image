@@ -103,6 +103,12 @@ impl Image {
     Self::from_core(abra_core::Image::read(file).unwrap_or_else(|message| panic!("{message}")))
   }
 
+  /// Reads an image from a file on another thread, so the app keeps running while it is decoded. Fails as `read` does.
+  #[uniffi::constructor]
+  pub async fn read_async(file: String) -> Self {
+    Self::from_core(abra_core::Image::read_async(file).await.unwrap_or_else(|message| panic!("{message}")))
+  }
+
   /// Writes the image to a file; the extension chooses the format.
   pub fn write(&self, file: String, options: Option<WriterOptions>) {
     self.0.read().unwrap().write(file, options).unwrap_or_else(|message| panic!("{message}"));

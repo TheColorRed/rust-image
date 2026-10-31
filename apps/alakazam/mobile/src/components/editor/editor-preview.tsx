@@ -1,9 +1,11 @@
 // @refresh reset
 import { PersonDetectionNotice, PersonDetectionOverlay, personOverlayShown } from '@/src/components/editor/person-detection-overlay';
+import { PluginTouchOverlay } from '@/src/components/editor/plugin-touch-overlay';
 import { ViewControls } from '@/src/components/editor/view-controls';
 import { BlemishReticle } from '@/src/components/tools/blemish-tool';
 import { AreaOutlines } from '@/src/components/tools/color-area-tool';
 import { DrawAreaOverlay } from '@/src/components/tools/draw-area';
+import { pluginTouchListeners$ } from '@/src/state/plugin-touch';
 import { areaDrawKey$, areaDrawMode, areaTarget$ } from '@/src/state/draw-area';
 import { CropGizmos } from '@/src/components/tools/crop-tool';
 import { useBasePreview } from '@/src/hooks/useBasePreview';
@@ -61,6 +63,7 @@ export function EditorPreview() {
   const blemishFocused = useObservable(isBlemishToolFocused$, false);
   const drawingArea = useObservable(areaDrawKey$, null);
   const areaTarget = useObservable(areaTarget$, null);
+  const pluginListening = useObservable(pluginTouchListeners$, 0) > 0;
   const cropFocused = useObservable(isCropToolFocused$, false);
   const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const personSelectionState = useObservable(personSelection$, personSelection.value);
@@ -208,6 +211,7 @@ export function EditorPreview() {
             }}
           />
         ) : null}
+        {pluginListening && !(areaTarget && drawingArea === areaTarget.key) && <PluginTouchOverlay />}
         {cropFocused && <CropGizmos />}
         <ViewControls />
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}

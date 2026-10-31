@@ -1,5 +1,5 @@
 import { BlendMode } from '@abra/core/blend';
-import { toolKey, type EditControl } from '@alakazam/plugin';
+import { toolKey, type EditControl } from '@alakazam/sdk';
 import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 import { applySculpt } from './sculpt';
 

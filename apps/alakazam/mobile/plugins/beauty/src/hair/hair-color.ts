@@ -1,4 +1,4 @@
-﻿import { derivedFor, owning, app, type ToolContext, type Painting } from '@alakazam/plugin';
+﻿import { derivedFor, owning, app, type ToolContext, type Painting } from '@alakazam/sdk';
 const MATTE_UNKNOWN = 0.012;
 import { channelMix, gradientMap, grayscale, invert } from '@abra/core/adjustments';
 import { blend, BlendMode } from '@abra/core/blend';

@@ -25,7 +25,7 @@ pub use homography::Homography;
 pub use line::bresenham;
 pub use line_segment::{LineSegment, Orientation};
 pub use outline::{simplify_points, smoothed_area};
-pub use path::{Path, Segment};
+pub use path::{ClosestQuery, Path, Segment};
 pub use pointf::PointF;
 pub use quad::Quad;
 pub use rect::{Alignment, AspectRatio, PreserveAspectRatio, Rect};

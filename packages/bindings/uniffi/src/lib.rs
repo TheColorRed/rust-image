@@ -35,7 +35,7 @@ mod transform;
 
 pub use abra::abra_core::ResizeTarget;
 pub use abra::canvas::prelude::{
-  AdjustmentLayerType, Anchor, CanvasCell, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
+  AdjustmentLayerType, Anchor, CanvasResizeTarget, CanvasUnit, LayerMove, LayerSize, Origin, OutlinePosition,
 };
 pub use adjustments::{
   AutoColor, AutoTone, BlackWhite, BlackWhitePreset, Brightness, ChannelMix, ColorMultiply, ColorRange, Contrast, CurveChannel, Curves, Exposure, FilterType, GradientMap,
@@ -45,8 +45,8 @@ pub use adjustments::{
   selective_color, threshold, vibrance, curves, black_white,
 };
 pub use ai::{
-  AiListening, AiModel, AiOutput, AiOutputKind, BodyParser, BodySegments, ImageModel, Instance, LabelMap, Listening,
-  ProgressListener,
+  AiListening, AiModel, AiOutput, AiOutputKind, BodyParser, BodySegments, DepthMap, ImageModel, Instance, LabelMap,
+  Listening, ProgressListener,
 };
 pub use beauty::{SkinSmooth, SkinTan, SkinTone, skin_smooth, skin_tan, skin_tone};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};

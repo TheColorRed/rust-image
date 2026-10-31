@@ -23,11 +23,18 @@ import {
   pluginEditorPreviewError,
   pluginEditorPreviewError$,
 } from '@/src/state/plugin-editor';
+import { ExportDialog, type ExportDialogItem } from '@/src/components/export-dialog';
+import { cacheFileUri, shareImageFile, writeImageToGallery } from '@/src/lib/native/media-file';
+import { errorMessage } from '@/src/lib/utils/error-message';
+import { release } from '@/src/lib/native/native-handles';
+import { exportFormat, exportQuality, type ExportFormat } from '@/src/state/settings';
 import ListSortDescending from 'lucide-react-native/icons/list-sort-descending';
+import Save from 'lucide-react-native/icons/save';
+import Share2 from 'lucide-react-native/icons/share-2';
 import X from 'lucide-react-native/icons/x';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useObservable } from 'react-rx';
-import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type PluginWorkspaceScreenInfo = PluginWorkspaceInfo;
@@ -53,6 +60,58 @@ export function PluginEditorScreen({
   const selection = useSelection();
   const wideLayout = width >= 700;
   const [hotUpdate, setHotUpdate] = useState(0);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [exportUri, setExportUri] = useState('');
+  const exportItems = useMemo(() => [{ id: 'workspace', uri: exportUri, name: `${workspace.title}.jpg` }], [exportUri, workspace.title]);
+
+  /** The save menu shows its picture from a file, so the canvas on show is written to the cache once, as the menu opens. */
+  const openSave = async () => {
+    const canvas = pluginEditorCanvas.value;
+    if (!canvas) return;
+    const image = canvas.asImage();
+    try {
+      const uri = await cacheFileUri(`${workspace.title}-preview.jpg`);
+      image.write(decodeURIComponent(uri.replace(/^file:\/\//, '')), { quality: 90 });
+      setExportUri(uri);
+      setSaveOpen(true);
+    } catch (failure) {
+      Alert.alert('Could not open the save menu', errorMessage(failure));
+    } finally {
+      release(image);
+    }
+  };
+
+  /** Writes the canvas on show to the cache in the saved format and quality, and opens the phone's share sheet with it. */
+  const shareWorkspace = async () => {
+    const canvas = pluginEditorCanvas.value;
+    if (!canvas || sharing) return;
+    setSharing(true);
+    const image = canvas.asImage();
+    try {
+      const uri = await cacheFileUri(`${workspace.title}.${exportFormat.value}`);
+      image.write(decodeURIComponent(uri.replace(/^file:\/\//, '')), { quality: exportQuality.value });
+      // Not deleted here: the app picked in the share sheet reads the file later.
+      await shareImageFile(uri);
+    } catch (failure) {
+      Alert.alert('Could not share the picture', errorMessage(failure));
+    } finally {
+      release(image);
+      setSharing(false);
+    }
+  };
+
+  /** Flattens the canvas on show once, writes it where the editor's save does, and frees the flattened picture. */
+  const saveWorkspace = async (_item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) => {
+    const canvas = pluginEditorCanvas.value;
+    if (!canvas) throw new Error('There is nothing to save yet.');
+    const image = canvas.asImage();
+    try {
+      await writeImageToGallery(image, fileName, format, quality);
+    } finally {
+      release(image);
+    }
+  };
 
   useEffect(() => {
     const subscription = pluginEditorDevUpdate$.subscribe(pluginId => {
@@ -62,8 +121,10 @@ export function PluginEditorScreen({
   }, [workspace.pluginId]);
 
   // The workspace is run by the host (see `plugin-workspace`); this screen only lays out what it made.
+  // The project this workspace saves into. It starts as the one that was opened, or empty until the first picture is picked.
+  const project = useRef(workspace.project);
   useEffect(
-    () => openPluginWorkspace(workspace),
+    () => openPluginWorkspace(workspace, project),
     [workspace.entryPath, workspace.pluginId, workspace.title, hotUpdate],
   );
 
@@ -89,19 +150,50 @@ export function PluginEditorScreen({
       <EditorToolbar
         onClose={onClose}
         rightActions={
-          hasInspector && !wideLayout ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open inspector"
-              accessibilityState={{ expanded: inspectorOpen }}
-              style={styles.inspectorButton}
-              onPress={() => pluginEditorInspectorOpen.next(!pluginEditorInspectorOpen.value)}
-              hitSlop={8}
-            >
-              <ListSortDescending size={20} color="#fff" />
-            </Pressable>
-          ) : null
+          <>
+            {workspaceCanvas ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Save to device"
+                style={styles.inspectorButton}
+                onPress={openSave}
+                hitSlop={8}
+              >
+                <Save size={22} color="#fff" />
+              </Pressable>
+            ) : null}
+            {workspaceCanvas ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Share"
+                style={[styles.inspectorButton, sharing && { opacity: 0.5 }]}
+                disabled={sharing}
+                onPress={shareWorkspace}
+                hitSlop={8}
+              >
+                <Share2 size={22} color="#fff" />
+              </Pressable>
+            ) : null}
+            {hasInspector && !wideLayout ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open inspector"
+                accessibilityState={{ expanded: inspectorOpen }}
+                style={styles.inspectorButton}
+                onPress={() => pluginEditorInspectorOpen.next(!pluginEditorInspectorOpen.value)}
+                hitSlop={8}
+              >
+                <ListSortDescending size={20} color="#fff" />
+              </Pressable>
+            ) : null}
+          </>
         }
+      />
+      <ExportDialog
+        items={exportItems}
+        visible={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        onSaveImage={saveWorkspace}
       />
 
       <View style={styles.workspace}>

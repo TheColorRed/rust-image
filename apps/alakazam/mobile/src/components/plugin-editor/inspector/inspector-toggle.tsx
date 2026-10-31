@@ -40,7 +40,9 @@ export const InspectorToggle = memo(function InspectorToggle({
         onValueChange={toggle}
         trackColor={{ false: colors.chip, true: colors.accent }}
         thumbColor="#fff"
-        style={{ alignSelf: 'flex-start' }}
+        // Scaled about its left edge, so it stays lined up with the controls above and below it. A transform does not change layout, so the
+        // switch still takes the height of a full-size one (about 28 dp) and the negative margin gives back what the scaling took.
+        style={{ alignSelf: 'flex-start', transform: [{ scale: 0.8 }], transformOrigin: 'left center', marginVertical: -3 }}
       />
     </InspectorRow>
   );

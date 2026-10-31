@@ -96,6 +96,52 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
     }
   }
 
+  /** Makes a project folder for a plugin workspace, which has no source photo, and returns the new project as JSON. `pluginJson` is its `plugin` object. */
+  @ReactMethod
+  fun createPluginProject(name: String, pluginJson: String, promise: Promise) {
+    var folder: File? = null
+    try {
+      val id = UUID.randomUUID().toString()
+      folder = folderOf(id)
+      if (!folder.mkdirs()) throw IOException("Could not create the project folder")
+      val now = System.currentTimeMillis()
+      writeProjectFile(
+        folder,
+        JSONObject()
+          .put("version", 2)
+          .put("id", id)
+          .put("name", name)
+          .put("recipe", JSONObject().put("adjustments", JSONObject()).put("appliedActions", JSONArray()))
+          .put("layers", JSONArray())
+          .put("savedCrops", JSONArray())
+          .put("plugin", JSONObject(pluginJson))
+          .put("createdAt", now)
+          .put("modifiedAt", now),
+      )
+      promise.resolve(readProject(folder).toString())
+    } catch (error: Exception) {
+      folder?.deleteRecursively()
+      promise.reject("PROJECT_CREATE_FAILED", "Could not create the project", error)
+    }
+  }
+
+  /** Copies a file (a `content://` or `file://` URI) into a project's folder as `pick-<random>-<name>` and returns that name. `writeProject` deletes the ones the project no longer lists. */
+  @ReactMethod
+  fun addProjectFile(id: String, sourceUri: String, fileName: String, promise: Promise) {
+    try {
+      val folder = folderOf(id)
+      if (!folder.isDirectory) throw IOException("No such project: $id")
+      val safeName = File(fileName).name.filter { it.isLetterOrDigit() || it == '.' || it == '-' || it == '_' }.ifBlank { "image" }
+      val stored = "pick-${UUID.randomUUID().toString().take(8)}-$safeName"
+      context.contentResolver.openInputStream(Uri.parse(sourceUri))?.use { input ->
+        FileOutputStream(File(folder, stored)).use { output -> input.copyTo(output) }
+      } ?: throw IOException("Could not open the file: $sourceUri")
+      promise.resolve(stored)
+    } catch (error: Exception) {
+      promise.reject("PROJECT_FILE_FAILED", "Could not add the file to the project", error)
+    }
+  }
+
   /** Every project as JSON, newest first. A folder without a readable project.json is skipped, not fatal. */
   @ReactMethod
   fun listProjects(promise: Promise) {
@@ -128,8 +174,15 @@ class ProjectStoreModule(private val context: ReactApplicationContext) : ReactCo
       for (index in 0 until layers.length()) {
         layers.optJSONObject(index)?.optString("file")?.takeIf(String::isNotEmpty)?.let(retained::add)
       }
+      // A plugin project keeps the pictures its controls picked: `plugin.pickers` is { control key: [{ name, file }] }.
+      val pickers = project.optJSONObject("plugin")?.optJSONObject("pickers")
+      pickers?.keys()?.forEach { key ->
+        val files = pickers.optJSONArray(key) ?: return@forEach
+        for (index in 0 until files.length()) files.optJSONObject(index)?.optString("file")?.takeIf(String::isNotEmpty)?.let(retained::add)
+      }
       folder.listFiles { entry ->
-        (entry.name.startsWith("result") || entry.name.startsWith("base-") || entry.name.startsWith("layer-")) && entry.name !in retained
+        (entry.name.startsWith("result") || entry.name.startsWith("base-") || entry.name.startsWith("layer-") || entry.name.startsWith("pick-")) &&
+          entry.name !in retained
       }?.forEach { it.delete() }
       promise.resolve(null)
     } catch (error: Exception) {

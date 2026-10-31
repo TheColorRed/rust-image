@@ -1,0 +1,13 @@
+[package]
+name = "depth"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+abra-ai-core = { workspace = true, features = ["onnx"] }
+tools = { workspace = true }
+
+[[bin]]
+name = "depth"
+path = "main.rs"

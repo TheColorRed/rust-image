@@ -128,7 +128,13 @@ impl<'a> Rasterizer<'a> {
     let row_len = width as usize * 4;
 
     pixels.par_chunks_mut(row_len).enumerate().skip(min_y).take(max_y - min_y).for_each(|(y, row)| {
-      for x in min_x..max_x {
+      // Only the part of the row the shape can be in is looked at.
+      let (row_min_x, row_max_x) = match self.coverage.row_span(y) {
+        Some((left, right)) if left <= right => ((left.floor().max(min_x as f32)) as usize, (right.ceil().min(max_x as f32)) as usize),
+        Some(_) => return,
+        None => (min_x, max_x),
+      };
+      for x in row_min_x..row_max_x {
         // Accumulate coverage and color samples
         let mut coverage_count = 0.0;
         let mut r_sum = 0.0;

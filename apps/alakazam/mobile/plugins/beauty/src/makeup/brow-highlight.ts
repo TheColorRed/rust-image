@@ -3,7 +3,7 @@ import {
   swatchesOf,
   toolKey,
   type EditControl,
-} from '@alakazam/plugin';
+} from '@alakazam/sdk';
 import { applyEyeMakeup } from './eye-makeup';
 import { faceColors } from './face-colors';
 import { MAKEUP_MODELS, makeupMasks } from './makeup-models';

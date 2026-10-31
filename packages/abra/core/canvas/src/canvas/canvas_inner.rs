@@ -48,6 +48,9 @@ pub(crate) struct CanvasInner<'a> {
   pub result: Image,
   /// Whether the canvas has been manually resized and needs to skip update_canvas on save.
   needs_recompose: Cell<bool>,
+  /// Whether how the canvas sits in its parent (position, rotation, scale, blend mode, opacity) changed since the parent last composed.
+  /// The canvas's own picture does not depend on these, so only the parent has to compose again.
+  placement_changed: Cell<bool>,
   /// The anchor point for positioning relative to the parent canvas.
   anchor: Option<Anchor>,
   /// The rotation in degrees for positioning within the parent canvas.
@@ -87,6 +90,7 @@ impl<'a> CanvasInner<'a> {
       x: Cell::new(0),
       y: Cell::new(0),
       needs_recompose: Cell::new(true),
+      placement_changed: Cell::new(false),
       anchor: None,
       rotation: Cell::new(None),
       scale: Cell::new(1.0),
@@ -129,15 +133,21 @@ impl<'a> CanvasInner<'a> {
     self.needs_recompose.set(true);
   }
 
-  /// Whether the canvas, or any canvas inside it, has changed since it was last composed.
+  /// Whether the canvas, or any canvas inside it, has changed since it was last composed, or it has been moved, turned or otherwise
+  /// placed differently in its parent since the parent last composed.
   pub fn is_dirty(&self) -> bool {
-    self.tree_is_dirty()
+    self.placement_changed.get() || self.tree_is_dirty()
   }
 
-  /// Whether this canvas or any canvas inside it has changed since it was last composed. A change inside a child canvas only
-  /// marks that child, so the canvas above it has to look down the tree to know its picture is out of date.
+  /// Whether this canvas's own picture is out of date: it, or a canvas inside it, has changed since it was last composed, or a canvas
+  /// inside it is placed differently. A change inside a child canvas only marks that child, so the canvas above it has to look down
+  /// the tree.
   fn tree_is_dirty(&self) -> bool {
-    self.needs_recompose.get() || self.canvases.iter().any(|child| child.lock().unwrap().tree_is_dirty())
+    self.needs_recompose.get()
+      || self.canvases.iter().any(|child| {
+        let child = child.lock().unwrap();
+        child.placement_changed.get() || child.tree_is_dirty()
+      })
   }
 
   /// Queues proportional scaling for direct layers, then recurses into child canvases.
@@ -290,14 +300,14 @@ impl<'a> CanvasInner<'a> {
 
     let mut canvas = Image::new(width, height);
 
-    // First pass: Apply anchors and recursively update child canvases
+    // First pass: Apply anchors and update the child canvases whose own picture is out of date. A child that was only placed
+    // differently (turned, scaled, moved) keeps the picture it has, which is drawn into this one below.
     for child_inner_rc in self.canvases.iter() {
       let mut child_inner = child_inner_rc.lock().unwrap();
       child_inner.apply_anchor_with_parent_dimensions(width as i32, height as i32);
-      drop(child_inner);
-
-      let mut child_inner_mut = child_inner_rc.lock().unwrap();
-      child_inner_mut.update_canvas();
+      if child_inner.tree_is_dirty() {
+        child_inner.update_canvas();
+      }
     }
 
     // Materialize text and transforms only after child attachment and resolution inheritance settle.
@@ -325,8 +335,12 @@ impl<'a> CanvasInner<'a> {
 
     final_image.set_resolution(self.resolution);
     self.result = final_image;
-    // Mark canvas as recomposed
+    // Mark canvas as recomposed, with the placement of everything inside it drawn
     self.needs_recompose.set(false);
+    self.placement_changed.set(false);
+    for child in &self.canvases {
+      child.lock().unwrap().placement_changed.set(false);
+    }
   }
 
   /// Composite this canvas' layers and children into the destination image, honoring pass-through.
@@ -477,7 +491,7 @@ impl<'a> CanvasInner<'a> {
   pub fn set_global_position(&mut self, p_x: i32, p_y: i32) {
     self.x.set(p_x);
     self.y.set(p_y);
-    self.mark_dirty();
+    self.placement_changed.set(true);
   }
 
   /// Gets the position of the canvas.
@@ -488,13 +502,13 @@ impl<'a> CanvasInner<'a> {
   /// Sets the rotation in degrees for the canvas within its parent.
   pub fn set_rotation(&mut self, p_degrees: impl Into<Option<f32>>) {
     self.rotation.set(p_degrees.into());
-    self.mark_dirty();
+    self.placement_changed.set(true);
   }
 
   /// Sets the factor the canvas is scaled by within its parent, about its middle. 1 is its own size; a factor below 0 is 0.
   pub fn set_scale(&mut self, p_factor: f32) {
     self.scale.set(p_factor.max(0.0));
-    self.mark_dirty();
+    self.placement_changed.set(true);
   }
 
   /// Gets the factor the canvas is scaled by within its parent.
@@ -510,7 +524,7 @@ impl<'a> CanvasInner<'a> {
   /// Sets the blend mode used when compositing this canvas into a parent.
   pub fn set_blend_mode(&mut self, p_blend: BlendMode) {
     self.blend_mode = p_blend;
-    self.mark_dirty();
+    self.placement_changed.set(true);
   }
 
   /// Gets the blend mode used for compositing this canvas.
@@ -540,7 +554,7 @@ impl<'a> CanvasInner<'a> {
   /// Sets the canvas opacity (0.0-1.0) when composited into the parent.
   pub fn set_opacity(&mut self, p_opacity: f32) {
     self.opacity.set(p_opacity.clamp(0.0, 1.0));
-    self.mark_dirty();
+    self.placement_changed.set(true);
   }
 
   /// Gets the canvas opacity.
@@ -607,6 +621,30 @@ impl<'a> CanvasInner<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn placing_a_child_differently_composes_the_parent_but_not_the_child() {
+    let gray = |value: u8| Arc::new(Image::new_from_color(4, 4, abra_core::Color::from_rgba(value, value, value, 255)));
+    let mut root = CanvasInner::new_blank("root", 4, 4);
+    let child = Arc::new(Mutex::new(CanvasInner::new_blank("child", 4, 4)));
+    child.lock().unwrap().add_layer(LayerInner::new("inner", gray(50)));
+    root.add_canvas_rc(child.clone(), None);
+    root.update_canvas();
+    assert!(!root.is_dirty());
+
+    // The child's picture is replaced by a red one that nothing but a composition of the child would put back.
+    child.lock().unwrap().result = Image::new_from_color(4, 4, abra_core::Color::from_rgba(255, 0, 0, 255));
+    child.lock().unwrap().set_opacity(1.0);
+    assert!(root.is_dirty(), "placing a child differently makes the parent dirty");
+    root.update_canvas();
+    assert_eq!(root.result.get_pixel(1, 1), Some((255, 0, 0, 255)), "the child kept its picture and the parent drew it");
+    assert!(!root.is_dirty(), "composing the parent clears it");
+
+    // A change to what is in the child composes the child again.
+    child.lock().unwrap().add_layer(LayerInner::new("more", gray(180)));
+    root.update_canvas();
+    assert_eq!(root.result.get_pixel(1, 1), Some((180, 180, 180, 255)));
+  }
 
   #[test]
   fn explicit_child_resolution_overrides_parent_inheritance() {

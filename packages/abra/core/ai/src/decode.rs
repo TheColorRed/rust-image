@@ -8,6 +8,7 @@
 //! |---|---|---|
 //! | `semantic-mask` | a score for every class at every pixel | [`AiOutput::Mask`]: how likely the chosen classes are |
 //! | `matte` | one value from 0 to 1 at every pixel (matting) | [`AiOutput::Mask`]: the model's alpha as it is |
+//! | `depth` | one distance value at every pixel, any range (depth estimation) | [`AiOutput::Depth`]: nearest is `1`, farthest is `0` |
 //! | `label-map` | a score for every class at every pixel | [`AiOutput::Labels`]: the best class at every pixel |
 //! | `instance-segmentation` | detections and mask prototypes (YOLO) | [`AiOutput::Instances`]: a box and mask for each |
 //! | `landmarks` | points and a presence score | [`AiOutput::Landmarks`] |
@@ -20,6 +21,7 @@ use crate::{
 };
 use abra_core::{Image, PointF, TransformAlgorithm};
 use mask::Mask;
+use rayon::prelude::*;
 
 /// One output tensor: its shape and its values.
 pub type Tensor = (Vec<usize>, Vec<f32>);
@@ -120,6 +122,52 @@ impl LabelMap {
   }
 }
 
+/// How near each pixel of a picture is, as numbers from `0` (the farthest part of the scene) to `1` (the nearest). Unlike a
+/// [`Mask`] it is not rounded to 256 levels, so a slow ramp such as a wall running away from the camera stays smooth.
+#[derive(Clone, Debug)]
+pub struct DepthMap {
+  pub width: u32,
+  pub height: u32,
+  /// One number for each pixel, row by row from the top left.
+  pub values: Vec<f32>,
+}
+
+impl DepthMap {
+  /// The depth scaled to `p_width` by `p_height` with bilinear interpolation.
+  pub fn resized(&self, p_width: u32, p_height: u32) -> DepthMap {
+    let (from_w, from_h) = (self.width as usize, self.height as usize);
+    let (to_w, to_h) = (p_width as usize, p_height as usize);
+    let mut values = vec![0.0f32; to_w * to_h];
+    values.par_chunks_mut(to_w.max(1)).enumerate().for_each(|(y, row)| {
+      let source_y = ((y as f32 + 0.5) * from_h as f32 / to_h as f32 - 0.5).clamp(0.0, from_h as f32 - 1.0);
+      let (y0, fy) = (source_y as usize, source_y.fract());
+      let y1 = (y0 + 1).min(from_h - 1);
+      for (x, slot) in row.iter_mut().enumerate() {
+        let source_x = ((x as f32 + 0.5) * from_w as f32 / to_w as f32 - 0.5).clamp(0.0, from_w as f32 - 1.0);
+        let (x0, fx) = (source_x as usize, source_x.fract());
+        let x1 = (x0 + 1).min(from_w - 1);
+        let top = self.values[y0 * from_w + x0] * (1.0 - fx) + self.values[y0 * from_w + x1] * fx;
+        let bottom = self.values[y1 * from_w + x0] * (1.0 - fx) + self.values[y1 * from_w + x1] * fx;
+        *slot = top * (1.0 - fy) + bottom * fy;
+      }
+    });
+    DepthMap {
+      width: p_width,
+      height: p_height,
+      values,
+    }
+  }
+
+  /// The depth as a mask, nearest white, for looking at or saving. It has 256 levels.
+  pub fn to_mask(&self) -> Mask {
+    Mask::from_values(
+      self.width,
+      self.height,
+      self.values.iter().map(|value| (value * 255.0).round().clamp(0.0, 255.0) as u8).collect(),
+    )
+  }
+}
+
 /// One point of a face or body, with a relative depth. Smaller depths are closer to the camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Landmark {
@@ -142,6 +190,8 @@ pub enum AiOutput {
   Instances(Vec<Instance>),
   Labels(LabelMap),
   Landmarks(Landmarks),
+  /// How near each pixel is, from a depth model (`decoder: depth`).
+  Depth(DepthMap),
   /// A picture, from a model that answers with one (`decoder: image`, read by the `graph` module).
   Image(Image),
 }
@@ -163,6 +213,10 @@ pub struct SemanticMask {
 /// One alpha value at each pixel, read as it is.
 #[derive(Clone, Debug)]
 pub struct Matte;
+
+/// One relative depth at each pixel, stretched to the full range of a mask.
+#[derive(Clone, Debug)]
+pub struct Depth;
 
 /// The best class at each pixel.
 #[derive(Clone, Debug)]
@@ -194,6 +248,7 @@ pub struct LandmarkDecoder {
 pub enum Decoder {
   SemanticMask(SemanticMask),
   Matte(Matte),
+  Depth(Depth),
   LabelMap(LabelMapDecoder),
   InstanceSegmentation(InstanceSegmentation),
   Landmarks(LandmarkDecoder),
@@ -205,6 +260,9 @@ impl Decoder {
   /// - `semantic-mask`: `class_count`, `mask_classes` (the classes that count as the mask) and `output_layout`
   ///   (`nhwc` or `nchw`, default `nchw`).
   /// - `matte`: no params. The first output is `[1, 1, height, width]` at the size of the model's input, from `0` to `1`.
+  /// - `depth`: no params. The first output is `[1, height, width]` or `[1, 1, height, width]` at the size of the model's
+  ///   input, in any range where larger means nearer (relative inverse depth). It is stretched so the nearest pixel is `1`
+  ///   and the farthest `0`.
   /// - `label-map`: `class_count` and `output_layout`; the manifest's `classes` name them.
   /// - `instance-segmentation`: `class`, `confidence_threshold`, `detection_count`, `detection_size`, `mask_channels`
   ///   and `edge_snap`. A detection is `x1, y1, x2, y2, confidence, class, mask coefficients...`.
@@ -227,6 +285,7 @@ impl Decoder {
         Ok(Decoder::SemanticMask(SemanticMask { scores, mask_classes }))
       }
       Some("matte") => Ok(Decoder::Matte(Matte)),
+      Some("depth") => Ok(Decoder::Depth(Depth)),
       Some("label-map") => {
         let scores = scores()?;
         if scores.class_count == 0 || scores.class_count > 256 {
@@ -250,7 +309,7 @@ impl Decoder {
         coordinates_per_landmark: p_manifest.number("coordinates_per_landmark").unwrap_or(3.0) as usize,
       })),
       Some(other) => Err(AiError::config_error(format!(
-        "Unknown decoder `{other}`; use semantic-mask, matte, label-map, instance-segmentation or landmarks"
+        "Unknown decoder `{other}`; use semantic-mask, matte, depth, label-map, instance-segmentation or landmarks"
       ))),
       None => Err(AiError::config_error(format!("The manifest of {} names no `decoder`", p_manifest.name()))),
     }
@@ -266,6 +325,7 @@ impl Decoder {
     match self {
       Decoder::SemanticMask(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Mask),
       Decoder::Matte(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Mask),
+      Decoder::Depth(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Depth),
       Decoder::LabelMap(decoder) => decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Labels),
       Decoder::InstanceSegmentation(decoder) => {
         decoder.decode(p_outputs, p_width, p_height, p_placement).map(AiOutput::Instances)
@@ -346,6 +406,36 @@ impl Matte {
       values.iter().map(|value| (value * 255.0).round().clamp(0.0, 255.0) as u8).collect(),
     );
     Ok(p_placement.restore(&model_mask, p_width, p_height, TransformAlgorithm::Bilinear))
+  }
+}
+
+impl Depth {
+  fn decode(
+    &self, p_outputs: &[Tensor], p_width: u32, p_height: u32, p_placement: &Placement,
+  ) -> Result<DepthMap, AiError> {
+    let (shape, values) =
+      p_outputs.first().ok_or_else(|| AiError::inference_failed("The model returned no outputs"))?;
+    let (width, height) = (p_placement.input_width as usize, p_placement.input_height as usize);
+    if (shape != &[1, height, width] && shape != &[1, 1, height, width]) || values.len() != width * height {
+      return Err(AiError::inference_failed(format!(
+        "Unexpected depth output shape {shape:?}, expected [1, {height}, {width}]"
+      )));
+    }
+    let (near, far) = values.iter().fold((f32::MIN, f32::MAX), |(near, far), value| (near.max(*value), far.min(*value)));
+    let range = (near - far).max(f32::EPSILON);
+    // Cut away the padding the model was given, then scale to the picture.
+    let (from_x, from_y) = (p_placement.pad_x as usize, p_placement.pad_y as usize);
+    let (cut_w, cut_h) = (p_placement.resized_width as usize, p_placement.resized_height as usize);
+    let mut cut = Vec::with_capacity(cut_w * cut_h);
+    for y in from_y..from_y + cut_h {
+      cut.extend(values[y * width + from_x..y * width + from_x + cut_w].iter().map(|value| (value - far) / range));
+    }
+    Ok(DepthMap {
+      width: cut_w as u32,
+      height: cut_h as u32,
+      values: cut,
+    }
+    .resized(p_width, p_height))
   }
 }
 
@@ -633,6 +723,26 @@ mod tests {
     assert!(mask.values().iter().all(|value| *value == 128), "0.5 is 128 of 255");
     assert!(decoder.decode(&[(vec![1, 1, 2, 2], vec![0.0; 4])], 4, 2, &placement).is_err());
     assert!(decoder.decode(&[], 4, 2, &placement).is_err());
+  }
+
+  #[test]
+  fn a_depth_is_stretched_so_the_nearest_pixel_is_one() {
+    let decoder = Decoder::from_manifest(&manifest("decoder: depth
+")).unwrap();
+    let placement = Placement::new(2, 2, 2, 2, Fit::Stretch);
+    let AiOutput::Depth(depth) =
+      decoder.decode(&[(vec![1, 2, 2], vec![-4.0, 0.0, 2.0, 6.0])], 2, 2, &placement).unwrap()
+    else {
+      panic!("a depth is a depth map")
+    };
+    let expected = [0.0, 0.4, 0.6, 1.0];
+    assert!(depth.values.iter().zip(expected).all(|(value, want)| (value - want).abs() < 1e-6), "{:?}", depth.values);
+    assert_eq!(depth.to_mask().values(), &[0, 102, 153, 255]);
+    let bigger = depth.resized(4, 4);
+    assert_eq!((bigger.width, bigger.height, bigger.values.len()), (4, 4, 16));
+    assert!(bigger.values[0] < 0.01 && bigger.values[15] > 0.99, "the corners keep their values");
+    assert!(decoder.decode(&[(vec![1, 3, 3], vec![0.0; 9])], 2, 2, &placement).is_err());
+    assert!(decoder.decode(&[], 2, 2, &placement).is_err());
   }
 
   #[test]

@@ -1,4 +1,4 @@
-import { faceMasks } from '@alakazam/plugin';
+import { faceMasks } from '@alakazam/sdk';
 
 /** Face-analysis model roles required by this plugin's face effects. */
 export const MAKEUP_MODELS = ['person-detection', 'face-parsing', 'face-landmarks'] as const;

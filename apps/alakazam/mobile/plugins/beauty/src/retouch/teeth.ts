@@ -1,4 +1,4 @@
-﻿import { derivedFor, belongsTo, owning, type Painting, type ToolContext } from '@alakazam/plugin';
+﻿import { derivedFor, belongsTo, owning, type Painting, type ToolContext } from '@alakazam/sdk';
 import { brightness, saturation } from '@abra/core/adjustments';
 import { teethMask } from '@abra/core/beauty';
 import { type MaskLike } from '@abra/core/mask';

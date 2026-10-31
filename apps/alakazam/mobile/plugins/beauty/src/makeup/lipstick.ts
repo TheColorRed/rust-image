@@ -10,7 +10,7 @@ import {
   type EditControl,
   type Painting,
   type ToolContext,
-} from '@alakazam/plugin';
+} from '@alakazam/sdk';
 import { lipBlend, lipSwatches } from './lips';
 import { MAKEUP_MODELS, makeupMasks } from './makeup-models';
 

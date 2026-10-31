@@ -11,7 +11,7 @@ export type Placement = {
 };
 
 /** What every style seeds its random numbers with, so a collage made again looks the same. */
-export const SEED = 'collage';
+export const SEED = 'alakazam';
 
 /**
  * A way to lay the pictures out. Each style lives in its own file and says only where the cells go; the collage makes the canvas from

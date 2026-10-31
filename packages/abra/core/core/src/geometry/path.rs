@@ -40,6 +40,49 @@ impl Segment {
   }
 }
 
+/// A path flattened once, to find the closest position on it to many points. Made by [`Path::closest_query`].
+#[derive(Clone, Debug)]
+pub struct ClosestQuery {
+  flattened: Vec<PointF>,
+}
+
+impl ClosestQuery {
+  /// The `t` of the closest position on the path to `(p_x, p_y)`, from 0 at the start to 1 at the end, counted by segments. The
+  /// same as [`Path::closest_time`], and `0.0` when the path has fewer than two points.
+  pub fn closest_time(&self, p_x: f32, p_y: f32) -> f32 {
+    self.closest(PointF::new(p_x, p_y)).map_or(0.0, |(t, _)| t)
+  }
+
+  /// The closest position on the flattened path to `p_query`, as `(t, point)`. A closed path (first point on the last)
+  /// includes its closing segment. `None` when the path has fewer than two points.
+  pub fn closest(&self, p_query: PointF) -> Option<(f32, PointF)> {
+    let flattened = &self.flattened;
+    let len = flattened.len();
+    if len < 2 {
+      return None;
+    }
+
+    let is_closed = flattened[0].distance_to(flattened[len - 1]) < 0.1;
+    let segments = if is_closed { len } else { len - 1 };
+    let mut best = (f32::MAX, 0.0, flattened[0]);
+
+    for i in 0..segments {
+      let (p1, p2) = (flattened[i], flattened[(i + 1) % len]);
+      let segment_vec = p2 - p1;
+      let segment_len_sq = segment_vec.length_squared();
+      let local_t =
+        if segment_len_sq < 1e-4 { 0.0 } else { ((p_query - p1).dot(segment_vec) / segment_len_sq).clamp(0.0, 1.0) };
+      let candidate = p1.lerp(p2, local_t);
+      let distance = p_query.distance_to(candidate);
+      if distance < best.0 {
+        best = (distance, (i as f32 + local_t) / segments as f32, candidate);
+      }
+    }
+
+    Some((best.1, best.2))
+  }
+}
+
 #[derive(Clone, Debug)]
 /// A path represents a geometric shape made of lines and curves.
 /// Paths are geometric utilities that can be used for drawing, following, effects, and more.
@@ -196,30 +239,15 @@ impl Path {
   /// the flattened segments. A closed path (first point on the last) includes its closing segment. `None` when the
   /// path has fewer than two points.
   fn closest(&self, p_query: PointF, p_tolerance: f32) -> Option<(f32, PointF)> {
-    let flattened = self.flatten(p_tolerance);
-    let len = flattened.len();
-    if len < 2 {
-      return None;
-    }
+    self.closest_query(p_tolerance).closest(p_query)
+  }
 
-    let is_closed = flattened[0].distance_to(flattened[len - 1]) < 0.1;
-    let segments = if is_closed { len } else { len - 1 };
-    let mut best = (f32::MAX, 0.0, flattened[0]);
-
-    for i in 0..segments {
-      let (p1, p2) = (flattened[i], flattened[(i + 1) % len]);
-      let segment_vec = p2 - p1;
-      let segment_len_sq = segment_vec.length_squared();
-      let local_t =
-        if segment_len_sq < 1e-4 { 0.0 } else { ((p_query - p1).dot(segment_vec) / segment_len_sq).clamp(0.0, 1.0) };
-      let candidate = p1.lerp(p2, local_t);
-      let distance = p_query.distance_to(candidate);
-      if distance < best.0 {
-        best = (distance, (i as f32 + local_t) / segments as f32, candidate);
-      }
-    }
-
-    Some((best.1, best.2))
+  /// Flattens the path once so that the closest position to many points can be found without flattening it again for each,
+  /// which is what [`Path::closest_time`] and [`Path::closest_point`] do on every call. Use this to look up every pixel of an
+  /// image, for example.
+  /// - `p_tolerance`: How far the flattened line may be from the curves, as in [`Path::flatten`]. [`Path::closest_time`] uses `1.0`.
+  pub fn closest_query(&self, p_tolerance: f32) -> ClosestQuery {
+    ClosestQuery { flattened: self.flatten(p_tolerance) }
   }
 
   /// Maps this path from the `p_source` coordinate system into a viewport of `p_viewport` size, the way an SVG
@@ -373,4 +401,25 @@ fn subdivisions(p_points: &[PointF], p_tolerance: f32) -> usize {
   let control_dist: f32 = p_points.windows(2).map(|pair| pair[0].distance_to(pair[1])).sum();
   let estimate_len = (chord_len + control_dist) * 0.5;
   (estimate_len / p_tolerance).ceil().max(2.0) as usize
+}
+
+#[cfg(test)]
+mod closest_query_tests {
+  use super::*;
+
+  #[test]
+  fn a_query_finds_the_same_places_as_asking_the_path_each_time() {
+    let mut path = Path::new();
+    path.move_to((0.0, 0.0)).quad_to((40.0, 90.0), (100.0, 10.0)).line_to((160.0, 60.0));
+    let query = path.closest_query(1.0);
+    for (x, y) in [(5.0, 5.0), (50.0, 30.0), (99.0, 80.0), (170.0, 70.0), (-20.0, -20.0)] {
+      assert_eq!(query.closest_time(x, y), path.closest_time(x, y));
+    }
+  }
+
+  #[test]
+  fn a_path_with_fewer_than_two_points_has_no_closest_position() {
+    assert_eq!(Path::new().closest_query(1.0).closest_time(3.0, 4.0), 0.0);
+    assert!(Path::new().closest_query(1.0).closest(PointF::new(3.0, 4.0)).is_none());
+  }
 }

@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use abra::abra_core::PointF;
 use abra_ai_core::{
-  AiError, AiModel as Model, AiOutput as Output, Bounds, ControlParams, ImageAi, ImageAiWithControl,
-  ImageModel as ImgModel, Instance as FoundInstance, LabelMap as Labels, Landmark, Landmarks, ReportsProgress,
+  AiError, AiModel as Model, AiOutput as Output, Bounds, ControlParams, DepthMap as Depths, ImageAi,
+  ImageAiWithControl, ImageModel as ImgModel, Instance as FoundInstance, LabelMap as Labels, Landmark, Landmarks,
+  ReportsProgress,
 };
 
 use abra::abra_core::Rect;
@@ -143,6 +144,8 @@ pub enum AiOutputKind {
   Landmarks,
   /// A picture, from a model that answers with one, such as an inpainting model.
   Image,
+  /// How near each pixel is, from a depth model.
+  Depth,
 }
 
 /// One thing the model found: what it is, where, how sure the model is, and its soft silhouette.
@@ -169,6 +172,38 @@ impl Instance {
   /// The soft silhouette, the size of the picture.
   pub fn mask(&self) -> Arc<Mask> {
     Arc::new(Mask::from_core(self.0.mask.clone()))
+  }
+}
+
+/// How near every pixel of a picture is: `1` is the nearest and `0` the farthest.
+#[derive(uniffi::Object)]
+pub struct DepthMap(Depths);
+
+#[uniffi::export]
+impl DepthMap {
+  /// The width in pixels.
+  pub fn width(&self) -> u32 {
+    self.0.width
+  }
+
+  /// The height in pixels.
+  pub fn height(&self) -> u32 {
+    self.0.height
+  }
+
+  /// One number for each pixel, row by row from the top left.
+  pub fn values(&self) -> Vec<f32> {
+    self.0.values.clone()
+  }
+
+  /// The depth scaled to `width` by `height` with bilinear interpolation.
+  pub fn resized(&self, width: u32, height: u32) -> Arc<DepthMap> {
+    Arc::new(DepthMap(self.0.resized(width, height)))
+  }
+
+  /// The depth as a mask, `255` for the nearest and `0` for the farthest.
+  pub fn to_mask(&self) -> Arc<Mask> {
+    Arc::new(Mask::from_core(self.0.to_mask()))
   }
 }
 
@@ -270,6 +305,7 @@ impl AiOutput {
       Output::Labels(_) => AiOutputKind::Labels,
       Output::Landmarks(_) => AiOutputKind::Landmarks,
       Output::Image(_) => AiOutputKind::Image,
+      Output::Depth(_) => AiOutputKind::Depth,
     }
   }
 
@@ -294,6 +330,14 @@ impl AiOutput {
     match &self.0 {
       Output::Image(image) => Ok(Arc::new(Image::from_core(image.clone()))),
       _ => Err(self.wrong_kind("a picture")),
+    }
+  }
+
+  /// How near every pixel is, when the kind is `Depth`.
+  pub fn depth(&self) -> Result<Arc<DepthMap>, AiError> {
+    match &self.0 {
+      Output::Depth(depth) => Ok(Arc::new(DepthMap(depth.clone()))),
+      _ => Err(self.wrong_kind("a depth map")),
     }
   }
 
@@ -501,12 +545,17 @@ mod tests {
     assert!(whole.region_at(0, 0).is_some());
     assert_eq!(whole.mask_of(vec![BodyRegion::Background, BodyRegion::Hair]).width(), 64);
     // Run on a part, the pixels outside it have no region.
-    let part = parser
-      .process_within(image, Rect::new((16, 16), (32, 32)), 0.0)
-      .expect("parsing a part should succeed");
+    let part = parser.process_within(image, Rect::new((16, 16), (32, 32)), 0.0).expect("parsing a part should succeed");
     assert!(part.region_at(20, 20).is_some());
     assert_eq!(part.region_at(0, 0), None);
-    assert_eq!(part.mask(BodyRegion::Background).bounds(0).map(|bounds| bounds.edges::<u32>()).map(|(left, top, _, _)| (left >= 16, top >= 16)), Some((true, true)));
+    assert_eq!(
+      part
+        .mask(BodyRegion::Background)
+        .bounds(0)
+        .map(|bounds| bounds.edges::<u32>())
+        .map(|(left, top, _, _)| (left >= 16, top >= 16)),
+      Some((true, true))
+    );
   }
 
   #[test]
@@ -523,7 +572,8 @@ mod tests {
     let model = AiModel::load(path).expect("the manifest names a picture model");
     let mut covered = vec![0u8; 64 * 64];
     covered[30 * 64 + 30..30 * 64 + 34].fill(255);
-    let output = model.run_guided(photo(64), Arc::new(Mask::from_values(64, 64, covered))).expect("removal should succeed");
+    let output =
+      model.run_guided(photo(64), Arc::new(Mask::from_values(64, 64, covered))).expect("removal should succeed");
     assert_eq!(output.kind(), AiOutputKind::Image);
     assert_eq!((output.image().unwrap().width(), output.image().unwrap().height()), (64, 64));
     assert!(output.mask().is_err(), "asking for the wrong kind fails");
@@ -548,6 +598,7 @@ mod tests {
         AiOutputKind::Labels => assert_eq!(output.labels().unwrap().labels().len(), 64 * 64),
         AiOutputKind::Landmarks => assert_eq!(output.landmarks().unwrap().landmarks.len(), 478),
         AiOutputKind::Image => unreachable!("none of these models answers with a picture"),
+        AiOutputKind::Depth => unreachable!("none of these models answers with a depth map"),
       }
       assert!(
         output.landmarks().is_err() || kind == AiOutputKind::Landmarks,

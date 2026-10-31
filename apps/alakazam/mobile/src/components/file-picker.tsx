@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Alert, Button, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card, CardHeader } from './card';
 import { ImagePreview } from './image-preview';
+import { ProjectImagePicker } from './project-image-picker';
 import { SelectableThumb, useSelection } from './selection';
 
 export interface PickedImage {
@@ -25,6 +26,10 @@ export interface FilePickerProps {
   hideTitle?: boolean;
   showPreview?: boolean;
   multiple?: boolean;
+  /** Where to pick from: the device's files, the saved projects (their edited images), or both. Defaults to `'file-system'`. */
+  source?: 'file-system' | 'projects' | 'both';
+  /** A project to leave out of the project grid, such as the one being edited. */
+  excludeProjectId?: string;
   /** Images to show as thumbnails below the control, for a caller that keeps its own picked list. */
   thumbs?: PickedImage[];
   /** Lets the thumbnails be selected (press and hold one). The caller owns it so it can show the `SelectionBar` at the bottom of the screen. */
@@ -44,6 +49,8 @@ export function FilePicker({
   hideTitle = false,
   showPreview = true,
   multiple = true,
+  source = 'file-system',
+  excludeProjectId,
   thumbs,
   selection,
   style,
@@ -74,8 +81,12 @@ export function FilePicker({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [projectsOpen, setProjectsOpen] = useState(false);
 
-  async function openPicker() {
+  /** The button: the device's chooser, or the project grid (which can hand over to the chooser when the source is both). */
+  const openPicker = source === 'file-system' ? openDevicePicker : () => setProjectsOpen(true);
+
+  async function openDevicePicker() {
     if (picking.current) return;
     picking.current = true;
     try {
@@ -144,6 +155,20 @@ export function FilePicker({
       )}
 
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {source === 'file-system' ? null : (
+        <ProjectImagePicker
+          visible={projectsOpen}
+          multiple={multiple}
+          excludeId={excludeProjectId}
+          onBrowseDevice={source === 'both' ? openDevicePicker : undefined}
+          onPick={assets => {
+            setSelected(assets[assets.length - 1]);
+            onPick?.(assets);
+          }}
+          onClose={() => setProjectsOpen(false)}
+        />
+      )}
 
       {thumbs && thumbs.length > 0 && (
         <View style={styles.thumbRow}>

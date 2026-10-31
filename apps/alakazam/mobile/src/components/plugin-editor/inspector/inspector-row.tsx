@@ -49,11 +49,11 @@ export function InspectorRow({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  name: { width: '36%', minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  name: { width: '36%', minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: 6 },
   control: { flex: 1, minWidth: 0 },
   stacked: { gap: 2 },
   stackedName: { minHeight: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
   stackedControl: { minWidth: 0 },
-  label: { flexShrink: 1, fontSize: 14, fontWeight: '600' },
+  label: { flexShrink: 1, fontSize: 14, fontWeight: '400' },
   reset: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,4 +1,4 @@
-use abra_core::{Channels, Gradient, Image};
+use abra_core::{Channels, Color, ColorStop, Gradient, Image};
 use rayon::prelude::*;
 
 use abra_core::image::gpu::{GpuAux, GpuPass};
@@ -86,6 +86,28 @@ pub fn radial_gradient(
   .render(p_width, p_height)
 }
 
+/// An image of `p_width` x `p_height` pixels that is clear in the middle and `p_color` at the edges, to be blended over a photo to
+/// darken or tint its edges, or to be used as a mask of how far from the middle each pixel is (its alpha runs from `0` to `p_color`'s).
+/// The color's own alpha is how strong the vignette is at its strongest.
+///
+/// The picture is an oval, so a wide image has a wide vignette. Distances are shares of half the image's size, so `1.0` is the middle
+/// of an edge and `sqrt(2)` is a corner.
+/// - `p_color`: The color at the edges, with its alpha as the strength.
+/// - `p_start`: How far from the middle the picture starts to change, so that everything inside it is clear. `0.0` starts at once.
+/// - `p_end`: How far from the middle it reaches `p_color`. Everything beyond is `p_color`. `1.0` is full at the edges, and
+///   `sqrt(2)` is full only in the corners.
+pub fn vignette(p_width: u32, p_height: u32, p_color: Color, p_start: f32, p_end: f32) -> Image {
+  let (half_width, half_height) = (p_width as f32 / 2.0, p_height as f32 / 2.0);
+  let end = p_end.max(f32::EPSILON);
+  let start = (p_start / end).clamp(0.0, 1.0);
+  let gradient = Gradient::new(vec![
+    ColorStop::new(p_color.set_alpha(0), 0.0),
+    ColorStop::new(p_color.set_alpha(0), start),
+    ColorStop::new(p_color, 1.0),
+  ]);
+  radial_gradient(p_width, p_height, &gradient, (half_width, half_height), (half_width * end, half_height * end))
+}
+
 /// [`radial_gradient`] as an image that is made by the GPU when its pixels are first read (see `abra_core::image::recipe`).
 /// Without a GPU it is made now, with the same pixels either way.
 pub fn radial_gradient_deferred(
@@ -123,6 +145,24 @@ mod tests {
     assert_eq!(pixel(&image, 0, 0), [0, 0, 255, 255]);
     let halfway = pixel(&image, 75, 50);
     assert!((halfway[0] as i32 - 128).abs() <= 3 && (halfway[2] as i32 - 128).abs() <= 3, "{halfway:?}");
+  }
+
+  #[test]
+  fn a_vignette_is_clear_inside_its_start_and_full_beyond_its_end() {
+    let image = vignette(201, 101, Color::from_rgba(0, 0, 0, 200), 0.4, 1.0);
+    // The middle and a point inside the start are clear.
+    assert_eq!(pixel(&image, 100, 50)[3], 0);
+    assert_eq!(pixel(&image, 100 + 30, 50)[3], 0);
+    // The middle of an edge, and the corner beyond it, have the color's own alpha.
+    assert!((196..=200).contains(&pixel(&image, 200, 50)[3]), "the last column is a half pixel inside the ring");
+    assert_eq!(pixel(&image, 0, 0)[3], 200);
+    // Between, it ramps up: stronger the farther out, along both axes, with the oval following the shape of the image.
+    let (near, far) = (pixel(&image, 100 + 55, 50)[3], pixel(&image, 100 + 85, 50)[3]);
+    assert!(0 < near && near < far && far < 200, "{near} {far}");
+    let (up_near, up_far) = (pixel(&image, 100, 50 - 22)[3], pixel(&image, 100, 50 - 40)[3]);
+    assert!(0 < up_near && up_near < up_far && up_far <= 200, "{up_near} {up_far}");
+    // The color is the vignette's color.
+    assert_eq!(&pixel(&image, 0, 0)[..3], &[0, 0, 0]);
   }
 
   /// A vignette (a radial gradient blended over a photo, as a tool makes it) drawn in a window at another zoom is the whole

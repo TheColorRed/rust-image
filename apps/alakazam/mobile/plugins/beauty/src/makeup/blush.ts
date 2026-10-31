@@ -8,7 +8,7 @@ import {
   paintSheet,
   type Painting,
   type ToolContext,
-} from '@alakazam/plugin';
+} from '@alakazam/sdk';
 
 const DOWN_TO_MOUTH = 0.4;
 /** How far out from the eye's middle (away from the middle of the face), in eye widths, the blush's middle is moved. */

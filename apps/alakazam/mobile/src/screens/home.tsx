@@ -13,14 +13,15 @@ import { useCameraPhotos } from '@/src/hooks/useCameraPhotos';
 import { toLocalPath } from '@/src/lib/editor/edit-source';
 import { writeImageToGallery } from '@/src/lib/native/media-file';
 import { release } from '@/src/lib/native/native-handles';
-import { projectImageUri, projectSourceUri } from '@/src/lib/project/project-store';
+import { projectImageUri, projectSourceUri, type Project } from '@/src/lib/project/project-store';
 import { useCommonStyles } from '@/src/lib/ui/styles';
 import { useTheme } from '@/src/lib/ui/theme';
 import type { EditablePhoto } from '@/src/screens/editor';
 import type { PluginWorkspaceScreenInfo } from '@/src/screens/plugin-editor';
 import { addProject, projects$, removeProjects } from '@/src/state/projects';
 import type { ExportFormat } from '@/src/state/settings';
-import { pluginsFolder, readImageAsync, scanPlugins } from '@alakazam/mobile';
+import { Image as AbraPixels } from '@abra/core/image';
+import { pluginsFolder, scanPlugins } from '@alakazam/mobile';
 import type { PhotoIdentifier } from '@react-native-camera-roll/camera-roll';
 import CameraIcon from 'lucide-react-native/icons/camera';
 import Blocks from 'lucide-react-native/icons/blocks';
@@ -205,7 +206,7 @@ function CameraRoll({ onAddPhotos }: { onAddPhotos: (photos: EditablePhoto[]) =>
  * Shows the saved projects. Each one is made from a photo (camera roll or file picker), is kept until it is removed,
  * and opens in the editor when tapped.
  */
-function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => void }) {
+function LoadedImages({ onOpenPhoto, onOpenPluginProject }: { onOpenPhoto: (photo: EditablePhoto) => void; onOpenPluginProject: (project: Project) => void }) {
   const { colors } = useTheme();
   const projects = useObservable(projects$, []);
   // Same sizing as the Camera Roll grid, inside this view's 16 padding.
@@ -222,7 +223,7 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
     [exportProjects],
   );
   const saveProjectImage = async (item: ExportDialogItem, fileName: string, format: ExportFormat, quality: number) => {
-    const image = await readImageAsync(toLocalPath(item.uri));
+    const image = await AbraPixels.readAsync(toLocalPath(item.uri));
     try {
       await writeImageToGallery(image, fileName, format, quality);
     } finally {
@@ -263,7 +264,7 @@ function LoadedImages({ onOpenPhoto }: { onOpenPhoto: (photo: EditablePhoto) => 
             <SelectableThumb
               id={project.id}
               selection={selection}
-              onOpen={() => onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project })}
+              onOpen={() => (project.plugin ? onOpenPluginProject(project) : onOpenPhoto({ uri: projectSourceUri(project), fileName: project.name, project }))}
               style={{ width: thumbSize, height: thumbSize, marginBottom: GAP }}
             >
               <Image
@@ -323,6 +324,13 @@ export function HomeScreen({ onOpenPhoto, onOpenPluginEditor }: HomeScreenProps)
       entryPath: workspace.entryPath,
     })));
 
+  /** Opens a saved plugin project in the workspace that made it, if that plugin is still installed. */
+  const openPluginProject = (project: Project) => {
+    const workspace = workspaces.find(candidate => candidate.pluginId === project.plugin?.pluginId && candidate.id === project.plugin?.workspaceId);
+    if (workspace) onOpenPluginEditor({ ...workspace, project });
+    else Alert.alert('Plugin not installed', `${project.name} was made with a plugin that is not installed or is missing something it needs.`);
+  };
+
   /** Makes a project of each photo, from the Camera Roll or the file chooser. One photo opens right away; several stay on the home page. */
   const addPhotos = async (photos: EditablePhoto[]) => {
     const added = (await Promise.all(photos.map(addProject))).filter(project => project !== undefined);
@@ -373,7 +381,7 @@ export function HomeScreen({ onOpenPhoto, onOpenPluginEditor }: HomeScreenProps)
         </ScrollView>
       </View>
 
-      {!showCameraRoll && <LoadedImages onOpenPhoto={onOpenPhoto} />}
+      {!showCameraRoll && <LoadedImages onOpenPhoto={onOpenPhoto} onOpenPluginProject={openPluginProject} />}
       {showCameraRoll && <CameraRoll onAddPhotos={addPhotos} />}
     </View>
   );

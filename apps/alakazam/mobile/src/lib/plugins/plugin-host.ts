@@ -1,21 +1,21 @@
-import * as hostApi from '@/src/lib/plugins/host-api';
 import {
   addPluginFilePicker,
   addPluginHeader,
-  addPluginSlider,
   addPluginNumber,
   addPluginSelect,
   addPluginSize,
+  addPluginSlider,
   addPluginToggle,
   type PluginFilePickerOptions,
   type PluginHeaderOptions,
-  type PluginSliderOptions,
   type PluginNumberOptions,
   type PluginSelectOptions,
   type PluginSizeOptions,
+  type PluginSliderOptions,
   type PluginToggleOptions,
 } from '@/src/lib/plugins/plugin-inspector';
 import type { ScriptModules } from '@/src/lib/plugins/plugin-script';
+import * as sdk from '@/src/lib/plugins/sdk-runtime';
 import * as abra from '@abra/core';
 import * as adjustments from '@abra/core/adjustments';
 import * as beauty from '@abra/core/beauty';
@@ -31,10 +31,11 @@ import * as image from '@abra/core/image';
 import * as mask from '@abra/core/mask';
 import * as tools from '@abra/core/tools';
 import * as transform from '@abra/core/transform';
+import type { Observable, Subscription } from 'rxjs';
 
 /**
- * The modules a plugin script can import: the Abra library, in the same parts the app imports it by, and `@alakazam/plugin` (see
- * `host-api.ts`). A script that imports anything else does not load.
+ * The modules a plugin script can import: the Abra library, in the same parts the app imports it by, and `@alakazam/sdk` (see
+ * `sdk-runtime.ts`). A script that imports anything else does not load.
  */
 const BASE_PLUGIN_MODULES: ScriptModules = {
   '@abra/core': abra,
@@ -52,14 +53,13 @@ const BASE_PLUGIN_MODULES: ScriptModules = {
   '@abra/core/mask': mask,
   '@abra/core/tools': tools,
   '@abra/core/transform': transform,
-  '@alakazam/plugin': hostApi,
-  // Keep already-published plugins working while new plugin projects use @alakazam/plugin.
-  '@alakazam/plugin-toolkit': hostApi,
+  '@alakazam/sdk': sdk,
 };
 
-/** Give each plugin a toolkit instance whose key helper is scoped to its manifest ID. */
+/** Give each plugin a toolkit instance whose key helper is scoped to its manifest ID, and whose event subscriptions end with `subscriptions`. */
 export const pluginModules = (
   pluginId: string,
+  subscriptions: Subscription,
   inspector: {
     filePicker: (label: string, options: PluginFilePickerOptions) => void;
     slider: (label: string, options: PluginSliderOptions) => void;
@@ -78,10 +78,24 @@ export const pluginModules = (
     toggle: (label, options) => addPluginToggle(pluginId, label, options),
   },
 ): ScriptModules => {
+  // Every subscription a plugin makes is added to `subscriptions`, which the caller cancels when the plugin closes.
+  const events = Object.fromEntries(
+    Object.entries(sdk.app.events).map(([name, stream$]) => [
+      name,
+      {
+        subscribe: (next: (value: never) => void) => {
+          const subscription = (stream$ as Observable<never>).subscribe(next);
+          subscriptions.add(subscription);
+          return subscription;
+        },
+      },
+    ]),
+  ) as unknown as typeof sdk.app.events;
   const pluginApi = {
-    ...hostApi,
+    ...sdk,
+    app: { ...sdk.app, events },
     toolKey: (id: string) => `${pluginId}.${id}`,
     inspector,
   };
-  return { ...BASE_PLUGIN_MODULES, '@alakazam/plugin': pluginApi, '@alakazam/plugin-toolkit': pluginApi };
+  return { ...BASE_PLUGIN_MODULES, '@alakazam/sdk': pluginApi, '@alakazam/plugin-toolkit': pluginApi };
 };

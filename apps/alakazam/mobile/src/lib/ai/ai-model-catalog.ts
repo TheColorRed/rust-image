@@ -16,6 +16,7 @@ import { errorMessage } from '@/src/lib/utils/error-message';
 import { EDIT_SECTIONS } from '@/src/lib/project/edit-sections';
 import { aiModelList, type AiModelListing, type AiModelSource } from '@/src/state/ai-models';
 import { pluginList, type PluginListing } from '@/src/state/plugins';
+import { skipPluginHashChecks } from '@/src/state/settings';
 import { pruneToolbarUsage, toolbarPathsFor } from '@/src/state/toolbar-usage';
 
 /** Installed plugins that must be removed with these ids, with dependents before their dependencies. */
@@ -129,7 +130,7 @@ export const installPluginWithDependencies = async (id: string, listener: { upda
   );
   const plan = await installPlan(id, catalogPlugins, installed, dependenciesOf);
   for (const [index, plugin] of plan.entries()) {
-    await installPluginPackage(plugin.archiveUri, plugin.archiveSha256, plugin.sha256, {
+    await installPluginPackage(plugin.archiveUri, plugin.archiveSha256, plugin.sha256, !skipPluginHashChecks.value, {
       update: share => listener.update((index + share) / plan.length),
     });
   }

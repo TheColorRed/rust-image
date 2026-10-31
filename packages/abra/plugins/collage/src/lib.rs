@@ -1,12 +1,11 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use abra::canvas::prelude::*;
 use abra::drawing::prelude::*;
 use abra::prelude::*;
 
-use rand::prelude::{IndexedRandom, Rng, RngExt};
 use rand::SeedableRng;
+use rand::prelude::{IndexedRandom, RngExt};
 use rand::rngs::StdRng;
 
 mod grid;
@@ -14,7 +13,7 @@ mod layered_grid;
 mod random;
 
 pub mod prelude {
-  pub use super::{CollageOptions, Collage, CollageStyle};
+  pub use super::{Collage, CollageOptions, CollageStyle};
 }
 
 #[derive(Clone)]

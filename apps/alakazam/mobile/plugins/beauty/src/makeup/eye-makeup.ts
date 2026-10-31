@@ -1,7 +1,7 @@
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
-import { belongsTo, derivedFor, owning, paintSheet, type Painting, type ToolContext } from '@alakazam/plugin';
+import { belongsTo, derivedFor, owning, paintSheet, type Painting, type ToolContext } from '@alakazam/sdk';
 
 type EyeMakeup = 'eyeliner' | 'eyeshadow' | 'brow-bone' | 'under-eye';
 

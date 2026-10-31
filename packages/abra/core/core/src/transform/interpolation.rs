@@ -26,6 +26,20 @@ pub enum Interpolation {
   EdgeDirectedEdi,
 }
 
+impl Interpolation {
+  /// The number the GPU samplers in sampling.wgsl are told the algorithm with.
+  pub(super) fn shader_mode(self) -> u32 {
+    match self {
+      Interpolation::Nearest => 0,
+      Interpolation::Bilinear => 1,
+      Interpolation::Bicubic => 2,
+      Interpolation::Lanczos => 3,
+      Interpolation::EdgeDirectedNedi => 4,
+      Interpolation::EdgeDirectedEdi => 5,
+    }
+  }
+}
+
 /// What a sampler reads for pixels past the edges of the image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum EdgeMode {

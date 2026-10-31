@@ -29,8 +29,20 @@ export interface Project {
   version: 2;
   id: string;
   name: string;
-  /** The original's file name inside the project folder. */
-  sourceFile: string;
+  /** The original's file name inside the project folder. A plugin project has none: it is made of what its controls hold (see `plugin`). */
+  sourceFile?: string;
+  /**
+   * Set on a project made in a plugin workspace instead of from a photo. It holds what the workspace's controls held when it was last
+   * changed, so opening the project puts them back. The pictures its file pickers picked are frozen copies inside the project folder.
+   */
+  plugin?: {
+    pluginId: string;
+    workspaceId: string;
+    /** Each control's value, by the control's key (see `plugin-workspace`). Controls with no value, like headings and pickers, are not here. */
+    values: Record<string, unknown>;
+    /** Each file picker's pictures, by the picker's key: their names, and the files in the project folder they were copied to. */
+    pickers: Record<string, { name?: string; file: string }[]>;
+  };
   /** The flattened result shown in project lists and while saved control images load. */
   resultFile?: string;
   /** The current control settings. Session-only undo/redo state is not part of a project's editable state. */
@@ -63,6 +75,8 @@ export interface Project {
 
 type ProjectStoreModule = {
   createProject(sourceUri: string, fileName: string): Promise<string>;
+  createPluginProject(name: string, pluginJson: string): Promise<string>;
+  addProjectFile(id: string, sourceUri: string, fileName: string): Promise<string>;
   listProjects(): Promise<string[]>;
   writeProject(id: string, json: string): Promise<void>;
   deleteProject(id: string): Promise<boolean>;
@@ -78,10 +92,17 @@ function native(): ProjectStoreModule {
 }
 
 /** The original image of a project, as a `file://` URI. */
-export const projectSourceUri = (project: Project) => `${project.dir}/${project.sourceFile}`;
+export const projectSourceUri = (project: Project) => {
+  if (!project.sourceFile) throw new Error(`The project ${project.name} was not made from a photo`);
+  return `${project.dir}/${project.sourceFile}`;
+};
 
-/** What to show for a project: its final image if it has been edited, otherwise the original. */
-export const projectImageUri = (project: Project) => `${project.dir}/${project.resultFile ?? project.sourceFile}`;
+/** What to show for a project: its final image if it has been edited, otherwise the original. A plugin project shows its first picture. */
+export const projectImageUri = (project: Project) => {
+  const file = project.resultFile ?? project.sourceFile;
+  if (!file) throw new Error(`The project ${project.name} has no image`);
+  return `${project.dir}/${file}`;
+};
 
 /**
  * A project as the store gives it, with the lists a `project.json` saved before they existed does not have. The old file is left as it
@@ -107,6 +128,17 @@ const parseProject = (json: string): Project => {
 /** Copies an image (`content://` or `file://`) into a new project folder. */
 export async function createProject(sourceUri: string, fileName: string): Promise<Project> {
   return parseProject(await native().createProject(sourceUri, fileName));
+}
+
+/** Makes a project with no photo, for a plugin workspace. Its `plugin` has no controls saved yet. */
+export async function createPluginProject(name: string, pluginId: string, workspaceId: string): Promise<Project> {
+  const plugin = { pluginId, workspaceId, values: {}, pickers: {} };
+  return parseProject(await native().createPluginProject(name, JSON.stringify(plugin)));
+}
+
+/** Copies a file into the project's folder and returns the name it has there. */
+export async function addProjectFile(id: string, sourceUri: string, fileName: string): Promise<string> {
+  return native().addProjectFile(id, sourceUri, fileName);
 }
 
 /** Every saved project, newest first. */

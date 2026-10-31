@@ -81,7 +81,6 @@ mod manifest;
 mod registry;
 mod scan;
 
-pub use error::PluginError;
 pub use manifest::{PluginManifest, StepValue};
 pub use registry::{Contribution, Plugin, PluginRegistry};
 

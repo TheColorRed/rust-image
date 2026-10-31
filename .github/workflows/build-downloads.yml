@@ -294,6 +294,23 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Plugins are type-checked against `@abra/core`, which is written from the bindings the generator reads out of the built library.
+      # Neither the bindings nor `@abra/core`'s declarations are checked in.
+      - name: Generate the Abra plugin types
+        run: |
+          # rav1d assembles its x86_64 code with the NASM that `npm ci` put in tools/nasm.
+          export NASM="$GITHUB_WORKSPACE/tools/nasm/nasm"
+          cargo build -p alakazam-mobile
+          cd packages/react-native/alakazam
+          node ../../../node_modules/uniffi-bindgen-react-native/bin/cli.cjs generate jsi2 bindings --library --lib-name alakazam_mobile --ts-dir src/generated ../../../target/debug/libalakazam_mobile.so
+          node ../abra/scripts/generate-entries.mjs
+          cd "$GITHUB_WORKSPACE"
+          npm run build -w packages/plugins/abra
+
       - name: Build and package plugins
         run: node scripts/pack-plugins.mjs
 

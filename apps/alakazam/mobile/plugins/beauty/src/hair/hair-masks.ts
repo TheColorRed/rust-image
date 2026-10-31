@@ -1,6 +1,6 @@
 ﻿import { type ImageLike } from '@abra/core/image';
 import { type MaskLike } from '@abra/core/mask';
-import { app, release } from '@alakazam/plugin';
+import { app, release } from '@alakazam/sdk';
 
 const ROLE = 'skin-segmentation';
 const manifest = (name: string, classes: number[]) => `name: selfie_multiclass_256x256_${name}

@@ -1,0 +1,20 @@
+# MiDaS v2.1 small, float32
+#
+# Purpose: Relative depth of a photo, much smaller and faster than Depth Anything V2 but older and rougher.
+# Origin: Intel ISL MiDaS v2.1 small (Ranftl et al., "Towards Robust Monocular Depth Estimation"), ONNX export by Heliosoph
+# Input: input_image [1, 3, 256, 256]: RGB float32, (value / 255 - mean) / standard deviation. The model card says BGR, but
+#   the upstream MiDaS transform is RGB, so RGB is used here until a test says otherwise.
+# Output: output_depth [1, 256, 256], larger is nearer, in no fixed range. The `depth` decoder stretches it to 0..1.
+
+name: midas-v21-small-256
+decoder: depth
+description: Relative depth of a photo with MiDaS v2.1 (small)
+source: https://huggingface.co/Heliosoph/midas-small-onnx/resolve/main/midas_v21_small_256.onnx
+license: MIT
+sha256: b0a5b3f12625137e626805167907fe0410665bec671685d59daaa2daab19f977
+
+params:
+  input_size: 256
+  input_fit: stretch
+  input_mean: [0.485, 0.456, 0.406]
+  input_standard_deviation: [0.229, 0.224, 0.225]

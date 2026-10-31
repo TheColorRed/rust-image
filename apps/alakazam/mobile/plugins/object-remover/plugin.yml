@@ -18,4 +18,4 @@ contributes:
 
 files:
   - path: remove-objects.js
-    sha256: 3da0fc049254cea51bb1204c6fb6b15203003ff52322166402b75b94c8e62aa4
+    sha256: f1048b34df58b3543711d540a47daf1db4aeff6b1c2a98bb0a0c6b73602d9654

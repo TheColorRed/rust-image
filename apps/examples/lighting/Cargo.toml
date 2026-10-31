@@ -1,0 +1,14 @@
+[package]
+name = "lighting-example"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+abra-ai-core = { workspace = true, features = ["onnx"] }
+lighting = { workspace = true }
+tools = { workspace = true }
+
+[[bin]]
+name = "lighting-example"
+path = "main.rs"

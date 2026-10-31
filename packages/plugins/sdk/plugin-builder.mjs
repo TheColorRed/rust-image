@@ -1,9 +1,9 @@
 // Shared plugin builder used by both the package command and the live-sync watcher.
+import chalk from 'chalk';
+import { build as esbuild, transform as esbuildTransform } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import chalk from 'chalk';
-import { build as esbuild, transform as esbuildTransform } from 'esbuild';
 import { parse } from 'yaml';
 
 /** Starts esbuild's service before the first file change, keeping its startup time out of the edit cycle. */
@@ -23,7 +23,7 @@ async function bundle(srcDir, entry) {
     platform: 'neutral',
     format: 'cjs',
     target: 'es2019',
-    external: ['@abra/core', '@abra/core/*', '@alakazam/plugin', '@alakazam/plugin-toolkit'],
+    external: ['@abra/core', '@abra/core/*', '@alakazam/sdk'],
     logLevel: 'silent',
   });
   return withPerKeyExports(result.outputFiles[0].text);
