@@ -6,33 +6,53 @@ outline: deep
 
 # Image transforms
 
-Each transform is a builder function (`resize`, `crop`, `rotate`, `flip`, `zoom`, `warp`) that is configured and then run with `apply`. The `Transform` trait adds one-call shortcuts (`resize`, `crop`, `rotate`, `flip`) directly on `Image`, and the same trait is implemented by layer and canvas transforms.
-
-## Resize
-
-Resize to exact dimensions, or preserve the aspect ratio by specifying one dimension:
+`transform()` crops, resizes, rotates and flips an image in one go. Describe what to do with the `with_*` methods and run it with `apply`; the library picks the order the pieces run in, so the picture is resampled as little as possible. `warp` and `zoom` are separate builders. The `Transform` trait (`resize`, `crop`, `rotate`, `flip`) is what layers and canvases offer for their contents; an `Image` is changed with `transform()`.
 
 ```rust
 use abra::prelude::*;
 use abra::abra_core::{FlipAxis, ResizeTarget, Size};
 
 let mut image = Image::read("assets/photo.jpg")?;
-image.resize(ResizeTarget::Exact(Size::new(1200, 800)), Some(TransformAlgorithm::Lanczos));
-image.resize(ResizeTarget::FitWidth(640), None);
-image.resize(ResizeTarget::FitHeight(480), None);
+transform()
+  .with_crop(Rect::new((100, 60), (800, 500)))
+  .with_scale(2.0)
+  .with_rotation(12.0)
+  .with_algorithm(TransformAlgorithm::Bicubic)
+  .apply(&mut image);
+```
+
+`applied(&image)` returns a changed copy and leaves the original as it was.
+
+## The order
+
+You do not choose the order, because the right one depends on the sizes:
+
+- A **crop** only copies pixels, so it is done first and the rest works on fewer pixels.
+- A **shrink** is made before a rotation, by the resize, which looks at every pixel it replaces. The rotation then works on the smaller picture.
+- An **enlargement** is made together with the rotation, each pixel read once from the original, so a picture that is zoomed and turned is as sharp as one that is only zoomed.
+- A **flip** is an exact mirror, done on the smaller picture.
+
+## Resize
+
+`with_size` takes a `ResizeTarget`, and `with_scale(0.5)` is a shortcut for `ResizeTarget::Scale`:
+
+```rust
+transform().with_size(ResizeTarget::Exact(Size::new(1200, 800))).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut image);
+transform().with_size(ResizeTarget::FitWidth(640)).apply(&mut image);
+transform().with_size(ResizeTarget::FitHeight(480)).apply(&mut image);
 ```
 
 `ResizeTarget::Exact` can stretch the image when the target aspect ratio differs. `FitWidth` and `FitHeight` calculate the other dimension from the original ratio.
 
-Resize relative to the current dimensions or by a percentage:
+Resize relative to the current dimensions or by a factor:
 
 ```rust
-image.resize(ResizeTarget::Scale(0.5), Some(TransformAlgorithm::Bicubic));
-image.resize(ResizeTarget::RelativeWidth(120), None);
-image.resize(ResizeTarget::RelativeHeight(-40), None);
+transform().with_scale(0.5).apply(&mut image);
+transform().with_size(ResizeTarget::RelativeWidth(120)).apply(&mut image);
+transform().with_size(ResizeTarget::RelativeHeight(-40)).apply(&mut image);
 ```
 
-A percentage of `0.5` means 50% of the current image size. Relative values are pixel changes.
+A factor of `0.5` means 50% of the current image size. Relative values are pixel changes.
 
 ## Resize algorithms
 
@@ -48,40 +68,33 @@ Choose an algorithm based on the quality and speed needed:
 | `EdgeDirectNEDI`  | Edge-directed interpolation with stronger detail preservation. |
 | `Auto`            | Select an algorithm based on the image and target size.   |
 
-Pass `None` to let the implementation choose automatically. The same algorithms apply to rotation and warping, since all geometric transforms sample the source through the same `remap` loop.
+Pass `None` to `with_algorithm`, or leave it out, to let the implementation choose automatically. The same algorithms apply to rotation and warping, since all geometric transforms sample the source through the same `remap` loop.
 
 ## Crop
 
-Crop from an origin and replace the image with the selected rectangle:
+`with_crop` keeps an area of the image, in source pixels. A `Size` keeps that size from the top-left corner:
 
 ```rust
-image.crop(100, 60, 800, 500);
-// or, with the builder:
-crop(100, 60, 800, 500).apply(&mut image);
+transform().with_crop(Rect::new((100, 60), (800, 500))).apply(&mut image);
 ```
 
-The arguments are `x`, `y`, `width`, and `height` in source-image pixels. The rectangle is clipped to the image; a rectangle entirely outside the image leaves it unchanged. To keep the original, crop a clone:
-
-```rust
-let mut result = image.clone();
-result.crop(100, 60, 800, 500);
-```
+The area is clipped to the image; an area entirely outside the image leaves it unchanged. A size, scale or rotation in the same transform works on the cropped picture.
 
 ## Rotate
 
-Rotate clockwise by a positive angle and counter-clockwise by a negative angle:
+`with_rotation` turns clockwise by a positive angle and counter-clockwise by a negative angle:
 
 ```rust
-image.rotate(12.0, Some(TransformAlgorithm::Bilinear));
+transform().with_rotation(12.0).with_algorithm(TransformAlgorithm::Bilinear).apply(&mut image);
 ```
 
 Rotation expands the image to contain the rotated result. Transparent pixels are used outside the source bounds, which avoids opaque borders during interpolation.
 
-Use the `rotate` builder to choose how the canvas is sized with `with_fit`:
+`with_fit` chooses how the canvas is sized:
 
 ```rust
-rotate(12.0).with_fit(TransformFit::Crop).apply(&mut image);
-rotate(12.0).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut image);
+transform().with_rotation(12.0).with_fit(TransformFit::Crop).apply(&mut image);
+transform().with_rotation(12.0).with_fit(TransformFit::Fill).with_algorithm(TransformAlgorithm::Lanczos).apply(&mut image);
 ```
 
 | Value               | Result                                                                                                                             |
@@ -123,14 +136,14 @@ Both arguments accept anything that converts into a `Quad`, including a `Rect` s
 
 ## Flip
 
-Flip in place horizontally or vertically:
+`with_flip` mirrors horizontally or vertically, before any rotation:
 
 ```rust
-flip(FlipAxis::Horizontal).apply(&mut image);
-flip(FlipAxis::Vertical).apply(&mut image);
+transform().with_flip(FlipAxis::Horizontal).apply(&mut image);
+transform().with_flip(FlipAxis::Vertical).apply(&mut image);
 ```
 
-Calling the same flip twice restores the original orientation.
+Flipping the same axis twice in one transform restores the original orientation.
 
 ## Zoom
 
@@ -145,16 +158,16 @@ A factor of `1.0` or less leaves the image unchanged. The algorithm is chosen au
 
 ## API summary
 
-| API                                        | Purpose                                      |
-| ------------------------------------------ | -------------------------------------------- |
-| `resize(ResizeTarget::Exact(...), algorithm)` | Resize to exact dimensions.                |
-| `resize(ResizeTarget::Scale(...), algorithm)` | Scale by a factor.                          |
-| `resize(ResizeTarget::FitWidth(...), algorithm)` | Resize width while preserving aspect ratio. |
-| `resize(ResizeTarget::FitHeight(...), algorithm)` | Resize height while preserving aspect ratio. |
-| `resize(ResizeTarget::RelativeWidth(...), algorithm)` | Change width by a pixel delta.     |
-| `resize(ResizeTarget::RelativeHeight(...), algorithm)` | Change height by a pixel delta.   |
-| `crop(x, y, width, height)`                | Crop in place.                               |
-| `rotate(degrees, algorithm)`               | Rotate and expand to fit.                    |
-| `warp(from, to).apply(image)`              | Move four points onto four others.           |
-| `flip(FlipAxis).apply(image)`              | Mirror the image.                            |
-| `zoom(anchor, factor).apply(image)`        | Zoom toward a point, keeping the size.       |
+| API                                        | Purpose                                                          |
+| ------------------------------------------ | ---------------------------------------------------------------- |
+| `transform()`                              | Start a transform; run it with `apply`, or `applied` for a copy. |
+| `.with_crop(area)`                         | Keep an area of the image.                                       |
+| `.with_size(ResizeTarget)`                 | Resize to a target size.                                         |
+| `.with_scale(factor)`                      | Scale both dimensions by a factor.                               |
+| `.with_rotation(degrees)`                  | Rotate clockwise about the middle.                               |
+| `.with_flip(FlipAxis)`                     | Mirror the image.                                                |
+| `.with_fit(TransformFit)`                  | Size the canvas after a rotation.                                |
+| `.with_algorithm(algorithm)`               | Choose the interpolation; automatic when not set.                |
+| `.with_hardware(Hardware)`                 | Run on the CPU, the GPU, or as the settings say.                 |
+| `warp(from, to).apply(image)`              | Move four points onto four others.                               |
+| `zoom(anchor, factor).apply(image)`        | Zoom toward a point, keeping the size.                           |

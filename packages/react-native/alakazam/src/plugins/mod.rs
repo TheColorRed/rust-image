@@ -79,6 +79,7 @@ mod error;
 mod install;
 mod manifest;
 mod registry;
+mod saves;
 mod scan;
 
 pub use manifest::{PluginManifest, StepValue};

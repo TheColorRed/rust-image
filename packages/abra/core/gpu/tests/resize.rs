@@ -1,7 +1,7 @@
 //! The GPU resize gives the CPU's pixels, to within the rounding of 32-bit numbers on the GPU against the CPU's 64-bit position.
 
 use abra_core::image::gpu::{GpuProcessor, Hardware, ready_gpu_provider};
-use abra_core::transform::{TransformAlgorithm, resize};
+use abra_core::transform::{TransformAlgorithm, transform};
 use abra_core::{Channels, Image, ResizeTarget, Size};
 
 /// A picture with colors that change in both directions, and a band that is partly see-through, so premultiplying matters.
@@ -21,9 +21,9 @@ fn differences(p_algorithm: TransformAlgorithm, p_from: (u32, u32), p_to: (u32, 
   let source = picture(p_from.0, p_from.1);
   let size = ResizeTarget::Exact(Size::new(p_to.0, p_to.1));
   let mut on_cpu = source.clone();
-  resize(size).with_algorithm(p_algorithm).with_hardware(Hardware::Cpu).apply(&mut on_cpu);
+  transform().with_size(size).with_algorithm(p_algorithm).with_hardware(Hardware::Cpu).apply(&mut on_cpu);
   let mut on_gpu = source.clone();
-  resize(size).with_algorithm(p_algorithm).with_hardware(Hardware::Gpu).apply(&mut on_gpu);
+  transform().with_size(size).with_algorithm(p_algorithm).with_hardware(Hardware::Gpu).apply(&mut on_gpu);
   assert_eq!(on_cpu.dimensions::<u32>(), p_to);
   assert_eq!(on_gpu.dimensions::<u32>(), p_to, "{p_algorithm:?} {p_from:?} to {p_to:?}");
   let gaps: Vec<u8> = on_cpu.rgba().iter().zip(on_gpu.rgba()).map(|(cpu, gpu)| cpu.abs_diff(*gpu)).collect();
@@ -69,12 +69,12 @@ fn every_algorithm_has_a_shader() {
     TransformAlgorithm::EdgeDirectEDI,
     TransformAlgorithm::Auto,
   ] {
-    let step = resize(ResizeTarget::Exact(Size::new(6, 4))).with_algorithm(algorithm);
+    let step = transform().with_size(ResizeTarget::Exact(Size::new(6, 4))).with_algorithm(algorithm);
     assert_eq!(step.passes(17, 11).len(), 1, "{algorithm:?}");
   }
 }
 
 #[test]
 fn a_resize_that_changes_nothing_has_no_passes() {
-  assert!(resize(ResizeTarget::Exact(Size::new(17, 11))).passes(17, 11).is_empty());
+  assert!(transform().with_size(ResizeTarget::Exact(Size::new(17, 11))).passes(17, 11).is_empty());
 }

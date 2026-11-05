@@ -81,7 +81,9 @@ export function healBlemish(base: AbraImage, entry: TimelineEntry): AbraImage {
         .withPosition(ShapePosition.Point.new({ x: change.x, y: change.y }))
         .apply(healed);
     }
-    else applyRedEyeStep(healed, change);
+    else if (change.type === 'red-eye-auto') {
+      throw new Error('The saved automatic red-eye checkpoint is missing.');
+    } else applyRedEyeStep(healed, change);
   } catch (error) {
     release(healed);
     throw error;

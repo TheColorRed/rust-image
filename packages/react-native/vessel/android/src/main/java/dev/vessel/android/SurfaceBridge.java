@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.Surface;
+import java.io.File;
 
 /**
  * The link between a view in the host app and Vessel's Rust library. A view reports its surface here, under an id, and the
@@ -30,7 +31,16 @@ public final class SurfaceBridge {
         throw new IllegalStateException(
             "Add <meta-data android:name=\"dev.vessel.library\" android:value=\"your_lib\" /> to the manifest.");
       }
-      System.loadLibrary(library);
+      // A debuggable app can take a freshly built native library from its private files dir.
+      // This lets Rust UI iteration avoid rebuilding/reinstalling the APK. Release builds always
+      // use the packaged library.
+      File developmentLibrary = new File(new File(context.getFilesDir(), "native-libs"), "lib" + library + ".so");
+      boolean debuggable = (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+      if (debuggable && developmentLibrary.isFile()) {
+        System.load(developmentLibrary.getAbsolutePath());
+      } else {
+        System.loadLibrary(library);
+      }
       loaded = true;
     } catch (PackageManager.NameNotFoundException error) {
       throw new IllegalStateException(error);

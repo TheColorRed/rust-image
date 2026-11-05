@@ -3,6 +3,8 @@ import { distinctUntilChanged, map } from 'rxjs/operators';
 import {
   BLEMISH_TOOL_KEY,
   CROP_TOOL_KEY,
+  GRADIENT_SETTINGS_KEY,
+  STRIPE_KEY,
   RED_EYE_TOOL_KEY,
   SKIN_EVEN_OUT_KEY,
   SKIN_SMOOTH_KEY,
@@ -11,7 +13,7 @@ import {
 } from '@/src/lib/project/edit-sections/keys';
 import { isFaceControlKey, isPersonControlKey } from '@/src/state/control-traits';
 import { objectRemovalToolKey$ } from '@/src/state/plugin-tool-panels';
-import type { AdjustmentValue } from '@/src/lib/project/edit-sections';
+import type { AdjustmentValue, PickerItem } from '@/src/lib/project/edit-sections';
 
 // #region: Edit controls
 
@@ -56,6 +58,26 @@ export const isRedEyeToolFocused = () => focusedControlKey.value === RED_EYE_TOO
 export const isCropToolFocused = () => focusedControlKey.value === CROP_TOOL_KEY;
 export const isCropToolFocused$ = focusedControlKey$.pipe(
   map(key => key === CROP_TOOL_KEY),
+  distinctUntilChanged(),
+);
+/**
+ * The picker item whose sub-menu is open (the color schemes of the gradient's From photo card), or `null`. Its items are shown in place of the
+ * picker's, its label is the last crumb of the breadcrumbs, and the back button closes it, as it steps out of any other sub-menu.
+ */
+export const pickerSubmenu = new BehaviorSubject<PickerItem | null>(null);
+export const pickerSubmenu$ = pickerSubmenu.asObservable();
+
+/** Whether the gradient overlay is open, which is when its two handles show on the photo. */
+export const isGradientFocused$ = focusedControlKey$.pipe(
+  map(key => key === GRADIENT_SETTINGS_KEY),
+  distinctUntilChanged(),
+);
+/**
+ * Whether the stripes overlay is open, which is when its text dialogs can be asked for. It opens as a row of tabs (as Bokeh does), so it is
+ * open while its row shows or while any of its tabs (the settings, the colors, the sub alignment) is.
+ */
+export const isStripeFocused$ = combineLatest([focusedControlKey$, openGroupKey$]).pipe(
+  map(([key, group]) => (group?.startsWith(STRIPE_KEY) ?? false) || (key?.startsWith(STRIPE_KEY) ?? false)),
   distinctUntilChanged(),
 );
 /** Controls whose work is confined to a face, so opening them can bring that face closer. */

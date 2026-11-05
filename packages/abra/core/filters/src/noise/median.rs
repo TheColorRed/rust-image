@@ -1,6 +1,6 @@
 use crate::common::*;
 use abra_core::Bins;
-use abra_core::{Channels, ResizeTarget, Size, Transform, if_pick};
+use abra_core::{Channels, ResizeTarget, Size, if_pick, transform};
 
 /// Naive histogram-based median filter - O(r²) per pixel
 /// Good for small radius values (< 8)
@@ -108,7 +108,7 @@ fn apply_median_downsampled(p_image: &mut Image, p_radius: u32) {
 
   // Downsample
   let mut tmp_img = Image::new_from_pixels(width, height, p_image.rgba().to_vec(), Channels::RGBA);
-  tmp_img.resize(ResizeTarget::Exact(Size::new(down_w, down_h)), None);
+  transform().with_size(ResizeTarget::Exact(Size::new(down_w, down_h))).apply(&mut tmp_img);
 
   // Apply median filter at scaled resolution
   let src = tmp_img.rgba();
@@ -119,7 +119,7 @@ fn apply_median_downsampled(p_image: &mut Image, p_radius: u32) {
   tmp_img.set_rgba(out);
 
   // Upsample back to original size
-  tmp_img.resize(ResizeTarget::Exact(Size::new(width, height)), None);
+  transform().with_size(ResizeTarget::Exact(Size::new(width, height))).apply(&mut tmp_img);
   p_image.set_rgba(tmp_img.into_rgba_vec());
 }
 

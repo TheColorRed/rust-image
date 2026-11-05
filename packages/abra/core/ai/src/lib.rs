@@ -63,6 +63,7 @@
 //! ```
 
 mod ai_model;
+mod edge_matte;
 pub mod decode;
 mod error;
 mod graph;
@@ -78,6 +79,7 @@ mod image_model;
 mod progress;
 
 pub use ai_model::AiModel;
+pub use edge_matte::{EdgeMatteOptions, edge_matte};
 pub use decode::{AiOutput, Bounds, Decoder, DepthMap, Instance, LabelMap, Landmark, Landmarks};
 pub use error::AiError;
 pub use input::{Fit, InputSpec, Layout, Placement};
@@ -89,6 +91,7 @@ pub use progress::{Listening, ReportsProgress};
 
 /// Prelude module for convenient imports.
 pub mod prelude {
+  pub use crate::edge_matte::{EdgeMatteOptions, edge_matte};
   pub use crate::error::AiError;
   pub use crate::image_ai::{ImageAi, ImageAiWithControl, Placeable};
   pub use crate::tensor::{image_to_nchw, nchw_to_image};

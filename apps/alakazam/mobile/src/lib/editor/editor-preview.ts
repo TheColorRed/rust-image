@@ -8,6 +8,8 @@ import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { PixelRatio } from 'react-native';
 import { combineLatest, type Subscription } from 'rxjs';
 import { release } from '@/src/lib/native/native-handles';
+import { devDebug } from '@/src/lib/log';
+import { aiProgress } from '@/src/state/ai-progress';
 
 /** The editor photo's live renderer: effects drawn over the committed photo while a control is tapped or dragged. */
 export const editorPreview = new LiveRenderer(liveSurface);
@@ -24,12 +26,17 @@ let lastSourceId = 0;
 export function showTool(tool: (photo: ImageLike, context: ToolContext) => ImageLike | void, start?: AbraPixels) {
   const base = editBaseImage.value;
   if (!base || !previewPixels()) return;
+  const started = Date.now();
   const photo = (start ?? shrunkOf('base', base)).clone();
   let returned: ImageLike | undefined;
   try {
     returned = tool(photo, { scale: scaleBetween(photo, editBaseImage.value) }) as ImageLike | undefined;
     editorPreview.showImage(returned ?? photo);
   } finally {
+    // Development: a frame of a slider drag that takes longer than a screen refresh holds the JavaScript thread, and the finger gets ahead of
+    // the picture. With the AI tasks that were running, so a frame made slow by them can be told from a slow effect.
+    const took = Date.now() - started;
+    if (took > 32) devDebug('slider', `a frame took ${took} ms; AI tasks:`, Object.keys(aiProgress.value).join(', ') || 'none');
     // They are native images the garbage collector cannot see the size of, so they are freed even when the tool throws.
     release(photo);
     if (returned) release(returned);

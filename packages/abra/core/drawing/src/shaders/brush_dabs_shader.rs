@@ -1,4 +1,5 @@
 use crate::Shader;
+use crate::falloff::brush_falloff;
 use abra_core::PointF;
 use std::collections::HashMap;
 
@@ -45,22 +46,7 @@ impl BrushDabsShader {
     if p_dist_sq >= self.max_distance_sq {
       return 0.0;
     }
-    let normalized_sq = p_dist_sq / self.max_distance_sq;
-    // We need a function that behaves similarly to the original falloff.
-    // Convert squared normalized distance back to normalized distance for falloff curve.
-    let normalized = normalized_sq.sqrt();
-    if self.hardness < 0.5 {
-      let t = self.hardness * 2.0;
-      let quadratic = 1.0 - (normalized * normalized);
-      let linear = 1.0 - normalized;
-      quadratic * (1.0 - t) + linear * t
-    } else {
-      let t = (self.hardness - 0.5) * 2.0;
-      let linear = 1.0 - normalized;
-      let hard_edge = if normalized < 0.5 { 1.0 } else { 0.0 };
-      linear * (1.0 - t) + hard_edge * t
-    }
-    .max(0.0)
+    brush_falloff(p_dist_sq.sqrt(), self.max_distance, self.hardness)
   }
 }
 

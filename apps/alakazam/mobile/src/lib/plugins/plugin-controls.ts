@@ -189,3 +189,14 @@ export function applyPluginTool(key: string, value?: unknown): { handled: boolea
   }
   return { handled: false };
 }
+
+/** Runs a plugin tool that may await native worker work. */
+export async function applyPluginToolAsync(key: string, value?: unknown): Promise<{ handled: boolean; result?: unknown }> {
+  for (const section of EDIT_SECTIONS) {
+    const control = leafControls(section.controls).find(each => each.kind === 'tool' && each.key === key);
+    if (control?.kind === 'tool' && control.onApply) {
+      return { handled: true, result: await control.onApply(value) };
+    }
+  }
+  return { handled: false };
+}

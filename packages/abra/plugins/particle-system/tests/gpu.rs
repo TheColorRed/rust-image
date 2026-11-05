@@ -112,6 +112,29 @@ fn textures_are_drawn_turned_and_tinted() {
 }
 
 #[test]
+fn dots_stretched_along_their_way_and_frames_of_a_texture_match_the_cpu() {
+  let moving = particle_system().with_seed(8).with_count(40).with_size((4.0, 9.0)).with_start_speed((-60.0, 60.0), (-60.0, 60.0)).with_rotation((0.0, 40.0));
+  let stretched = moving.clone().with_velocity_stretch(0.01);
+  let (largest, differing, _) = compare(&on_cpu(&stretched), &on_gpu(&stretched));
+  assert!(largest <= 2 && differing < 0.02, "dots: largest {largest}, {} differ", differing * 100.0);
+  // A texture of four frames, each a different color, played along the life.
+  let mut pixels = Vec::new();
+  for y in 0..16u32 {
+    for x in 0..16u32 {
+      pixels.extend(match (x / 8, y / 8) {
+        (0, 0) => [255, 40, 40, 255],
+        (1, 0) => [40, 255, 40, 255],
+        (0, 1) => [40, 40, 255, 255],
+        _ => [255, 255, 40, if x % 2 == 0 { 255 } else { 120 }],
+      });
+    }
+  }
+  let flipbook = moving.with_texture(Image::new_from_pixels(16, 16, pixels, Channels::RGBA)).with_texture_frames(2, 2).with_frame_cycles(1.0).with_velocity_stretch(0.005).with_progress(0.7);
+  let (largest, differing, _) = compare(&on_cpu(&flipbook), &on_gpu(&flipbook));
+  assert!(largest <= 2 && differing < 0.02, "frames: largest {largest}, {} differ", differing * 100.0);
+}
+
+#[test]
 fn children_born_from_a_particle_are_drawn() {
   let sparks = particle_system().with_seed(1).with_count(6).with_size((1.0, 3.0)).with_start_speed((-40.0, 40.0), (-40.0, 40.0)).with_blend(Blend::Additive);
   let system = dots().with_count(60).with_sub_emitter(0.4, sparks);

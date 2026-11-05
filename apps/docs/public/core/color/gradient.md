@@ -165,6 +165,23 @@ pub fn main() {
 
 `with_opacity` clamps the layer opacity to the range `0.0` to `1.0`. A value of `0.0` makes the gradient layer transparent, while `1.0` makes it fully opaque.
 
+## Drawing a gradient over an image as an effect
+
+`LinearGradientEffect` draws a gradient straight over an image, on the GPU when there is one and on the CPU with the same pixels when there is not. It is made `between` two points in image pixels, or at an `angle`, and the line, the opacity and the colors can be changed afterwards (`set_between`, `set_opacity`, `set_gradient`) without making it again, so a gradient can follow a finger.
+
+By default the gradient is laid over the image like a normal layer. `with_blend_mode` lays it the way a layer with that [blend mode](../canvas/blend-modes) is laid, so a gradient can darken (`Multiply`), lighten (`Screen`) or tint (`Color`) the image under it:
+
+```rust
+use abra::abra_core::BlendMode;
+use abra::adjustments::prelude::color::LinearGradientEffect;
+
+let effect = LinearGradientEffect::between(&gradient, (0.0, 0.0), (0.0, 600.0))
+  .with_opacity(0.8)
+  .with_blend_mode(BlendMode::SoftLight);
+```
+
+Changing the blend mode does not build the GPU program again. A custom blend mode (a Rust function) has no shader, so an effect that has one is drawn on the CPU.
+
 ## API summary
 
 | API                           | Purpose                                             |

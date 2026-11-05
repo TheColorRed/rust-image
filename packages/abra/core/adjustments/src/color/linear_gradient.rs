@@ -1,9 +1,17 @@
+use abra_core::blend::blend;
 use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor};
-use abra_core::{Gradient, Image};
+use abra_core::{BLEND_MODES_WGSL, BlendMode, Gradient, Image};
 use options::{Effect, Options};
+use std::sync::OnceLock;
 
 /// Number of colors sampled from the gradient into the lookup table the shader reads.
 const LUT_SIZE: u32 = 1024;
+
+/// The shader, joined after the blend modes it uses. It is made once, so the renderer can tell it is the same shader every time.
+fn gpu_shader() -> &'static str {
+  static SHADER: OnceLock<String> = OnceLock::new();
+  SHADER.get_or_init(|| format!("{BLEND_MODES_WGSL}{}", include_str!("./linear_gradient.wgsl"))).as_str()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Direction {
@@ -14,12 +22,15 @@ enum Direction {
 /// A linear gradient drawn over the image on the GPU.
 ///
 /// The gradient stays parametric: changing the angle, endpoints or opacity only changes a few uniform bytes, so it can
-/// be re-rendered every frame while a slider is dragged. Colors are composited source-over.
+/// be re-rendered every frame while a slider is dragged. By default the colors are composited source-over; any other
+/// [`BlendMode`] can be chosen with [`with_blend_mode`](Self::with_blend_mode), and is drawn the same way a layer with that
+/// mode is, on the CPU and on the GPU.
 #[derive(Clone)]
 pub struct LinearGradientEffect {
   lut: std::sync::Arc<[u8]>,
   direction: Direction,
   opacity: f32,
+  blend_mode: BlendMode,
   options: Options,
 }
 
@@ -32,6 +43,7 @@ impl LinearGradientEffect {
       lut: build_lut(p_gradient).into(),
       direction: Direction::Angle(p_degrees),
       opacity: 1.0,
+      blend_mode: BlendMode::Normal,
       options: None,
     }
   }
@@ -42,6 +54,7 @@ impl LinearGradientEffect {
       lut: build_lut(p_gradient).into(),
       direction: Direction::Between(p_start, p_end),
       opacity: 1.0,
+      blend_mode: BlendMode::Normal,
       options: None,
     }
   }
@@ -50,6 +63,18 @@ impl LinearGradientEffect {
   pub fn with_opacity(mut self, p_opacity: f32) -> LinearGradientEffect {
     self.opacity = p_opacity;
     self
+  }
+
+  /// Sets how the gradient is laid over the image, such as [`BlendMode::Multiply`]. Defaults to [`BlendMode::Normal`].
+  /// A custom mode is a Rust function with no shader, so an effect with one is drawn on the CPU.
+  pub fn with_blend_mode(mut self, p_mode: impl Into<BlendMode>) -> LinearGradientEffect {
+    self.blend_mode = p_mode.into();
+    self
+  }
+
+  /// Sets how the gradient is laid over the image. See [`with_blend_mode`](Self::with_blend_mode).
+  pub fn set_blend_mode(&mut self, p_mode: impl Into<BlendMode>) {
+    self.blend_mode = p_mode.into();
   }
 
   /// Turns the gradient to `p_degrees`. See [`angle`](Self::angle).
@@ -193,14 +218,15 @@ impl GpuProcessor for LinearGradientEffect {
       plan.c as u32,
       plan.shift,
       plan.opacity,
-      0,
+      // A mode with no shader is not drawn on the GPU (see `gpu_processor`), so Normal here is never a stand-in.
+      self.blend_mode.shader_index().unwrap_or(0),
       0,
       0,
     ] {
       uniforms.extend_from_slice(&value.to_le_bytes());
     }
     vec![
-      GpuPass::new(include_str!("./linear_gradient.wgsl"), uniforms).with_window().with_aux(GpuAux {
+      GpuPass::new(gpu_shader(), uniforms).with_window().with_aux(GpuAux {
         width: LUT_SIZE,
         height: 1,
         rgba: self.lut.clone(),
@@ -219,6 +245,7 @@ impl LinearGradientEffect {
     }
     let plan = self.plan(width, height);
     let mut pixels = p_image.to_rgba_vec();
+    let normal = matches!(self.blend_mode, BlendMode::Normal);
     for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
       let (x, y) = ((index as u32 % width) as i32, (index as u32 / width) as i32);
       let table = plan.table_index(x, y) * 4;
@@ -228,9 +255,20 @@ impl LinearGradientEffect {
         self.lut[table + 2],
         self.lut[table + 3],
       ];
-      pixel.copy_from_slice(&composite([pixel[0], pixel[1], pixel[2], pixel[3]], gradient, plan.opacity));
+      if normal {
+        pixel.copy_from_slice(&composite([pixel[0], pixel[1], pixel[2], pixel[3]], gradient, plan.opacity));
+      } else {
+        // Another mode is the library's own blend of the gradient over the image, so the gradient becomes the picture.
+        pixel.copy_from_slice(&gradient);
+      }
     }
-    p_image.set_rgba(pixels);
+    if normal {
+      p_image.set_rgba(pixels);
+    } else {
+      let mut layer = p_image.clone();
+      layer.set_rgba(pixels);
+      blend(&layer).with_mode(self.blend_mode).with_opacity(plan.opacity as f32 / 255.0).apply(p_image);
+    }
   }
 }
 
@@ -256,7 +294,7 @@ impl Effect for LinearGradientEffect {
   }
 
   fn gpu_processor(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
+    self.blend_mode.shader_index().map(|_| self as &dyn GpuProcessor)
   }
 }
 
@@ -333,6 +371,59 @@ mod tests {
       assert_close(&out, &expected(&effect, &gradient, &base));
     }
     Ok(())
+  }
+
+  #[test]
+  fn another_blend_mode_gives_the_same_pixels_on_the_gpu_and_the_cpu() -> anyhow::Result<()> {
+    use abra_core::{Channels, ColorStop};
+    let mut renderer = renderer()?;
+    // Both ends are not solid, so the gradient's own alpha takes part in the blend.
+    let gradient = Gradient::new(vec![
+      ColorStop::new(Color::from_rgba(255, 40, 0, 255), 0.0),
+      ColorStop::new(Color::from_rgba(0, 90, 255, 160), 1.0),
+    ]);
+    let base = base_pixels();
+    let mut effect = LinearGradientEffect::angle(&gradient, 33.0).with_opacity(0.7);
+    for mode in [BlendMode::Multiply, BlendMode::Screen, BlendMode::Overlay, BlendMode::SoftLight, BlendMode::Color, BlendMode::Difference] {
+      effect.set_blend_mode(mode);
+      let out = renderer.process(&[effect.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?;
+      let mut cpu = Image::new_from_pixels(WIDTH, HEIGHT, base.clone(), Channels::RGBA);
+      effect.draw(&mut cpu);
+      assert_eq!(out.len(), cpu.rgba().len());
+      for (index, (gpu, cpu)) in out.iter().zip(cpu.rgba().iter()).enumerate() {
+        assert!(gpu.abs_diff(*cpu) <= 3, "{mode:?} byte {index}: gpu {gpu} vs cpu {cpu}");
+      }
+    }
+    // The mode is a number in the uniforms, so changing it never makes a new pipeline.
+    assert_eq!(renderer.cached_pipelines(), 1);
+    Ok(())
+  }
+
+  #[test]
+  fn multiply_darkens_and_normal_is_unchanged_by_the_blend_mode_option() -> anyhow::Result<()> {
+    let mut renderer = renderer()?;
+    let gradient = Gradient::from_to(Color::from_rgba(128, 128, 128, 255), Color::from_rgba(128, 128, 128, 255));
+    let base = base_pixels();
+    let multiplied = LinearGradientEffect::angle(&gradient, 0.0).with_blend_mode(BlendMode::Multiply);
+    let out = renderer.process(&[multiplied.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?;
+    for (pixel, original) in out.chunks_exact(4).zip(base.chunks_exact(4)) {
+      assert!(pixel[0] <= original[0] && pixel[1] <= original[1] && pixel[2] <= original[2], "multiplying by gray darkens");
+    }
+    let normal = LinearGradientEffect::angle(&gradient, 0.0).with_blend_mode(BlendMode::Normal);
+    let plain = LinearGradientEffect::angle(&gradient, 0.0);
+    assert_eq!(
+      renderer.process(&[normal.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?,
+      renderer.process(&[plain.passes(WIDTH, HEIGHT)], WIDTH, HEIGHT, &base)?
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn a_custom_blend_mode_has_no_shader_so_it_is_drawn_on_the_cpu() {
+    let gradient = Gradient::from_to(Color::black(), Color::white());
+    let custom = LinearGradientEffect::angle(&gradient, 0.0).with_blend_mode(BlendMode::Custom(|a, _| a));
+    assert!(custom.gpu_processor().is_none());
+    assert!(LinearGradientEffect::angle(&gradient, 0.0).gpu_processor().is_some());
   }
 
   #[test]

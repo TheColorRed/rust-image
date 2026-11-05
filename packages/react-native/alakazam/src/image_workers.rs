@@ -1,17 +1,104 @@
 use std::sync::{
-  Arc, Mutex, OnceLock,
-  atomic::{AtomicUsize, Ordering},
+  Arc, Condvar, Mutex, OnceLock,
+  atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
   mpsc,
 };
+use std::time::Duration;
 
-use abra::abra_core::Rect;
+use abra::abra_core::{Rect, TransformAlgorithm};
+use abra::mask::prelude as library_mask;
 use abra_body_segmentation::prelude::ImageAi;
-use abra_uniffi::{AiModel, AiOutput, BodySegments, Image, Mask};
+use abra_ai_core::{EdgeMatteOptions, edge_matte};
+use abra_uniffi::{AiModel, AiOutput, BodySegments, Image, Mask, guided_filter};
+use abra_body_segmentation::BodyRegion;
 
 use crate::{
   AbraError,
+  consts::EDGE_REFINEMENT_ROLE,
   models::{BODY_PARSER, PERSON_SEGMENTER, SKIN_SEGMENTER},
 };
+
+/// A small shared flag, changed under a short lock and read without holding that lock during model execution.
+struct SingleFlight {
+  busy: Mutex<bool>,
+  available: Condvar,
+}
+
+impl SingleFlight {
+  const fn new() -> Self {
+    Self {
+      busy: Mutex::new(false),
+      available: Condvar::new(),
+    }
+  }
+
+  fn enter(&'static self, state: &ImageWorkState) -> Option<SingleFlightPermit> {
+    let mut busy = self.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    while *busy {
+      if state.is_cancelled() {
+        return None;
+      }
+      busy = self
+        .available
+        .wait_timeout(busy, Duration::from_millis(100))
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0;
+    }
+    if state.is_cancelled() {
+      return None;
+    }
+    *busy = true;
+    drop(busy);
+    Some(SingleFlightPermit(self))
+  }
+}
+
+struct SingleFlightPermit(&'static SingleFlight);
+
+impl Drop for SingleFlightPermit {
+  fn drop(&mut self) {
+    let mut busy = self.0.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    *busy = false;
+    self.0.available.notify_one();
+  }
+}
+
+// Keep high-memory edge refinements sequential, even when different editor sessions request them at once.
+static EDGE_MATTE_SINGLE_FLIGHT: SingleFlight = SingleFlight::new();
+
+/// Progress and cancellation shared with JavaScript through cheap atomic operations.
+#[derive(uniffi::Object)]
+pub struct ImageWorkState {
+  share: AtomicU32,
+  cancelled: AtomicBool,
+}
+
+#[uniffi::export]
+impl ImageWorkState {
+  #[uniffi::constructor]
+  pub fn new() -> Self {
+    Self {
+      share: AtomicU32::new(0.0f32.to_bits()),
+      cancelled: AtomicBool::new(false),
+    }
+  }
+
+  /// The completed share of edge-matte tiles, from `0.0` to `1.0`.
+  pub fn share(&self) -> f32 {
+    f32::from_bits(self.share.load(Ordering::Relaxed))
+  }
+
+  /// Stops the current native image job at its next safe checkpoint.
+  pub fn cancel(&self) {
+    self.cancelled.store(true, Ordering::Relaxed);
+  }
+}
+
+impl ImageWorkState {
+  fn is_cancelled(&self) -> bool {
+    self.cancelled.load(Ordering::Relaxed)
+  }
+}
 
 /// One person found in a photo: where they are in the photo's pixels, how sure the model is, and the mask of their body.
 #[derive(uniffi::Record)]
@@ -42,6 +129,18 @@ static WORKER_STACK_MEGABYTES: AtomicUsize = AtomicUsize::new(DEFAULT_WORKER_STA
 pub fn set_worker_stack_megabytes(megabytes: u32) {
   let megabytes = megabytes.clamp(*WORKER_STACK_RANGE.start(), *WORKER_STACK_RANGE.end());
   WORKER_STACK_MEGABYTES.store(megabytes as usize, Ordering::Relaxed);
+}
+
+/// Makes the AI models leave room for the screen. A model run uses as many threads as it is allowed, and on a phone or tablet that is every core
+/// by default, which leaves the JavaScript and render threads too little CPU, so the app answers seconds late while the AI works. This gives
+/// each model run half of the device's threads (at least one) and stops them spinning while they wait. Call it once when the app starts, before
+/// the first model is loaded; models already loaded keep their settings. Returns the number of threads a model run uses.
+#[uniffi::export]
+pub fn configure_ai_inference() -> u32 {
+  let threads = (std::thread::available_parallelism().map_or(2, |threads| threads.get()) / 2).max(1);
+  abra_ai_core::prelude::OnnxConfig::set_default_threads(Some(threads));
+  abra_ai_core::prelude::OnnxConfig::set_default_spinning(Some(false));
+  threads as u32
 }
 
 /// How many image jobs (decoding, thumbnails, downloads) run at the same time: half of the threads this device
@@ -151,6 +250,75 @@ worker! {
 }
 
 worker! {
+  /// Joins person masks into one photo-sized mask using bilinear resizing.
+  maximum_masks_async(masks: Vec<Arc<Mask>>, width: u32, height: u32) -> Option<Arc<Mask>> {
+    let mut joined = library_mask::Mask::empty(width, height);
+    for mask in masks {
+      let resized = mask.core().resized(width, height, TransformAlgorithm::Bilinear);
+      joined = joined.maximum(&resized);
+    }
+    Ok(joined.bounds(0).map(|_| Arc::new(Mask::from_core(joined))))
+  }
+}
+
+worker! {
+  /// Runs guided edge matting and tile assembly on a native worker, serializing the high-memory model work.
+  edge_matte_async(image: Arc<Image>, rough: Arc<Mask>, state: Arc<ImageWorkState>) -> Option<Arc<Mask>> {
+    let Some(_single_flight) = EDGE_MATTE_SINGLE_FLIGHT.enter(&state) else { return Ok(None) };
+    let path = crate::models::ai_model_path(EDGE_REFINEMENT_ROLE.to_owned())?;
+    let model = AiModel::load_native(path).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    if state.is_cancelled() {
+      return Ok(None);
+    }
+    let refined = edge_matte(
+      model.core(),
+      &image.core(),
+      &rough.core(),
+      EdgeMatteOptions::default(),
+      |share| state.share.store(share.to_bits(), Ordering::Relaxed),
+      || state.is_cancelled(),
+    )?;
+    Ok(refined.map(|mask| Arc::new(Mask::from_core(mask))))
+  }
+}
+
+worker! {
+  /// Parses, smooths and fits the body regions against a cutout on a native worker.
+  fit_body_parts_async(
+    image: Arc<Image>,
+    cutout: Arc<Mask>,
+    margin: f32,
+    follow: f32,
+    epsilon: f32,
+    state: Arc<ImageWorkState>,
+  ) -> Vec<Arc<Mask>> {
+    if state.is_cancelled() { return Ok(Vec::new()) }
+    let photo = image.core();
+    let cutout = cutout.core();
+    let Some(bounds) = cutout.bounds(128) else { return Ok(Vec::new()) };
+    let segments = BODY_PARSER.get()?.process_within(&photo, bounds, margin)?;
+    if state.is_cancelled() { return Ok(Vec::new()) }
+    let radius = ((bounds.width * bounds.height).sqrt() * follow).round().max(2.0) as u32;
+    let regions = [
+      segments.mask(BodyRegion::Hair),
+      segments.mask_of(&[BodyRegion::BodySkin, BodyRegion::FaceSkin]),
+      segments.mask(BodyRegion::Clothes),
+      segments.mask(BodyRegion::Accessories),
+    ];
+    let mut followed = Vec::with_capacity(regions.len());
+    for region in regions {
+      if state.is_cancelled() { return Ok(Vec::new()) }
+      followed.push(guided_filter(Arc::new(Mask::from_core(region)), Arc::new(Image::from_core(photo.clone())), radius, epsilon).core());
+    }
+    let whole = cutout.maximum(&followed[3]);
+    let mut output = Vec::with_capacity(5);
+    output.push(Arc::new(Mask::from_core(whole.clone())));
+    output.extend(followed.iter().map(|part| Arc::new(Mask::from_core(part.multiplied(&whole)))));
+    Ok(output)
+  }
+}
+
+worker! {
   /// Labels the hair, skin, clothes and accessories of the person in the photo.
   parse_body_async(image: Arc<Image>) -> Arc<BodySegments> {
     Ok(Arc::new(BodySegments::from_core(BODY_PARSER.get()?.process(&image.core())?)))
@@ -179,7 +347,7 @@ worker! {
   /// Loads a model and its manifest on an image worker thread, keeping large model initialization off the UI thread.
   load_ai_model_async(role: String) -> Arc<AiModel> {
     let path = crate::models::ai_model_path(role)?;
-    AiModel::load(path).map(Arc::new).map_err(|error| AbraError::Ai { message: error.to_string() })
+    AiModel::load_native(path).map(Arc::new).map_err(|error| AbraError::Ai { message: error.to_string() })
   }
 }
 

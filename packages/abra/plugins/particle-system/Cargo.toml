@@ -5,8 +5,6 @@ edition = "2024"
 
 [dependencies]
 abra = { workspace = true }
-rayon = { workspace = true }
-rand = { workspace = true }
 
 [dev-dependencies]
 gpu = { workspace = true }

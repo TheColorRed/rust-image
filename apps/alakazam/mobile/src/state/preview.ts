@@ -24,9 +24,3 @@ export const controlThumbnails$ = controlThumbnails.asObservable();
 
 // #endregion
 
-// #region: Safe-area insets
-
-export const bottomInset = new BehaviorSubject(0);
-export const bottomInset$ = bottomInset.asObservable();
-
-// #endregion

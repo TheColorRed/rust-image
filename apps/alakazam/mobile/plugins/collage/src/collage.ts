@@ -85,31 +85,14 @@ const writeCaption = () => {
   const [width, height] = canvasSize;
   const shorter = Math.min(width, height);
   const color = CAPTION_COLORS[captionColor]();
-  const image = app.fonts.renderText({
-    text: caption,
-    family: captionFont,
-    size: (shorter * captionSize) / 100,
-    color,
-    width: width * 0.9,
-    align: 'center',
-  });
-  release(color);
-  if (!image) {
-    textLayer.setVisible(false);
-    return;
-  }
-  const [textWidth, textHeight] = [image.width(), image.height()];
   const margin = shorter * 0.04;
-  const top =
-    captionPosition === 'Top'
-      ? margin
-      : captionPosition === 'Bottom'
-        ? height - textHeight - margin
-        : (height - textHeight) / 2;
-  textLayer.setImage(image);
-  textLayer.setPosition(Math.round((width - textWidth) / 2), Math.round(top));
-  textLayer.setVisible(true);
-  release(image);
+  app.fonts.placeText(
+    textLayer,
+    { x: 0, y: margin, width, height: height - 2 * margin },
+    { text: caption, family: captionFont, size: (shorter * captionSize) / 100, color, width: width * 0.9, align: 'center' },
+    captionPosition === 'Top' ? 'top' : captionPosition === 'Bottom' ? 'bottom' : 'middle',
+  );
+  release(color);
 };
 
 const toPath = (uri: string) => decodeURIComponent(uri.replace(/^file:\/\//, ''));
@@ -138,9 +121,29 @@ let captionKeys: string[] = [];
 /** The picture a cell was swapped for, by the cell's name in `captionKeys`. A cell not in it shows the picture the layout gave it. */
 const swaps = new Map<string, string>();
 
+/** How far each cell's picture is zoomed in and turned inside its frame, by the cell's name in `captionKeys`. A cell not in it shows its picture as the layout fit it. */
+const photoViews = new Map<string, PhotoView>();
+/** `pan` is how far the picture is moved from the middle of its frame, in pixels of the frame. */
+type PhotoView = { zoom: number; turn: number; pan?: [number, number] };
+const MAX_ZOOM = 4;
+/** The picture in each cell's frame (the canvas the zoom, turn and move are set on) and the size of the frame. */
+let views: { picture: CanvasLike; width: number; height: number }[] = [];
+
+/**
+ * Zooms, turns and moves one cell's picture inside its frame. The library keeps it covering the frame, so turning it does not leave empty
+ * corners. Only the picture canvas's own placement is set, so a drag of the slider is cheap.
+ */
+const showPhoto = (index: number) => {
+  const view = views[index];
+  if (!view) return;
+  const { zoom, turn, pan = [0, 0] } = photoViews.get(captionKeys[index]) ?? { zoom: 1, turn: 0 };
+  view.picture.setViewInFrame(view.width, view.height, { zoom, turn, pan });
+};
+
 /** Keeps what the cells hold that no control does (their swaps and their words) with the project, so it is there when the project opens. */
 const keepCells = () =>
   app.saved.set('cells', {
+    photoViews: [...photoViews],
     swaps: [...swaps],
     cellWords: [...cellWords],
     sameWords: [...sameWords],
@@ -154,6 +157,7 @@ const restoreCells = () => {
   const kept = app.saved.get('cells') as
     | {
         swaps: [string, string][];
+        photoViews?: [string, PhotoView][];
         cellWords: [string, Said][];
         sameWords: [string, Said][];
         allWords: Said | null;
@@ -163,6 +167,7 @@ const restoreCells = () => {
     | undefined;
   if (!kept) return;
   kept.swaps.forEach(([slot, uri]) => swaps.set(slot, uri));
+  kept.photoViews?.forEach(([slot, view]) => photoViews.set(slot, view));
   kept.cellWords.forEach(([slot, words]) => cellWords.set(slot, words));
   kept.sameWords.forEach(([uri, words]) => sameWords.set(uri, words));
   allWords = kept.allWords;
@@ -190,28 +195,12 @@ const writeStrips = () => {
     if (writtenStrips.get(index) === wanted) return;
     writtenStrips.set(index, wanted);
     const ink = Color.black();
-    const image = app.fonts.renderText({
-      text: words,
-      family: polaroidFont,
-      size: strip.bottom * STRIP_TEXT,
-      color: ink,
-      width: strip.width - 2 * strip.side,
-      align: 'center',
-    });
-    release(ink);
-    if (!image) {
-      strip.layer.setVisible(false);
-      return;
-    }
-    // Centered in the strip by the size of the words, which is the size of the picture the library made of them.
-    const [wordsWidth, wordsHeight] = [image.width(), image.height()];
-    strip.layer.setImage(image);
-    strip.layer.setPosition(
-      Math.round((strip.width - wordsWidth) / 2),
-      Math.round(strip.height - strip.bottom + (strip.bottom - wordsHeight) / 2),
+    app.fonts.placeText(
+      strip.layer,
+      { x: 0, y: strip.height - strip.bottom, width: strip.width, height: strip.bottom },
+      { text: words, family: polaroidFont, size: strip.bottom * STRIP_TEXT, color: ink, width: strip.width - 2 * strip.side, align: 'center' },
     );
-    strip.layer.setVisible(true);
-    release(image);
+    release(ink);
   });
 };
 
@@ -229,6 +218,7 @@ const drawSelection = () => {
 /** Picks a cell, or none, and shows its frame and its settings. */
 const selectCell = (index: number | null) => {
   selected = index;
+  watchPinches();
   drawSelection();
   inspector.refresh();
   // On a narrow screen the settings of the cell are behind a button, so a tap on a cell brings them up. Letting go leaves the panel as it is.
@@ -243,6 +233,72 @@ app.events.taps.subscribe(({ imageX, imageY }) => {
   release(found);
   selectCell(index >= 0 ? index : null);
 });
+
+/** How far the Rotation slider has turned each cell, in degrees, so a move of the picture on the screen is carried into the cell's own axes. */
+const cellTurns: number[] = [];
+
+/** How far, in screen pixels, the picked cell's place for two fingers reaches past its frame, and the least it measures across, so a small cell is still easy to pinch. */
+const PINCH_MARGIN = 24;
+const PINCH_LEAST = 120;
+
+// Two fingers that land on the picked cell, or near it, move its picture; anywhere else they zoom, turn and move the whole collage.
+app.gestures.claimPinch(({ imageX, imageY, imageScale }) => {
+  const cell = selected === null ? undefined : cells[selected];
+  if (!cell || imageX === null || imageY === null) return false;
+  const corners = quadCorners(cell.quadInParent());
+  const [left, right] = [Math.min(...corners.map(corner => corner.x)), Math.max(...corners.map(corner => corner.x))];
+  const [top, bottom] = [Math.min(...corners.map(corner => corner.y)), Math.max(...corners.map(corner => corner.y))];
+  const [reachX, reachY] = [Math.max((right - left) / 2, (PINCH_LEAST / 2) * imageScale), Math.max((bottom - top) / 2, (PINCH_LEAST / 2) * imageScale)];
+  const pad = PINCH_MARGIN * imageScale;
+  return Math.abs(imageX - (left + right) / 2) <= reachX + pad && Math.abs(imageY - (top + bottom) / 2) <= reachY + pad;
+});
+
+/** The cell and its picture's place when two fingers went down, which the rest of that pinch is measured from. */
+let pinched: { index: number; from: PhotoView } | null = null;
+
+/** Listening to pinches is what takes two fingers from the preview, so it is done only while a cell is picked; with none picked, two fingers zoom, turn and move the whole collage. */
+let pinchWatch: { unsubscribe: () => void } | null = null;
+const watchPinches = () => {
+  if (selected !== null && !pinchWatch) pinchWatch = app.events.pinches.subscribe(onPinch);
+  if (selected === null && pinchWatch) {
+    pinchWatch.unsubscribe();
+    pinchWatch = null;
+    pinched = null;
+  }
+};
+
+// Two fingers zoom, turn and move the picked cell's picture inside its frame, as they move.
+const onPinch = (pinch: { type: 'start' | 'change' | 'end'; rotation: number; scale: number; imageDx: number | null; imageDy: number | null }) => {
+  if (!canvas || selected === null) return;
+  if (pinch.type === 'start') {
+    const from = photoViews.get(captionKeys[selected]) ?? { zoom: 1, turn: 0 };
+    pinched = { index: selected, from: { ...from, pan: from.pan ?? [0, 0] } };
+    return;
+  }
+  if (!pinched) return;
+  const { index, from } = pinched;
+  if (pinch.type === 'end') {
+    pinched = null;
+    keepCells();
+    inspector.refresh();
+    return;
+  }
+  // The move is in the collage's pixels; the cell is turned by the Rotation slider, so it is turned back into the cell's own axes.
+  const angle = (cellTurns[index] * Math.PI) / 180;
+  const [moveX, moveY] = [pinch.imageDx ?? 0, pinch.imageDy ?? 0];
+  const turn = from.turn + pinch.rotation;
+  photoViews.set(captionKeys[index], {
+    zoom: Math.max(1, Math.min(MAX_ZOOM, from.zoom * pinch.scale)),
+    turn: ((((turn + 180) % 360) + 360) % 360) - 180,
+    pan: [
+      from.pan![0] + Math.cos(angle) * moveX + Math.sin(angle) * moveY,
+      from.pan![1] - Math.sin(angle) * moveX + Math.cos(angle) * moveY,
+    ],
+  });
+  showPhoto(index);
+  // The cell's picture changed in place, so the preview draws it now, not when the fingers lift.
+  inspector.redraw();
+};
 
 /** How much each cell is scaled at a setting of the Scale slider, in the order of the cells (chosen once so a drag does not shuffle them). */
 const factorsAt = (range: [number, number]) => {
@@ -260,7 +316,8 @@ const shape = () => {
   cells.forEach((cell, index) => {
     // The random number is drawn either way, so the turns of the other styles do not change.
     const turn = rotation[0] + (rotation[1] - rotation[0]) * rotateRand.next();
-    cell.setRotation(style.rotates === false ? 0 : turn);
+    cellTurns[index] = style.rotates === false ? 0 : turn;
+    cell.setRotation(cellTurns[index]);
     if (style.scaleFrom === 'middle') cell.setScale(now[index] / built[index]);
   });
   drawSelection();
@@ -287,6 +344,26 @@ const applyWords = (index: number, words: string) => {
 const cellInspector = (index: number) => {
   const { header, select, fontPicker, text, pictures } = inspector;
   header(`Image ${index + 1}`, { back: () => selectCell(null) });
+  if (photoViews.has(captionKeys[index])) {
+    select('Reset', {
+      options: ['Scale', 'Position', 'Rotation', 'All'],
+      momentary: true,
+      onChange: part => {
+        const now = photoViews.get(captionKeys[index])!;
+        const reset: PhotoView = {
+          zoom: part === 'Scale' ? 1 : now.zoom,
+          turn: part === 'Rotation' ? 0 : now.turn,
+          pan: part === 'Position' ? [0, 0] : now.pan,
+        };
+        if (part === 'All') photoViews.delete(captionKeys[index]);
+        else photoViews.set(captionKeys[index], reset);
+        showPhoto(index);
+        keepCells();
+        inspector.redraw();
+        inspector.refresh();
+      },
+    });
+  }
   // Every picked picture, to put in this cell in place of the one it shows.
   pictures('Swap Image', {
     files: collageImages,
@@ -325,12 +402,12 @@ const cellInspector = (index: number) => {
       polaroidFont = family;
     },
   });
-  text('Caption Words', {
+  text('Caption Text', {
     value: wordsOf(index),
     placeholder: fonts.length > 0 ? 'Write something' : 'Download a font on the Fonts tab',
     onChange: value => applyWords(index, value),
   });
-  select('Apply words to', {
+  select('Apply text to', {
     options: ['Current', 'Same', 'All'],
     value: captionScope,
     onChange: value => {
@@ -440,7 +517,7 @@ const mainInspector = () => {
       captionFont = family;
     },
   });
-  text('Words', {
+  text('Text', {
     value: caption,
     placeholder: fonts.length > 1 ? 'Write something' : 'Download a font on the Fonts tab',
     onChange: value => {
@@ -477,14 +554,23 @@ const mainInspector = () => {
 /** Lets go of the canvas and its cells, and calls a build that is still running out of date. */
 const free = () => {
   building++;
-  release(textLayer, ...strips.map(strip => strip?.layer), canvas, ...cells, ...photoCache.values());
+  release(
+    textLayer,
+    ...strips.map(strip => strip?.layer),
+    canvas,
+    ...cells,
+    ...views.map(each => each.picture),
+    ...photoCache.values(),
+  );
   photoCache.clear();
+  views = [];
   textLayer = null;
   strips = [];
   sources = [];
   captionKeys = [];
   writtenStrips.clear();
   selected = null;
+  watchPinches();
   drawSelection();
   writtenCaption = '';
   canvas = null;
@@ -549,7 +635,9 @@ export const previewCanvas = async () => {
   const card = FRAMES[frame];
   const averageCell = Math.sqrt((imageSize[0] * imageSize[1]) / Math.max(1, collageImages.length));
   const sharedSide = card && style.sharedBorder ? Math.round(averageCell * card.side) : 0;
-  const border = sharedSide ? { side: sharedSide, bottom: Math.round(sharedSide * (card!.bottom / card!.side)) } : undefined;
+  const border = sharedSide
+    ? { side: sharedSide, bottom: Math.round(sharedSide * (card!.bottom / card!.side)) }
+    : undefined;
   const placed = style.layout(collageImages.length, imageSize, shapes, border);
   // With Trim Edges the collage is only as big as its cells, so there are no empty bands. A cell with shared borders reaches half a border past its place.
   let size = imageSize;
@@ -571,7 +659,10 @@ export const previewCanvas = async () => {
     const nth = given.get(uri) ?? 0;
     given.set(uri, nth + 1);
     const swapped = swaps.get(`${uri}#${nth}`);
-    return { slot: `${uri}#${nth}`, shown: swapped && collageImages.some(file => file.uri === swapped) ? swapped : uri };
+    return {
+      slot: `${uri}#${nth}`,
+      shown: swapped && collageImages.some(file => file.uri === swapped) ? swapped : uri,
+    };
   });
   const paths = [...new Set(slots.map(each => toPath(each.shown)))];
   if (!(await load(paths))) return canvas;
@@ -580,6 +671,7 @@ export const previewCanvas = async () => {
   const made = Canvas.newBlank('Collage', size[0], size[1]);
   const madeStrips: typeof strips = [];
   const madeSources: string[] = [];
+  const madeViews: typeof views = [];
   const scaleRand = seededRandom(`${SEED}:scale`);
   for (const [at, spot] of layout.entries()) {
     // The Scale slider sizes the place itself, so the picture is shrunk once, straight from the original. A place grows about its middle
@@ -620,7 +712,6 @@ export const previewCanvas = async () => {
     const boxWidth = Math.max(1, place.width - 2 * side);
     const boxHeight = Math.max(1, place.height - side - bottom);
     const fit = Math.min(boxWidth / photoWidth, boxHeight / photoHeight);
-    const cover = Math.max(boxWidth / photoWidth, boxHeight / photoHeight);
     // Keeping the aspect ratio, the picture's space shrinks to the picture scaled to fit, and the cell, with its edges, sits in the middle
     // of its place. Otherwise the space fills the box and the picture, scaled to cover it, is cropped.
     const width = place.keepAspect ? Math.min(boxWidth, Math.max(1, Math.round(photoWidth * fit))) : boxWidth;
@@ -651,7 +742,7 @@ export const previewCanvas = async () => {
     const picture = Canvas.newBlank('Photo', photoWidth, photoHeight);
     const layer = picture.addLayerFromImage('photo', photo, undefined);
     const inArea = area.addCanvas(picture, undefined);
-    inArea.setScale(place.keepAspect ? fit : cover);
+    madeViews.push({ picture: inArea, width, height });
     const inCell = cell.addCanvas(area, { position: [side, side] });
     // A Polaroid's thick edge is a strip to write on. A cell draws its own layers over its canvases, so the words are one, hidden until there are some.
     let strip: (typeof strips)[number] = null;
@@ -675,7 +766,7 @@ export const previewCanvas = async () => {
         place.y + Math.trunc((place.height - cellHeight) / 2),
       ],
     });
-    release(layer, inArea, picture, inCell, area, inCollage, cell);
+    release(layer, picture, inCell, area, inCollage, cell);
   }
   // The pictures that are no longer picked are let go; the others stay for the next build.
   for (const [path, photo] of photoCache) {
@@ -689,7 +780,8 @@ export const previewCanvas = async () => {
   const blank = Image.newFromColor(1, 1, clear);
   const text = made.addLayerFromImage('text', blank, undefined);
   release(clear, blank);
-  release(textLayer, ...strips.map(each => each?.layer), canvas, ...cells);
+  release(textLayer, ...strips.map(each => each?.layer), canvas, ...cells, ...views.map(each => each.picture));
+  views = madeViews;
   canvas = made;
   canvasSize = size;
   textLayer = text;
@@ -699,8 +791,12 @@ export const previewCanvas = async () => {
   captionKeys = slots.map(each => each.slot);
   writtenStrips.clear();
   // The cells are new, so a picked cell is the one at the same place, if there is still one.
-  if (selected !== null && selected >= cells.length) selected = null;
+  if (selected !== null && selected >= cells.length) {
+    selected = null;
+    watchPinches();
+  }
   builtScale = scale;
+  views.forEach((_, index) => showPhoto(index));
   shape();
   builtFrom = key;
   writtenCaption = '';

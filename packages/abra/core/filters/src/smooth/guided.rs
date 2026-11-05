@@ -9,7 +9,7 @@
 //! guide, so two things of the same brightness but different color still count as different.
 
 use abra_core::image::gpu::{GpuAux, GpuPass, GpuProcessor};
-use abra_core::{Image, ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{Image, ResizeTarget, Size, TransformAlgorithm, transform};
 use mask::Mask;
 use options::{Effect, Options};
 use rayon::prelude::*;
@@ -248,7 +248,7 @@ impl Guided {
   fn guide_at(&self, p_width: u32, p_height: u32) -> Image {
     let mut guide = self.guide.clone();
     if guide.dimensions::<u32>() != (p_width, p_height) {
-      guide.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), None);
+      transform().with_size(ResizeTarget::Exact(Size::new(p_width, p_height))).apply(&mut guide);
     }
     guide
   }

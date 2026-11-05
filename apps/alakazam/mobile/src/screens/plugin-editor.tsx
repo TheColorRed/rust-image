@@ -34,7 +34,6 @@ import Share2 from 'lucide-react-native/icons/share-2';
 import X from 'lucide-react-native/icons/x';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useObservable } from 'react-rx';
 
 export type PluginWorkspaceScreenInfo = PluginWorkspaceInfo;
@@ -49,7 +48,6 @@ export function PluginEditorScreen({
 }) {
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const inspectorOpen = useObservable(pluginEditorInspectorOpen$, pluginEditorInspectorOpen.value);
   const hasInspector = useObservable(pluginEditorHasInspector$, pluginEditorHasInspector.value);
   const hasControls = useObservable(pluginEditorHasControls$, pluginEditorHasControls.value);
@@ -230,7 +228,7 @@ export function PluginEditorScreen({
               style={[
                 styles.drawer,
                 {
-                  bottom: insets.bottom,
+                  bottom: 0,
                   width: Math.min(width * 0.86, 360),
                   borderColor: colors.border,
                   backgroundColor: colors.surface,

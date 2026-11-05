@@ -5,6 +5,8 @@ import { useTheme } from '@/src/lib/ui/theme';
 import {
   pluginEditorControlsError,
   pluginEditorControlsError$,
+  pluginEditorGroups,
+  pluginEditorGroups$,
   pluginEditorInspectorError,
   pluginEditorInspectorError$,
   pluginEditorItems,
@@ -15,14 +17,19 @@ import {
 import { Fragment, useMemo } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useObservable } from 'react-rx';
+import { InspectorColor } from './inspector-color';
 import { InspectorFilePicker, type InspectorFiles } from './inspector-file-picker';
 import { InspectorFontPicker } from './inspector-font-picker';
+import { InspectorGroup } from './inspector-group';
+import { InspectorCurve } from './inspector-curve';
+import { InspectorGradient } from './inspector-gradient';
 import { InspectorHeader } from './inspector-header';
 import { InspectorNumber } from './inspector-number';
 import { InspectorPictures } from './inspector-pictures';
 import { InspectorSelect, joinChoices } from './inspector-select';
 import { InspectorSlider } from './inspector-slider';
 import { InspectorSize } from './inspector-size';
+import { InspectorSubmenu } from './inspector-submenu';
 import { InspectorText } from './inspector-text';
 import { InspectorToggle } from './inspector-toggle';
 
@@ -46,6 +53,9 @@ export function Inspector({
   const controlsError = useObservable(pluginEditorControlsError$, pluginEditorControlsError.value);
   const error = surface === 'inspector' ? inspectorError : controlsError;
   const picked = useObservable(pluginEditorPicked$, pluginEditorPicked.value);
+  const groups = useObservable(pluginEditorGroups$, pluginEditorGroups.value);
+  // Whether the controls being listed are showing: those before the first group always are.
+  let shown = true;
 
   return (
     <ScrollView style={styles.tools} contentContainerStyle={styles.toolList}>
@@ -54,8 +64,28 @@ export function Inspector({
         <Text style={{ color: colors.textSecondary }}>This plugin added no inspector controls.</Text>
       ) : null}
       {items.map((item, index) => {
+        if (item.kind === 'group') {
+          const isOpen = groups[item.key] ?? item.open;
+          shown = isOpen;
+          return (
+            <InspectorGroup
+              key={item.key}
+              text={item.label}
+              open={isOpen}
+              first={index === 0}
+              itemKey={item.key}
+              enabled={item.enabled}
+              onFold={() => pluginEditorGroups.next({ ...pluginEditorGroups.value, [item.key]: !isOpen })}
+            />
+          );
+        }
+        // The controls after a folded group are hidden up to the next group.
+        if (!shown) return null;
         if (item.kind === 'header') {
           return <InspectorHeader key={item.key} text={item.label} level={item.level} first={index === 0} onBack={item.back} />;
+        }
+        if (item.kind === 'submenu') {
+          return <InspectorSubmenu key={item.key} itemKey={item.key} text={item.label} />;
         }
         if (item.kind === 'file-picker') {
           return (
@@ -94,6 +124,36 @@ export function Inspector({
         }
         if (item.kind === 'toggle') {
           return <InspectorToggle key={item.key} itemKey={item.key} label={item.label} value={item.value} />;
+        }
+        if (item.kind === 'color') {
+          return (
+            <InspectorColor
+              key={item.key}
+              itemKey={item.key}
+              label={item.label}
+              value={item.value}
+              alpha={item.alpha}
+              title={item.title}
+              swatches={item.swatches}
+            />
+          );
+        }
+        if (item.kind === 'curve') {
+          return (
+            <InspectorCurve
+              key={item.key}
+              itemKey={item.key}
+              label={item.label}
+              value={item.value}
+              min={item.min}
+              max={item.max}
+              title={item.title}
+              presets={item.presets}
+            />
+          );
+        }
+        if (item.kind === 'gradient') {
+          return <InspectorGradient key={item.key} itemKey={item.key} label={item.label} value={item.value} title={item.title} swatches={item.swatches} />;
         }
         if (item.kind === 'number') {
           return (

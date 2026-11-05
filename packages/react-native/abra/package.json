@@ -10,6 +10,7 @@
   "exports": {
     ".": "./index.ts",
     "./adjustments": "./entries/adjustments.ts",
+    "./animation": "./entries/animation.ts",
     "./beauty": "./entries/beauty.ts",
     "./blend": "./entries/blend.ts",
     "./canvas": "./entries/canvas.ts",
@@ -21,6 +22,8 @@
     "./gradient": "./entries/gradient.ts",
     "./image": "./entries/image.ts",
     "./mask": "./entries/mask.ts",
+    "./particles": "./entries/particles.ts",
+    "./sprites": "./entries/sprites.ts",
     "./tools": "./entries/tools.ts",
     "./transform": "./entries/transform.ts",
     "./typography": "./entries/typography.ts"

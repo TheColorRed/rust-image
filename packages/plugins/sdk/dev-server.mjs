@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import chokidar from 'chokidar';
 import Enquirer from 'enquirer';
 import fg from 'fast-glob';
-import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -275,6 +275,9 @@ function queuePluginChange(plugin) {
   }, 250);
 }
 
+/** Only a file bigger than this is left out of a sync when it has not changed, such as an AI model. */
+const SKIP_UNCHANGED_OVER_BYTES = 1_000_000;
+
 async function buildAndPush(plugin) {
   if (plugin.removed) return;
   if (plugin.building) {
@@ -304,14 +307,22 @@ async function buildAndPush(plugin) {
       ...(plugin.manifest.contributes?.scripts ?? []).map(script => script.entry),
       ...(plugin.manifest.contributes?.workspaces ?? []).map(workspace => workspace.entry),
     ]);
+    // A big file the app already has with the same hash is not sent again: the app fills it in from the installed plugin. A small file is always
+    // sent, because this server cannot tell whether the app installed the last send: after one that failed it would go on skipping a file the app
+    // does not have, and every later sync would be refused for a hash that does not match.
+    let skipped = 0;
     for (const file of plugin.manifest.files ?? []) {
       const source = builtEntries.has(file.path) ? path.join(plugin.dir, 'dist', ...file.path.split('/')) : path.join(plugin.dir, ...file.path.split('/'));
+      if (plugin.sent?.get(file.path) === file.sha256 && statSync(source).size > SKIP_UNCHANGED_OVER_BYTES) { skipped++; continue; }
       await sendFile(file.path, source);
     }
     if (plugin.removed) return;
     await appRequest(serverUrl, 'POST', '/complete', undefined, pluginHeader);
-    console.log(chalk.green(`Sent ${plugin.manifest.id} to Alakazam at ${new Date().toLocaleString()}.`));
+    plugin.sent = new Map((plugin.manifest.files ?? []).map(file => [file.path, file.sha256]));
+    console.log(chalk.green(`Sent ${plugin.manifest.id} to Alakazam at ${new Date().toLocaleString()}${skipped ? ` (${skipped} unchanged file(s) not sent)` : ''}.`));
   } catch (error) {
+    // A sync that stopped part way leaves the app with a partly sent plugin, so the next one sends everything.
+    plugin.sent = undefined;
     console.error(error.message);
   } finally {
     plugin.building = false;
@@ -328,13 +339,18 @@ function pluginChangeIsRelevant(plugin, relativePath) {
   if (relativePath === '' || relativePath === '.') return true;
   const parts = relativePath.split('/');
   if (parts.some(part => part === 'dist' || part === 'node_modules' || part === 'target' || part === '.git')) return false;
-  if (relativePath === 'plugin.yml' || relativePath === 'package.json' || relativePath === 'package-lock.json' ||
+  if (relativePath === 'plugin.yml' || relativePath === 'README.md' || relativePath === 'CHANGELOG.md' ||
+    relativePath === 'package.json' || relativePath === 'package-lock.json' ||
     relativePath === 'src' || relativePath.startsWith('src/')) return true;
   const builtEntries = new Set([
     ...(plugin.manifest.contributes?.controls ?? []).flatMap(group => (group.items ?? []).map(item => item.entry)),
     ...(plugin.manifest.contributes?.scripts ?? []).map(script => script.entry),
     ...(plugin.manifest.contributes?.workspaces ?? []).map(workspace => workspace.entry),
   ]);
+  if ((plugin.manifest.assets ?? []).some(asset => {
+    const folder = String(asset).replace(/\/$/, '');
+    return /[*?[\]{}]/.test(folder) ? fg.sync(folder, { cwd: plugin.dir }).includes(relativePath) : relativePath === folder || relativePath.startsWith(`${folder}/`);
+  })) return true;
   return (plugin.manifest.files ?? []).some(file => !builtEntries.has(file.path) && file.path === relativePath);
 }
 

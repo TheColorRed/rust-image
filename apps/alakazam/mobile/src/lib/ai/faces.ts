@@ -1,10 +1,10 @@
 import { devDebug } from '@/src/lib/log';
-import { AiModel } from '@abra/core';
 import { rectIntersect, rectNew, rectRoundedOut, rectScaled, rectSquared, rectTranslated, type Rect } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
-import { aiModelPath, runAiModelAsync, unloadAiModels } from '@alakazam/mobile';
+import { loadAiModelAsync, runAiModelAsync, unloadAiModels } from '@alakazam/mobile';
 import { debounceTime, filter } from 'rxjs/operators';
 import { personIn } from '@/src/lib/ai/analysis';
+import { missingModels } from '@/src/lib/ai/ai-model-availability';
 
 import { owning, release } from '@/src/lib/native/native-handles';
 import { aiProgress, aiProgress$ } from '@/src/state/ai-progress';
@@ -47,20 +47,25 @@ const OUTLINE_GROWTH = 1.5;
 /** The outline is moved up by this fraction of its side, because the landmarks stop at the forehead and the top of the head is above. */
 const OUTLINE_RISE = 0.05;
 
-const models: Record<string, ReturnType<typeof AiModel.load>> = {};
+export type LoadedAiModel = Awaited<ReturnType<typeof loadAiModelAsync>>;
+const models: Record<string, LoadedAiModel> = {};
 
-/** A model by its role, or nothing when it is not downloaded on this device (or has no manifest yet). */
-export const model = (role: string): ReturnType<typeof AiModel.load> | undefined => {
-  try {
-    return (models[role] ??= AiModel.load(aiModelPath(role)));
-  } catch {
-    return undefined;
-  }
+const loading: Record<string, Promise<LoadedAiModel | undefined>> = {};
+
+/**
+ * Loads the model on a native worker thread. There is intentionally no synchronous model accessor.
+ */
+export const modelAsync = (role: string): Promise<LoadedAiModel | undefined> => {
+  if (models[role]) return Promise.resolve(models[role]);
+  return (loading[role] ??= loadAiModelAsync(role)
+    .then(loaded => (models[role] = loaded))
+    .catch(() => undefined)
+    .finally(() => delete loading[role]));
 };
 
 /**
  * Frees a model by its role, and with it the memory it holds (a large model keeps gigabytes of working memory after a run). It is loaded
- * again by `model` the next time it is wanted.
+ * again by `modelAsync` the next time it is wanted.
  */
 export const unloadModel = (role: string): void => {
   release(models[role]);
@@ -101,71 +106,25 @@ export type FoundFace = {
   /** The box around the whole person this face belongs to, in pixels of the photo. */
   body: Rect;
   /** The face-parsing labels of the `zoom` crop. */
-  labels: ReturnType<ReturnType<NonNullable<ReturnType<typeof model>>['run']>['labels']>;
+  labels: ReturnType<Awaited<ReturnType<typeof runAiModelAsync>>['labels']>;
   /** The crop `labels` were made from, in pixels of the photo. */
   zoom: Rect;
   /** The square around the face features, in pixels of the photo. */
   face: Rect;
   /** The photo cropped to `face`. */
   faceImage: ImageLike;
-  landmarks: ReturnType<ReturnType<NonNullable<ReturnType<typeof model>>['run']>['landmarks']>;
+  landmarks: ReturnType<Awaited<ReturnType<typeof runAiModelAsync>>['landmarks']>;
 };
 
 /**
  * The face of each person in the photo, with the AI models. Nothing when a model is missing or no face is found. What it yields
  * is kept by `keep`, so it is freed with everything else the caller keeps.
  */
-export function* findFaces(photo: ImageLike, keep: <V>(value: V) => V): Generator<FoundFace> {
-  const people = model(PERSON_DETECTION);
-  const parser = model(FACE_PARSING);
-  const landmarker = model(FACE_LANDMARKS);
-  if (!people || !parser || !landmarker) return;
-
-  const frame = rectNew({ x: 0, y: 0 }, { width: photo.width(), height: photo.height() });
-  for (const person of keep(people.run(photo)).instances()) {
-    const body = keep(person).bounds();
-
-    // Try a small square at the top of the person first and larger ones after it, because a face in a full-length photo is
-    // small and in a close-up it fills the picture. A square counts when it leads to a face the landmark model accepts.
-    for (const fraction of HEAD_SQUARES) {
-      const side = body.height * fraction;
-      const head = inside(
-        rectNew({ x: body.x + body.width / 2 - side / 2, y: body.y - side * HEAD_RISE }, { width: side, height: side }),
-        frame,
-      );
-      if (!head) continue;
-
-      // Coarse: the eyes the parser sees in this square.
-      const seen = keep(keep(keep(parser.run(keep(photo.cropped(head.x, head.y, head.width, head.height)))).labels()).maskNamed(EYES)).bounds(0);
-      if (!seen) continue;
-
-      // Fine: a crop around the eyes where the face fills the picture, so the parser finds the features properly.
-      const zoom = inside(rectScaled(rectSquared(rectTranslated(seen, head.x, head.y)), EYES_TO_CROP, EYES_TO_CROP), frame);
-      if (!zoom) continue;
-      const labels = keep(keep(parser.run(keep(photo.cropped(zoom.x, zoom.y, zoom.width, zoom.height)))).labels());
-      const features = keep(labels.maskNamed(FACE_FEATURES)).bounds(0);
-      const face =
-        features && inside(rectTranslated(rectScaled(rectSquared(features), FACE_GROWTH, FACE_GROWTH), zoom.x, zoom.y), frame);
-      if (!face) continue;
-
-      const faceImage = keep(photo.cropped(face.x, face.y, face.width, face.height));
-      const landmarks = keep(landmarker.run(faceImage)).landmarks();
-      if (landmarks.presence < MIN_FACE_PRESENCE) continue;
-
-      yield { body, labels, zoom, face, faceImage, landmarks };
-      break;
-    }
-  }
-}
-
-/**
- * `findFaces` with every model run on a worker thread, so the app keeps drawing and answering touches while it looks. The steps are
- * the same, so a change to how a face is found goes in both.
- */
+/** Finds faces with model loading and inference on native workers, loading models sequentially to limit peak memory. */
 export async function* findFacesAsync(photo: ImageLike, keep: <V>(value: V) => V): AsyncGenerator<FoundFace> {
-  const people = model(PERSON_DETECTION);
-  const parser = model(FACE_PARSING);
-  const landmarker = model(FACE_LANDMARKS);
+  const people = await modelAsync(PERSON_DETECTION);
+  const parser = await modelAsync(FACE_PARSING);
+  const landmarker = await modelAsync(FACE_LANDMARKS);
   if (!people || !parser || !landmarker) return;
   const run = async (loaded: NonNullable<typeof people>, image: ImageLike) =>
     keep(await runAiModelAsync(loaded, image as Parameters<typeof runAiModelAsync>[1]));
@@ -217,6 +176,9 @@ export async function* findFacesAsync(photo: ImageLike, keep: <V>(value: V) => V
   }
 }
 
+/** Plugin-facing alias; iteration is asynchronous and every model operation stays on native workers. */
+export const findFaces = findFacesAsync;
+
 /**
  * Names a face by the box around its person, as fractions of the photo, so that the name is the same at every size of the photo
  * and the masks made for one size can be resized for another.
@@ -236,7 +198,9 @@ let findingFaceBoxes: Promise<void> | undefined;
  */
 export const findFaceBoxes = (photo: ImageLike): Promise<void> => {
   const found = people.value;
-  if (!found || faceBoxes.value || FACE_MODELS.some(role => !model(role))) return Promise.resolve();
+  // A model that is missing is not "no faces": nothing is kept, so the search runs when the models are downloaded. This only looks for the files, and
+  // does not read the models.
+  if (!found || faceBoxes.value || missingModels(FACE_MODELS).length > 0) return Promise.resolve();
   // Opening a person control again while it is still looking does not start a second search.
   findingFaceBoxes ??= (async () => {
     // The editor frees its own copy of the photo when the session ends, which can be before the models are done.
@@ -263,7 +227,7 @@ export const findFaceBoxes = (photo: ImageLike): Promise<void> => {
             rectNew({ x: x - side, y: y - side }, { width: side * 2, height: side * 2 }),
             rectNew({ x: 0, y: 0 }, { width: mine.width(), height: mine.height() }),
           );
-          const landmarker = model(FACE_LANDMARKS);
+          const landmarker = await modelAsync(FACE_LANDMARKS);
           if (wider && landmarker) {
             const again = keep(
               await runAiModelAsync(landmarker, keep(mine.cropped(wider.x, wider.y, wider.width, wider.height)) as Parameters<typeof runAiModelAsync>[1]),

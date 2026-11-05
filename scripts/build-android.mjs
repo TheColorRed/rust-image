@@ -2,7 +2,7 @@
 //   1. finds every connected device (or the one named with --device),
 //   2. builds libalakazam_mobile.so, regenerates the TypeScript bindings (packages/react-native/alakazam) and rebuilds the
 //      @abra/core plugin types from them (packages/plugins/abra),
-//   3. installs the app on each device with Gradle,
+//   3. installs the app with Gradle, or with --native-only pushes only the Rust library into an installed debug app,
 //   4. forwards Metro to each device and launches the app.
 //
 // Debug builds load their JavaScript from Metro, so it is started if nothing answers on port 8081: in its own terminal
@@ -16,9 +16,11 @@
 //
 // --gradle-only skips the Rust build and Metro and only runs the Gradle install (debug, or release with --release).
 //
-// Usage: npm run dev:android [-- --release] [-- --no-launch] [-- --no-metro] [-- --metro-only] [-- --gradle-only] [-- --device <serial>]
+// --native-only skips the APK build/install and replaces the Rust library in a previously installed debug app.
+//
+// Usage: npm run dev:android [-- --release] [-- --native-only] [-- --no-launch] [-- --no-metro] [-- --metro-only] [-- --gradle-only] [-- --device <serial>]
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, openSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,10 +31,11 @@ const release = args.includes('--release');
 const metroOnly = args.includes('--metro-only');
 const launch = !args.includes('--no-launch') && !metroOnly;
 const gradleOnly = args.includes('--gradle-only');
+const nativeOnly = args.includes('--native-only');
 const startMetro = !release && !gradleOnly && !args.includes('--no-metro');
 const deviceArgIndex = args.findIndex((arg) => arg === '--device' || arg.startsWith('--device='));
 const requestedDevice = deviceArgIndex < 0 ? undefined : args[deviceArgIndex] === '--device' ? args[deviceArgIndex + 1] : args[deviceArgIndex].slice('--device='.length);
-const ownFlags = new Set(['--release', '--no-launch', '--no-metro', '--metro-only', '--gradle-only']);
+const ownFlags = new Set(['--release', '--native-only', '--no-launch', '--no-metro', '--metro-only', '--gradle-only']);
 const forwardedArgs = args.filter((arg, index) => !ownFlags.has(arg) && !arg.startsWith('--device') && args[index - 1] !== '--device');
 const appId = release ? 'com.alakazam.mobile' : 'com.alakazam.mobile.debug';
 const metroUrl = 'http://127.0.0.1:8081/status';
@@ -59,6 +62,8 @@ function fail(p_message) {
 }
 
 if (deviceArgIndex >= 0 && !requestedDevice) fail('--device requires an ADB serial.');
+if (nativeOnly && release) fail('--native-only is for the debuggable app; it cannot update a release install.');
+if (nativeOnly && gradleOnly) fail('--native-only builds Rust, so it cannot be combined with --gradle-only.');
 
 function run(p_label, p_command, p_args, p_cwd, p_env) {
   console.log(`\n==> ${p_label}`);
@@ -125,12 +130,30 @@ if (!metroOnly) {
     run('Build the @abra/core plugin types', 'node', [path.join('packages', 'plugins', 'abra', 'build.mjs')], root);
   }
 
-  // 4. Install with Gradle. Reusing the Gradle build means later device installs
-  // are incremental, while ANDROID_SERIAL keeps each install unambiguous.
+  // 4. Native-only debug iterations replace the library in app-private storage;
+  // other deploys install the complete app through Gradle.
   const androidDir = path.join(root, 'apps', 'alakazam', 'mobile', 'android');
   const gradlew = isWindows ? `"${path.join(androidDir, 'gradlew.bat')}"` : path.join(androidDir, 'gradlew');
-  for (const device of devices) {
-    run(`Install the app with Gradle (${device})`, gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+  if (nativeOnly) {
+    const libraryName = 'libalakazam_mobile.so';
+    for (const device of devices) {
+      const installed = adb(['-s', device, 'shell', 'pm', 'path', appId]);
+      if (!installed.includes('package:')) fail(`debug app ${appId} is not installed on ${device}; run npm run dev:android once first.`);
+      const abi = adb(['-s', device, 'shell', 'getprop', 'ro.product.cpu.abi']);
+      const library = path.join(root, 'packages', 'react-native', 'alakazam', 'android', 'src', 'main', 'jniLibs', abi, libraryName);
+      if (!existsSync(library)) fail(`no ${abi} library at ${library}; build with --targets ${abi}.`);
+      console.log(`\n==> Push ${libraryName} to ${device} (${abi})`);
+      const remote = `files/native-libs/${libraryName}`;
+      const result = spawnSync(adbCommand, ['-s', device, 'exec-in', 'run-as', appId, 'sh', '-c', `mkdir -p files/native-libs && cat > ${remote}`], {
+        input: readFileSync(library),
+        stdio: ['pipe', 'inherit', 'inherit'],
+      });
+      if (result.error || result.status !== 0) fail(`could not copy native library into ${appId} on ${device}${result.error ? ` (${result.error.message})` : ''}.`);
+    }
+  } else {
+    for (const device of devices) {
+      run(`Install the app with Gradle (${device})`, gradlew, [`app:install${release ? 'Release' : 'Debug'}`, '-PreactNativeDevServerPort=8081'], androidDir, { ANDROID_SERIAL: device });
+    }
   }
 }
 

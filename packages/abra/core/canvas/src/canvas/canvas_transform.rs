@@ -1,6 +1,6 @@
 //! Transform operations for canvases.
 
-use abra_core::{FlipAxis, IntoNumber, ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{FlipAxis, IntoNumber, Rect, ResizeTarget, Size, Transform, TransformAlgorithm, transform};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -106,7 +106,7 @@ fn crop_all_layers(p_canvas: &mut CanvasInner, p_crop_x: u32, p_crop_y: u32, p_w
       let intersect_width = (intersect_right - intersect_left) as u32;
       let intersect_height = (intersect_bottom - intersect_top) as u32;
 
-      layer.image_mut().crop(crop_left, crop_top, intersect_width, intersect_height);
+      transform().with_crop(Rect::new((crop_left, crop_top), (intersect_width, intersect_height))).apply(layer.image_mut());
 
       // Update layer position to be relative to the new canvas
       let new_x = intersect_left - crop_x_i32;
@@ -114,7 +114,7 @@ fn crop_all_layers(p_canvas: &mut CanvasInner, p_crop_x: u32, p_crop_y: u32, p_w
       layer.set_position_internal(new_x, new_y);
     } else {
       // No intersection - this layer won't be visible after crop
-      layer.image_mut().crop(0, 0, 0, 0);
+      transform().with_crop(Rect::new((0, 0), (0, 0))).apply(layer.image_mut());
       layer.set_position_internal(0, 0);
     }
   }
@@ -174,7 +174,7 @@ impl<'a> CanvasTransform<'a> {
       let mut canvas = self.canvas.lock().unwrap();
       // Resize all layers
       for i in 0..canvas.layers.len() {
-        canvas.layers[i].lock().unwrap().image_mut().resize(ResizeTarget::RelativeWidth(p_width), p_algorithm);
+        transform().with_size(ResizeTarget::RelativeWidth(p_width)).with_algorithm(p_algorithm).apply(canvas.layers[i].lock().unwrap().image_mut());
       }
 
       // Update dimensions and recenter horizontally
@@ -188,7 +188,7 @@ impl<'a> CanvasTransform<'a> {
       let mut canvas = self.canvas.lock().unwrap();
       // Resize all layers
       for i in 0..canvas.layers.len() {
-        canvas.layers[i].lock().unwrap().image_mut().resize(ResizeTarget::RelativeHeight(p_height), p_algorithm);
+        transform().with_size(ResizeTarget::RelativeHeight(p_height)).with_algorithm(p_algorithm).apply(canvas.layers[i].lock().unwrap().image_mut());
       }
 
       // Update dimensions and recenter vertically
@@ -242,7 +242,7 @@ impl<'a> Transform for CanvasTransform<'a> {
       let algorithm = p_algorithm.into();
       let degrees = p_degrees.into::<f64>();
       for i in 0..canvas.layers.len() {
-        canvas.layers[i].lock().unwrap().image_mut().rotate(degrees, algorithm);
+        transform().with_rotation(degrees).with_algorithm(algorithm).apply(canvas.layers[i].lock().unwrap().image_mut());
       }
       canvas.mark_dirty();
     }
@@ -252,7 +252,7 @@ impl<'a> Transform for CanvasTransform<'a> {
     {
       let canvas = self.canvas.lock().unwrap();
       for i in 0..canvas.layers.len() {
-        canvas.layers[i].lock().unwrap().image_mut().flip(p_axis);
+        transform().with_flip(p_axis).apply(canvas.layers[i].lock().unwrap().image_mut());
       }
       canvas.mark_dirty();
     }

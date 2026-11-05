@@ -1,5 +1,6 @@
 import { RangeSlider } from '@/src/components/range-slider';
 import { Slider } from '@/src/components/slider';
+import { isReal } from '@/src/lib/plugins/plugin-values';
 import { pluginEditorItems, pluginEditorRebuild, pluginEditorRedraw } from '@/src/state/plugin-editor';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -59,6 +60,8 @@ export const InspectorSlider = memo(function InspectorSlider({
 
   /** The slider was moved or a number was typed: keeps it, tells the plugin and has the preview drawn again, and rebuilt once it stops moving if the slider asks. */
   const move = (next: [number, number]) => {
+    // A number that is not real is not taken, so the plugin is never given a NaN.
+    if (!next.every(isReal)) return;
     setCurrent(next);
     const item = pluginEditorItems.value.find(each => each.key === itemKey);
     if (item?.kind === 'slider') item.onChange?.(range ? next : next[0]);

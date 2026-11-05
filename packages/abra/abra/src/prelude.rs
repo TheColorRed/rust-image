@@ -14,7 +14,7 @@ pub use crate::abra_core::{BlendMode, Color, ColorStat, Harmony, Palette};
 pub use crate::abra_core::{Channel, Channels};
 
 // Commonly used transform traits (brought into prelude for ergonomics)
-pub use crate::abra_core::Transform;
+pub use crate::abra_core::{Transform, transform};
 
 // Common geometry and path helpers
 pub use crate::abra_core::Area;

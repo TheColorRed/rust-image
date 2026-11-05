@@ -1,4 +1,5 @@
 use crate::Shader;
+use crate::falloff::brush_falloff;
 use abra_core::{Gradient, Path, PointF, StrokeOpacity, StrokeWidth};
 
 /// Stroke brush shader: applies hardness-based falloff relative to a path centerline.
@@ -53,7 +54,14 @@ const MAX_GRID_CELLS: usize = 1 << 18;
 impl SegmentGrid {
   /// Sorts the segments between `p_points` into cells, each segment into every cell that is within `p_reach` of it.
   fn new(p_points: &[PointF], p_reach: f32) -> Self {
-    let empty = SegmentGrid { left: 0.0, top: 0.0, cell: 1.0, columns: 0, rows: 0, cells: Vec::new() };
+    let empty = SegmentGrid {
+      left: 0.0,
+      top: 0.0,
+      cell: 1.0,
+      columns: 0,
+      rows: 0,
+      cells: Vec::new(),
+    };
     if p_points.len() < 2 || !p_reach.is_finite() {
       return empty;
     }
@@ -86,7 +94,14 @@ impl SegmentGrid {
         }
       }
     }
-    SegmentGrid { left, top, cell, columns, rows, cells }
+    SegmentGrid {
+      left,
+      top,
+      cell,
+      columns,
+      rows,
+      cells,
+    }
   }
 
   /// The segments that can matter to a sample at `(p_x, p_y)`, none when it is outside the grid.
@@ -115,7 +130,8 @@ impl StrokeBrushShader {
   /// let s = StrokeBrushShader::new(inner, path.clone(), 6.0, 0.7);
   /// ```
   pub fn new(
-    p_inner: Box<dyn Shader + Send + Sync>, p_path: &Path, p_width: StrokeWidth, p_opacity: StrokeOpacity, p_hardness: impl Into<f64>,
+    p_inner: Box<dyn Shader + Send + Sync>, p_path: &Path, p_width: StrokeWidth, p_opacity: StrokeOpacity,
+    p_hardness: impl Into<f64>,
   ) -> Self {
     // Pre-flatten the path to a set of points; choose a tolerance that balances accuracy and performance.
     let flattened = p_path.flatten(1.0);
@@ -147,7 +163,8 @@ impl StrokeBrushShader {
   /// path a second time for every sample. It does nothing for a path that is closed, which the gradient shader treats differently.
   /// - `p_gradient`: The gradient. Its direction must be this stroke's path, or the colors will not be the ones the inner shader gives.
   pub fn with_gradient_along_path(mut self, p_gradient: Gradient) -> Self {
-    let closed = self.flattened.len() > 1 && self.flattened[0].distance_to(self.flattened[self.flattened.len() - 1]) < 0.1;
+    let closed =
+      self.flattened.len() > 1 && self.flattened[0].distance_to(self.flattened[self.flattened.len() - 1]) < 0.1;
     if !closed {
       self.gradient = Some(p_gradient);
     }
@@ -163,19 +180,7 @@ impl StrokeBrushShader {
     if p_distance >= p_max_distance {
       return 0.0;
     }
-    let normalized_dist = p_distance / p_max_distance;
-
-    if self.hardness < 0.5 {
-      let t = self.hardness * 2.0;
-      let quadratic = 1.0 - (normalized_dist * normalized_dist);
-      let linear = 1.0 - normalized_dist;
-      (quadratic * (1.0 - t) + linear * t).max(0.0)
-    } else {
-      let t = (self.hardness - 0.5) * 2.0;
-      let linear = 1.0 - normalized_dist;
-      let hard_edge = if normalized_dist < 0.5 { 1.0 } else { 0.0 };
-      (linear * (1.0 - t) + hard_edge * t).max(0.0)
-    }
+    brush_falloff(p_distance, p_max_distance, self.hardness)
   }
 }
 
@@ -286,7 +291,10 @@ mod tests {
         (255, 255, 255, 255)
       }
     }
-    let width = StrokeWidth::new(vec![abra_core::WidthStop::new(3.0, 0.0), abra_core::WidthStop::new(11.0, 1.0)]);
+    let width = StrokeWidth::new(vec![
+      abra_core::WidthStop::new(3.0, 0.0),
+      abra_core::WidthStop::new(11.0, 1.0),
+    ]);
     let shader = StrokeBrushShader::new(Box::new(Solid), &wavy(), width.clone(), StrokeOpacity::default(), 0.5);
     let reach = width.widest() / 2.0;
     let (mut inside, mut outside) = (0, 0);
@@ -318,7 +326,10 @@ mod tests {
     ])
     .with_direction(path.clone());
     let make = || {
-      let inner = crate::shader_from_fill_with_path(abra_core::Fill::Gradient(std::borrow::Cow::Owned(gradient.clone())), Some(path.clone()));
+      let inner = crate::shader_from_fill_with_path(
+        abra_core::Fill::Gradient(std::borrow::Cow::Owned(gradient.clone())),
+        Some(path.clone()),
+      );
       StrokeBrushShader::new(inner, &path, StrokeWidth::from(8.0), StrokeOpacity::default(), 0.5)
     };
     let (searched, read_along) = (make(), make().with_gradient_along_path(gradient.clone()));

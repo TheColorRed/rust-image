@@ -63,7 +63,9 @@ export function buildControlThumbnails(
         // A picker's items with a `thumb` are drawn like one-tap controls, each under its own key.
         const controls = thumbnailControls(section.controls).flatMap((control): Exclude<EditControl, GroupControl>[] =>
           control.kind === 'picker'
-            ? control.items.flatMap(item => (item.thumb ? [{ kind: 'action', key: item.key, label: item.label, thumb: item.thumb }] : []))
+            ? control.items
+                .flatMap(item => [item, ...(item.items ?? [])])
+                .flatMap(item => (item.thumb ? [{ kind: 'action', key: item.key, label: item.label, thumb: item.thumb }] : []))
             : [control],
         );
         while (!cancelled && next < controls.length) {

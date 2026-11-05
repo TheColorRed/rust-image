@@ -3,7 +3,7 @@
 // A plugin is found as `packages/ai/<crate>/plugins/<folder>/plugin.yml`, or `apps/alakazam/mobile/plugins/<folder>/plugin.yml`. Its `files` are taken from the plugin's own folder, or when
 // they are not there from the `models` folder of its crate, so a model that other code reads from `models` is not copied into the
 // repository twice. Every file is checked against the SHA-256 the plugin lists, and the folder is written the way the bucket holds it:
-// `plugins/<folder>/plugin.yml` and one installable ZIP. The folder's name is only where the plugin is kept: the plugin is named by the
+// `plugins/<folder>/plugin.yml`, the optional `README.md` and `CHANGELOG.md`, and one installable ZIP. The folder's name is only where the plugin is kept: the plugin is named by the
 // `id` in its plugin.yml, so the folder can be called anything and can be moved without the plugin knowing.
 //
 // It prints the two files to upload and their catalog URLs and SHA-256 values. Usage: `node scripts/pack-plugins.mjs [folder ...]`.
@@ -85,6 +85,10 @@ for (const { crate, folder, dir } of found) {
   if (!ok) continue;
   const manifestPath = path.join(out, 'plugin.yml');
   copyFileSync(path.join(dir, 'plugin.yml'), manifestPath);
+  // The README and changelog sit beside plugin.yml in the bucket too, so a store page can fetch them without the ZIP.
+  for (const document of ['README.md', 'CHANGELOG.md']) {
+    if (existsSync(path.join(dir, document))) copyFileSync(path.join(dir, document), path.join(out, document));
+  }
   const archive = `${manifest.id}.akzx`;
   const archivePath = path.join(out, archive);
   const archiveBytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });

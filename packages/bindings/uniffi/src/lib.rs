@@ -8,7 +8,7 @@
 //! One file for each part of the library: [`canvas`] (`Canvas` and `Layer`), [`color`] (the `primitives` color module),
 //! [`image`] (`Image`), [`gradient`] (`abra-core`'s gradients and the radial gradient), [`ai`] (any AI model, from its manifest)
 //! and [`blend`] (blending), [`mask`] (masks) and [`geometry`] (points, paths, areas and shapes), [`drawing`] (brushes and the
-//! line they draw), [`transform`] (rotate and flip), [`typography`] (fonts and text), [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
+//! line they draw), [`sprites`] (the stamping engine, and the random numbers, curves and noise that place its stamps), [`transform`] (rotate and flip), [`typography`] (fonts and text), [`tools`] (the remover). The top of each file says what in its part of the library cannot be exported, and why. A tuple
 //! of the library is an array here, and an array of the wrong length panics, as the library does for input it cannot use.
 //!
 //! uniffi turns this crate into one namespace (`abra_uniffi`) of the generated TypeScript bindings. A crate that builds the
@@ -30,6 +30,9 @@ mod geometry;
 mod gradient;
 mod image;
 mod mask;
+mod animation;
+mod particles;
+mod sprites;
 mod tools;
 mod transform;
 mod typography;
@@ -52,8 +55,8 @@ pub use ai::{
 pub use beauty::{SkinSmooth, SkinTan, SkinTone, skin_smooth, skin_tan, skin_tone};
 pub use blend::{BlendImage, BlendMode, blend, blend_mode_from_name, blend_modes, blended};
 pub use canvas::{
-  AddCanvasOptions, Canvas, CanvasTransform, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
-  add_canvas_options, new_layer_options,
+  AddCanvasOptions, Canvas, CanvasTransform, CoverView, DropShadow, Layer, LayerEffects, LayerTransform, NewLayerOptions, Stroke,
+  add_canvas_options, cover_view, new_layer_options,
 };
 pub use collage::{Collage, CollageOptions};
 pub use color::{Bins, Color, Harmony, Histogram, Palette, luma, luma_weights};
@@ -77,11 +80,14 @@ pub use geometry::{
   size_inscribed_after_rotation, size_mul, size_new, size_rotated_bounds, size_sub, size_sub_scalar, size_to_tuple,
 };
 pub use gradient::{ColorStop, Gradient, radial_gradient};
+pub use animation::{Impulse, Motion, Movers, PoseNoise, Schedule, SpeedResponse};
+pub use particles::{Emitter, ParticleSystem, Swarm};
+pub use sprites::{Blend, CurveRange, Random, Sprite, SpriteTrail, Sprites, TrailPoint, sprites, value_noise};
 pub use image::{Image, channel_index, channels_bytes_per_pixel, resolution_new, resolution_uniform};
 pub use abra::mask::prelude::{Blob, Falloff};
 pub use mask::{Mask, apply_mask_to_image, apply_mask_to_pixels_rgba, mask_value_to_alpha, rgba_to_gray};
 pub use tools::{Remover, RemoverShape, remover};
-pub use transform::{FlipImage, ResizeImage, RotateImage, flip, resize, rotate};
+pub use transform::{TransformImage, transform};
 pub use typography::{Font, Text};
 
 uniffi::setup_scaffolding!();

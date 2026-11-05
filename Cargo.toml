@@ -43,8 +43,8 @@ resolver = "2"
 
 [profile.dev]
 opt-level = 1
-split-debuginfo = "off"   # Stops LLVM from creating separate massive cache files
-debug = 1                 # Drastically shrinks binary and 'deps' metadata size
+split-debuginfo = "off" # Stops LLVM from creating separate massive cache files
+debug = 1               # Drastically shrinks binary and 'deps' metadata size
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -77,6 +77,7 @@ swash = { version = "0.2.10" }
 
 # Packages
 abra = { path = "./packages/abra/abra" }
+animation = { path = "./packages/abra/core/animation" }
 adjustments = { path = "./packages/abra/core/adjustments" }
 canvas = { path = "./packages/abra/core/canvas" }
 abra-core = { path = "./packages/abra/core/core" }
@@ -105,7 +106,7 @@ surface = { path = "./packages/vessel/surface" }
 abra-uniffi = { path = "./packages/bindings/uniffi" }
 
 # Abra Plugins
-collage ={ path = "./packages/abra/plugins/collage" }
+collage = { path = "./packages/abra/plugins/collage" }
 lighting = { path = "./packages/abra/plugins/lighting" }
 particle-system = { path = "./packages/abra/plugins/particle-system" }
 
@@ -119,6 +120,9 @@ abra-object-removal = { path = "./packages/ai/object-removal" }
 abra-trimap-matting = { path = "./packages/ai/trimap-matting" }
 abra-face-landmarks = { path = "./packages/ai/face-landmarks" }
 abra-face-parsing = { path = "./packages/ai/face-parsing" }
+
+# Profiling and performance-related dependencies
+dhat = "=0.3.3"
 
 [workspace.dependencies.uuid]
 version = "1.24.0"

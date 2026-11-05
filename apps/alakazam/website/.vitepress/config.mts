@@ -10,9 +10,22 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       { text: 'Install', link: '/install' },
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Plugins', link: '/plugins/' },
     ],
 
-    sidebar: [
+    sidebar: {
+      '/plugins/': [
+        {
+          text: 'Plugins',
+          items: [
+            { text: 'Overview', link: '/plugins/' },
+            { text: 'Beauty', link: '/plugins/beauty' },
+            { text: 'Object Remover', link: '/plugins/object-remover' },
+            { text: 'Collage', link: '/plugins/collage' },
+          ],
+        },
+      ],
+      '/': [
       {
         text: 'Guide',
         items: [
@@ -28,7 +41,8 @@ export default defineConfig({
           { text: 'Settings', link: '/guide/settings' },
         ],
       },
-    ],
+      ],
+    },
 
     // socialLinks: [
     // { icon: 'github', link: 'https://github.com/vuejs/vitepress' }

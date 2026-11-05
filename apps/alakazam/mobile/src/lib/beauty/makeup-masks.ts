@@ -3,7 +3,8 @@ import { rectOrigin } from '@abra/core/geometry';
 import { type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type ToolContext } from '@/src/lib/project/edit-sections';
-import { MAKEUP_MODELS, boxKey, findFacesAsync, model } from '@/src/lib/ai/faces';
+import { MAKEUP_MODELS, boxKey, findFacesAsync } from '@/src/lib/ai/faces';
+import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { owning, release } from '@/src/lib/native/native-handles';
 
 const LIPS = ['upper lip', 'lower lip'];
@@ -53,7 +54,7 @@ export const skinWithMouthEased = (
  * because the editor frees the one it passed as soon as this returns.
  */
 export const makeupMasks = async (photo: ImageLike): Promise<Record<string, MaskLike> | undefined> => {
-  if (MAKEUP_MODELS.some(role => !model(role))) return undefined;
+  if (missingModels(MAKEUP_MODELS).length) return undefined;
   const mine = photo.clone();
   const made: Record<string, MaskLike> = {};
   try {

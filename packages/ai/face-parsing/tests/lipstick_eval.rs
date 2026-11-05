@@ -6,7 +6,7 @@
 //!
 //! Keep the constants and the mixer in step with `lipstick.ts`.
 
-use abra_core::{Channels, Image, ImageExt, Rect, Transform};
+use abra_core::{Channels, Image, ImageExt, Rect, transform};
 use abra_face_parsing::prelude::ImageAi;
 use abra_face_parsing::{FaceParser, FaceRegion};
 use tools::{Tool, atlas_with};
@@ -97,8 +97,7 @@ fn lipstick_contact_sheet() {
       let (cell_w, cell_h) = (right - left, bottom - top);
 
       // The mouth cropped out once; each cell of the sheet is a copy of it, with a lipstick on or not.
-      let mut mouth = photo.clone();
-      mouth.crop(left, top, cell_w, cell_h);
+      let mouth = transform().with_crop(Rect::new((left, top), (cell_w, cell_h))).applied(&photo);
       let mouth_pixels = mouth.rgba().to_vec();
       let mask = lips.cropped(Rect::new((left as f32, top as f32), (cell_w as f32, cell_h as f32)));
       let covered = mask.values();

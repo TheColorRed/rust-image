@@ -35,7 +35,7 @@ use crate::{
   manifest::{Entry, Manifest},
   onnx::{AnyTensor, OnnxSession, TensorData},
 };
-use abra_core::{Channels, Image, Rect, ResizeTarget, Size, TransformAlgorithm, crop, resize};
+use abra_core::{Channels, Image, Rect, ResizeTarget, Size, TransformAlgorithm, transform};
 use mask::Mask;
 
 /// A mask value above this counts as covered, where a model needs a hard edge.
@@ -145,7 +145,7 @@ impl InputDef {
     let (width, height) = p_part.dimensions::<u32>();
     let side = self.size.unwrap_or(0);
     let (width, height) = if side == 0 { (width, height) } else { (side, side) };
-    let scaled = resize(ResizeTarget::Exact(Size::new(width, height))).resized(p_part);
+    let scaled = transform().with_size(ResizeTarget::Exact(Size::new(width, height))).applied(p_part);
     let plane = width as usize * height as usize;
     let (index, shape): (Box<dyn Fn(usize, usize) -> usize>, Vec<usize>) = match self.layout {
       Layout::Nchw => (Box::new(move |channel, pixel| channel * plane + pixel), vec![1, 3, height as usize, width as usize]),
@@ -251,8 +251,7 @@ impl Graph {
     };
     let (left, top, right, bottom) = part_rect.edges::<u32>();
     let (part_width, part_height) = (right - left, bottom - top);
-    let mut part = p_image.clone();
-    crop(left, top, part_width, part_height).apply(&mut part);
+    let part = transform().with_crop(part_rect).applied(p_image);
     let part_guide = p_guide.map(|guide| guide.cropped(part_rect));
 
     let mut tensors = Vec::with_capacity(self.inputs.len());
@@ -286,7 +285,7 @@ impl Graph {
 
     // The answer goes back to the size of the part it came from when it is put back into the picture.
     if (self.composite || self.window.is_some()) && answered.dimensions::<u32>() != (part_width, part_height) {
-      answered = resize(ResizeTarget::Exact(Size::new(part_width, part_height))).resized(&answered);
+      answered = transform().with_size(ResizeTarget::Exact(Size::new(part_width, part_height))).applied(&answered);
     }
     if !self.composite && self.window.is_none() {
       return Ok(answered);

@@ -25,6 +25,7 @@ import { errorCodes, isErrorWithCode, keepLocalCopy, pick, types } from '@react-
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Download from 'lucide-react-native/icons/download';
+import Info from 'lucide-react-native/icons/info';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import Trash2 from 'lucide-react-native/icons/trash';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -40,6 +41,7 @@ import {
   View,
 } from 'react-native';
 import { useObservable } from 'react-rx';
+import { PluginReadmeScreen } from './plugin-readme';
 
 const removalMessage = (name: string, targetId: string, plan: ReturnType<typeof pluginsToRemove>) => {
   const dependents = plan.filter(plugin => plugin.id !== targetId);
@@ -72,6 +74,15 @@ export function PluginsScreen() {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [devServer, setDevServer] = useState<PluginDevServerState | null>(null);
   const [devServerBusy, setDevServerBusy] = useState(false);
+  /** The plugin whose page is open. */
+  const [pageOf, setPageOf] = useState<{
+    id: string;
+    name: string;
+    summary: string;
+    author?: string;
+    version?: string;
+    manifestUrl?: string;
+  } | null>(null);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -446,6 +457,8 @@ export function PluginsScreen() {
     updateAvailable?: boolean;
     /** Without the indent of a row under a group. */
     flat?: boolean;
+    /** The plugin the row is for, which gives it a button for the plugin's page. */
+    page?: { id: string; manifestUrl?: string; version?: string; author?: string };
     onDownload: () => void;
     onDelete: () => void;
   }) => (
@@ -462,6 +475,17 @@ export function PluginsScreen() {
                 : `Not downloaded · ${formatBytes(item.downloadSizeBytes)}`)}
         </Text>
       </View>
+      {item.page !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`About ${item.title}`}
+          hitSlop={8}
+          onPress={() => setPageOf({ ...item.page!, name: item.title, summary: item.description })}
+          style={styles.refresh}
+        >
+          <Info size={20} color={colors.accent} strokeWidth={1.8} />
+        </Pressable>
+      )}
       {item.id in downloadTasks && !item.downloaded ? (
         <View style={[styles.button, styles.progressButton]}>
           <View pointerEvents="none" style={styles.progressFill}>
@@ -500,6 +524,24 @@ export function PluginsScreen() {
       )}
     </View>
   );
+
+  if (pageOf) {
+    return (
+      <PluginReadmeScreen
+        name={pageOf.name}
+        summary={pageOf.summary}
+        author={pageOf.author}
+        version={pageOf.version}
+        installed={installedPluginsById.get(pageOf.id)}
+        describe={id => {
+          const found = installedPluginsById.get(id) ?? addons.find(plugin => plugin.id === id);
+          return found && { name: found.name, description: found.description };
+        }}
+        manifestUrl={pageOf.manifestUrl}
+        onBack={() => setPageOf(null)}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -563,6 +605,7 @@ export function PluginsScreen() {
                   .map(plugin =>
                     renderRow({
                       id: `plugin:${plugin.id}`,
+                      page: { id: plugin.id, manifestUrl: plugin.manifestUrl, version: plugin.version, author: plugin.author },
                       title: plugin.name,
                       description: plugin.description,
                       downloaded: plugin.downloaded,
@@ -628,6 +671,10 @@ export function PluginsScreen() {
                     members.map(model =>
                       renderRow({
                         id: model.id,
+                        page:
+                          model.source.type === 'plugin'
+                            ? { id: model.source.pluginId, manifestUrl: model.source.manifestUrl, version: model.source.version, author: model.source.author }
+                            : undefined,
                         title: model.title,
                         description: model.description,
                         downloaded: model.downloaded,
@@ -653,6 +700,7 @@ export function PluginsScreen() {
                 installedPluginRows.map(plugin =>
                   renderRow({
                     id: `installed:${plugin.id}`,
+                    page: { id: plugin.id },
                     title: plugin.name,
                     description: `${plugin.id} · ${plugin.version}${plugin.missingDependencies.length ? ` · needs ${plugin.missingDependencies.join(', ')}` : ''}`,
                     downloaded: true,

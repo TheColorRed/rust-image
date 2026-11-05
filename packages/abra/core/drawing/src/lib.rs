@@ -35,7 +35,9 @@ mod shaders {
 mod brush {
   pub mod brush;
 }
+mod falloff;
 mod fill;
+mod sprites;
 mod stroke_overlay;
 mod performance;
 
@@ -49,5 +51,6 @@ pub use core::sampling::SampleGrid;
 pub use core::sdf::{draw_area_fill, draw_area_stroke, draw_ellipse_stroke};
 pub use core::shader::{Shader, shader_from_fill, shader_from_fill_with_path};
 pub use fill::*;
+pub use sprites::{SPRITE_MAX_WORDS, SPRITE_VALUES, SPRITE_WORDS, Sprite, SpriteTrail, Sprites, TRAIL_POINT_VALUES, TRAIL_POINT_WORDS, TRAIL_WORDS, TrailPoint, sprites};
 pub use stroke_overlay::{MAX_STROKE_POINTS, StrokeLook, stroke_overlay, stroke_overlay_deferred};
 pub use performance::DrawingAlgorithm;

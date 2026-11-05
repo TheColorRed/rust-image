@@ -1,6 +1,6 @@
 //! Utilities for applying layer size options to layers.
 
-use abra_core::{ResizeTarget, Size, Transform};
+use abra_core::{ResizeTarget, Size, transform};
 
 use super::layer_inner::LayerInner;
 use super::options_new_layer::LayerSize;
@@ -27,7 +27,7 @@ pub(crate) fn apply_layer_size(p_layer: &mut LayerInner, p_size: LayerSize, p_ca
       let new_width = (layer_width as f32 * scale) as u32;
       let new_height = (layer_height as f32 * scale) as u32;
 
-      p_layer.image_mut().resize(ResizeTarget::Exact(Size::new(new_width, new_height)), algorithm);
+      transform().with_size(ResizeTarget::Exact(Size::new(new_width, new_height))).with_algorithm(algorithm).apply(p_layer.image_mut());
     }
     LayerSize::Cover(algorithm) => {
       let (layer_width, layer_height) = p_layer.dimensions::<u32>();
@@ -39,13 +39,13 @@ pub(crate) fn apply_layer_size(p_layer: &mut LayerInner, p_size: LayerSize, p_ca
       let new_width = (layer_width as f32 * scale) as u32;
       let new_height = (layer_height as f32 * scale) as u32;
 
-      p_layer.image_mut().resize(ResizeTarget::Exact(Size::new(new_width, new_height)), algorithm);
+      transform().with_size(ResizeTarget::Exact(Size::new(new_width, new_height))).with_algorithm(algorithm).apply(p_layer.image_mut());
     }
     LayerSize::Specific(w, h, algorithm) => {
-      p_layer.image_mut().resize(ResizeTarget::Exact(Size::new(w, h)), algorithm);
+      transform().with_size(ResizeTarget::Exact(Size::new(w, h))).with_algorithm(algorithm).apply(p_layer.image_mut());
     }
     LayerSize::Percentage(amount, algorithm) => {
-      p_layer.image_mut().resize(ResizeTarget::Scale(amount), algorithm);
+      transform().with_size(ResizeTarget::Scale(amount)).with_algorithm(algorithm).apply(p_layer.image_mut());
     }
   }
 }

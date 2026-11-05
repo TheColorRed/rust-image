@@ -5,7 +5,7 @@
 //! as a small quad, so a frame costs the length of what is new. Where segments overlap the larger coverage wins, so a line drawn
 //! in many pieces is the same as one drawn at once, with no beads at its joints.
 
-use crate::context::{FORMAT, GpuContext};
+use crate::context::{FORMAT, GpuContext, RenderEntry, RenderKey};
 
 /// How segments are drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,6 +39,7 @@ impl StrokeCanvas {
       usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
       view_formats: &[],
     });
+    let pipeline = p_ctx.render_pipeline(RenderKey { name: "strokes", format: FORMAT }, || {
     let shader = p_ctx.compile_wgsl(include_str!("./strokes.wgsl"), Some("strokes::shader"));
     // The larger of what is there and what is drawn, for the color and for the coverage.
     let keep_larger = wgpu::BlendComponent {
@@ -73,8 +74,11 @@ impl StrokeCanvas {
       depth_stencil: None,
       multisample: wgpu::MultisampleState::default(),
       multiview_mask: None,
-      cache: None,
+      cache: p_ctx.driver_cache(),
     });
+    RenderEntry { pipeline, layout: None }
+    })
+    .pipeline;
     let canvas = StrokeCanvas { ctx: p_ctx.clone(), texture, pipeline };
     canvas.clear();
     canvas

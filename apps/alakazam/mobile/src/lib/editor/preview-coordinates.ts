@@ -50,6 +50,33 @@ export function computePreviewImagePoint(
 }
 
 /**
+ * Where a point of the photo is in the preview box: the opposite of `computePreviewImagePoint`. The point is given as shares of the
+ * photo's width and height (0 to 1), so it does not depend on the size of the copy of the photo being shown. `rotation` is how far the
+ * photo is turned clockwise on the screen, in radians.
+ */
+export function computePreviewScreenPoint(
+  imageWidth: number,
+  imageHeight: number,
+  box: PreviewBox,
+  scale: number,
+  translate: PreviewPoint,
+  share: PreviewPoint,
+  rotation = 0,
+): PreviewPoint {
+  const containScale = Math.min(box.width / imageWidth, box.height / imageHeight);
+  const displayedWidth = imageWidth * containScale;
+  const displayedHeight = imageHeight * containScale;
+  const localX = (box.width - displayedWidth) / 2 + share.x * displayedWidth;
+  const localY = (box.height - displayedHeight) / 2 + share.y * displayedHeight;
+  // Zoomed and panned about the middle of the box, then turned about it.
+  const dx = (localX - box.width / 2) * scale + translate.x;
+  const dy = (localY - box.height / 2) * scale + translate.y;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  return { x: box.width / 2 + cos * dx - sin * dy, y: box.height / 2 + sin * dx + cos * dy };
+}
+
+/**
  * The part of a photo (each side from 0 to 1 of the whole photo: left, top, width, height) that a preview box shows at a zoom and
  * pan. The photo sits contained in the box; the part of the view past its edges is outside 0 to 1.
  */

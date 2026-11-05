@@ -1,4 +1,5 @@
 import { Subject } from 'rxjs';
+import type { PhotoHarmony } from '@/src/effects/gradient-overlay';
 import { type ActionControl, type AdjustmentValue, type EditControl, type SliderControl } from '@/src/lib/project/edit-sections';
 
 // Fire-and-forget editor commands: UI emits them, whichever component or tool owns the behavior subscribes.
@@ -14,6 +15,18 @@ export const selectSectionRequested = new Subject<string>();
 export const selectSectionRequested$ = selectSectionRequested.asObservable();
 export const sliderCommitRequested = new Subject<{ control: SliderControl; value: AdjustmentValue }>();
 export const sliderCommitRequested$ = sliderCommitRequested.asObservable();
+/**
+ * The person chose something for the gradient that needs more than saving a number: `custom` to make their own colors in the gradient
+ * editor, `photo` to take the colors from the photo with a color scheme, or `area` to put the gradient only behind the people or only on
+ * them (which needs the models that find them). The open gradient answers it.
+ */
+export const gradientChoiceRequested = new Subject<
+  { kind: 'custom' } | { kind: 'photo'; scheme: PhotoHarmony } | { kind: 'area'; area: number }
+>();
+export const gradientChoiceRequested$ = gradientChoiceRequested.asObservable();
+/** A Text card of the open stripes was tapped (the main text or the sub text): the open stripes answer by showing that text's dialog. */
+export const stripeTextRequested = new Subject<'main' | 'sub'>();
+export const stripeTextRequested$ = stripeTextRequested.asObservable();
 /** The reset button of the open control with several sliders was pressed. */
 export const sliderResetRequested = new Subject<void>();
 export const sliderResetRequested$ = sliderResetRequested.asObservable();

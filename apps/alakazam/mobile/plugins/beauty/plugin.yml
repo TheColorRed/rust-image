@@ -55,21 +55,21 @@ contributes:
 
 files:
   - path: skin/skin-even-out.js
-    sha256: 003dc0289bb78c2face3133b6d0adff965dbcb84980c79556e9a140760824709
+    sha256: 02b5bae85f8138b1e7d7f9f149fe48a5e69ccae8492c52610affaa2e793e477d
   - path: skin/skin-tan.js
-    sha256: ffbd02500ae7f75203d8e816096b36fc6b42d62d61c70aed327e4b5ff10a68ee
+    sha256: d5510656f3860b133cbafb0ea578ea2fc60c641f650bd2185df8e852ba5c91bb
   - path: skin/skin-tone.js
-    sha256: f1dadfa6f1ef2938865eecbb13f2b236f6952a1628d1166afffe5ef65f92a544
+    sha256: 614ad967260012b2ff6cbcfe05e43140319c9bd7573d4a5a9936dc612bfaf8c9
   - path: skin/skin-smooth.js
-    sha256: 82fc3f58466c23b3d718d71bc6a82812082d4f06788d0c7348d0b5897f544d85
+    sha256: 6d5157f91a6b8f46a0cce9bea0b406cc21b59eeb4e7c341d7a79ed0787e3c13b
   - path: retouch/teeth-whitening.js
-    sha256: fb7403f5ad1f0fdea3168734f30cb67df2fb4e87c8c4258e1872fb3a9e64ea38
+    sha256: c46ba134b450b20b04bd69f1d960cec67f400c4bed215b9714a961fe655a01f3
   - path: retouch/red-eye.js
-    sha256: b0dfef7b2aa9e60add02ae1864c127215cb8e41d472eb63a672789bfddf29006
+    sha256: ae806cb7c72de07d58cb113a2bac25decd3a2a93636f2a628c057fd4239615e0
   - path: retouch/blemish.js
-    sha256: f7b675d13453decfb38fd0995f8bd923b5d7ae7a0a90bb27864512c06583b2d2
+    sha256: 8a31885a59417b16c801d8a277db1cf3346d29335be94093088ccd3f220b40ef
   - path: hair/hair.js
-    sha256: d103e2918807dd89bc3546d4c66b9cd70aed0e12e6c7e5756b4e92e9b0c25b67
+    sha256: 4321bc2e4956ad5c4c20bb0e0e8aef8ce53d10721f2e00b32d2204a092aeab65
   - path: makeup/lipstick.js
     sha256: 2b5c76e29820dd8f2ba01a66340956807f51ef0e3b309f988cc245aa39bb0a46
   - path: makeup/lip-liner.js

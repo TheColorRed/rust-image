@@ -297,7 +297,7 @@ impl<'a> Layer<'a> {
 
   /// Gets the current index of this layer in the canvas's layer stack.
   pub fn current_index(&self) -> Option<usize> {
-    self.borrow().current_index()
+    LayerInner::current_index(&self.inner)
   }
 
   /// Gets the adjustment type if this is an adjustment layer.
@@ -310,20 +310,20 @@ impl<'a> Layer<'a> {
     self.borrow().dimensions::<u32>()
   }
 
-  layer_method_mut!(
-    /// Moves the layer according to a relative or absolute stack action.
-    /// Operations at the corresponding boundary have no effect.
-    move_to(action: LayerMove)
-  );
+  /// Moves the layer according to a relative or absolute stack action.
+  /// Operations at the corresponding boundary have no effect.
+  pub fn move_to(&self, p_action: LayerMove) {
+    LayerInner::move_to(&self.inner, p_action);
+  }
 
-  layer_method_mut!(
-    /// Moves the layer to the specified index in the stack.
-    set_index(new_index: usize)
-  );
+  /// Moves the layer to the specified index in the stack.
+  pub fn set_index(&self, p_new_index: usize) {
+    LayerInner::set_index(&self.inner, p_new_index);
+  }
 
   /// Duplicates the layer and returns a new `Layer` instance.
   pub fn duplicate(&self) -> Self {
-    self.borrow().duplicate()
+    LayerInner::duplicate(&self.inner)
   }
 
   layer_method_imm_owned!(

@@ -50,8 +50,7 @@ pub trait ImageAi: Sized {
     if x1 <= x0 || y1 <= y0 {
       return Err(AiError::invalid_input("The region is outside the picture"));
     }
-    let mut part = p_image.clone();
-    abra_core::crop(x0, y0, x1 - x0, y1 - y0).apply(&mut part);
+    let part = abra_core::transform().with_crop(Rect::new((x0, y0), (x1 - x0, y1 - y0))).applied(p_image);
     Ok(self.process(&part)?.placed(width, height, x0, y0))
   }
 }

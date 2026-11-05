@@ -14,5 +14,6 @@ outline: deep
 | -------------------------------- | ----------------------------------------------------------------------------- |
 | [Image operations](./operations) | Construct images, inspect dimensions, access pixels, and update RGBA data.    |
 | [Loading and saving](./io)       | Read supported image formats, write output files, and load image collections. |
+| [Guided edge matting](./edge-matte) | Refine a rough foreground mask with a guided model, processed in sequential tiles. |
 
 Most image-processing APIs mutate an `Image` in place. Use `clone` or `as_image` when a separate result is needed.

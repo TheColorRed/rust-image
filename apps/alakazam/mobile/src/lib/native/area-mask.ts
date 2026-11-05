@@ -26,6 +26,15 @@ export const areaMask = (rings: number[][][], width: number, height: number, kee
   return holes ? keep(fill.subtracted(holes)) : fill;
 };
 
+/** The circle round each ring of an area, in pixels of a photo `width` by `height`: the middle of the ring's box and half its diagonal. */
+export const areaSpots = (rings: number[][][], width: number, height: number): { x: number; y: number; radius: number }[] =>
+  rings.map(ring => {
+    const xs = ring.map(([x]) => x * width);
+    const ys = ring.map(([, y]) => y * height);
+    const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    return { x: (left + right) / 2, y: (top + bottom) / 2, radius: Math.hypot(right - left, bottom - top) / 2 };
+  });
+
 /**
  * An area, as rings of `[x, y]` fractions of the photo, changed by a drawn loop: the loop starts the area over (`new`), is added to it
  * (`add`) or is taken away from it (`subtract`). A loop is in the photo's pixels, as `DrawAreaOverlay` gives it. Taking away from no

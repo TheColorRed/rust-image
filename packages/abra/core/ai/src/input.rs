@@ -6,7 +6,7 @@
 //! the model's answer back onto the original picture.
 
 use crate::{error::AiError, manifest::Manifest};
-use abra_core::{Image, ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{Image, ResizeTarget, Size, TransformAlgorithm, transform};
 use mask::Mask;
 
 /// The order of the numbers in an input tensor.
@@ -181,11 +181,10 @@ impl InputSpec {
   pub fn prepare_guided(&self, p_image: &Image, p_guide: Option<&Mask>) -> Prepared {
     let (width, height) = p_image.dimensions::<u32>();
     let placement = Placement::new(self.width, self.height, width, height, self.fit);
-    let mut resized = p_image.clone();
-    resized.resize(
-      ResizeTarget::Exact(Size::new(placement.resized_width, placement.resized_height)),
-      TransformAlgorithm::Bilinear,
-    );
+    let resized = transform()
+      .with_size(ResizeTarget::Exact(Size::new(placement.resized_width, placement.resized_height)))
+      .with_algorithm(TransformAlgorithm::Bilinear)
+      .applied(p_image);
     let source = resized.rgba();
     let guide = self
       .guide

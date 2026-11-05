@@ -17,5 +17,6 @@ Abra drawing APIs rasterize fills, paths, areas, brush dabs, and brush strokes i
 | [Painter](./painter)                        | Use a mutable drawing context for repeated brush operations.             |
 | [Rasterization primitives](./rasterization) | Build custom coverage, shader, compositor, and sampling pipelines.       |
 | [SDF drawing helpers](./sdf)                | Use signed-distance helpers and optimized solid drawing functions.       |
+| [Sprites and trails](./sprites)             | Draw many dots, textures and lines on the GPU or CPU with one engine.    |
 
 Drawing works with [Geometry](../geometry/) and [Color](../color/) values. Use [Masks](../mask/) when coverage should be reusable across operations.

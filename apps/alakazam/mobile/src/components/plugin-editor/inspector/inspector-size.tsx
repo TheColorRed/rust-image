@@ -1,4 +1,5 @@
 import { useTheme } from '@/src/lib/ui/theme';
+import { isReal } from '@/src/lib/plugins/plugin-values';
 import { pluginEditorItems, pluginEditorRebuild } from '@/src/state/plugin-editor';
 import { memo, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -47,6 +48,8 @@ export const InspectorSize = memo(function InspectorSize({
 
   /** Keeps the numbers, tells the plugin and has it run again. Each number is held to `min` and `max`. */
   const set = (next: [number, number]) => {
+    // A number that is not real is not taken, so the plugin is never given a NaN.
+    if (!next.every(isReal)) return;
     const limited = next.map(each => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, each))) as [number, number];
     setCurrent(limited);
     const item = pluginEditorItems.value.find(each => each.key === itemKey);

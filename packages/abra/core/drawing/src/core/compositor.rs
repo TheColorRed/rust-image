@@ -107,6 +107,16 @@ pub enum Blend {
   Mode(BlendMode),
 }
 
+impl Blend {
+  /// The number the blend shaders know this blend by, or `None` for a mode that is a Rust function and has no shader.
+  pub fn shader_code(self) -> Option<u32> {
+    match self {
+      Blend::Additive => Some(0xFFFF),
+      Blend::Mode(mode) => mode.shader_index(),
+    }
+  }
+}
+
 impl Default for Blend {
   fn default() -> Self {
     Blend::Mode(BlendMode::Normal)

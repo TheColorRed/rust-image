@@ -1,6 +1,6 @@
 //! Presents a rendered texture to a native window surface without reading it back to the CPU.
 
-use crate::context::{FORMAT, GpuContext};
+use crate::context::{FORMAT, GpuContext, RenderEntry, RenderKey};
 use anyhow::{Result, anyhow};
 
 const BLIT_SHADER: &str = r#"
@@ -126,7 +126,10 @@ impl Presenter {
     let device = &p_ctx.device;
     // Metal in wgpu 30 labels its transparent mode PostMultiplied, but Core Animation expects premultiplied pixels
     // (gfx-rs/wgpu#9896). Both advertised modes need premultiplication on our iOS layer.
-    let shader_source = if cfg!(target_os = "ios") || config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied {
+    let premultiply = cfg!(target_os = "ios") || config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+    let name = if premultiply { "present-premultiplied" } else { "present" };
+    let pipeline = p_ctx.render_pipeline(RenderKey { name, format }, || {
+    let shader_source = if premultiply {
       BLIT_SHADER.replace(
         "return color;",
         "return vec4<f32>(color.rgb * color.a, color.a);",
@@ -157,8 +160,11 @@ impl Presenter {
       depth_stencil: None,
       multisample: wgpu::MultisampleState::default(),
       multiview_mask: None,
-      cache: None,
+      cache: p_ctx.driver_cache(),
     });
+    RenderEntry { pipeline, layout: None }
+    })
+    .pipeline;
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
       mag_filter: wgpu::FilterMode::Linear,
       min_filter: wgpu::FilterMode::Linear,

@@ -20,6 +20,10 @@ import { useEffect, useState } from 'react';
 import { Alert, NativeModules, StatusBar, StyleSheet, View } from 'react-native';
 import BootSplash from 'react-native-bootsplash';
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { errorMessage } from '@/src/lib/utils/error-message';
+import { ColorPickerHost } from '@/src/components/color-picker/color-picker-host';
+import { CurvePickerHost } from '@/src/components/curve-picker/curve-picker-host';
+import { GradientPickerHost } from '@/src/components/gradient-picker/gradient-picker-host';
 
 const TABS: TabItem[] = [
   { name: 'home', label: 'Home', icon: HomeIcon },
@@ -40,6 +44,9 @@ export default function App() {
         <ErrorBoundary>
           <AppContent />
         </ErrorBoundary>
+        <CurvePickerHost />
+        <GradientPickerHost />
+        <ColorPickerHost />
       </SafeAreaProvider>
     </ThemeProvider>
   );
@@ -84,8 +91,8 @@ function AppContent() {
           if (pluginId !== folderName) pluginEditorDevUpdate.next(pluginId);
         }
       } catch (error) {
-        console.warn('Could not install the received plugin files:', error);
-        Alert.alert('Plugin update failed', error instanceof Error ? error.message : String(error));
+        console.warn('Could not install the received plugin files:', errorMessage(error));
+        Alert.alert('Plugin update failed', errorMessage(error));
       } finally {
         if (folder) {
           await sync
@@ -115,7 +122,7 @@ function AppContent() {
       <StatusBar barStyle={colors.statusBarStyle} />
       <SafeAreaView
         style={[styles.container, { backgroundColor: colors.background }]}
-        edges={pluginWorkspace || editingPhoto ? ['top'] : ['top', 'bottom']}
+        edges={['top', 'bottom']}
       >
         {pluginWorkspace ? (
           <PluginEditorScreen workspace={pluginWorkspace} onClose={() => setPluginWorkspace(null)} />

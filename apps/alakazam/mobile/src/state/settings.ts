@@ -1,6 +1,6 @@
-import { warn } from '@/src/lib/log';
+import { devDebug, warn } from '@/src/lib/log';
 import type { ThemePreference } from '@/src/lib/ui/theme';
-import { setWorkerStackMegabytes } from '@alakazam/mobile';
+import { configureAiInference, setWorkerStackMegabytes } from '@alakazam/mobile';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BehaviorSubject, combineLatest, skip } from 'rxjs';
 
@@ -76,6 +76,8 @@ const STORAGE_KEY = 'settings';
   }
   // Tells the library before the first image job, which is when the workers are made.
   setWorkerStackMegabytes(workerStackMegabytes.value);
+  // Before the first model is loaded: a model run takes half of the device's threads and does not spin them, so the screen keeps answering.
+  devDebug('settings', 'AI model runs use', configureAiInference(), 'threads');
   workerStackInEffect.next(workerStackMegabytes.value);
   // Starts after the read, and skips the value it starts with, so the defaults never overwrite what was saved.
   combineLatest([exportFormat$, exportQuality$, themePreference$, workerStackMegabytes$, developerModeEnabled$, skipPluginHashChecks$])

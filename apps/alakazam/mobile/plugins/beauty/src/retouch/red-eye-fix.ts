@@ -15,7 +15,7 @@ import {
 } from '@abra/core/geometry';
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
-import { findFaces, app, owning, release } from '@alakazam/sdk';
+import { findFaces, app, owning } from '@alakazam/sdk';
 import { MAKEUP_MODELS } from '../makeup/makeup-models';
 
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */
@@ -118,15 +118,15 @@ function correct(photo: ImageLike, pupils: MaskLike, keep: <V>(value: V) => V) {
  * placed back on the whole photo, and the color is rewritten through the result. This only says which steps to take and what
  * counts as red. Returns how many faces were corrected: none when the models are missing or no face was found.
  */
-export const removeRedEye = (photo: ImageLike): number => {
+export const removeRedEye = async (photo: ImageLike): Promise<number> => {
   if (app.ai.missing(RED_EYE_MODELS).length > 0) return 0;
 
-  return owning((keep) => {
+  return owning(async keep => {
     const white = keep(Color.fromRgba(255, 255, 255, 255));
     let redEyes: MaskLike | undefined;
     let faces = 0;
 
-    for (const { labels, zoom, face, faceImage, landmarks } of findFaces(photo, keep)) {
+    for await (const { labels, zoom, face, faceImage, landmarks } of findFaces(photo, keep)) {
       // The eyes the parser found, limited to a disc over the pupil of each iris the landmarks found, and to the pixels that are red.
       const eyesOnPhoto = keep(keep(labels.maskNamed(EYES)).placed(photo.width(), photo.height(), rectOrigin(zoom)));
       const eyesInFace = keep(eyesOnPhoto.cropped(face));
@@ -226,27 +226,16 @@ export const fixRedEyeAt = (photo: ImageLike, x: number, y: number): boolean =>
 
 
 /** Applies one plugin-owned red-eye repair to a copy for the editor host to commit. */
-export function applyRedEyeChange(photo: ImageLike, change: RedEyeChange): boolean {
-  return change.type === 'red-eye' ? fixRedEyeAt(photo, change.x, change.y) : removeRedEye(photo) > 0;
+export async function applyRedEyeChange(photo: ImageLike, change: RedEyeChange): Promise<boolean> {
+  return change.type === 'red-eye' ? fixRedEyeAt(photo, change.x, change.y) : (await removeRedEye(photo)) > 0;
 }
 
 export type RedEyeChange = { type: 'red-eye'; x: number; y: number } | { type: 'red-eye-auto' };
 
-export function applyRedEyeToEditor(value: unknown): boolean {
+export function applyRedEyeToEditor(value: unknown): Promise<boolean> {
   const change = value as RedEyeChange;
   if (!change || (change.type !== 'red-eye' && change.type !== 'red-eye-auto')) return false;
-  if (!app.editor.hasHistory()) return false;
-  app.editor.flush();
-  const image = app.editor.currentImage();
-  if (!image) return false;
-  const photo = image.clone();
-  try {
-    const fixed = applyRedEyeChange(photo, change);
-    if (fixed) app.editor.replaceImage(image, photo);
-    return fixed;
-  } finally {
-    release(photo);
-  }
+  return app.editor.edit(photo => applyRedEyeChange(photo, change));
 }
 
 

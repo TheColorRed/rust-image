@@ -1,5 +1,5 @@
-import { inspector, seededRandom } from '@alakazam/sdk';
-import { dealt, shuffled } from './randomness';
+import { inspector, seededRandom, shuffled } from '@alakazam/sdk';
+import { dealt } from './randomness';
 import { SEED, type CollageStyle } from './style';
 
 /** The number of columns and rows. */

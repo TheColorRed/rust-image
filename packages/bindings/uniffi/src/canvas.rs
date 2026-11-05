@@ -200,6 +200,41 @@ pub fn add_canvas_options() -> AddCanvasOptions {
   AddCanvasOptions::default()
 }
 
+/// How a picture is zoomed, turned and moved inside a frame it has to cover. A zoom of 1 just covers the frame; the picture is never
+/// smaller than covers it at its turn and never moved so far that the frame shows past an edge.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct CoverView {
+  /// How far the picture is zoomed in from the smallest size that covers the frame.
+  pub zoom: f32,
+  /// How far the picture is turned about its middle, in degrees.
+  pub turn: f32,
+  /// How far the picture is moved from the middle of the frame, in pixels of the frame: `[x, y]`.
+  pub pan: Vec<f32>,
+}
+
+impl Default for CoverView {
+  fn default() -> Self {
+    Self::from_core(library::CoverView::default())
+  }
+}
+
+impl CoverView {
+  pub fn to_core(self) -> library::CoverView {
+    let [x, y]: [f32; 2] = self.pan.try_into().expect("a pan takes 2 values: [x, y]");
+    library::CoverView::new().with_zoom(self.zoom).with_turn(self.turn).with_pan(x, y)
+  }
+
+  pub fn from_core(view: library::CoverView) -> Self {
+    Self { zoom: view.zoom, turn: view.turn, pan: vec![view.pan.0, view.pan.1] }
+  }
+}
+
+/// Creates a `CoverView` record that shows the picture as it just covers the frame.
+#[uniffi::export]
+pub fn cover_view() -> CoverView {
+  CoverView::default()
+}
+
 /// Configuration for drop shadow effect on a layer or canvas.
 #[derive(Clone, Debug, uniffi::Object)]
 pub struct DropShadow(library::DropShadow<'static>);
@@ -426,6 +461,12 @@ impl Canvas {
   /// pixels, so changing the factor never loses quality.
   pub fn set_scale(&self, factor: f32) {
     self.0.set_scale(factor);
+  }
+
+  /// Zooms, turns and moves the canvas inside a frame of `width` by `height` pixels that it has to cover, as a photo sits in a cell. See
+  /// `CoverView`. It only sets the canvas's own position, rotation and scale, so it is cheap enough to call on every move of a finger.
+  pub fn set_view_in_frame(&self, width: u32, height: u32, view: CoverView) {
+    self.0.set_view_in_frame((width, height), view.to_core());
   }
 
   /// The origin point within the canvas bounds.

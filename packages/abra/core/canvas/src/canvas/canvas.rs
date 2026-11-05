@@ -9,6 +9,7 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use crate::canvas::AddCanvasOptions;
+use crate::canvas::CoverView;
 use crate::canvas::Origin;
 
 use abra_core::Image;
@@ -212,10 +213,10 @@ impl<'a> Canvas<'a> {
     {
       // Set the canvas reference for each layer to the created Arc so
       // layer-level operations mark the correct parent canvas as dirty.
-      let inner_clone = inner.clone();
       let mut guard = inner.lock().unwrap();
+      let dirty = guard.dirty_flag();
       for layer_rc in guard.layers.iter_mut() {
-        layer_rc.lock().unwrap().set_canvas(inner_clone.clone());
+        layer_rc.lock().unwrap().set_canvas(&inner, dirty.clone());
       }
     }
     Canvas { inner }
@@ -326,6 +327,19 @@ impl<'a> Canvas<'a> {
     canvas.set_scale(p_factor);
   }
 
+  /// Zooms, turns and moves the canvas inside a frame of `p_frame` pixels (width, height) that it has to cover, as a photo sits in a cell:
+  /// the view says how far, and the canvas is set to where that puts it, never smaller than covers the frame at its turn and never moved
+  /// so far that the frame shows past an edge. It sets the canvas's own position, rotation and scale, so only those are marked changed
+  /// and a view that follows a finger costs no more than setting them.
+  pub fn set_view_in_frame(&self, p_frame: (u32, u32), p_view: CoverView) {
+    let mut canvas = self.inner.lock().unwrap();
+    let (width, height) = canvas.dimensions::<u32>();
+    let placement = p_view.placement((width as f32, height as f32), (p_frame.0 as f32, p_frame.1 as f32));
+    canvas.set_scale(placement.scale);
+    canvas.set_rotation(placement.rotation);
+    canvas.set_global_position(placement.position.0, placement.position.1);
+  }
+
   /// Gets the factor the canvas is scaled by within its parent
   pub fn scale(&self) -> f32 {
     let canvas = self.inner.lock().unwrap();
@@ -388,7 +402,8 @@ impl<'a> Canvas<'a> {
       LayerContent::Image(p_image) => LayerInner::new(p_name, p_image),
       LayerContent::Text(text) => LayerInner::new_text(p_name, text, resolution),
     };
-    layer.set_canvas(canvas_rc);
+    let dirty = canvas_rc.lock().unwrap().dirty_flag();
+    layer.set_canvas(&canvas_rc, dirty);
 
     // Determine if this is the first layer before modifying canvas
     let is_first_layer = {
@@ -442,7 +457,7 @@ impl<'a> Canvas<'a> {
     let canvas_rc = self.inner.clone();
     let mut canvas = canvas_rc.lock().unwrap();
     let layer_rc = canvas.add_adjustment_layer(p_name, p_adjustment_type);
-    layer_rc.lock().unwrap().set_canvas(canvas_rc.clone());
+    layer_rc.lock().unwrap().set_canvas(&canvas_rc, canvas.dirty_flag());
     Layer::from_inner(layer_rc)
   }
 
@@ -828,5 +843,91 @@ mod tests {
     assert_eq!(image.get_pixel(49, 22), Some((255, 255, 255, 255)), "left of the patch");
     assert_eq!(image.get_pixel(55, 26), Some((255, 255, 255, 255)), "below the patch");
     assert_eq!(image.get_pixel(55, 60), Some((255, 255, 255, 255)), "far below the patch");
+  }
+
+  /// A change to a layer on one thread while the canvas composes on another used to wait forever: the change held the layer's lock and
+  /// asked for the canvas's, and the compose held the canvas's lock and asked for the layer's.
+  #[test]
+  fn changing_a_layer_while_the_canvas_composes_does_not_wait_forever() {
+    let canvas = Canvas::new_blank("canvas", 64, 64);
+    let layer = canvas.add_layer_from_image("base", Image::new_from_color(64, 64, Color::from_rgba(255, 255, 255, 255)), None);
+    let (done, finished) = std::sync::mpsc::channel();
+    let composer = {
+      let (canvas, done) = (canvas.clone(), done.clone());
+      std::thread::spawn(move || {
+        for _ in 0..3000 {
+          canvas.as_image();
+        }
+        done.send(()).unwrap();
+      })
+    };
+    let changer = std::thread::spawn(move || {
+      for step in 0..3000 {
+        layer.set_opacity(if step % 2 == 0 { 0.5 } else { 1.0 });
+      }
+      done.send(()).unwrap();
+    });
+    for _ in 0..2 {
+      finished.recv_timeout(std::time::Duration::from_secs(60)).expect("the canvas and the layer wait for each other");
+    }
+    composer.join().unwrap();
+    changer.join().unwrap();
+  }
+
+  #[test]
+  fn a_layer_is_found_and_moved_in_the_stack() {
+    let canvas = Canvas::new_blank("canvas", 4, 4);
+    let white = Image::new_from_color(4, 4, Color::from_rgba(255, 255, 255, 255));
+    let (a, b, c) = (
+      canvas.add_layer_from_image("a", white.clone(), None),
+      canvas.add_layer_from_image("b", white.clone(), None),
+      canvas.add_layer_from_image("c", white, None),
+    );
+    assert_eq!((a.current_index(), b.current_index(), c.current_index()), (Some(0), Some(1), Some(2)));
+
+    a.move_to(crate::LayerMove::Top);
+    assert_eq!((a.current_index(), b.current_index(), c.current_index()), (Some(2), Some(0), Some(1)));
+
+    a.move_to(crate::LayerMove::Down);
+    assert_eq!((a.current_index(), b.current_index(), c.current_index()), (Some(1), Some(0), Some(2)));
+
+    c.set_index(0);
+    assert_eq!((a.current_index(), b.current_index(), c.current_index()), (Some(2), Some(1), Some(0)));
+
+    // Moving past the top does nothing.
+    a.move_to(crate::LayerMove::Up);
+    assert_eq!(a.current_index(), Some(2));
+    assert!(canvas.is_dirty());
+  }
+
+  /// Asking a layer where it sits in the stack, or moving it, while the canvas composes on another thread used to wait forever: the layer
+  /// held its own lock and asked for the canvas's, and the compose held the canvas's lock and asked for the layer's.
+  #[test]
+  fn asking_a_layer_for_its_place_while_the_canvas_composes_does_not_wait_forever() {
+    let canvas = Canvas::new_blank("canvas", 64, 64);
+    let layer = canvas.add_layer_from_image("base", Image::new_from_color(64, 64, Color::from_rgba(255, 255, 255, 255)), None);
+    canvas.add_layer_from_image("top", Image::new_from_color(64, 64, Color::from_rgba(255, 0, 0, 255)), None);
+    let (done, finished) = std::sync::mpsc::channel();
+    let composer = {
+      let (canvas, done) = (canvas.clone(), done.clone());
+      std::thread::spawn(move || {
+        for _ in 0..3000 {
+          canvas.as_image();
+        }
+        done.send(()).unwrap();
+      })
+    };
+    let asker = std::thread::spawn(move || {
+      for _ in 0..3000 {
+        layer.current_index();
+        layer.set_index(0);
+      }
+      done.send(()).unwrap();
+    });
+    for _ in 0..2 {
+      finished.recv_timeout(std::time::Duration::from_secs(20)).expect("the canvas and the layer wait for each other");
+    }
+    composer.join().unwrap();
+    asker.join().unwrap();
   }
 }

@@ -5,14 +5,16 @@ use abra_core::Image;
 use abra_core::IntoNumber;
 use abra_core::Resolution;
 use abra_core::WriterOptions;
-use abra_core::blend::blend as blend_images;
+use abra_core::image::recipe::lay_over;
+use abra_core::layers::{MaskTexture, adjust, multiply_alpha};
 use abra_core::image::image_ext::*;
 use abra_core::writer;
 use mask::Mask;
-use abra_core::{ResizeTarget, Size, Transform, TransformAlgorithm};
+use abra_core::{ResizeTarget, Size, TransformAlgorithm, transform};
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::Anchor;
 use crate::LayerEffects;
@@ -21,6 +23,28 @@ use crate::canvas::Origin;
 
 use super::layer_inner::{LayerInner, LayerOperation};
 use super::options_new_layer::NewLayerOptions;
+
+/// A canvas's "needs to compose again" mark, shared with its layers so that a layer can set it without taking the canvas's lock.
+///
+/// The lock order is canvas, then layer: composing holds the canvas's lock and takes each layer's. A layer that is being changed holds
+/// its own lock, so if it then took the canvas's lock to set the mark, a change on one thread and a compose on another would each hold
+/// the lock the other waits for, and both would wait forever. A shared flag needs no lock.
+#[derive(Clone)]
+pub(crate) struct DirtyFlag(Arc<AtomicBool>);
+
+impl DirtyFlag {
+  pub(crate) fn new(p_value: bool) -> Self {
+    DirtyFlag(Arc::new(AtomicBool::new(p_value)))
+  }
+
+  pub(crate) fn get(&self) -> bool {
+    self.0.load(Ordering::Acquire)
+  }
+
+  pub(crate) fn set(&self, p_value: bool) {
+    self.0.store(p_value, Ordering::Release);
+  }
+}
 
 /// The internal canvas implementation - provides the mutable reference API.
 pub(crate) struct CanvasInner<'a> {
@@ -47,7 +71,7 @@ pub(crate) struct CanvasInner<'a> {
   /// This is the final image that is created by blending all the layers.
   pub result: Image,
   /// Whether the canvas has been manually resized and needs to skip update_canvas on save.
-  needs_recompose: Cell<bool>,
+  needs_recompose: DirtyFlag,
   /// Whether how the canvas sits in its parent (position, rotation, scale, blend mode, opacity) changed since the parent last composed.
   /// The canvas's own picture does not depend on these, so only the parent has to compose again.
   placement_changed: Cell<bool>,
@@ -78,6 +102,8 @@ pub(crate) struct CanvasInner<'a> {
   effects: LayerEffects<'a>,
   /// Limits where the canvas shows: multiplied into the composite of its layers and children, so it limits all of them.
   mask: Option<Mask>,
+  /// The mask as the GPU is given it, made once when the mask is set.
+  mask_texture: Option<Arc<MaskTexture>>,
 }
 
 impl<'a> CanvasInner<'a> {
@@ -96,7 +122,7 @@ impl<'a> CanvasInner<'a> {
       resolution_is_explicit: false,
       x: Cell::new(0),
       y: Cell::new(0),
-      needs_recompose: Cell::new(true),
+      needs_recompose: DirtyFlag::new(true),
       placement_changed: Cell::new(false),
       out_of_sight: Cell::new(false),
       result_offset: Cell::new((0, 0)),
@@ -109,6 +135,7 @@ impl<'a> CanvasInner<'a> {
       origin: Origin::default(),
       effects: LayerEffects::new(),
       mask: None,
+      mask_texture: None,
     }
   }
 
@@ -135,6 +162,11 @@ impl<'a> CanvasInner<'a> {
     layer.lock().unwrap().set_name("Background");
     canvas_inner.set_canvas_size(width, height);
     canvas_inner
+  }
+
+  /// The canvas's "needs to compose again" mark, for a layer to set without taking the canvas's lock.
+  pub(crate) fn dirty_flag(&self) -> DirtyFlag {
+    self.needs_recompose.clone()
   }
 
   /// Marks the canvas as needing recomposition.
@@ -360,6 +392,9 @@ impl<'a> CanvasInner<'a> {
       return;
     }
 
+    // The mark is cleared before the layers are read, not after: a layer sets it without this canvas's lock, so a change made on another
+    // thread while this runs sets it again and the next compose picks the change up. Cleared at the end, it would be lost.
+    self.needs_recompose.set(false);
     let mut canvas = Image::new(width, height);
 
     // First pass: Apply anchors and update the child canvases whose own picture is out of date. A child that was only placed
@@ -382,8 +417,9 @@ impl<'a> CanvasInner<'a> {
 
     // Composite child canvases and local layers into the canvas (handles pass-through logic)
     self.composite_into(&mut canvas, 0, 0, false);
-    if let Some(mask) = &self.mask {
-      mask.multiply_alpha(&mut canvas);
+    if let (Some(mask), Some(texture)) = (&self.mask, &self.mask_texture) {
+      assert_eq!(mask.dimensions::<u32>(), canvas.dimensions::<u32>(), "mask must be the same size as the canvas");
+      multiply_alpha(&mut canvas, texture);
     }
 
     // Note: local layers are already blended by composite_into in the pass-through path
@@ -404,7 +440,6 @@ impl<'a> CanvasInner<'a> {
     final_image.set_resolution(self.resolution);
     self.result = final_image;
     // Mark canvas as recomposed, with the placement of everything inside it drawn
-    self.needs_recompose.set(false);
     self.placement_changed.set(false);
     for child in &self.canvases {
       child.lock().unwrap().placement_changed.set(false);
@@ -443,26 +478,35 @@ impl<'a> CanvasInner<'a> {
         // so that point is followed through them, and the picture is put where the middle of the canvas goes in the parent.
         let (offset_x, offset_y) = child_inner.result_offset.get();
         let (mut middle_x, mut middle_y) = (offset_x as f32 + child_width as f32 / 2.0, offset_y as f32 + child_height as f32 / 2.0);
-        // Scaled from the canvas's own pixels each time it is composed, so changing the scale never loses quality, and about the
-        // middle of the canvas, so it grows and shrinks where it sits.
+        // Scaled and turned from the canvas's own pixels each time it is composed, so changing the scale never loses quality, and about the
+        // middle of the canvas, so it grows and shrinks where it sits. `transform` picks the order: a shrink first, so the rotation does not
+        // skip pixels, and an enlargement together with the rotation, so the picture is resampled once.
         let scale = child_inner.scale();
+        let rotation = child_inner.rotation();
+        let (before_width, before_height) = child_result.dimensions::<u32>();
+        // Every shrink is made with Lanczos, which looks at enough pixels to keep a shrunk photo smooth. The automatic choice uses
+        // bilinear for a shrink of less than half, which skips pixels and shows as a rough, pixelated picture.
+        let algorithm = if scale < 1.0 { TransformAlgorithm::Lanczos } else { TransformAlgorithm::Bicubic };
+        let mut change = transform().with_algorithm(algorithm);
         if scale != 1.0 {
-          let (before_width, before_height) = child_result.dimensions::<u32>();
-          let (scaled_width, scaled_height) = (((before_width as f32 * scale).round().max(1.0)), ((before_height as f32 * scale).round().max(1.0)));
-          // Every shrink is made with Lanczos, which looks at enough pixels to keep a shrunk photo smooth. The automatic choice uses
-          // bilinear for a shrink of less than half, which skips pixels and shows as a rough, pixelated picture.
-          let algorithm = if scale < 1.0 { TransformAlgorithm::Lanczos } else { TransformAlgorithm::Bicubic };
-          child_result.resize(ResizeTarget::Exact(Size::new(scaled_width, scaled_height)), algorithm);
-          middle_x *= scaled_width / before_width as f32;
-          middle_y *= scaled_height / before_height as f32;
+          change = change.with_scale(scale);
         }
-        if let Some(rotation_degrees) = child_inner.rotation() {
-          // The picture turns about its own middle and grows to hold its tilted corners, so the canvas's middle, which is not always the
+        if let Some(rotation_degrees) = rotation {
+          change = change.with_rotation(rotation_degrees);
+        }
+        change.apply(&mut child_result);
+        let (after_width, after_height) = child_result.dimensions::<u32>();
+        let (scaled_width, scaled_height) = if scale != 1.0 {
+          (((before_width as f32 * scale).round().max(1.0)), ((before_height as f32 * scale).round().max(1.0)))
+        } else {
+          (before_width as f32, before_height as f32)
+        };
+        middle_x *= scaled_width / before_width as f32;
+        middle_y *= scaled_height / before_height as f32;
+        if let Some(rotation_degrees) = rotation {
+          // The picture turned about its own middle and grew to hold its tilted corners, so the canvas's middle, which is not always the
           // picture's middle, is carried round it.
-          let (before_width, before_height) = child_result.dimensions::<u32>();
-          child_result.rotate(rotation_degrees, None);
-          let (after_width, after_height) = child_result.dimensions::<u32>();
-          let (across, down) = (middle_x - before_width as f32 / 2.0, middle_y - before_height as f32 / 2.0);
+          let (across, down) = (middle_x - scaled_width / 2.0, middle_y - scaled_height / 2.0);
           let (sin, cos) = rotation_degrees.to_radians().sin_cos();
           middle_x = after_width as f32 / 2.0 + across * cos - down * sin;
           middle_y = after_height as f32 / 2.0 + across * sin + down * cos;
@@ -471,11 +515,7 @@ impl<'a> CanvasInner<'a> {
         let dest_y = (dest_y as f32 + child_height as f32 / 2.0 - middle_y).round() as i32;
         let child_blend = child_inner.blend_mode();
         let child_opacity = child_inner.opacity();
-        blend_images(&child_result)
-          .with_offset((dest_x, dest_y))
-          .with_opacity(child_opacity)
-          .with_mode(child_blend)
-          .apply(p_dest);
+        lay_over(p_dest, &child_result, (dest_x, dest_y), child_blend, child_opacity);
       }
     }
 
@@ -489,34 +529,9 @@ impl<'a> CanvasInner<'a> {
         // An adjustment layer changes what is already composited beneath it instead of drawing its own pixels.
         let opacity = layer_ref.opacity().clamp(0.0, 1.0);
         if layer_ref.is_visible() && opacity > 0.0 {
-          let mut adjusted = p_dest.clone();
-          for effect in layer_ref.live_effects() {
-            effect.apply_cpu(&mut adjusted);
-          }
-          // The mask and opacity say how much of the adjusted picture replaces the one beneath.
-          let (dest_w, dest_h) = p_dest.dimensions::<u32>();
           let (x0, y0) = layer_ref.position();
-          let layer_mask = layer_ref.mask();
-          let channels = 4;
-          let adjusted_pixels = adjusted.rgba().to_vec();
-          let Some(dest_pixels) = p_dest.colors().as_slice_mut() else { continue };
-          for y in 0..dest_h {
-            for x in 0..dest_w {
-              let mask_value = match layer_mask {
-                Some(mask) => {
-                  let (mx, my) = (x as i32 - p_offset_x - x0, y as i32 - p_offset_y - y0);
-                  if mx < 0 || my < 0 { 0 } else { mask.get(mx as u32, my as u32).unwrap_or(0) }
-                }
-                None => 255,
-              };
-              let strength = mask_value as f32 / 255.0 * opacity;
-              let at = (y * dest_w + x) as usize * channels;
-              for c in 0..channels {
-                let (from, to) = (dest_pixels[at + c] as f32, adjusted_pixels[at + c] as f32);
-                dest_pixels[at + c] = (from + (to - from) * strength).round() as u8;
-              }
-            }
-          }
+          // The effects and the mix are steps of the picture's chain with a GPU, and are done on its pixels without one.
+          adjust(p_dest, layer_ref.live_effects(), opacity, layer_ref.mask_texture(), (p_offset_x + x0, p_offset_y + y0));
         }
         continue;
       }
@@ -527,11 +542,7 @@ impl<'a> CanvasInner<'a> {
         let blend =
           if !dest_has_content && first_layer { abra_core::BlendMode::Normal } else { layer_ref.blend_mode() };
         let (x, y) = layer_ref.position();
-        blend_images(&rendered_image)
-          .with_offset((p_offset_x + x, p_offset_y + y))
-          .with_opacity(opacity)
-          .with_mode(blend)
-          .apply(p_dest);
+        lay_over(p_dest, &rendered_image, (p_offset_x + x, p_offset_y + y), blend, opacity);
         first_layer = false;
       }
     }
@@ -629,6 +640,7 @@ impl<'a> CanvasInner<'a> {
   /// hides), so it must be the same size as the canvas. A masked canvas is composited as one picture even when it is
   /// pass-through. `None` removes it.
   pub fn set_mask(&mut self, p_mask: Option<Mask>) {
+    self.mask_texture = p_mask.as_ref().map(|mask| Arc::new(MaskTexture::new(mask.plane().clone())));
     self.mask = p_mask;
     self.mark_dirty();
   }

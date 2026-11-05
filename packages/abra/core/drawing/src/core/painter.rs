@@ -1,12 +1,79 @@
-use abra_core::{Area, BlendMode, Image, LineCap, LineJoin, Path, Performance, PointF};
+use abra_core::image::effect::{Effect, deferred};
+use abra_core::{Area, Fill, Image, LineCap, LineJoin, Path, Performance, PointF};
 
 use crate::{
-  Blend, CoverageMask, PolygonCoverage, Rasterizer, SampleGrid, Shader,
+  CoverageMask, PolygonCoverage, Rasterizer, SampleGrid, Shader, Sprite, SpriteTrail, TrailPoint,
   brush::brush::Brush,
   performance::{DrawingAlgorithm, ResolvedPerformance, configured_performance},
-  shader_from_fill_with_path,
+  shader_from_fill_with_path, sprites,
   shaders::{brush_dabs_shader::BrushDabsShader, brush_shader::BrushShader, stroke_brush_shader::StrokeBrushShader},
 };
+
+/// The brush's dab as a sprite of the stamping engine, or nothing when the engine cannot draw it: a brush that is not a solid color, or
+/// whose tip is not the default round one.
+fn dab_sprite(p_x: f32, p_y: f32, p_brush: &Brush) -> Option<Sprite> {
+  let Fill::Solid(color) = p_brush.color() else {
+    return None;
+  };
+  let path = &p_brush.area().path;
+  let (left, top, right, bottom) = path.bounds().edges::<f32>();
+  let (center_x, center_y, radius) = ((left + right) / 2.0, (top + bottom) / 2.0, (right - left) / 2.0);
+  // The default tip is a circle of radius 5 around the origin, which the brush's size scales to its own.
+  let round = (radius - 5.0).abs() < 0.05
+    && (bottom - top - 2.0 * radius).abs() < 0.05
+    && center_x.abs() < 0.05
+    && center_y.abs() < 0.05
+    && path.flatten(0.25).iter().all(|point| ((point.x - center_x).hypot(point.y - center_y) - radius).abs() < 0.1 * radius);
+  if !round {
+    return None;
+  }
+  let (red, green, blue, alpha) = color.rgba();
+  Some(
+    Sprite::new(p_x, p_y, p_brush.size() / 2.0)
+      .with_hardness(p_brush.hardness())
+      .with_color((red, green, blue))
+      .with_opacity(p_brush.opacity().opacity_at(0.0) * alpha as f32 / 255.0)
+      .with_blend(p_brush.blend()),
+  )
+}
+
+/// The brush's stroke along a path as a trail of the stamping engine, or nothing when the engine cannot draw it: a brush that is not a
+/// solid color or a gradient that runs along the stroke's own path, or a path with no length.
+fn stroke_trail(p_path: &Path, p_brush: &Brush) -> Option<SpriteTrail> {
+  let gradient = match p_brush.color() {
+    Fill::Solid(_) => None,
+    Fill::Gradient(gradient) if gradient.direction().is_some_and(|direction| direction.flatten(1.0) == p_path.flatten(1.0)) => Some(gradient),
+    _ => return None,
+  };
+  let (width, opacity) = (p_brush.width(), p_brush.opacity());
+  let points = p_path.flatten((width.widest() * 0.01).clamp(0.1, 0.5));
+  if points.len() < 2 {
+    return None;
+  }
+  // How far along the path each point is, by length: `0` at the first and `1` at the last, where the width and opacity are read.
+  let mut lengths = vec![0.0f32; points.len()];
+  for at in 1..points.len() {
+    lengths[at] = lengths[at - 1] + ((points[at].x - points[at - 1].x).powi(2) + (points[at].y - points[at - 1].y).powi(2)).sqrt();
+  }
+  let total = *lengths.last().unwrap();
+  if total <= 0.0 {
+    return None;
+  }
+  let solid = match p_brush.color() {
+    Fill::Solid(color) => Some(color.rgba()),
+    _ => None,
+  };
+  let trail = points.iter().zip(&lengths).map(|(point, length)| {
+    let along = length / total;
+    let (red, green, blue, alpha) = match (&solid, &gradient) {
+      (Some(color), _) => *color,
+      (None, Some(gradient)) => gradient.color_at(along).rgba(),
+      (None, None) => unreachable!("a stroke has a solid color or a gradient"),
+    };
+    TrailPoint::new(point.x, point.y, width.width_at(along)).with_opacity(opacity.opacity_at(along) * alpha as f32 / 255.0).with_color((red, green, blue))
+  });
+  Some(SpriteTrail::new(trail.collect()).with_hardness(p_brush.hardness()).with_blend(p_brush.blend()))
+}
 
 /// Unified drawing context for an image.
 pub struct Painter<'a> {
@@ -28,12 +95,25 @@ impl<'a> Painter<'a> {
     }
   }
 
+  /// Whether a dab, stroke or fill that the stamping engine can draw is drawn by it. The `Rasterizer` algorithm (the quality profile) asks for the
+  /// general supersampled rasterizer for every shape, so it is not.
+  fn uses_engine(&self) -> bool {
+    self.performance.algorithm != DrawingAlgorithm::Rasterizer
+  }
+
   /// Paints a single brush dab at a specific position.
   /// - `p_x`: The x-coordinate to paint at.
   /// - `p_y`: The y-coordinate to paint at.
   /// - `p_brush`: The brush to use for painting.
   pub fn dab_brush(&mut self, p_x: f32, p_y: f32, p_brush: &Brush) {
-    let size = p_brush.size() as f32;
+    // A round dab of a solid color is a sprite, which the GPU draws when there is one and the image can wait for it.
+    if self.uses_engine()
+      && let Some(dot) = dab_sprite(p_x, p_y, p_brush)
+    {
+      sprites().with_sprites(vec![dot]).apply(deferred(&mut *self.image));
+      return;
+    }
+    let size = p_brush.size();
     let area = p_brush.area();
     let fill = p_brush.color();
 
@@ -71,45 +151,13 @@ impl<'a> Painter<'a> {
     let width = p_brush.width();
     let opacity = p_brush.opacity();
 
-    // Fast-path: if the original path is an ellipse and the brush is a solid color,
-    // use the SDF-based rasterizer for a much faster stroke of large circular shapes.
-    fn detect_ellipse(p_path: &Path) -> Option<(f32, f32, f32, f32)> {
-      let (min_x, min_y, max_x, max_y) = p_path.bounds().edges::<f32>();
-      let rx = (max_x - min_x) / 2.0;
-      let ry = (max_y - min_y) / 2.0;
-      if rx <= 0.0 || ry <= 0.0 {
-        return None;
-      }
-      let cx = (min_x + max_x) / 2.0;
-      let cy = (min_y + max_y) / 2.0;
-      let tol = 0.06; // allow some small deviation
-      for p in p_path.flatten(1.0) {
-        let dx = (p.x - cx) / rx;
-        let dy = (p.y - cy) / ry;
-        let r = (dx * dx + dy * dy).sqrt();
-        if (r - 1.0).abs() > tol {
-          return None;
-        }
-      }
-      Some((cx, cy, rx, ry))
-    }
-
-    // The fast path draws one width all the way round, the brush's size, so a stroke that changes along the path is rasterized.
-    if self.performance.algorithm != DrawingAlgorithm::Rasterizer
-      && width.constant_width() == Some(p_brush.size() as f32)
-      && opacity.constant_opacity().is_some()
-      && p_brush.blend() == Blend::Mode(BlendMode::Normal)
-      && let Some((cx, cy, rx, ry)) = detect_ellipse(p_path)
+    // A stroke of a solid color, or of a gradient that runs along it, is a trail of the stamping engine, which the GPU draws when there
+    // is one and the image can wait for it. Other fills are drawn by the rasterizer below.
+    if self.uses_engine()
+      && let Some(trail) = stroke_trail(p_path, p_brush)
     {
-      // Only fast-path for solid-color brushes
-      match p_brush.color() {
-        abra_core::Fill::Solid(_color) => {
-          // Draw stroke using SDF ellipse rasterizer
-          crate::draw_ellipse_stroke(self.image, cx, cy, rx, ry, p_brush);
-          return;
-        }
-        _ => {}
-      }
+      sprites().with_trails(vec![trail]).apply(deferred(&mut *self.image));
+      return;
     }
 
     // Convert open path into an area and then create a stroked outline
@@ -158,7 +206,7 @@ impl<'a> Painter<'a> {
 
     let coverage = PolygonCoverage::new(flattened);
     if let Some((min_x, min_y, max_x, max_y)) = coverage.bounds() {
-      let radius = p_brush.size() as f32 / 2.0;
+      let radius = p_brush.size() / 2.0;
       if radius <= 0.0 {
         return;
       }
@@ -188,6 +236,13 @@ impl<'a> Painter<'a> {
         y += stride;
       }
 
+      // Round dabs of a solid color are sprites of the stamping engine, limited to the area, which the GPU draws when there is one.
+      if self.uses_engine() && !centers.is_empty() && dab_sprite(0.0, 0.0, p_brush).is_some() {
+        let dabs: Vec<Sprite> = centers.iter().filter_map(|center| dab_sprite(center.x, center.y, p_brush)).collect();
+        sprites().with_sprites(dabs).with_area(p_area.clone()).apply(deferred(&mut *self.image));
+        return;
+      }
+
       if !centers.is_empty() {
         // Use a gradient path covering the area so gradients without explicit
         // direction are visible across the whole area.
@@ -206,7 +261,8 @@ impl<'a> Painter<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::Brush;
+  use crate::{Blend, Brush};
+  use abra_core::BlendMode;
   use abra_core::{Color, Image, Path, StrokeOpacity, StrokeWidth};
 
   #[test]
@@ -262,9 +318,9 @@ mod tests {
     let brush = Brush::new().with_size(20).with_width(StrokeWidth::from_to(20.0, 2.0)).with_color(&Color::black()).with_hardness(1.0);
     Painter::new(&mut img).stroke_with_brush(&path, &brush);
     let (near_start, middle, near_end) = (painted_in_column(&img, 15), painted_in_column(&img, 50), painted_in_column(&img, 85));
-    // The width at those places is 18.9, 11 and 3.1, and a hard stroke is solid over the middle half of its width: about 9, 5 and 1 rows.
+    // The width at those places is 18.9, 11 and 3.1, and a hard stroke is solid over all of its width: about 19, 11 and 3 rows.
     assert!(near_start > middle && middle > near_end, "{near_start} {middle} {near_end}");
-    assert!((7..=11).contains(&near_start) && near_end <= 3, "{near_start} {near_end}");
+    assert!((17..=20).contains(&near_start) && (2..=4).contains(&near_end), "{near_start} {near_end}");
   }
 
   #[test]
@@ -344,5 +400,72 @@ mod tests {
     let rgba = cursor.rgba();
     let idx = (((size as u32 / 2) * (size as u32 + 2) + (size as u32)) as usize) * 4 + 3;
     assert!(rgba[idx] != 0, "expected alpha written by cursor stroke");
+  }
+
+  /// A stroke and a dab are drawn by the GPU when there is one, and give the CPU's pixels. The image waits for the GPU, so it is not made until
+  /// its pixels are read.
+  #[test]
+  fn a_stroke_and_a_dab_are_drawn_by_the_gpu_when_there_is_one() -> anyhow::Result<()> {
+    use abra_core::image::gpu::{GPU_PROVIDER_LOCK, clear_gpu_provider};
+    use abra_core::{Channels, Performance};
+
+    let (width, height) = (97u32, 61u32);
+    let photo = || Image::new_from_pixels(width, height, [90u8, 120, 150, 255].repeat((width * height) as usize), Channels::RGBA);
+    let mut path = Path::new();
+    path.move_to((8.0, 50.0)).quad_to((40.0, 2.0), (90.0, 40.0));
+    let stroke = Brush::new().with_size(9).with_color(&Color::red()).with_hardness(0.6).with_opacity(StrokeOpacity::from_to(1.0, 0.4));
+    let dab = Brush::new().with_size(14).with_color(&Color::white()).with_hardness(0.3);
+    let draw = |image: &mut Image| {
+      let mut painter = Painter::new(image);
+      painter.stroke_with_brush(&path, &stroke);
+      painter.dab_brush(30.5, 30.5, &dab);
+    };
+
+    let _guard = GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_gpu_provider();
+    let mut on_cpu = photo();
+    draw(&mut on_cpu);
+
+    gpu::GpuContext::new_default_blocking()?;
+    gpu::register();
+    let mut on_gpu = photo();
+    draw(&mut on_gpu);
+    assert!(on_gpu.deferred().is_some(), "with a GPU the drawing waits until the pixels are read");
+    let worst = on_gpu.rgba().iter().zip(on_cpu.rgba()).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+    assert!(worst <= 2, "the GPU differs from the CPU by {worst}");
+    assert_ne!(on_cpu.rgba(), photo().rgba(), "something was drawn");
+    // The Rasterizer algorithm asks for the supersampled rasterizer, which the CPU runs at once.
+    let mut rasterized = photo();
+    {
+      let mut painter = Painter::with_performance(&mut rasterized, Performance::Algorithm(DrawingAlgorithm::Rasterizer));
+      painter.stroke_with_brush(&path, &stroke);
+      painter.dab_brush(30.5, 30.5, &dab);
+    }
+    assert!(rasterized.deferred().is_none(), "the rasterizer draws at once");
+    assert_ne!(rasterized.rgba(), photo().rgba(), "something was drawn");
+    clear_gpu_provider();
+    Ok(())
+  }
+
+  #[test]
+  fn an_area_is_filled_with_dabs_and_nothing_outside_it_is_touched() {
+    let mut image = Image::new(60, 40);
+    let brush = Brush::new().with_size(8).with_color(&Color::red()).with_hardness(0.5);
+    Painter::new(&mut image).fill_area_with_brush(&Area::rect((10.0, 10.0), (30.0, 20.0)), &brush);
+    let alpha = |x: u32, y: u32| image.get_pixel(x, y).unwrap().3;
+    assert!(alpha(25, 20) > 240, "the middle of the area is filled: {}", alpha(25, 20));
+    assert_eq!(alpha(5, 20), 0, "left of the area");
+    assert_eq!(alpha(25, 5), 0, "above the area");
+    assert_eq!(alpha(50, 20), 0, "right of the area");
+  }
+
+  #[test]
+  fn a_brush_can_be_a_fraction_of_a_pixel_across() {
+    assert_eq!(Brush::new().with_size(2.5).size(), 2.5);
+    assert_eq!(Brush::new().with_size(7).size(), 7.0);
+    let mut image = Image::new(20, 20);
+    Painter::new(&mut image).dab_brush(10.5, 10.5, &Brush::new().with_size(2.5).with_hardness(1.0).with_color(&Color::white()));
+    assert_eq!(image.get_pixel(10, 10).unwrap().3, 255);
+    assert_eq!(image.get_pixel(13, 10).unwrap().3, 0);
   }
 }

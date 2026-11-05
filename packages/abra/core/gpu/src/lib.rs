@@ -11,7 +11,7 @@ pub use gpu_passes::{
 };
 
 use abra_core::image::gpu::{GpuPass, GpuProcessor, GpuProvider, GpuSession, register_gpu_provider, register_warmup};
-use abra_core::transform::{ResizeTarget, resize, rotate};
+use abra_core::transform::{ResizeTarget, transform};
 use abra_core::Size;
 use std::sync::{Mutex, OnceLock};
 
@@ -29,14 +29,31 @@ pub fn register() {
   });
   // Resizing and rotating compile big shaders, which cost the first photo to be scaled or turned about half a second. Warming them up
   // compiles them now, while the app starts. Other crates add theirs with `register_warmup`. A warm-up also starts the GPU context.
-  register_warmup(|| resize(ResizeTarget::Exact(Size::new(1, 1))).passes(2, 2));
-  register_warmup(|| rotate(45.0).passes(2, 2));
+  register_warmup(|| transform().with_size(ResizeTarget::Exact(Size::new(1, 1))).passes(2, 2));
+  register_warmup(|| transform().with_rotation(45.0).passes(2, 2));
 }
 
 /// The shared GPU context, created once (waiting for it if it is still starting). `None` when no adapter is available.
 pub fn context() -> Option<&'static GpuContext> {
   static CONTEXT: OnceLock<Option<GpuContext>> = OnceLock::new();
-  CONTEXT.get_or_init(|| GpuContext::new_default_blocking().ok()).as_ref()
+  CONTEXT
+    .get_or_init(|| {
+      let context = GpuContext::new_default_blocking().ok()?;
+      if let Some(path) = PIPELINE_CACHE_FILE.get() {
+        context.use_pipeline_cache_file(path);
+      }
+      Some(context)
+    })
+    .as_ref()
+}
+
+static PIPELINE_CACHE_FILE: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Keeps compiled shaders in the file at `p_path` so the next run of the app does not compile them again (see
+/// `GpuContext::use_pipeline_cache_file`). The app picks the place; abra never chooses where files go. It only has an effect when
+/// called before the first use of [`context`], and the first call wins.
+pub fn set_pipeline_cache_file(p_path: impl Into<std::path::PathBuf>) {
+  let _ = PIPELINE_CACHE_FILE.set(p_path.into());
 }
 
 /// Most idle renderers kept for one-shot calls. Each holds textures the size of the last image it processed.

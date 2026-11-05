@@ -17,6 +17,13 @@ export const aiPendingNotice = new BehaviorSubject<AiPendingNoticeText | null>(n
 export const aiPendingNotice$ = aiPendingNotice.asObservable();
 export const setAiPendingNotice = (text: AiPendingNoticeText | null) => aiPendingNotice.next(text);
 
+/**
+ * Whether the person closed the banner that says the AI is getting the photo ready (see `AiPendingNotice`), so they can edit while it works. It
+ * is for the job that is running now: it is cleared when the job is done, so the next job shows its banner again.
+ */
+export const aiNoticeDismissed = new BehaviorSubject(false);
+export const aiNoticeDismissed$ = aiNoticeDismissed.asObservable();
+
 /** How long a finished job shows its full bar before it clears, so a short one is seen and the next job starts from nothing. */
 const DONE_MS = 500;
 
@@ -29,6 +36,13 @@ aiProgress$
   .subscribe(() => aiProgress.next({}));
 
 aiProgress$.subscribe(tasks => devDebug('ai', 'tasks:', JSON.stringify(tasks)));
+
+// The banner a person closed stays closed until the job it was for is over.
+aiProgress$.pipe(filter(tasks => Object.keys(tasks).length === 0)).subscribe(() => {
+  if (aiNoticeDismissed.value) devDebug('ai', 'the banner was closed, and the AI list is empty, so it can show again');
+  aiNoticeDismissed.next(false);
+});
+aiNoticeDismissed$.subscribe(dismissed => devDebug('ai', 'banner closed by the person:', dismissed));
 
 /**
  * How far along the whole job is, from 0 to 1. Every task is worth the same share of it, because how long each takes is not known

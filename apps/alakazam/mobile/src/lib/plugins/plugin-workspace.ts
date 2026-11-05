@@ -6,12 +6,17 @@ import {
   createPluginFontPickerItem,
   createPluginPicturesItem,
   createPluginHeaderItem,
+  createPluginGroupItem,
+  createPluginGradientItem,
+  createPluginCurveItem,
+  createPluginSubmenuItem,
   createPluginSliderItem,
   createPluginNumberItem,
   createPluginSelectItem,
   createPluginSizeItem,
   createPluginTextItem,
   createPluginToggleItem,
+  createPluginColorItem,
   removePluginInspectorItems,
   type PluginInspectorItem,
 } from '@/src/lib/plugins/plugin-inspector';
@@ -23,6 +28,7 @@ import {
   pluginEditorCanvas,
   pluginEditorControlsError,
   pluginEditorHasControls,
+  pluginEditorGroups,
   pluginEditorHasInspector,
   pluginEditorInspectorError,
   pluginEditorInspectorOpen,
@@ -36,6 +42,7 @@ import {
 } from '@/src/state/plugin-editor';
 import type { CanvasLike } from '@abra/core/canvas';
 import { readPluginScript } from '@alakazam/mobile';
+import { errorMessage } from '@/src/lib/utils/error-message';
 
 /** A workspace a plugin adds, as the plugins screen lists it. `project` is the saved project it opens, when it opens one. */
 export type PluginWorkspaceInfo = { pluginId: string; id: string; title: string; entryPath: string; project?: Project };
@@ -65,7 +72,8 @@ const SURFACES = [
 /** What is open, so a change to a control can run the plugin again. `null` when no workspace is open. */
 let open: { rebuild: () => void } | null = null;
 
-const message = (error: unknown) => String((error as Error)?.message ?? error);
+/** Why something failed, in words: a native error keeps its explanation in `inner`, not in `message`. */
+const message = errorMessage;
 
 /**
  * Opens a workspace: runs its script, lets it make its controls and its canvas, and puts what it made in the plugin editor state, which
@@ -85,6 +93,7 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
   pluginEditorPreviewError.next(null);
   pluginEditorBuilding.next(false);
   pluginEditorPicked.next({});
+  pluginEditorGroups.next({});
   // What the plugin kept with the project is there before its script runs, so it can read it the first time it needs it.
   pluginEditorSaved.next(project.current?.plugin?.state ?? {});
   pluginEditorProjectId.next(project.current?.id);
@@ -104,11 +113,16 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
       pluginModules(workspace.pluginId, events, {
         filePicker: (label, options) => collecting?.push(createPluginFilePickerItem(workspace.pluginId, label, options)),
         header: (text, options) => collecting?.push(createPluginHeaderItem(workspace.pluginId, text, options)),
+        group: (label, options) => collecting?.push(createPluginGroupItem(workspace.pluginId, label, options)),
+        gradient: (label, options) => collecting?.push(createPluginGradientItem(workspace.pluginId, label, options)),
+        curve: (label, options) => collecting?.push(createPluginCurveItem(workspace.pluginId, label, options)),
+        submenu: (label, options) => collecting?.push(createPluginSubmenuItem(workspace.pluginId, label, options)),
         slider: (label, options) => collecting?.push(createPluginSliderItem(workspace.pluginId, label, options)),
         size: (label, options) => collecting?.push(createPluginSizeItem(workspace.pluginId, label, options)),
         select: (label, options) => collecting?.push(createPluginSelectItem(workspace.pluginId, label, options)),
         number: (label, options) => collecting?.push(createPluginNumberItem(workspace.pluginId, label, options)),
         toggle: (label, options) => collecting?.push(createPluginToggleItem(workspace.pluginId, label, options)),
+        color: (label, options) => collecting?.push(createPluginColorItem(workspace.pluginId, label, options)),
         text: (label, options) => collecting?.push(createPluginTextItem(workspace.pluginId, label, options)),
         fontPicker: (label, options) => collecting?.push(createPluginFontPickerItem(workspace.pluginId, label, options)),
         pictures: (label, options) => collecting?.push(createPluginPicturesItem(workspace.pluginId, label, options)),
@@ -174,7 +188,7 @@ export function openPluginWorkspace(workspace: PluginWorkspaceInfo, project: Plu
     if (project.current) restorePluginProject(project.current, open.rebuild);
     stopSaving = autosavePluginProject(workspace, project);
   } catch (failure) {
-    console.warn(`Could not open the ${workspace.title} workspace:`, failure);
+    console.warn(`Could not open the ${workspace.title} workspace:`, message(failure));
     // A workspace that fails to load still opens its inspector, which says why.
     pluginEditorInspectorError.next(message(failure));
     pluginEditorHasInspector.next(true);

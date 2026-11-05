@@ -4,12 +4,12 @@ import { useObservable } from 'react-rx';
 import { BehaviorSubject } from 'rxjs';
 import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { commitRetouch } from '@/src/lib/editor/editor-history';
-import { applyPluginTool } from '@/src/lib/plugins/plugin-controls';
+import { applyPluginToolAsync } from '@/src/lib/plugins/plugin-controls';
 import { RED_EYE_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { flushFullReplay } from '@/src/lib/editor/editor-replay';
 import { errorMessage } from '@/src/lib/utils/error-message';
 import { computePreviewImagePoint } from '@/src/lib/editor/preview-coordinates';
-import { type RedEyeChange } from '@/src/lib/beauty/red-eye';
+import { applyRedEyeStepAsync, type RedEyeChange } from '@/src/lib/beauty/red-eye';
 import { FACE_MODELS } from '@/src/lib/ai/faces';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import { aiModelsRequested } from '@/src/state/ai-models';
@@ -64,15 +64,15 @@ export function RedEyeToolController() {
     };
 
     /** Applies a red-eye fix to the full-size photo and records it as a step, or tells the user why nothing changed. */
-    const fix = (change: RedEyeChange, nothingFound: string) => {
+    const fix = async (change: RedEyeChange, nothingFound: string) => {
       // The fix is made on the full-size photo, so it must have this edit's full-size version first.
       flushFullReplay();
       const image = currentImage.value;
       // Until the history is built the image is a project's saved picture, and a fix made on it would be lost.
       if (!image || !historyReady.value) return;
       try {
-        const pluginResult = applyPluginTool(RED_EYE_TOOL_KEY, change);
-        const fixed = pluginResult.handled && pluginResult.result === true;
+        const pluginResult = await applyPluginToolAsync(RED_EYE_TOOL_KEY, change);
+        const fixed = pluginResult.handled ? pluginResult.result === true : await applyRedEyeStepAsync(image, change);
         if (!fixed) {
           say(nothingFound);
           return;
@@ -87,9 +87,9 @@ export function RedEyeToolController() {
     const runAuto = () => {
       busy.next(true);
       // Let the spinner draw before the models start, which hold up the screen for a moment.
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          fix({ type: 'red-eye-auto' }, 'No red-eye found. Tap each eye to fix it yourself.');
+          await fix({ type: 'red-eye-auto' }, 'No red-eye found. Tap each eye to fix it yourself.');
         } finally {
           busy.next(false);
         }

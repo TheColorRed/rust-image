@@ -11,6 +11,7 @@ import {
   startPreviewGestures,
   trackPreviewTransform,
 } from '@/src/state/gestures';
+import { pluginPinch, pluginTakesPinch } from '@/src/state/plugin-touch';
 import { useObservable } from 'react-rx';
 import { CircleToZoomOverlay } from '@/src/components/editor/view-controls';
 import { editorGizmos } from '@/src/state/gizmos';
@@ -111,16 +112,65 @@ export function WorkspacePreview({ canvas }: { canvas: CanvasLike | null }) {
   // A tap on the preview is told to the plugin (`app.events.taps`), as the editor's preview does for its photo: one finger that goes down and
   // comes up without moving much or staying long. A second finger, a pan or a pinch is not a tap.
   const tap = useRef<{ x: number; y: number; time: number } | null>(null);
+  // Two fingers are told to the plugin (`app.events.pinches`) while it listens: how far apart they are, how far the line between them has
+  // turned and where their middle is, each against where the two fingers went down.
+  const pinch = useRef<{ distance: number; angle: number; turned: number; x: number; y: number } | null>(null);
+  const tellPinch = (type: 'start' | 'change' | 'end', touches: GestureResponderEvent['nativeEvent']['touches']) => {
+    const state = pinch.current;
+    if (!state) return;
+    const [first, second] = [touches[0], touches[1]];
+    const centre = first && second ? { x: (first.pageX + second.pageX) / 2, y: (first.pageY + second.pageY) / 2 } : { x: state.x, y: state.y };
+    if (first && second && type === 'change') {
+      const angle = Math.atan2(second.pageY - first.pageY, second.pageX - first.pageX);
+      const step = angle - state.angle;
+      // The turn is added up step by step, so it goes past a half turn instead of jumping back.
+      state.turned += Math.atan2(Math.sin(step), Math.cos(step));
+      state.angle = angle;
+    }
+    const distance = first && second ? Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY) : state.distance;
+    pluginPinch.next({
+      type,
+      x: centre.x - previewOrigin.value.x,
+      y: centre.y - previewOrigin.value.y,
+      scale: distance / state.distance,
+      rotation: (state.turned * 180) / Math.PI,
+      dx: centre.x - state.x,
+      dy: centre.y - state.y,
+    });
+  };
   const onTouchStart = (event: GestureResponderEvent) => {
     const { touches, pageX, pageY } = event.nativeEvent;
     tap.current = touches.length === 1 ? { x: pageX, y: pageY, time: Date.now() } : null;
+    if (touches.length === 2 && pluginTakesPinch(touches)) {
+      const [first, second] = touches;
+      pinch.current = {
+        distance: Math.max(1, Math.hypot(second.pageX - first.pageX, second.pageY - first.pageY)),
+        angle: Math.atan2(second.pageY - first.pageY, second.pageX - first.pageX),
+        turned: 0,
+        x: (first.pageX + second.pageX) / 2,
+        y: (first.pageY + second.pageY) / 2,
+      };
+      tellPinch('start', touches);
+    }
   };
   const onTouchMove = (event: GestureResponderEvent) => {
     const { touches, pageX, pageY } = event.nativeEvent;
     const start = tap.current;
     if (start && (touches.length !== 1 || Math.hypot(pageX - start.x, pageY - start.y) > TAP_MOVE)) tap.current = null;
+    if (pinch.current) {
+      if (touches.length === 2) tellPinch('change', touches);
+      else {
+        tellPinch('end', touches);
+        pinch.current = null;
+      }
+    }
   };
-  const onTouchEnd = () => {
+  const onTouchEnd = (event: GestureResponderEvent) => {
+    pluginTakesPinch(event.nativeEvent.touches);
+    if (pinch.current && event.nativeEvent.touches.length < 2) {
+      tellPinch('end', event.nativeEvent.touches);
+      pinch.current = null;
+    }
     const start = tap.current;
     tap.current = null;
     if (!start || Date.now() - start.time > TAP_MS) return;

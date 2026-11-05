@@ -2,14 +2,14 @@ use abra::adjustments::prelude::levels::{CurveChannel, curves};
 use abra::adjustments::prelude::*;
 use abra::prelude::*;
 use abra::tools::prelude::*;
-use abra::transform::prelude::{ResizeTarget, resize};
+use abra::transform::prelude::{ResizeTarget, transform};
 
 const FILE: &str = "assets/architecture/red-building.jpg";
 const OUT_FILE: &str = "assets/out/curves.png";
 
 pub fn main() {
   let mut original = Image::read(FILE).expect("Failed to load image");
-  resize(ResizeTarget::FitWidth(600)).apply(&mut original);
+  transform().with_size(ResizeTarget::FitWidth(600)).apply(&mut original);
 
   // The original first, then each curve, left to right and top to bottom.
   let mut atlas = atlas().with_dimensions(3);

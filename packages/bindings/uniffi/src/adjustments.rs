@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use abra::adjustments::prelude::{color, levels};
 
 use crate::effect::effect_methods;
-use crate::{Color, Curve, Gradient, Image};
+use crate::{BlendMode, Color, Curve, Gradient, Image};
 use abra::abra_core::{Image as CoreImage, PointF};
 
 /// Starting settings for a black and white conversion.
@@ -632,6 +632,16 @@ impl LinearGradientEffect {
     Arc::new(Self(RwLock::new(self.0.read().unwrap().clone().with_opacity(opacity))))
   }
 
+  /// How the gradient is laid over the image, as a new effect. Normal when not set.
+  pub fn with_blend_mode(&self, blend_mode: BlendMode) -> Arc<LinearGradientEffect> {
+    Arc::new(Self(RwLock::new(self.0.read().unwrap().clone().with_blend_mode(blend_mode.to_core()))))
+  }
+
+  /// Sets how the gradient is laid over the image.
+  pub fn set_blend_mode(&self, blend_mode: BlendMode) {
+    self.0.write().unwrap().set_blend_mode(blend_mode.to_core());
+  }
+
   /// Turns the gradient to `degrees`.
   pub fn set_angle(&self, degrees: f32) {
     self.0.write().unwrap().set_angle(degrees);
@@ -705,6 +715,22 @@ mod tests {
     let result = effect.applied(flat.clone());
     assert_eq!(flat.rgba(), picture(), "the image is as it was");
     assert_ne!(result.rgba(), picture(), "the copy has the gradient");
+  }
+
+  #[test]
+  fn a_gradient_with_a_blend_mode_lays_over_the_image_the_way_that_mode_does() {
+    let gray = Arc::new(Gradient::from_to(Arc::new(Color::from_rgba(128, 128, 128, 255)), Arc::new(Color::from_rgba(128, 128, 128, 255))));
+    let image = || pixel(200, 100, 50, 255);
+    let normal = LinearGradientEffect::angle(gray.clone(), 0.0);
+    normal.apply(image());
+    // Multiply by about half gray darkens each channel, where Normal replaces it with the gray.
+    let multiplied = LinearGradientEffect::angle(gray.clone(), 0.0).with_blend_mode(BlendMode::Multiply);
+    let result = multiplied.applied(image());
+    assert_eq!(result.get_pixel(0, 0), Some(vec![100, 50, 25, 255]));
+    // Set afterwards, on the same handle, it does the same.
+    let later = LinearGradientEffect::angle(gray, 0.0);
+    later.set_blend_mode(BlendMode::Multiply);
+    assert_eq!(later.applied(image()).get_pixel(0, 0), Some(vec![100, 50, 25, 255]));
   }
 
   #[test]

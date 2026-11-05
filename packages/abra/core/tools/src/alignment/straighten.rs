@@ -1,4 +1,4 @@
-use abra_core::{LineSegment, Orientation, PointF, TransformAlgorithm, TransformFit, rotate};
+use abra_core::{LineSegment, Orientation, PointF, TransformAlgorithm, TransformFit, transform};
 
 use crate::tool::Tool;
 
@@ -64,7 +64,8 @@ impl Tool for Straighten {
     }
 
     let mut image = p_image.into();
-    rotate(self.line.correction_to(self.orientation))
+    transform()
+      .with_rotation(self.line.correction_to(self.orientation))
       .with_fit(self.fit)
       .with_algorithm(self.algorithm)
       .apply(&mut image);

@@ -44,7 +44,12 @@ export const ImageThumbs = memo(
     const grid =
       rows === 'all'
         ? styles.all
-        : { flexDirection: 'column' as const, flexWrap: 'wrap' as const, gap: GAP, height: shownRows * THUMB + (shownRows - 1) * GAP };
+        : {
+            flexDirection: 'column' as const,
+            flexWrap: 'wrap' as const,
+            gap: GAP,
+            height: shownRows * THUMB + (shownRows - 1) * GAP,
+          };
     const thumbs = (
       <>
         {files.map((file, index) => (
@@ -66,7 +71,12 @@ export const ImageThumbs = memo(
         {rows === 'all' ? (
           <View style={grid}>{thumbs}</View>
         ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled contentContainerStyle={grid}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled
+            contentContainerStyle={grid}
+          >
             {thumbs}
           </ScrollView>
         )}

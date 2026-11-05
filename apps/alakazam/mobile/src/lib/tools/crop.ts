@@ -1,6 +1,6 @@
 import type { AbraImage } from '@alakazam/mobile';
 import type { PreviewBox } from '@/src/state/gestures';
-import { rotate } from '@abra/core/transform';
+import { transform } from '@abra/core/transform';
 import { release } from '@/src/lib/native/native-handles';
 
 /** The part of the photo to keep, as fractions of its size: 0 is the left or top edge, 1 the right or bottom edge. */
@@ -38,7 +38,7 @@ export function cropPicture(image: AbraImage, rect: CropRect, turn = 0): AbraIma
   if (!turn) return cropImage(image, rect);
   const turned = image.clone() as AbraImage;
   try {
-    rotate(turnDegrees(turn)).apply(turned);
+    transform().withRotation(turnDegrees(turn)).apply(turned);
     return cropImage(turned, rect);
   } finally {
     release(turned);

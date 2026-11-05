@@ -5,7 +5,7 @@ import { ResizeTarget } from '@abra/core/canvas';
 import { Color } from '@abra/core/color';
 import { gaussianBlur } from '@abra/core/filters';
 import { TransformAlgorithm } from '@abra/core/mask';
-import { resize } from '@abra/core/transform';
+import { transform } from '@abra/core/transform';
 import { RemoverShape, ShapePosition, Units, remover } from '@abra/core/tools';
 import type { EditControl } from '@alakazam/sdk';
 import { app, owning, paintSheet, release, swatchesOf, type Painting, type ToolContext } from '@alakazam/sdk';
@@ -142,7 +142,7 @@ export const beauty: { key: string; label: string; controls: EditControl[] } = {
                   width: Math.max(1, Math.round(part.width * shrink)),
                   height: Math.max(1, Math.round(part.height * shrink)),
                 };
-                keep(resize(ResizeTarget.Exact.new(small))).apply(image);
+                keep(transform().withSize(ResizeTarget.Exact.new(small))).apply(image);
                 // The average color of only the skin: the photo is multiplied by how much each pixel is skin, both are blurred, and the
                 // blurred photo is divided by the blurred skin, which leaves out everything that is not skin.
                 const skinHere = keep(
@@ -153,7 +153,7 @@ export const beauty: { key: string; label: string; controls: EditControl[] } = {
                 keep(gaussianBlur(reach)).apply(image);
                 keep(gaussianBlur(reach)).apply(skinHere);
                 keep(keep(blend(skinHere)).withMode(BlendMode.Divide)).apply(image);
-                keep(resize(ResizeTarget.Exact.new({ width: part.width, height: part.height }))).apply(image);
+                keep(transform().withSize(ResizeTarget.Exact.new({ width: part.width, height: part.height }))).apply(image);
                 // Puts the photo's light back on the evened color. Color blend does this in HSL, where a bright pixel can hold less
                 // color than a dark one, so the bright skin came out pale. This adds the same difference in light to red, green and
                 // blue, which keeps the color's strength: how light the evened color is, turned upside down, laid at half strength

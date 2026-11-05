@@ -2,18 +2,19 @@
 
 use abra_core::BlendMode;
 use abra_core::image::image_ext::ImageExt;
-use abra_core::{FlipAxis, Image, ResizeTarget, Resolution, Transform, TransformAlgorithm};
+use abra_core::Channels;
+use abra_core::{FlipAxis, Image, Rect, ResizeTarget, Resolution, TransformAlgorithm, transform};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
 
-use abra_core::Channels;
+use abra_core::layers::{MaskTexture, multiply_alpha};
 use mask::Mask;
 use abra_core::image::gpu::{ChainRenderer, GpuSession, Hardware, LiveEffect, ready_gpu_provider};
 
 use crate::Origin;
-use crate::canvas::canvas_inner::CanvasInner;
+use crate::canvas::canvas_inner::{CanvasInner, DirtyFlag};
 use crate::effects::LayerEffects;
 use crate::{Anchor, LayerMove};
 use typography::Text;
@@ -83,6 +84,8 @@ pub struct LayerInner<'a> {
   /// The canvas that holds this layer. Weak, because the canvas holds the layer strongly and a strong link back would be a cycle
   /// that frees neither.
   canvas: Weak<Mutex<CanvasInner<'a>>>,
+  /// The canvas's "needs to compose again" mark, so a change to the layer sets it without taking the canvas's lock (see [`DirtyFlag`]).
+  dirty: DirtyFlag,
   /// The anchor point for positioning relative to the canvas.
   anchor: Option<Anchor>,
   /// The origin point within the layer that the anchor refers to.
@@ -100,6 +103,8 @@ pub struct LayerInner<'a> {
   live: LiveState,
   /// Limits where the layer shows: the mask is multiplied into the layer's alpha when it is composed.
   mask: Option<Arc<Mask>>,
+  /// The mask as the GPU is given it, made once when the mask is set.
+  mask_texture: Option<Arc<MaskTexture>>,
 }
 
 impl Debug for LayerInner<'_> {
@@ -133,6 +138,7 @@ impl Default for LayerInner<'_> {
       x: 0,
       y: 0,
       canvas: Weak::new(),
+      dirty: DirtyFlag::new(false),
       anchor: None,
       origin: Origin::default(),
       anchor_dimensions: None,
@@ -141,6 +147,7 @@ impl Default for LayerInner<'_> {
       adjustment_layer_type: None,
       live: LiveState::default(),
       mask: None,
+      mask_texture: None,
     }
   }
 }
@@ -178,9 +185,11 @@ impl<'a> LayerInner<'a> {
     }
   }
 
-  /// Sets the canvas reference for the layer.
-  pub(crate) fn set_canvas(&mut self, p_canvas: Arc<Mutex<CanvasInner<'a>>>) {
-    self.canvas = Arc::downgrade(&p_canvas);
+  /// Sets the canvas reference for the layer. The caller gives the canvas's `dirty_flag()` because it already holds the canvas's lock, or has
+  /// just taken it, and the layer must not take it again.
+  pub(crate) fn set_canvas(&mut self, p_canvas: &Arc<Mutex<CanvasInner<'a>>>, p_dirty: DirtyFlag) {
+    self.canvas = Arc::downgrade(p_canvas);
+    self.dirty = p_dirty;
   }
 
   /// The canvas that holds this layer, or a temporary empty one when the layer is in none (or its canvas is gone).
@@ -193,9 +202,10 @@ impl<'a> LayerInner<'a> {
     &self.id
   }
 
-  /// Marks the layer's canvas as needing to recompose.
+  /// Marks the layer's canvas as needing to recompose. It takes no lock: the canvas's lock is taken before the layers' when composing, so a
+  /// layer that holds its own lock must not wait for the canvas's (see [`DirtyFlag`]).
   pub fn mark_dirty(&mut self) {
-    self.canvas().lock().unwrap().mark_dirty();
+    self.dirty.set(true);
   }
 
   /// Gets the anchor point of the layer.
@@ -399,10 +409,12 @@ impl<'a> LayerInner<'a> {
     let image = Arc::make_mut(&mut self.image);
     for operation in self.operations[self.applied_operations..].iter().copied() {
       match operation {
-        LayerOperation::Resize(target, algorithm) => image.resize(target, algorithm),
-        LayerOperation::Crop(x, y, width, height) => image.crop(x, y, width, height),
-        LayerOperation::Rotate(angle, algorithm) => image.rotate(angle, algorithm),
-        LayerOperation::Flip(axis) => image.flip(axis),
+        LayerOperation::Resize(target, algorithm) => transform().with_size(target).with_algorithm(algorithm).apply(image),
+        LayerOperation::Crop(x, y, width, height) => {
+          transform().with_crop(Rect::new((x, y), (width, height))).apply(image)
+        }
+        LayerOperation::Rotate(angle, algorithm) => transform().with_rotation(angle).with_algorithm(algorithm).apply(image),
+        LayerOperation::Flip(axis) => transform().with_flip(axis).apply(image),
       }
     }
     self.applied_operations = self.operations.len();
@@ -411,9 +423,11 @@ impl<'a> LayerInner<'a> {
   /// Renders the layer effects without replacing the layer's source image.
   pub fn apply_pending_effects(&mut self) -> Arc<Image> {
     let mut image_arc = self.render_live();
-    if let Some(mask) = &self.mask {
+    if let (Some(mask), Some(texture)) = (&self.mask, &self.mask_texture) {
+      assert_eq!(mask.dimensions::<u32>(), image_arc.dimensions::<u32>(), "mask must be the same size as the image");
+      // With a GPU the mask is a step of the picture's chain and not a copy of its pixels.
       let mut masked = (*image_arc).clone();
-      mask.multiply_alpha(&mut masked);
+      multiply_alpha(&mut masked, texture);
       image_arc = Arc::new(masked);
     }
     let result = self.effects.apply_with_offset(image_arc);
@@ -427,6 +441,7 @@ impl<'a> LayerInner<'a> {
   /// Limits where the layer shows. The mask is multiplied into the layer's alpha when it is composed (white shows, black hides),
   /// so it must be the same size as the layer. `None` removes it.
   pub fn set_mask(&mut self, p_mask: Option<Mask>) {
+    self.mask_texture = p_mask.as_ref().map(|mask| Arc::new(MaskTexture::new(mask.plane().clone())));
     self.mask = p_mask.map(Arc::new);
     self.mark_dirty();
   }
@@ -434,6 +449,11 @@ impl<'a> LayerInner<'a> {
   /// The mask limiting where the layer shows, if any.
   pub fn mask(&self) -> Option<&Mask> {
     self.mask.as_deref()
+  }
+
+  /// The mask as the GPU is given it.
+  pub fn mask_texture(&self) -> Option<&Arc<MaskTexture>> {
+    self.mask_texture.as_ref()
   }
 
   /// Replaces the live effects evaluated over this layer's image and marks the canvas dirty. Only the effects are
@@ -489,17 +509,23 @@ impl<'a> LayerInner<'a> {
     image
   }
 
-  /// Sets the index of the layer within the canvas's layer stack
-  pub fn set_index(&mut self, p_index: usize) {
-    // To avoid borrow conflicts, we need to find the current layer's index by ID
-    let current_index = self.current_index();
+  /// The canvas that holds the layer, read with the layer's lock held only for the read.
+  ///
+  /// The functions below that work on the layer stack take the canvas's lock, and composing holds the canvas's lock while it takes the
+  /// layers', so they must not be called with a layer's lock held (a method of the layer itself would be): that is the same two locks
+  /// taken in the opposite order, and a stack change on one thread and a compose on another would wait for each other forever. They take
+  /// the layer as the `Arc` that holds it, lock it only to find its canvas, and let go before they lock the canvas.
+  fn canvas_of(p_layer: &Arc<Mutex<Self>>) -> Arc<Mutex<CanvasInner<'a>>> {
+    p_layer.lock().unwrap().canvas()
+  }
 
-    if let Some(current_idx) = current_index {
-      let canvas = self.canvas();
-      let mut canvas = canvas.lock().unwrap();
-      // Directly manipulate layers vec
-      if current_idx != p_index && p_index <= canvas.layers.len() {
-        let layer = canvas.layers.remove(current_idx);
+  /// Sets the index of the layer within the canvas's layer stack
+  pub(crate) fn set_index(p_layer: &Arc<Mutex<Self>>, p_index: usize) {
+    let canvas = Self::canvas_of(p_layer);
+    let mut canvas = canvas.lock().unwrap();
+    if let Some(current_index) = canvas.layers.iter().position(|each| Arc::ptr_eq(each, p_layer)) {
+      if current_index != p_index && p_index < canvas.layers.len() {
+        let layer = canvas.layers.remove(current_index);
         canvas.layers.insert(p_index, layer);
       }
       // Mark canvas as needing recomposition since layer order changed
@@ -508,17 +534,10 @@ impl<'a> LayerInner<'a> {
   }
 
   /// Gets the current index of this layer in the canvas's layer stack
-  pub fn current_index(&self) -> Option<usize> {
-    let canvas = self.canvas();
+  pub(crate) fn current_index(p_layer: &Arc<Mutex<Self>>) -> Option<usize> {
+    let canvas = Self::canvas_of(p_layer);
     let canvas = canvas.lock().unwrap();
-    canvas.layers.iter().enumerate().find_map(|(i, layer_rc)| {
-      if let Ok(layer) = layer_rc.try_lock() {
-        if layer.id == self.id { Some(i) } else { None }
-      } else {
-        // If can't lock, assume it's self
-        Some(i)
-      }
-    })
+    canvas.layers.iter().position(|each| Arc::ptr_eq(each, p_layer))
   }
 
   pub fn adjustment_type(&self) -> Option<crate::AdjustmentLayerType> {
@@ -526,23 +545,21 @@ impl<'a> LayerInner<'a> {
   }
 
   /// Moves this layer according to a relative or absolute stack action.
-  pub fn move_to(&mut self, p_action: LayerMove) {
-    let Some(current_index) = self.current_index() else { return };
+  pub(crate) fn move_to(p_layer: &Arc<Mutex<Self>>, p_action: LayerMove) {
+    let Some(current_index) = Self::current_index(p_layer) else { return };
+    let len = Self::canvas_of(p_layer).lock().unwrap().layers.len();
     let target_index = match p_action {
-      LayerMove::Up => {
-        let len = self.canvas().lock().unwrap().layers.len();
-        (current_index + 1 < len).then_some(current_index + 1)
-      }
+      LayerMove::Up => (current_index + 1 < len).then_some(current_index + 1),
       LayerMove::Down => current_index.checked_sub(1),
       LayerMove::Top => {
-        let top = self.canvas().lock().unwrap().layers.len().saturating_sub(1);
+        let top = len.saturating_sub(1);
         (current_index != top).then_some(top)
       }
       LayerMove::Bottom => (current_index != 0).then_some(0),
     };
 
     if let Some(target_index) = target_index {
-      self.set_index(target_index);
+      Self::set_index(p_layer, target_index);
     }
   }
 
@@ -555,15 +572,15 @@ impl<'a> LayerInner<'a> {
 
   /// Duplicates the layer within the same canvas.
   /// This returns a Layer (the public wrapper), not the raw Rc<Mutex<LayerInner>>.
-  pub fn duplicate(&self) -> super::Layer<'a> {
-    let mut new_layer = self.clone();
+  pub(crate) fn duplicate(p_layer: &Arc<Mutex<Self>>) -> super::Layer<'a> {
+    // Copied and let go before the canvas is locked (see `canvas_of`).
+    let (mut new_layer, canvas) = {
+      let layer = p_layer.lock().unwrap();
+      (layer.clone(), layer.canvas())
+    };
     new_layer.set_name(format!("{} clone", new_layer.name()).as_str());
 
-    let layer_rc = {
-      let canvas = self.canvas();
-      let mut canvas = canvas.lock().unwrap();
-      canvas.add_layer(new_layer).clone()
-    };
+    let layer_rc = canvas.lock().unwrap().add_layer(new_layer);
 
     super::Layer::from_inner(layer_rc)
   }
@@ -673,6 +690,7 @@ impl<'a> Clone for LayerInner<'a> {
       x: self.x,
       y: self.y,
       canvas: self.canvas.clone(),
+      dirty: self.dirty.clone(),
       anchor: self.anchor,
       origin: self.origin,
       anchor_dimensions: self.anchor_dimensions,
@@ -681,6 +699,7 @@ impl<'a> Clone for LayerInner<'a> {
       adjustment_layer_type: self.adjustment_layer_type.clone(),
       live: self.live.clone(),
       mask: self.mask.clone(),
+      mask_texture: self.mask_texture.clone(),
     }
   }
 }

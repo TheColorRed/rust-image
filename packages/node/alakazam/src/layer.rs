@@ -5,8 +5,8 @@ use abra::canvas::prelude::Layer as AbraLayer;
 use abra::{
   abra_core::BlendMode,
   canvas::prelude::Anchor,
-  prelude::{Channels, Image, Transform},
-  transform::prelude::{ResizeTarget, resize},
+  prelude::{Channels, Image},
+  transform::prelude::{ResizeTarget, transform},
 };
 
 #[napi(object)]
@@ -159,9 +159,7 @@ impl Layer {
     let img = if new_width == width && new_height == height {
       img.clone()
     } else {
-      let mut resized_img = img.clone();
-      resize(ResizeTarget::Exact(abra::prelude::Size::new(new_width, new_height))).apply(&mut resized_img);
-      resized_img
+      transform().with_size(ResizeTarget::Exact(abra::prelude::Size::new(new_width, new_height))).applied(&img)
     };
 
     ImageData {
@@ -234,7 +232,7 @@ impl Layer {
       // underlying `LayerTransform` lifetime which can lead to complex
       // lifetime requirements across the binding boundary.
       self.inner.with_image_mut(|img| {
-        img.rotate(angle, None);
+        transform().with_rotation(angle).apply(img);
       });
     }
     self

@@ -99,10 +99,12 @@ import {
   openSliderState,
   openSliderState$,
   areaOutlinesHidden,
+  pickerSubmenu,
+  pickerSubmenu$,
 } from '@/src/state/edits';
 import { canRedo$, canUndo$ } from '@/src/state/history';
 import { personOutlinesVisible, personSelection, personSelection$ } from '@/src/state/person-selection';
-import { bottomInset$, controlThumbnails$ } from '@/src/state/preview';
+import { controlThumbnails$ } from '@/src/state/preview';
 import { replayHidden } from '@/src/state/session';
 import { VesselView } from '@vessel/react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
@@ -150,7 +152,6 @@ export function EditorPanel({
   // A plugin that adds or takes away controls changes what the panel lists, so it reads them again then.
   useObservable(pluginControlsVersion$, 0);
   const recentToolbarUse = useObservable(toolbarUsage$, toolbarUsage.value);
-  const bottomInset = useObservable(bottomInset$, 0);
   const activeKey = useObservable(activeSectionKey$, 'section-colorization');
   const orderedSections = useMemo(() => orderToolbarSections(EDIT_SECTIONS, recentToolbarUse), [recentToolbarUse]);
   const canUndo = useObservable(canUndo$, false);
@@ -162,6 +163,7 @@ export function EditorPanel({
   const currentSectionsOffset = useRef(sectionScrollOffset);
   const activeSection = findSection(activeKey);
   const openKey = useObservable(openGroupKey$, openGroupKey.value);
+  const submenu = useObservable(pickerSubmenu$, pickerSubmenu.value);
   const groups = openKey ? groupPath(activeSection.controls, openKey) : [];
   useActionPreview();
   const focusedControl = useFocusedControl();
@@ -178,6 +180,11 @@ export function EditorPanel({
   const openGroup = groups[groups.length - 1];
   /** Steps out of what is open: the focused control, back to the row it sits in, or else the open group, back to its parent. */
   const goBack = () => {
+    // A sub-menu of a picker is the innermost level, so it closes first, and what it was opened from is as it was.
+    if (submenu) {
+      pickerSubmenu.next(null);
+      return;
+    }
     let remainingGroups = groups.length;
     if (focusedControl) {
       focusedControlKey.next(null);
@@ -326,10 +333,8 @@ export function EditorPanel({
 
   return (
     <View
-      style={[styles.panel, { paddingBottom: bottomInset + 12 }]}
-      onLayout={event =>
-        devDebug('panel', 'height', event.nativeEvent.layout.height, 'bottom inset', bottomInset)
-      }
+      style={[styles.panel, { paddingBottom: 12 }]}
+      onLayout={event => devDebug('panel', 'height', event.nativeEvent.layout.height)}
     >
       <BlemishToolController />
       <RedEyeToolController />
@@ -351,6 +356,7 @@ export function EditorPanel({
             ...(focusedControl
               ? [{ key: focusedControl.key, label: crumbLabel(focusedControl), open: undefined }]
               : []),
+            ...(submenu ? [{ key: `submenu-${submenu.key}`, label: submenu.label, open: undefined }] : []),
           ].map((crumb, index, all) => (
             <Pressable
               key={crumb.key ?? 'section'}
@@ -613,19 +619,27 @@ function SliderEditor() {
   };
   const barKind = barKindAt(0);
 
-  const extraTab = (extra: PickerControl) => (
-    <Pressable
-      key={extra.key}
-      style={[styles.sliderPill, extra.key === openExtra?.key && styles.sliderPillOpen]}
-      onPress={() => setExtraKey(extra.key)}
-      accessibilityRole="tab"
-      accessibilityState={{ selected: extra.key === openExtra?.key }}
-    >
-      <Text style={[styles.sliderPillText, extra.key === openExtra?.key && styles.sliderPillTextOpen]}>
-        {extra.label}
-      </Text>
-    </Pressable>
-  );
+  const extraTab = (extra: PickerControl) => {
+    // A picker that saves its choice on this control says what is chosen on its tab, as a slider's tab says its value. The choice
+    // that was never made is the first item, as the picker marks it.
+    const chosen =
+      extra.commitTo?.slider === control.key
+        ? extra.items.find(item => item.value === (committed[extra.commitTo!.index] ?? 0))
+        : undefined;
+    return (
+      <Pressable
+        key={extra.key}
+        style={[styles.sliderPill, extra.key === openExtra?.key && styles.sliderPillOpen]}
+        onPress={() => setExtraKey(extra.key)}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: extra.key === openExtra?.key }}
+      >
+        <Text style={[styles.sliderPillText, extra.key === openExtra?.key && styles.sliderPillTextOpen]}>
+          {chosen ? `${extra.label} · ${chosen.label}` : extra.label}
+        </Text>
+      </Pressable>
+    );
+  };
   const extraAfter = (index: number) => extras.filter(extra => extra.after === index).map(extraTab);
 
   return (
@@ -878,6 +892,10 @@ function PickerItems({ picker }: { picker: PickerControl }) {
   const adjustments = useObservable(adjustments$, adjustmentsState.value);
   const sectionKey = useObservable(activeSectionKey$, 'section-colorization');
   const [marked, setMarked] = useState<string[]>([]);
+  // The item whose sub-menu is open, which is shown in place of the row. It is closed with the picker, so it is never left open behind
+  // another tab or section.
+  const submenu = useObservable(pickerSubmenu$, pickerSubmenu.value);
+  useEffect(() => () => pickerSubmenu.next(null), []);
   // With a `commitTo`, the choice is a value saved on a slider control, so the marked item is read from there.
   const target = picker.commitTo;
   const slider = target
@@ -888,7 +906,7 @@ function PickerItems({ picker }: { picker: PickerControl }) {
   const saved = slider && target ? (sliderValues(slider, adjustments[slider.key])[target.index] ?? 0) : undefined;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailRow}>
-      {picker.items.map(item => {
+      {(submenu?.items ?? picker.items).map(item => {
         const isMarked = slider ? item.value === saved : marked.includes(item.key);
         const thumbnail = controlThumbnails[item.key];
         return (
@@ -899,6 +917,10 @@ function PickerItems({ picker }: { picker: PickerControl }) {
             accessibilityLabel={item.label}
             accessibilityState={{ selected: isMarked }}
             onPress={() => {
+              if (item.items) {
+                pickerSubmenu.next(item);
+                return;
+              }
               setMarked(current =>
                 picker.selection === 'one'
                   ? [item.key]
@@ -906,6 +928,10 @@ function PickerItems({ picker }: { picker: PickerControl }) {
                     ? current.filter(key => key !== item.key)
                     : [...current, item.key],
               );
+              if (item.pick) {
+                item.pick();
+                return;
+              }
               if (slider && target && item.value !== undefined) {
                 const values = sliderValues(slider, adjustments[slider.key]);
                 values[target.index] = item.value;
@@ -919,6 +945,13 @@ function PickerItems({ picker }: { picker: PickerControl }) {
             <View style={[styles.thumbnailImage, isMarked && styles.thumbnailApplied]}>
               {item.picture.kind === 'asset' ? (
                 <Image source={item.picture.source} style={styles.thumbnailCanvas} resizeMode="contain" />
+              ) : item.picture.kind === 'icon' ? (
+                <View style={styles.iconCard}>
+                  <item.picture.icon color={colors.textPrimary} size={24} />
+                  <Text numberOfLines={1} style={styles.iconCardLabel}>
+                    {item.label}
+                  </Text>
+                </View>
               ) : VesselView && thumbnail ? (
                 <VesselView source={thumbnail} style={styles.thumbnailCanvas} pointerEvents="none" />
               ) : (
@@ -1039,6 +1072,8 @@ function createStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     thumbnailApplied: { borderColor: colors.accent },
     thumbnailCanvas: { flex: 1 },
+    iconCard: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 6, backgroundColor: colors.chip },
+    iconCardLabel: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
     thumbnailPlaceholder: { color: colors.textSecondary, textAlign: 'center', margin: 'auto' },
     sliderPanel: { paddingHorizontal: 12 },
     sliderStack: { gap: 4 },

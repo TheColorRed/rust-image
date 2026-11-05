@@ -1,7 +1,7 @@
 use crate::common::*;
 use abra_core::image::gpu::{CpuProcessor, GpuAux, GpuPass, GpuProcessor};
 use abra_core::image::levels::scaled_to_level;
-use abra_core::{Channels, ResizeTarget, Size, Transform};
+use abra_core::{Channels, ResizeTarget, Size, transform};
 use abra_core::{IntoNumber, if_pick};
 use primitives::gaussian::gaussian_weights;
 
@@ -95,10 +95,10 @@ fn apply_gaussian_blur(p_image: &mut Image, p_radius: u32) {
     let new_radius = (p_radius as f32 / scale as f32).max(1.0).round() as u32;
 
     let mut tmp_img = Image::new_from_pixels(width, height, pixels.clone(), Channels::RGBA);
-    tmp_img.resize(ResizeTarget::Exact(Size::new(down_w, down_h)), None);
+    transform().with_size(ResizeTarget::Exact(Size::new(down_w, down_h))).apply(&mut tmp_img);
     let blurred_small = separable_gaussian_blur_pixels(tmp_img.rgba(), down_w as usize, down_h as usize, new_radius);
     tmp_img.set_rgba(blurred_small);
-    tmp_img.resize(ResizeTarget::Exact(Size::new(width, height)), None);
+    transform().with_size(ResizeTarget::Exact(Size::new(width, height))).apply(&mut tmp_img);
     tmp_img.into_rgba_vec()
   } else {
     separable_gaussian_blur_pixels(&pixels, width as usize, height as usize, p_radius)

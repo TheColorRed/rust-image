@@ -14,7 +14,8 @@ import {
 import { type Image as AbraPixels, type ImageLike } from '@abra/core/image';
 import { Mask, type MaskLike } from '@abra/core/mask';
 import { type AbraImageLike } from '@alakazam/mobile';
-import { FACE_MODELS, findFaces, inside, model } from '@/src/lib/ai/faces';
+import { FACE_MODELS, findFacesAsync, inside } from '@/src/lib/ai/faces';
+import { missingModels } from '@/src/lib/ai/ai-model-availability';
 import { owning, release } from '@/src/lib/native/native-handles';
 
 /** The AI models automatic red-eye removal needs, by role. Fixing an eye by tapping it needs none. */
@@ -108,20 +109,20 @@ function correct(photo: ImageLike, pupils: MaskLike, keep: <V>(value: V) => V) {
 }
 
 /**
- * Removes red-eye from every person in the photo, with the AI models. The library does all the work: the models find the
+ * Removes red-eye from every person in the photo, with model inference and loading on native worker threads. The library does all the work: the models find the
  * people, the faces, the eyes and the irises as masks, the red pixels are picked out by color, the masks are combined and
  * placed back on the whole photo, and the color is rewritten through the result. This only says which steps to take and what
  * counts as red. Returns how many faces were corrected: none when the models are missing or no face was found.
  */
-export const removeRedEye = (photo: ImageLike): number => {
-  if (FACE_MODELS.some(role => !model(role))) return 0;
+export const removeRedEye = async (photo: ImageLike): Promise<number> => {
+  if (missingModels(FACE_MODELS).length) return 0;
 
-  return owning((keep) => {
+  return owning(async keep => {
     const white = keep(Color.fromRgba(255, 255, 255, 255));
     let redEyes: MaskLike | undefined;
     let faces = 0;
 
-    for (const { labels, zoom, face, faceImage, landmarks } of findFaces(photo, keep)) {
+    for await (const { labels, zoom, face, faceImage, landmarks } of findFacesAsync(photo, keep)) {
       // The eyes the parser found, limited to a disc over the pupil of each iris the landmarks found, and to the pixels that are red.
       const eyesOnPhoto = keep(keep(labels.maskNamed(EYES)).placed(photo.width(), photo.height(), rectOrigin(zoom)));
       const eyesInFace = keep(eyesOnPhoto.cropped(face));
@@ -227,13 +228,29 @@ export type RedEyeChange = { type: 'red-eye'; x: number; y: number } | { type: '
  * the image is left as it was.
  */
 export function applyRedEyeStep(image: AbraImageLike, change: RedEyeChange): boolean {
+  if (change.type === 'red-eye-auto') {
+    throw new Error('Automatic red-eye removal must run asynchronously.');
+  }
   const photo = image.clone();
   try {
-    const fixed = change.type === 'red-eye' ? fixRedEyeAt(photo, change.x, change.y) : removeRedEye(photo) > 0;
+    const fixed = fixRedEyeAt(photo, change.x, change.y);
     if (fixed) image.replaceWith(photo);
     return fixed;
   } finally {
     // It is a native image the garbage collector cannot see the size of.
+    release(photo);
+  }
+}
+
+/** Applies automatic AI red-eye removal after its models finish on native workers. */
+export async function applyRedEyeStepAsync(image: AbraImageLike, change: RedEyeChange): Promise<boolean> {
+  if (change.type === 'red-eye') return applyRedEyeStep(image, change);
+  const photo = image.clone();
+  try {
+    const fixed = (await removeRedEye(photo)) > 0;
+    if (fixed) image.replaceWith(photo);
+    return fixed;
+  } finally {
     release(photo);
   }
 }

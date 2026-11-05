@@ -1,0 +1,29 @@
+$schema: https://alakazam-image-editor.s3.us-east-1.amazonaws.com/plugins/plugin.schema.json
+id: alakazam.particle-systems
+name: Particle Systems
+version: 1.0.0
+description: Create particle effects to add to your images.
+author: Alakazam
+
+contributes:
+  workspaces:
+    - id: particle-maker
+      title: Particle Maker
+      description: Make particle effects to add to your images.
+      entry: particle-maker.js
+  # controls:
+  #   - root: Particles
+  #     items:
+  #       - path: Add System
+  #         entry: add-systems.js
+
+store:
+  tags: [particles, effects, overlay]
+
+files:
+  - path: particle-maker.js
+    sha256: acc9bafadf4e8a8311953f0fc724143deacfc90d1c43d2d2ba6a69532d2ee75e
+  - path: README.md
+    sha256: 78c82b68ee9d46d6ce97b28de3a752c015d5d37a64e94ba581827ec16304a0d9
+  - path: CHANGELOG.md
+    sha256: 399903b7ec0b94510acda6e76522b8f2cc6d21d8771efbd393ded4e075268507

@@ -25,12 +25,11 @@ impl<'a> Collage<'a> {
     for i in 0..cell_count {
       // Get a random image from the provided images.
       let original_image = self.select_random_image();
-      let mut image = (*original_image).clone();
-
       // Rotate the image if the option.rotation is set
-      if let Some(rotation) = self.options.as_ref().and_then(|opts| Some(opts.rotation)) {
-        image.rotate(self.select_range(rotation), None);
-      }
+      let image = match self.options.as_ref().and_then(|opts| Some(opts.rotation)) {
+        Some(rotation) => transform().with_rotation(self.select_range(rotation)).applied(&original_image),
+        None => (*original_image).clone(),
+      };
 
       let trans_image = Arc::new(Image::new_from_color(cell_width, cell_height, Color::transparent()));
       let canvas = Canvas::new("Cell");

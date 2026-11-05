@@ -130,7 +130,8 @@ fn install(p_manifest_url: &str, p_manifest_sha256: &str, p_listener: &dyn Downl
       .flat_map(|model| [&model.model, &model.manifest])
       .chain(manifest.scripts.iter().map(|script| &script.entry))
       .chain(manifest.workspaces.iter().map(|workspace| &workspace.entry))
-      .chain(manifest.controls.iter().map(|control| &control.entry));
+      .chain(manifest.controls.iter().map(|control| &control.entry))
+      .chain(manifest.store.screenshots.iter());
     for file in named {
       if !manifest.files.iter().any(|listed| &listed.path == file) {
         return Err(format!("The plugin {} names {file} but does not list it in `files`, so it cannot be downloaded", manifest.id));
@@ -200,7 +201,8 @@ fn install_archive(
     .flat_map(|model| [&model.model, &model.manifest])
     .chain(manifest.scripts.iter().map(|script| &script.entry))
     .chain(manifest.workspaces.iter().map(|workspace| &workspace.entry))
-    .chain(manifest.controls.iter().map(|control| &control.entry));
+    .chain(manifest.controls.iter().map(|control| &control.entry))
+      .chain(manifest.store.screenshots.iter());
   for file in named {
     if !manifest.files.iter().any(|listed| &listed.path == file) {
       return Err(format!("The plugin {} names {file} but does not list it in `files`", manifest.id));
@@ -311,7 +313,12 @@ pub async fn install_plugin_archive(
 pub async fn install_dev_plugin_folder(folder: String) -> Result<(), AbraError> {
   image_workers::run(move || {
     let source = PathBuf::from(&folder);
-    let plugin = Plugin::read(&source).map_err(|error| AbraError::Ai { message: error.to_string() })?;
+    // Only the manifest is read here: a file the development server did not send is filled in from the installed copy below, and the
+    // folder is read as a whole once it is in staging.
+    let manifest = fs::read_to_string(source.join("plugin.yml"))
+      .map_err(|error| error.to_string())
+      .and_then(|text| PluginManifest::parse(&text).map_err(|error| error.to_string()))
+      .map_err(|message| AbraError::Ai { message })?;
     let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = plugins_dir();
     fs::create_dir_all(&root).map_err(|error| AbraError::Ai { message: format!("Cannot create the plugin folder: {error}") })?;
@@ -321,7 +328,7 @@ pub async fn install_dev_plugin_folder(folder: String) -> Result<(), AbraError> 
     let result = (|| {
       fs::copy(source.join("plugin.yml"), staging.join("plugin.yml"))
         .map_err(|error| format!("Cannot copy plugin.yml: {error}"))?;
-      for file in &plugin.manifest.files {
+      for file in &manifest.files {
         let relative = PathBuf::from(&file.path);
         if relative.is_absolute() || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_))) {
           return Err(format!("{} is not a safe plugin file path", file.path));
@@ -330,15 +337,24 @@ pub async fn install_dev_plugin_folder(folder: String) -> Result<(), AbraError> 
         if let Some(parent) = destination.parent() {
           fs::create_dir_all(parent).map_err(|error| format!("Cannot create plugin folder: {error}"))?;
         }
-        fs::copy(source.join(&relative), &destination).map_err(|error| format!("Cannot copy {}: {error}", file.path))?;
+        // The development server leaves out a file it already sent that has not changed, so it comes from the installed copy. Its hash is
+        // checked below like any other, so a stale copy is refused rather than installed.
+        let sent = source.join(&relative);
+        let from = if sent.is_file() { sent } else { root.join(&manifest.id).join(&relative) };
+        fs::copy(&from, &destination).map_err(|error| {
+          format!("{} was not sent and is not installed either ({error}); restart the development server to send every file", file.path)
+        })?;
         let bytes = fs::read(&destination).map_err(|error| format!("Cannot read {}: {error}", file.path))?;
         let actual = Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
         if actual != file.sha256 {
-          return Err(format!("{} does not match its SHA-256 in plugin.yml", file.path));
+          return Err(format!(
+            "{} does not match its SHA-256 in plugin.yml (if it was not sent, the installed copy is out of date: restart the development server to send every file)",
+            file.path
+          ));
         }
       }
       Plugin::read(&staging).map_err(|error| error.to_string())?;
-      let target = root.join(&plugin.manifest.id);
+      let target = root.join(&manifest.id);
       match fs::remove_dir_all(&target) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -389,17 +405,58 @@ pub fn read_plugin_script(path: String) -> Result<String, AbraError> {
   fs::read_to_string(&file).map_err(|e| AbraError::Io { message: format!("Cannot read the plugin script {path}: {e}") })
 }
 
-/// Removes an installed plugin and its files. It does nothing when the plugin is not installed.
+/// The text of a `README.md` or `CHANGELOG.md` of an installed plugin, as `scanPlugins` gives its path. Like `read_plugin_script`, a path
+/// outside the plugins folder or any other file name is refused.
 #[uniffi::export]
-pub fn delete_plugin(id: String) -> Result<(), AbraError> {
+pub fn read_plugin_document(path: String) -> Result<String, AbraError> {
+  let refuse = |message: String| Err(AbraError::Io { message });
+  if !(path.ends_with("README.md") || path.ends_with("CHANGELOG.md")) {
+    return refuse(format!("{path} is not a plugin document"));
+  }
+  let root = fs::canonicalize(plugins_dir()).map_err(|e| AbraError::Io { message: format!("No plugins are installed: {e}") })?;
+  let file = fs::canonicalize(&path).map_err(|e| AbraError::Io { message: format!("Cannot find the plugin document {path}: {e}") })?;
+  if !file.starts_with(&root) {
+    return refuse(format!("{path} is not inside the plugins folder"));
+  }
+  fs::read_to_string(&file).map_err(|e| AbraError::Io { message: format!("Cannot read the plugin document {path}: {e}") })
+}
+
+/// The path on this device of a file the plugin shipped (one of its `assets`, say a sprite), for the plugin to load. `relative` is
+/// relative to the plugin's folder. A file that is not there, or a path that leaves the plugin's own folder (with `..` or by a link), is
+/// refused, so a plugin cannot use this to reach what is not its own.
+#[uniffi::export]
+pub fn plugin_asset_path(plugin_id: String, relative: String) -> Result<String, AbraError> {
+  let refuse = |message: String| Err(AbraError::Io { message });
+  if plugin_id.contains(['/', '\\']) || plugin_id.contains("..") {
+    return refuse(format!("`{plugin_id}` is not a plugin id"));
+  }
+  let folder = fs::canonicalize(plugins_dir().join(&plugin_id))
+    .map_err(|e| AbraError::Io { message: format!("The plugin {plugin_id} is not installed: {e}") })?;
+  let file = fs::canonicalize(folder.join(&relative))
+    .map_err(|e| AbraError::Io { message: format!("The plugin {plugin_id} has no file {relative}: {e}") })?;
+  if !file.starts_with(&folder) || !file.is_file() {
+    return refuse(format!("{relative} is not a file inside the plugin {plugin_id}"));
+  }
+  Ok(file.to_string_lossy().into_owned())
+}
+
+/// Whether this is a plugin id: an author and a name, each lowercase words joined by `-`, with a `.` between them (`alakazam.collage`).
+pub(super) fn is_plugin_id(p_id: &str) -> bool {
   let valid_name = |name: &str| {
     !name.is_empty()
       && name
         .split('-')
         .all(|word| !word.is_empty() && word.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
   };
-  let mut parts = id.split('.');
-  if !matches!((parts.next(), parts.next(), parts.next()), (Some(author), Some(name), None) if valid_name(author) && valid_name(name)) {
+  let mut parts = p_id.split('.');
+  matches!((parts.next(), parts.next(), parts.next()), (Some(author), Some(name), None) if valid_name(author) && valid_name(name))
+}
+
+/// Removes an installed plugin and its files. It does nothing when the plugin is not installed. What the plugin saved, in `abra-plugin-saves`
+/// (see `saves`), is not removed.
+#[uniffi::export]
+pub fn delete_plugin(id: String) -> Result<(), AbraError> {
+  if !is_plugin_id(&id) {
     return Err(AbraError::Ai { message: format!("`{id}` is not a plugin id") });
   }
   let _guard = DOWNLOAD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

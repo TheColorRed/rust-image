@@ -151,7 +151,7 @@ pub fn sdf_polygon(p_points: &[PointF], p_x: f32, p_y: f32) -> f32 {
 /// outline with total width `stroke_w`. `hardness` (0.0..1.0) acts as a multiplier for coverage falloff.
 pub fn draw_ellipse_stroke(p_img: &mut Image, p_cx: f32, p_cy: f32, p_rx: f32, p_ry: f32, p_brush: &crate::Brush) {
   // Extract stroke width, color and hardness from brush. Only Solid fills are supported.
-  let stroke_w = p_brush.size() as f32;
+  let stroke_w = p_brush.size();
   let half = stroke_w / 2.0;
   let (color, hardness, opacity) = match p_brush.color() {
     abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity().opacity_at(0.0)),
@@ -307,7 +307,7 @@ pub fn draw_area_stroke(p_img: &mut Image, p_area: &abra_core::Area, p_brush: &c
   }
 
   // Extract stroke width, color and hardness from brush (only Solid supported)
-  let stroke_w = p_brush.size() as f32;
+  let stroke_w = p_brush.size();
   let half = stroke_w / 2.0;
   let (color, hardness, opacity) = match p_brush.color() {
     abra_core::Fill::Solid(c) => (c, p_brush.hardness(), p_brush.opacity().opacity_at(0.0)),

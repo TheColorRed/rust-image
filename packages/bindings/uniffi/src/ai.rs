@@ -28,6 +28,15 @@ use abra_body_segmentation::{BodyParser as Parser, BodyRegion, BodySegments as S
 
 use crate::{Image, Mask};
 
+/// Runs CPU-heavy model work on the native Rayon pool, leaving UniFFI's future poll fast for the calling thread.
+async fn on_worker<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, AiError> {
+  let (sender, receiver) = futures::channel::oneshot::channel();
+  rayon::spawn(move || {
+    let _ = sender.send(work());
+  });
+  receiver.await.map_err(|_| AiError::other("AI worker stopped before completing"))
+}
+
 // The regions the body model tells apart.
 #[uniffi::remote(Enum)]
 pub enum BodyRegion {
@@ -367,20 +376,55 @@ impl AiModel {
   pub fn core(&self) -> &Model {
     &self.0
   }
+
+  /// Native-only implementation used by worker entry points and tests.
+  pub fn load_native(onnx_path: String) -> Result<Self, AiError> {
+    Ok(Self(Model::load(onnx_path)?))
+  }
+
+  /// Native-only constructor for a supplied manifest. Mobile callers use a worker.
+  pub fn load_with_manifest_native(onnx_path: String, manifest: String) -> Result<Self, AiError> {
+    Ok(Self(Model::load_with_manifest(onnx_path, &manifest)?))
+  }
+
+  /// Native-only model inference. Mobile callers use a worker.
+  pub fn run_native(&self, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
+    Ok(Arc::new(AiOutput(self.0.run(&image.core())?)))
+  }
+
+  /// Native-only guided inference. Mobile callers use a worker.
+  pub fn run_guided_native(&self, image: Arc<Image>, guide: Arc<Mask>) -> Result<Arc<AiOutput>, AiError> {
+    Ok(Arc::new(AiOutput(self.0.run_guided(&image.core(), Some(&guide.core()), &|_| {})?)))
+  }
+
+  /// Native-only listener wrapper. Do not expose its synchronous `process` to JavaScript.
+  pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<AiListening> {
+    Arc::new(AiListening { model: self, listener })
+  }
 }
 
 #[uniffi::export]
 impl AiModel {
-  /// Loads a model and the `.yml` manifest beside it (the same path with a `.yml` extension).
+  /// Loads a model and its manifest on UniFFI's asynchronous Rust executor.
   #[uniffi::constructor]
-  pub fn load(onnx_path: String) -> Result<Self, AiError> {
-    Ok(Self(Model::load(onnx_path)?))
+  pub async fn load(onnx_path: String) -> Result<Self, AiError> {
+    on_worker(move || Self::load_native(onnx_path)).await?
   }
 
-  /// Loads a model with a manifest that is not a file beside it, such as one a catalog lists. `manifest` is the YAML.
+  /// Loads a model with a supplied manifest on UniFFI's asynchronous Rust executor.
   #[uniffi::constructor]
-  pub fn load_with_manifest(onnx_path: String, manifest: String) -> Result<Self, AiError> {
-    Ok(Self(Model::load_with_manifest(onnx_path, &manifest)?))
+  pub async fn load_with_manifest(onnx_path: String, manifest: String) -> Result<Self, AiError> {
+    on_worker(move || Self::load_with_manifest_native(onnx_path, manifest)).await?
+  }
+
+  /// Runs inference on UniFFI's asynchronous Rust executor.
+  pub async fn run(self: Arc<Self>, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
+    on_worker(move || self.run_native(image)).await?
+  }
+
+  /// Runs guided inference on UniFFI's asynchronous Rust executor.
+  pub async fn run_guided(self: Arc<Self>, image: Arc<Image>, guide: Arc<Mask>) -> Result<Arc<AiOutput>, AiError> {
+    on_worker(move || self.run_guided_native(image, guide)).await?
   }
 
   /// The name of the model.
@@ -404,31 +448,14 @@ impl AiModel {
     self.0.manifest().classes().to_vec()
   }
 
-  /// Runs the model on a picture of any size.
-  pub fn run(&self, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
-    Ok(Arc::new(AiOutput(self.0.run(&image.core())?)))
-  }
-
-  /// Runs a model that takes a guide mask with the picture, such as a matting model and its trimap. The guide has the
-  /// picture's proportions. Fails for a model that takes no guide, and `run` fails for one that needs it.
-  pub fn run_guided(&self, image: Arc<Image>, guide: Arc<Mask>) -> Result<Arc<AiOutput>, AiError> {
-    Ok(Arc::new(AiOutput(self.0.run_guided(&image.core(), Some(&guide.core()), &|_| {})?)))
-  }
-
-  /// Listens to the progress of what the returned handle runs. The model runs in one piece, so progress is by stage.
-  pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<AiListening> {
-    Arc::new(AiListening { model: self, listener })
-  }
 }
 
 /// An AI model with a listener for the progress of what it runs, from `AiModel.on`.
-#[derive(uniffi::Object)]
 pub struct AiListening {
   model: Arc<AiModel>,
   listener: Arc<dyn ProgressListener>,
 }
 
-#[uniffi::export]
 impl AiListening {
   /// Runs the model like `AiModel.run`, telling the listener how far along it is.
   pub fn process(&self, image: Arc<Image>) -> Result<Arc<AiOutput>, AiError> {
@@ -450,12 +477,18 @@ pub trait ProgressListener: Send + Sync {
 #[derive(uniffi::Object)]
 pub struct ImageModel(ImgModel);
 
-#[uniffi::export]
 impl ImageModel {
-  /// Loads a model and the `.yml` manifest beside it (the same path with a `.yml` extension).
-  #[uniffi::constructor]
-  pub fn load(onnx_path: String) -> Result<Self, AiError> {
+  fn load_native(onnx_path: String) -> Result<Self, AiError> {
     Ok(Self(ImgModel::load(onnx_path)?))
+  }
+
+  fn process_native(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+    Ok(Arc::new(Image::from_core(self.0.process(&image.core())?)))
+  }
+
+  fn process_with_control_native(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+    let output = self.0.process_with_control(&image.core(), &ControlParams::new(&control))?;
+    Ok(Arc::new(Image::from_core(output)))
   }
 
   /// The name of the model.
@@ -473,20 +506,28 @@ impl ImageModel {
     self.0.has_control()
   }
 
-  /// Processes a picture, using the default control values when the model takes them.
-  pub fn process(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
-    Ok(Arc::new(Image::from_core(self.0.process(&image.core())?)))
-  }
-
-  /// Processes a picture with control values, one for each of the model's controls.
-  pub fn process_with_control(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
-    let output = self.0.process_with_control(&image.core(), &ControlParams::new(&control))?;
-    Ok(Arc::new(Image::from_core(output)))
-  }
-
   /// Listens to the progress of what the returned handle processes.
   pub fn on(self: Arc<Self>, listener: Arc<dyn ProgressListener>) -> Arc<Listening> {
     Arc::new(Listening { model: self, listener })
+  }
+}
+
+#[uniffi::export]
+impl ImageModel {
+  /// Loads a model and its manifest on UniFFI's asynchronous Rust executor.
+  #[uniffi::constructor]
+  pub async fn load(onnx_path: String) -> Result<Self, AiError> {
+    on_worker(move || Self::load_native(onnx_path)).await?
+  }
+
+  /// Processes a picture asynchronously on the native side, using default control values.
+  pub async fn process(self: Arc<Self>, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+    on_worker(move || self.process_native(image)).await?
+  }
+
+  /// Processes a picture asynchronously on the native side with control values.
+  pub async fn process_with_control(self: Arc<Self>, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+    on_worker(move || self.process_with_control_native(image, control)).await?
   }
 }
 
@@ -497,17 +538,16 @@ pub struct Listening {
   listener: Arc<dyn ProgressListener>,
 }
 
-#[uniffi::export]
 impl Listening {
   /// Processes a picture like `ImageModel.process`, telling the listener how far along it is.
-  pub fn process(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+  fn process_native(&self, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
     let listener = &self.listener;
     let output = self.model.0.on(|progress| listener.update(progress)).process(&image.core())?;
     Ok(Arc::new(Image::from_core(output)))
   }
 
   /// Processes a picture like `ImageModel.process_with_control`, telling the listener how far along it is.
-  pub fn process_with_control(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+  fn process_with_control_native(&self, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
     let listener = &self.listener;
     let output = self
       .model
@@ -515,6 +555,19 @@ impl Listening {
       .on(|progress| listener.update(progress))
       .process_with_control(&image.core(), &ControlParams::new(&control))?;
     Ok(Arc::new(Image::from_core(output)))
+  }
+}
+
+#[uniffi::export]
+impl Listening {
+  /// Processes a picture asynchronously and reports progress.
+  pub async fn process(self: Arc<Self>, image: Arc<Image>) -> Result<Arc<Image>, AiError> {
+    on_worker(move || self.process_native(image)).await?
+  }
+
+  /// Processes a picture asynchronously with controls and reports progress.
+  pub async fn process_with_control(self: Arc<Self>, image: Arc<Image>, control: Vec<f32>) -> Result<Arc<Image>, AiError> {
+    on_worker(move || self.process_with_control_native(image, control)).await?
   }
 }
 
@@ -560,8 +613,8 @@ mod tests {
 
   #[test]
   fn a_missing_model_or_manifest_is_an_error_not_a_panic() {
-    assert!(AiModel::load("missing.onnx".into()).is_err());
-    assert!(AiModel::load_with_manifest("missing.onnx".into(), "decoder: nope\n".into()).is_err());
+    assert!(AiModel::load_native("missing.onnx".into()).is_err());
+    assert!(AiModel::load_with_manifest_native("missing.onnx".into(), "decoder: nope\n".into()).is_err());
   }
 
   #[test]
@@ -569,15 +622,15 @@ mod tests {
     let Some(path) = bundled("object-removal", "plugins/ai-migan-object-removal/migan_pipeline_v2.onnx") else {
       return;
     };
-    let model = AiModel::load(path).expect("the manifest names a picture model");
+    let model = AiModel::load_native(path).expect("the manifest names a picture model");
     let mut covered = vec![0u8; 64 * 64];
     covered[30 * 64 + 30..30 * 64 + 34].fill(255);
     let output =
-      model.run_guided(photo(64), Arc::new(Mask::from_values(64, 64, covered))).expect("removal should succeed");
+      model.run_guided_native(photo(64), Arc::new(Mask::from_values(64, 64, covered))).expect("removal should succeed");
     assert_eq!(output.kind(), AiOutputKind::Image);
     assert_eq!((output.image().unwrap().width(), output.image().unwrap().height()), (64, 64));
     assert!(output.mask().is_err(), "asking for the wrong kind fails");
-    assert!(model.run(photo(64)).is_err(), "a model that needs a mask fails without one");
+    assert!(model.run_native(photo(64)).is_err(), "a model that needs a mask fails without one");
   }
 
   #[test]
@@ -590,7 +643,7 @@ mod tests {
     ];
     for (folder, file, kind) in cases {
       let Some(path) = bundled(folder, file) else { continue };
-      let output = AiModel::load(path).unwrap().run(photo(64)).unwrap();
+      let output = AiModel::load_native(path).unwrap().run_native(photo(64)).unwrap();
       assert_eq!(output.kind(), kind, "{folder}");
       match kind {
         AiOutputKind::Mask => assert_eq!(output.mask().unwrap().width(), 64),
@@ -619,7 +672,7 @@ mod tests {
   fn a_listener_hears_progress_from_zero_to_one_through_the_bridge() {
     let Some(path) = bundled("super-resolution", "MewZoom-V1-2X.onnx") else { return };
     let recorder = Arc::new(Recorder(Default::default()));
-    let output = Arc::new(ImageModel::load(path).unwrap()).on(recorder.clone()).process(photo(64)).unwrap();
+    let output = Arc::new(ImageModel::load_native(path).unwrap()).on(recorder.clone()).process_native(photo(64)).unwrap();
     assert_eq!(output.core().dimensions::<u32>(), (128, 128));
     let heard = recorder.0.lock().unwrap();
     assert_eq!(heard.first(), Some(&0.0));
@@ -631,7 +684,7 @@ mod tests {
   fn an_ai_model_reports_its_stages_through_the_bridge() {
     let Some(path) = bundled("body-segmentation", "selfie_multiclass_256x256.onnx") else { return };
     let recorder = Arc::new(Recorder(Default::default()));
-    let model = Arc::new(AiModel::load(path).unwrap());
+    let model = Arc::new(AiModel::load_native(path).unwrap());
     let output = model.on(recorder.clone()).process(photo(64)).unwrap();
     assert_eq!(output.kind(), AiOutputKind::Mask);
     assert_eq!(*recorder.0.lock().unwrap(), vec![0.0, 0.1, 0.9, 1.0]);
@@ -640,7 +693,7 @@ mod tests {
   #[test]
   fn a_model_reports_what_its_manifest_says() {
     let Some(path) = bundled("face-parsing", "resnet18.onnx") else { return };
-    let model = AiModel::load(path).unwrap();
+    let model = AiModel::load_native(path).unwrap();
     assert_eq!(model.name(), "bisenet-resnet18-face-parsing");
     assert_eq!(model.classes().len(), 19);
     assert_eq!(model.decoder().as_deref(), Some("label-map"));

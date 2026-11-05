@@ -16,7 +16,7 @@
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::{Arc, RwLock};
 
-use abra::abra_core::{self, Channel, Channels, ImageExt, Resolution, Size, Transform, WriterOptions};
+use abra::abra_core::{self, Channel, Channels, ImageExt, Rect, Resolution, Size, WriterOptions, transform};
 
 use crate::{Area, Color};
 
@@ -200,8 +200,7 @@ impl Image {
 
   /// A copy cropped to `[x, y, width, height]`. The rectangle is clipped to the image.
   pub fn cropped(&self, x: u32, y: u32, width: u32, height: u32) -> Arc<Image> {
-    let mut image = self.core();
-    image.crop(x, y, width, height);
+    let image = transform().with_crop(Rect::new((x, y), (width, height))).applied(&self.core());
     Arc::new(Self::from_core(image))
   }
 

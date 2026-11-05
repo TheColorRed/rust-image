@@ -5,6 +5,7 @@ import { debounceTime, distinctUntilChanged, filter, map, startWith, tap } from 
 import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY } from '@/src/lib/project/edit-sections/keys';
 import { focusedControlKey, focusedControlKey$, isBlemishToolFocused, isCropToolFocused } from '@/src/state/edits';
 import { cropHandleGrabbed } from '@/src/state/crop';
+import { pluginTakesPinch } from '@/src/state/plugin-touch';
 
 // #region: Preview layout
 
@@ -362,9 +363,12 @@ export function startPreviewGestures(): Subscription {
  */
 export function createPreviewPanResponder() {
   return PanResponder.create({
-    onStartShouldSetPanResponderCapture: event => !previewCircling.value && event.nativeEvent.touches.length === 2,
+    onStartShouldSetPanResponderCapture: event =>
+      !previewCircling.value && !pluginTakesPinch(event.nativeEvent.touches) && event.nativeEvent.touches.length === 2,
     onMoveShouldSetPanResponderCapture: (event, gestureState) => {
       if (previewCircling.value) return false;
+      // A plugin that claims the pinch owns the second finger; a single finger still pans as before.
+      if (pluginTakesPinch(event.nativeEvent.touches)) return false;
       if (event.nativeEvent.touches.length === 2) return true;
       if (previewDrawing.value) return false;
       const moved = Math.hypot(gestureState.dx, gestureState.dy) > PAN_START_THRESHOLD;

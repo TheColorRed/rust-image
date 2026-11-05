@@ -9,3 +9,74 @@ diff --git a/node_modules/@ubjs/react-native/cpp/shim.cpp b/node_modules/@ubjs/r
      for (const auto &info : modules_) {
        // Per module, because one that fails must not strand the rest still
        // armed — and because a destructor that throws terminates.
+diff --git a/node_modules/@ubjs/react-native/android/cpp-adapter.cpp b/node_modules/@ubjs/react-native/android/cpp-adapter.cpp
+--- a/node_modules/@ubjs/react-native/android/cpp-adapter.cpp
++++ b/node_modules/@ubjs/react-native/android/cpp-adapter.cpp
+@@ -5,6 +5,8 @@
+ #include <ReactCommon/CallInvokerHolder.h>
+ #include <jni.h>
+ #include <jsi/jsi.h>
++#include <unistd.h>
++#include <string>
+ 
+ #include "ubrn_jsi_player.h"
+ 
+@@ -12,6 +14,7 @@
+ Java_dev_ubjs_reactnative_UniffiPlayerModule_nativeInstall(
+     JNIEnv *env, jobject /*thiz*/, jlong rtPtr,
+-    jobject callInvokerHolderJavaObj) {
++    jobject callInvokerHolderJavaObj, jstring developmentLibraryDirectory,
++    jboolean debuggable) {
+   using JCallInvokerHolder = facebook::react::CallInvokerHolder;
+ 
+   auto holderLocal = facebook::jni::make_local(callInvokerHolderJavaObj);
+@@ -21,9 +24,16 @@
+   auto jsCallInvoker = holderRef->cthis()->getCallInvoker();
+   auto *runtime = reinterpret_cast<facebook::jsi::Runtime *>(rtPtr);
+ 
+-  // A library's jniLibs land in the app's native-library directory, which the
+-  // linker already searches, so a soname is enough.
++  const char *directoryChars = env->GetStringUTFChars(developmentLibraryDirectory, nullptr);
++  const std::string directory(directoryChars ? directoryChars : "");
++  if (directoryChars) env->ReleaseStringUTFChars(developmentLibraryDirectory, directoryChars);
++  // Debug builds may load a replaced library from app-private storage. Otherwise
++  // use the packaged soname, which the Android linker resolves from jniLibs.
+   ubrn::jsi_player::install(*runtime, jsCallInvoker,
+-                            [](const std::string &name) { return "lib" + name + ".so"; });
++                            [directory, debuggable](const std::string &name) {
++                              const std::string developmentPath = directory + "/lib" + name + ".so";
++                              if (debuggable && access(developmentPath.c_str(), R_OK) == 0) return developmentPath;
++                              return "lib" + name + ".so";
++                            });
+   return JNI_TRUE;
+ }
+diff --git a/node_modules/@ubjs/react-native/android/src/main/java/dev/ubjs/reactnative/UniffiPlayerModule.kt b/node_modules/@ubjs/react-native/android/src/main/java/dev/ubjs/reactnative/UniffiPlayerModule.kt
+--- a/node_modules/@ubjs/react-native/android/src/main/java/dev/ubjs/reactnative/UniffiPlayerModule.kt
++++ b/node_modules/@ubjs/react-native/android/src/main/java/dev/ubjs/reactnative/UniffiPlayerModule.kt
+@@ -8,4 +8,5 @@
+ import com.facebook.react.module.annotations.ReactModule
+ import com.facebook.react.turbomodule.core.interfaces.CallInvokerHolder
++import java.io.File
+ 
+ @ReactModule(name = UniffiPlayerModule.NAME)
+@@ -16,12 +17,19 @@
+   override fun getName(): String = NAME
+ 
+   // Implemented in cpp-adapter.cpp: installs `globalThis.uniffi` on the runtime.
+-  external fun nativeInstall(runtimePointer: Long, callInvoker: CallInvokerHolder): Boolean
++  external fun nativeInstall(
++    runtimePointer: Long,
++    callInvoker: CallInvokerHolder,
++    developmentLibraryDirectory: String,
++    debuggable: Boolean,
++  ): Boolean
+ 
+   override fun install(): Boolean {
+     val context = reactApplicationContext
+     return nativeInstall(
+       context.javaScriptContextHolder!!.get(),
+       context.jsCallInvokerHolder!!,
++      File(context.filesDir, "native-libs").absolutePath,
++      (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+     )
+   }

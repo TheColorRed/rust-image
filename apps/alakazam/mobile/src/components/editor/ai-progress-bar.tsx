@@ -58,9 +58,10 @@ export function AiProgressBar({
     return () => clearInterval(timer);
   }, [running]);
   const { share, unsure } = overallProgress(tasks, GUESS_LIMIT * (1 - Math.exp(-elapsed / GUESS_MS)));
+  const complete = running && Object.values(tasks).every(progress => progress === 1);
   // The bar only moves forward during a job: a task that starts late adds to the whole and would otherwise pull it back.
   const furthest = useRef(0);
-  furthest.current = running ? Math.max(furthest.current, share) : 0;
+  furthest.current = running ? (complete ? 1 : Math.max(furthest.current, share)) : 0;
   const progress = furthest.current;
   const [width, setWidth] = useState(0);
   const filled = useRef(new Animated.Value(0)).current;

@@ -8,7 +8,7 @@ use abra::filters::prelude::{blur, edges::color_edges, halftone::halftone, noise
 use abra::mask::prelude::Mask;
 use abra::prelude::*;
 use abra::tools::prelude::*;
-use abra::transform::prelude::{ResizeTarget, resize};
+use abra::transform::prelude::{ResizeTarget, transform};
 use std::sync::Arc;
 
 const FILE: &str = "assets/aletta-ocean.jpg";
@@ -141,7 +141,7 @@ pub fn main() {
   let file = arguments.next().unwrap_or(FILE.to_string());
   let out_file = arguments.next().unwrap_or(OUT_FILE.to_string());
   let mut original = Image::read(&file).expect("Failed to load image");
-  resize(ResizeTarget::FitWidth(600)).apply(&mut original);
+  transform().with_size(ResizeTarget::FitWidth(600)).apply(&mut original);
 
   if by_parts {
     let dots = Dots { spacing: 0.04, ink: None, paper: None };

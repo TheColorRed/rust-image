@@ -22,6 +22,11 @@ pub mod tools {
     pub use ::tools::*;
   }
 }
+pub mod animation {
+  pub mod prelude {
+    pub use ::animation::*;
+  }
+}
 pub mod canvas {
   pub mod prelude {
     pub use ::canvas::*;

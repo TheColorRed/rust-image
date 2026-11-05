@@ -1,0 +1,18 @@
+[package]
+name = "canvas-test"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+abra = { workspace = true }
+dhat = { workspace = true }
+
+[[bin]]
+name = "canvas"
+path = "main.rs"
+
+[profile.release]
+debug = true
+
+[features]
+dhat-heap = []

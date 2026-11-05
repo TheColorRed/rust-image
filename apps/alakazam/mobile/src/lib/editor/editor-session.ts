@@ -1,5 +1,9 @@
 import { devDebug, devLog, warn } from '@/src/lib/log';
 import { registerAiAnalysis } from '@/src/lib/ai/ai-analyses';
+import { watchAiWorkForStalls } from '@/src/lib/dev/stall-monitor';
+
+// Development only: logs every time the screen could not answer touches while the AI worked (see `watchAiWorkForStalls`).
+watchAiWorkForStalls();
 import { clearAnalysis } from '@/src/lib/ai/analysis';
 import { SKIN_EVEN_OUT_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
 import {

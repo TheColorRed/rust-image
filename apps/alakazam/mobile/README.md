@@ -17,6 +17,14 @@ In another terminal, build and deploy to every connected authorized Android devi
 npm run dev:android
 ```
 
+After a normal `npm run dev:android` install that includes Vessel's debug loader, Rust-only UI changes can be rebuilt and pushed without rebuilding the APK:
+
+```sh
+npm run dev:android -- --native-only
+```
+
+This requires a debuggable app containing Vessel's private-library development loader. Restarting the app loads the updated library; Java/Kotlin, manifest, or other packaged-native changes still need a normal install.
+
 To deploy to one device only, pass its ADB serial:
 
 ```sh

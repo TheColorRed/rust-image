@@ -29,7 +29,7 @@ const RESULT_QUALITY = 85;
 
 /** What a control holds that is worth saving, or `undefined` for one that holds nothing (a heading, a file picker). */
 const valueOf = (item: PluginInspectorItem): unknown =>
-  item.kind === 'header' || item.kind === 'file-picker' || item.kind === 'pictures' || (item.kind === 'select' && item.momentary)
+  item.kind === 'header' || item.kind === 'group' || item.kind === 'submenu' || item.kind === 'file-picker' || item.kind === 'pictures' || (item.kind === 'select' && item.momentary)
     ? undefined
     : item.value;
 
@@ -72,7 +72,7 @@ export function restorePluginProject(project: Project, rebuild: () => void): voi
         item.onPick(files);
       } else if (item.kind === 'font-picker') {
         item.onPick?.(saved.values[item.key] as string);
-      } else if (item.kind !== 'header') {
+      } else if (item.kind !== 'header' && item.kind !== 'group' && item.kind !== 'submenu') {
         (item.onChange as ((value: unknown) => void) | undefined)?.(saved.values[item.key]);
       }
     }

@@ -119,6 +119,15 @@ pub struct Dependency {
   pub id: String,
 }
 
+/// What a plugin gives the store page the app shows for it. Nothing here changes how the plugin runs.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StoreInfo {
+  /// Images for the page, relative to the plugin's folder, in the order they are shown.
+  pub screenshots: Vec<String>,
+  /// Words the store can group and search the plugin by.
+  pub tags: Vec<String>,
+}
+
 /// What a plugin's `plugin.yml` says about it. See the module documentation for the format.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PluginManifest {
@@ -126,6 +135,8 @@ pub struct PluginManifest {
   pub name: String,
   pub version: String,
   pub description: String,
+  /// Who made the plugin, as the store page shows it. The author part of the id is shown when there is none.
+  pub author: Option<String>,
   pub subscription: bool,
   /// Optional settings form declared by the plugin, in display order.
   pub settings: Vec<PluginSetting>,
@@ -141,6 +152,11 @@ pub struct PluginManifest {
   pub workspaces: Vec<WorkspaceContribution>,
   /// The controls the plugin adds, under one root or several, in the order they go in their place.
   pub controls: Vec<ControlContribution>,
+  /// What the plugin's store page shows. Empty when the plugin has no `store` section.
+  pub store: StoreInfo,
+  /// The extra files the plugin ships (sprites, say), as the author wrote them: a file, a folder or a glob, relative to the plugin's
+  /// folder. The build expands them into `files`, which is what is downloaded and checked.
+  pub assets: Vec<String>,
 }
 
 /// Whether `p_id` is a lowercase author and plugin name, separated by a dot, with words joined by single dashes.
@@ -506,6 +522,44 @@ impl PluginManifest {
       }
     }
 
+    // A `store:` with nothing under it is nothing, but a key that is not known is an error, so a misspelled one is not silently ignored.
+    let mut store = StoreInfo::default();
+    if let Some(node) = doc.as_mapping_get("store").filter(|node| !node.is_null()) {
+      let mapping = node
+        .as_mapping()
+        .ok_or_else(|| PluginError::invalid_manifest(format!("{place}: `store` must have `screenshots` or `tags`")))?;
+      for key in mapping.iter().filter_map(|(key, _)| key.as_str()) {
+        if key != "screenshots" && key != "tags" {
+          return Err(PluginError::invalid_manifest(format!(
+            "{place}: `store` has `{key}`; it can only have `screenshots` and `tags`"
+          )));
+        }
+      }
+      let store_place = format!("`store` of {place}");
+      store.screenshots = texts(node, "screenshots")?;
+      for screenshot in &store.screenshots {
+        if !is_inside(screenshot) {
+          return Err(PluginError::invalid_manifest(format!(
+            "{store_place} has the screenshot `{screenshot}`; a plugin's files are relative to its folder, with `/` between names and no `..`"
+          )));
+        }
+      }
+      store.tags = texts(node, "tags")?;
+      if store.tags.iter().any(|tag| tag.trim().is_empty()) {
+        return Err(PluginError::invalid_manifest(format!("{store_place} has an empty tag")));
+      }
+    }
+
+    // A folder may end in `/`, and a glob may use `*`, `?`, `[` and `{`; the rest is a path that stays inside the plugin's folder.
+    let assets = texts(doc, "assets")?;
+    for asset in &assets {
+      if !is_inside(asset.trim_end_matches('/')) {
+        return Err(PluginError::invalid_manifest(format!(
+          "{place} has `assets: {asset}`; a plugin's files are relative to its folder, with `/` between names and no `..`"
+        )));
+      }
+    }
+
     let mut files = Vec::new();
     for node in doc.as_mapping_get("files").and_then(Yaml::as_vec).into_iter().flatten() {
       let path = file_of(node, "path", &format!("{place}, in `files`,"))?;
@@ -587,6 +641,7 @@ impl PluginManifest {
         .filter(|version| !version.trim().is_empty())
         .ok_or_else(|| PluginError::invalid_manifest(format!("{place} needs `version`")))?,
       description: text(doc, "description").unwrap_or_default().to_string(),
+      author: optional_text(doc, "author", &place)?.map(|author| author.trim().to_string()).filter(|author| !author.is_empty()),
       subscription: boolean(doc, "subscription").unwrap_or(false),
       settings: plugin_settings(doc)?,
       files,
@@ -596,6 +651,8 @@ impl PluginManifest {
       scripts,
       workspaces,
       controls,
+      store,
+      assets,
     })
   }
 }
@@ -631,6 +688,10 @@ mod tests {
     assert_eq!(step.settings["tint"], StepValue::List(vec![1.0, 0.5, 0.0]));
     assert_eq!(step.settings["mode"], StepValue::Text("soft".into()));
     assert_eq!(manifest.scripts[0].entry, "collage.js");
+    assert_eq!(manifest.author, None, "the author is optional");
+    let with_author = |author: &str| FULL.replace("name: Demo\n", &format!("name: Demo\nauthor: {author}\n"));
+    assert_eq!(PluginManifest::parse(&with_author(" Ada Lovelace ")).unwrap().author.as_deref(), Some("Ada Lovelace"));
+    assert!(PluginManifest::parse(&with_author("[x]")).unwrap_err().to_string().contains("`author` must be text"));
   }
 
   #[test]
@@ -698,6 +759,46 @@ mod tests {
     assert!(error(&format!("{FULL}files:\n  - path: ../x\n    sha256: {hash}\n")).contains("no `..`"));
     assert!(error(&format!("{FULL}files:\n  - path: x\n    sha256: abc\n")).contains("not a SHA-256"));
     assert!(error(&format!("{FULL}files:\n  - path: x\n")).contains("sha256"));
+  }
+
+  #[test]
+  fn the_store_section_lists_screenshots_and_tags() {
+    let with = |store: &str| format!("{FULL}store:\n{store}");
+    let manifest = PluginManifest::parse(&with("  screenshots: [shots/one.png, two.png]\n  tags: [particles, effects]\n")).unwrap();
+    assert_eq!(manifest.store.screenshots, ["shots/one.png", "two.png"]);
+    assert_eq!(manifest.store.tags, ["particles", "effects"]);
+    assert_eq!(PluginManifest::parse(FULL).unwrap().store, StoreInfo::default());
+    assert_eq!(PluginManifest::parse(&format!("{FULL}store:\n")).unwrap().store, StoreInfo::default(), "an empty section is nothing");
+
+    let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
+    assert!(error(&with("  screenshot: [a.png]\n")).contains("can only have `screenshots` and `tags`"));
+    assert!(error(&with("  screenshots: [../a.png]\n")).contains("no `..`"));
+    assert!(error(&with("  screenshots: a.png\n")).contains("must be a list"));
+    assert!(error(&with("  tags: [' ']\n")).contains("empty tag"));
+    assert!(error(&format!("{FULL}store: nope\n")).contains("`store` must have"));
+  }
+
+  #[test]
+  fn assets_are_files_folders_or_globs_inside_the_plugin() {
+    let with = |assets: &str| format!("{FULL}assets:
+{assets}");
+    let manifest = PluginManifest::parse(&with("  - sprites/
+  - sounds/*.ogg
+  - noise.png
+")).unwrap();
+    assert_eq!(manifest.assets, ["sprites/", "sounds/*.ogg", "noise.png"]);
+    assert!(PluginManifest::parse(FULL).unwrap().assets.is_empty());
+    let error = |text: &str| PluginManifest::parse(text).unwrap_err().to_string();
+    assert!(error(&with("  - ../x.png
+")).contains("no `..`"));
+    assert!(error(&with("  - /x.png
+")).contains("no `..`"));
+    assert!(error(&with("  - C:/x.png
+")).contains("no `..`"));
+    assert!(error(&with("  - ''
+")).contains("no `..`"));
+    assert!(error(&format!("{FULL}assets: sprites/
+")).contains("must be a list"));
   }
 
   #[test]

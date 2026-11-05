@@ -11,6 +11,7 @@
     "name": { "type": "string", "minLength": 1 },
     "version": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "number" }] },
     "description": { "type": "string" },
+    "author": { "type": "string", "minLength": 1 },
     "subscription": { "type": "boolean" },
     "settings": {
       "type": "array",
@@ -169,6 +170,31 @@
             },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "assets": {
+      "description": "Extra files the plugin ships, such as sprites: each a file, a folder (`sprites/`) or a glob (`sounds/*.ogg`), relative to the plugin's folder. The build adds every file it finds to `files`.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*/?$" }
+    },
+    "store": {
+      "description": "What the plugin's store page shows. Nothing here changes how the plugin runs.",
+      "type": ["object", "null"],
+      "properties": {
+        "screenshots": {
+          "description": "Images for the page, relative to the plugin's folder, in the order shown.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/filePath" }
+        },
+        "tags": {
+          "description": "Words the store can group and search the plugin by.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\S" }
         }
       },
       "additionalProperties": false

@@ -807,12 +807,14 @@ impl LiveRenderer {
       layout: Some(&pipeline_layout),
       module: &module,
       entry_point: Some("main"),
-      cache: None,
+      cache: self.ctx.driver_cache(),
       compilation_options: wgpu::PipelineCompilationOptions::default(),
     });
+    // The guard is dropped before the file is written.
     if let Ok(mut pipelines) = self.ctx.pipelines.lock() {
       pipelines.insert(key, Pipeline { pipeline, layout });
     }
+    self.ctx.save_pipeline_cache();
   }
 
   /// The compiled pipeline for `p_key`, shared by every renderer on this context.
@@ -940,6 +942,70 @@ mod tests {
     }
     Ok(())
   }
+
+  #[test]
+  fn going_from_shader_a_to_b_and_back_to_a_compiles_each_shader_once() -> Result<()> {
+    let mut renderer = LiveRenderer::new(GpuContext::new_default_blocking()?);
+    let pixels = ramp(8, 8);
+    let a = vec![vec![GpuPass::new(NEAREST_COPY_A, Vec::new())]];
+    let b = vec![vec![GpuPass::new(NEAREST_COPY_B, Vec::new())]];
+    let first = renderer.process(&a, 8, 8, &pixels)?;
+    renderer.process(&b, 8, 8, &pixels)?;
+    assert_eq!(renderer.cached_pipelines(), 2);
+    let again = renderer.process(&a, 8, 8, &pixels)?;
+    assert_eq!(renderer.cached_pipelines(), 2, "shader A was compiled again");
+    assert_eq!(first, again);
+    Ok(())
+  }
+
+  #[test]
+  fn making_a_second_stroke_canvas_does_not_build_its_pipeline_again() -> Result<()> {
+    let ctx = GpuContext::new_default_blocking()?;
+    let _first = crate::strokes::StrokeCanvas::new(&ctx, 16, 16);
+    assert_eq!(ctx.render_pipelines.lock().unwrap().len(), 1);
+    let _second = crate::strokes::StrokeCanvas::new(&ctx, 32, 32);
+    assert_eq!(ctx.render_pipelines.lock().unwrap().len(), 1);
+    Ok(())
+  }
+
+  #[test]
+  fn the_pipeline_cache_file_is_written_where_the_backend_can_save_one() -> Result<()> {
+    let ctx = GpuContext::new_default_blocking()?;
+    let path = std::env::temp_dir().join(format!("gpu-passes-cache-{}.bin", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let in_use = ctx.use_pipeline_cache_file(&path);
+    let mut renderer = LiveRenderer::new(ctx);
+    renderer.process(&[vec![GpuPass::new(NEAREST_COPY_A, Vec::new())]], 8, 8, &ramp(8, 8))?;
+    if in_use {
+      assert!(path.exists(), "the backend supports a cache but no file was written");
+    } else {
+      assert!(!path.exists());
+    }
+    let _ = std::fs::remove_file(&path);
+    Ok(())
+  }
+
+  /// Two different shaders that copy their input, so they are two cache entries.
+  const NEAREST_COPY_A: &str = "
+    @group(0) @binding(0) var input_tex: texture_2d<f32>;
+    @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let size = vec2<i32>(textureDimensions(output_tex));
+      let pos = vec2<i32>(gid.xy);
+      if (pos.x >= size.x || pos.y >= size.y) { return; }
+      textureStore(output_tex, pos, textureLoad(input_tex, pos, 0));
+    }";
+  const NEAREST_COPY_B: &str = "
+    @group(0) @binding(0) var input_tex: texture_2d<f32>;
+    @group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, write>;
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+      let size = vec2<i32>(textureDimensions(output_tex));
+      let pos = vec2<i32>(gid.xy);
+      if (pos.x >= size.x || pos.y >= size.y) { return; }
+      textureStore(output_tex, pos, 1.0 - textureLoad(input_tex, pos, 0));
+    }";
 
   #[test]
   fn a_chain_cannot_end_on_a_pass_that_writes_rgba32float() -> Result<()> {

@@ -1,7 +1,7 @@
 //! The GPU rotation gives the CPU's pixels, to within the rounding of 32-bit numbers on the GPU against the CPU's 64-bit position.
 
 use abra_core::image::gpu::{GpuProcessor, Hardware, ready_gpu_provider};
-use abra_core::transform::{TransformAlgorithm, TransformFit, rotate};
+use abra_core::transform::{TransformAlgorithm, TransformFit, transform};
 use abra_core::{Channels, Image};
 
 /// A picture with colors that change in both directions, and a band that is partly see-through, so premultiplying matters.
@@ -20,9 +20,9 @@ fn picture(p_width: u32, p_height: u32) -> Image {
 fn differences(p_algorithm: TransformAlgorithm, p_fit: TransformFit, p_degrees: f32) -> (usize, u8) {
   let source = picture(37, 23);
   let mut on_cpu = source.clone();
-  rotate(p_degrees).with_fit(p_fit).with_algorithm(p_algorithm).with_hardware(Hardware::Cpu).apply(&mut on_cpu);
+  transform().with_rotation(p_degrees).with_fit(p_fit).with_algorithm(p_algorithm).with_hardware(Hardware::Cpu).apply(&mut on_cpu);
   let mut on_gpu = source.clone();
-  rotate(p_degrees).with_fit(p_fit).with_algorithm(p_algorithm).with_hardware(Hardware::Gpu).apply(&mut on_gpu);
+  transform().with_rotation(p_degrees).with_fit(p_fit).with_algorithm(p_algorithm).with_hardware(Hardware::Gpu).apply(&mut on_gpu);
   assert_eq!(on_gpu.dimensions::<u32>(), on_cpu.dimensions::<u32>(), "{p_algorithm:?} {p_fit:?} {p_degrees}");
   let gaps: Vec<u8> = on_cpu.rgba().iter().zip(on_gpu.rgba()).map(|(cpu, gpu)| cpu.abs_diff(*gpu)).collect();
   (gaps.iter().filter(|gap| **gap > 2).count(), gaps.into_iter().max().unwrap_or(0))
@@ -71,7 +71,22 @@ fn every_algorithm_has_a_shader() {
     TransformAlgorithm::EdgeDirectEDI,
     TransformAlgorithm::Auto,
   ] {
-    let step = rotate(30.0).with_algorithm(algorithm);
+    let step = transform().with_rotation(30.0).with_algorithm(algorithm);
     assert_eq!(step.passes(17, 11).len(), 1, "{algorithm:?}");
+  }
+}
+
+#[test]
+fn the_gpu_turn_and_enlargement_in_one_pass_matches_the_cpu() {
+  gpu::register();
+  assert!(ready_gpu_provider(Hardware::Gpu).is_some(), "these tests need a GPU");
+  for (scale, degrees) in [(1.5f32, 30.0f32), (2.0, 90.0), (3.0, -17.0)] {
+    let mut on_cpu = picture(37, 23);
+    let mut on_gpu = on_cpu.clone();
+    transform().with_scale(scale).with_rotation(degrees).with_algorithm(TransformAlgorithm::Bicubic).with_hardware(Hardware::Cpu).apply(&mut on_cpu);
+    transform().with_scale(scale).with_rotation(degrees).with_algorithm(TransformAlgorithm::Bicubic).with_hardware(Hardware::Gpu).apply(&mut on_gpu);
+    assert_eq!(on_gpu.dimensions::<u32>(), on_cpu.dimensions::<u32>(), "{scale} {degrees}");
+    let worst = on_cpu.rgba().iter().zip(on_gpu.rgba()).map(|(cpu, gpu)| cpu.abs_diff(*gpu)).max().unwrap_or(0);
+    assert!(worst <= 2, "scale {scale} turned {degrees} differs by {worst}");
   }
 }

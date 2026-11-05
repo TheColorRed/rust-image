@@ -2,9 +2,13 @@
 import chalk from 'chalk';
 import { build as esbuild, transform as esbuildTransform } from 'esbuild';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import fg from 'fast-glob';
 import { parse } from 'yaml';
+
+/** The optional documents a plugin can ship beside its plugin.yml. */
+const DOCS = ['README.md', 'CHANGELOG.md'];
 
 /** Starts esbuild's service before the first file change, keeping its startup time out of the edit cycle. */
 export async function warmPluginBuilder() {
@@ -82,8 +86,33 @@ export async function buildPlugins(pluginDirs, { devMode = false } = {}) {
     }
 
     const builtPaths = new Set(builtFiles.map(file => file.path));
-    const otherFiles = Array.isArray(manifest.files) ? manifest.files.filter(file => !builtPaths.has(file.path)) : [];
-    const files = [...builtFiles, ...otherFiles];
+    // README.md and CHANGELOG.md ship when the plugin folder has them; their hashes are always taken from the file itself.
+    const docFiles = DOCS.filter(name => existsSync(path.join(dir, name))).map(name => ({
+      path: name,
+      sha256: createHash('sha256').update(readFileSync(path.join(dir, name))).digest('hex'),
+    }));
+    // The store's screenshots ship too, hashed from the file in the same way.
+    const screenshotFiles = [...new Set(manifest.store?.screenshots ?? [])].map(name => {
+      const file = path.join(dir, ...String(name).split('/'));
+      if (!existsSync(file)) throw new Error(`${manifest.id} lists the screenshot ${name} in store, but it is not in the plugin folder`);
+      return { path: name, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+    });
+    // The assets: each entry of `assets` is a file, a folder (everything under it) or a glob. An entry that matches nothing is an error.
+    const assetFiles = (manifest.assets ?? []).flatMap(entry => {
+      const pattern = String(entry);
+      const isFolder = pattern.endsWith('/') || (!/[*?[\]{}]/.test(pattern) && existsSync(path.join(dir, pattern)) && statSync(path.join(dir, pattern)).isDirectory());
+      const matches = fg.sync(isFolder ? `${pattern.replace(/\/$/, '')}/**/*` : pattern, {
+        cwd: dir,
+        onlyFiles: true,
+        ignore: ['dist/**', 'node_modules/**', 'target/**', '.git/**'],
+      });
+      if (matches.length === 0) throw new Error(`${manifest.id} lists the asset ${pattern}, but it matches no file in the plugin folder`);
+      return matches.sort().map(file => ({ path: file, sha256: createHash('sha256').update(readFileSync(path.join(dir, file))).digest('hex') }));
+    });
+    const docPaths = new Set([...DOCS, ...screenshotFiles.map(file => file.path), ...assetFiles.map(file => file.path)]);
+    const otherFiles = Array.isArray(manifest.files) ? manifest.files.filter(file => !builtPaths.has(file.path) && !docPaths.has(file.path)) : [];
+    const shipped = new Map([...docFiles, ...screenshotFiles, ...assetFiles].map(file => [file.path, file]));
+    const files = [...builtFiles, ...otherFiles, ...shipped.values()];
     const listedPaths = new Set(files.map(file => file.path));
     for (const model of manifest.contributes?.models ?? []) {
       for (const file of [model.model, model.manifest].filter(value => typeof value === 'string' && value !== '')) {

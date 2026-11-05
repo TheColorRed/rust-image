@@ -8,6 +8,8 @@ import { DrawAreaOverlay } from '@/src/components/tools/draw-area';
 import { pluginTouchListeners$ } from '@/src/state/plugin-touch';
 import { areaDrawKey$, areaDrawMode, areaTarget$ } from '@/src/state/draw-area';
 import { CropGizmos } from '@/src/components/tools/crop-tool';
+import { GradientHandles } from '@/src/components/tools/gradient-tool';
+import { StripeWordsDialog } from '@/src/components/tools/stripe-words-dialog';
 import { useBasePreview } from '@/src/hooks/useBasePreview';
 import { usePreviewBox } from '@/src/hooks/usePreviewBox';
 import { usePreviewCamera } from '@/src/hooks/usePreviewCamera';
@@ -16,7 +18,7 @@ import { comparisonImage, shownImage } from '@/src/lib/editor/editor-pictures';
 import { editorPreview } from '@/src/lib/editor/editor-preview';
 import { useTheme, type ThemeColors } from '@/src/lib/ui/theme';
 import { restorePreviewRequested$, showCheckpointRequested$ } from '@/src/state/commands';
-import { isBlemishToolFocused$, isCropToolFocused$, isPersonControlFocused$ } from '@/src/state/edits';
+import { isBlemishToolFocused$, isCropToolFocused$, isGradientFocused$, isPersonControlFocused$, isStripeFocused$ } from '@/src/state/edits';
 import {
   ensurePreviewPanResponder,
   previewBox$,
@@ -65,6 +67,8 @@ export function EditorPreview() {
   const areaTarget = useObservable(areaTarget$, null);
   const pluginListening = useObservable(pluginTouchListeners$, 0) > 0;
   const cropFocused = useObservable(isCropToolFocused$, false);
+  const gradientFocused = useObservable(isGradientFocused$, false);
+  const stripeFocused = useObservable(isStripeFocused$, false);
   const skinControlFocused = useObservable(isPersonControlFocused$, false);
   const personSelectionState = useObservable(personSelection$, personSelection.value);
   // People are found in the edit base, not in the screen-size preview, so their boxes are in its pixels.
@@ -213,6 +217,8 @@ export function EditorPreview() {
         ) : null}
         {pluginListening && !(areaTarget && drawingArea === areaTarget.key) && <PluginTouchOverlay />}
         {cropFocused && <CropGizmos />}
+        {gradientFocused && <GradientHandles />}
+        {stripeFocused && <StripeWordsDialog />}
         <ViewControls />
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}
       </Pressable>

@@ -1,4 +1,8 @@
 import type { PickedImage } from '@/src/components/file-picker';
+import type { ColorSwatch } from '@/src/state/color-picker';
+import type { CurvePreset, CurveValue } from '@/src/state/curve-picker';
+import type { GradientValue } from '@/src/state/gradient-picker';
+import { isReal, realBetween, realOr, warnNotReal } from '@/src/lib/plugins/plugin-values';
 import { BehaviorSubject } from 'rxjs';
 
 /** Where a file picker looks: the device's files, the app's saved projects (their edited images), or both. */
@@ -111,6 +115,64 @@ export type PluginPicturesOptions = {
   onPick?: (index: number) => void;
 };
 
+export type PluginColorOptions = {
+  /** The color it starts as: `[red, green, blue]`, each 0 to 255, with the strength as a fourth number (0 to 255) when `alpha` is true. Defaults to white. */
+  value?: number[];
+  /** Whether the color has a strength, so the picker has a Strength bar and the value has a fourth number. Defaults to false. */
+  alpha?: boolean;
+  /** The words over the picker. Defaults to the control's name. */
+  title?: string;
+  /** The named colors the picker shows above the square, each `{ label, rgb: [r, g, b] }`. Defaults to the app's common colors. */
+  swatches?: ColorSwatch[];
+  /** Called with `[red, green, blue]` (and the strength when `alpha` is true) each time a color is picked and OK is pressed. The editor runs the plugin again after it. */
+  onChange?: (value: number[]) => void;
+  /**
+   * Called as the person drags in the picker, with the color it shows now, so the plugin can show the change before OK is pressed. When the picker is
+   * cancelled it is called once more with the color the control had, so the change is taken back. The editor does not run the plugin again for it:
+   * change what is showing, as a slider's `onChange` does.
+   */
+  onPreview?: (value: number[]) => void;
+};
+
+export type PluginGradientOptions = {
+  /**
+   * The gradient it starts as: `colors`, each `{ at, color: [red, green, blue] }`, and `alphas`, each `{ at, alpha }`, with `at` from 0 (the start)
+   * to 1 (the end) and `alpha` from 0 (not there) to 255 (solid). The strength has stops of its own, so where it changes need not be where the
+   * color does. Each list needs a stop; one that has none gets a white one (or a solid one). Defaults to solid white.
+   */
+  value?: GradientValue;
+  /** The words over the editor. Defaults to the control's name. */
+  title?: string;
+  /** The named colors the color picker of a stop shows, each `{ label, rgb: [r, g, b] }`. Defaults to the app's common colors. */
+  swatches?: ColorSwatch[];
+  /** Called with the gradient (each list in order along it) each time the editor is closed with OK. The editor runs the plugin again after it. */
+  onChange?: (value: GradientValue) => void;
+  /**
+   * Called as the person edits in the editor, with the gradient it shows now, so the plugin can show the change before OK is pressed. When the editor
+   * is cancelled it is called once more with the gradient the control had, so the change is taken back. The editor does not run the plugin again for it.
+   */
+  onPreview?: (value: GradientValue) => void;
+};
+
+export type PluginCurveOptions = {
+  /** The points it starts as, each `[x, y]`: `x` from 0 (the start) to 1 (the end) and `y` from `min` to `max`. It is a smooth line through them, flat before the first and after the last. Needs a point; with none it is flat at `max`. */
+  value?: CurveValue;
+  /** The lowest and highest value of the curve, which is also the range of the editor. Default to 0 and 1. */
+  min?: number;
+  max?: number;
+  /** The words over the editor. Defaults to the control's name. */
+  title?: string;
+  /** Named shapes the editor offers to start from, each `{ label, value }` with `value` as above. */
+  presets?: CurvePreset[];
+  /** Called with the points (in order along the curve) each time the editor is closed with OK. The editor runs the plugin again after it. */
+  onChange?: (value: CurveValue) => void;
+  /**
+   * Called as the person edits in the editor, with the curve it shows now, so the plugin can show the change before OK is pressed. When the editor
+   * is cancelled it is called once more with the curve the control had, so the change is taken back. The editor does not run the plugin again for it.
+   */
+  onPreview?: (value: CurveValue) => void;
+};
+
 export type PluginToggleOptions = {
   /** Whether the toggle starts on. Defaults to false. */
   value?: boolean;
@@ -133,10 +195,39 @@ export type PluginInspectorItem =
       onPick: (files: PickedImage[]) => void;
     })
   | (PluginInspectorBase & { kind: 'header'; level: PluginHeaderLevel; back?: () => void })
+  | (PluginInspectorBase & { kind: 'group'; open: boolean; enabled?: boolean; onToggle?: (enabled: boolean) => void })
+  | (PluginInspectorBase & { kind: 'submenu'; onOpen?: () => void })
   | (PluginInspectorBase & { kind: 'select'; options: string[]; value: string; momentary?: boolean; onChange?: (value: string) => void })
   | (PluginInspectorBase & { kind: 'font-picker'; value?: string; onPick?: (family: string) => void })
   | (PluginInspectorBase & { kind: 'pictures'; files: PickedImage[]; rows: number | 'all'; onPick?: (index: number) => void })
   | (PluginInspectorBase & { kind: 'toggle'; value: boolean; onChange?: (value: boolean) => void })
+  | (PluginInspectorBase & {
+      kind: 'color';
+      value: number[];
+      alpha: boolean;
+      title?: string;
+      swatches?: ColorSwatch[];
+      onChange?: (value: number[]) => void;
+      onPreview?: (value: number[]) => void;
+    })
+  | (PluginInspectorBase & {
+      kind: 'gradient';
+      value: GradientValue;
+      title?: string;
+      swatches?: ColorSwatch[];
+      onChange?: (value: GradientValue) => void;
+      onPreview?: (value: GradientValue) => void;
+    })
+  | (PluginInspectorBase & {
+      kind: 'curve';
+      value: CurveValue;
+      min: number;
+      max: number;
+      title?: string;
+      presets?: CurvePreset[];
+      onChange?: (value: CurveValue) => void;
+      onPreview?: (value: CurveValue) => void;
+    })
   | (PluginInspectorBase & { kind: 'text'; value: string; placeholder?: string; onChange?: (value: string) => void })
   | (PluginInspectorBase & {
       kind: 'number';
@@ -195,6 +286,67 @@ export function addPluginHeader(pluginId: string, text: string, options?: Plugin
   }
 }
 
+export type PluginGroupOptions = {
+  /** Whether the group starts open. Defaults to false. The person's own taps on it win over this once they have made one. */
+  open?: boolean;
+  /** Puts a checkbox in the group's title, ticked when this is true, for a group that can be switched on and off as a whole (the group still folds with its arrow). Left out, the group has no checkbox. */
+  enabled?: boolean;
+  /** Called with whether the group is switched on each time its checkbox is tapped. The editor runs the plugin again after it. */
+  onToggle?: (enabled: boolean) => void;
+};
+
+export function createPluginGroupItem(pluginId: string, label: string, options: PluginGroupOptions = {}): PluginInspectorItem {
+  return { id: nextId++, key: label, surface: 'inspector', pluginId, kind: 'group', label, open: options.open ?? false, enabled: options.enabled, onToggle: options.onToggle };
+}
+
+export function addPluginGroup(pluginId: string, label: string, options?: PluginGroupOptions): void {
+  const item = createPluginGroupItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+export type PluginSubmenuOptions = {
+  /** Called when the row is tapped. The editor runs the plugin again after it, so it can make the submenu's controls (with a `header` that has `back`) in place of the main ones. */
+  onOpen?: () => void;
+};
+
+export function createPluginSubmenuItem(pluginId: string, label: string, options: PluginSubmenuOptions = {}): PluginInspectorItem {
+  return { id: nextId++, key: label, surface: 'inspector', pluginId, kind: 'submenu', label, onOpen: options.onOpen };
+}
+
+export function addPluginSubmenu(pluginId: string, label: string, options?: PluginSubmenuOptions): void {
+  const item = createPluginSubmenuItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+/** The number when it is real, and when it is not, `fallback`, with the plugin told once that it gave a bad one. */
+const realValue = (pluginId: string, label: string, value: unknown, fallback: number) => {
+  if (isReal(value)) return value;
+  warnNotReal(pluginId, `the control "${label}"`, fallback);
+  return fallback;
+};
+
+/** Two numbers made real. */
+const realPair = (pluginId: string, label: string, value: [number, number], fallback: [number, number]): [number, number] => [
+  realValue(pluginId, label, value[0], fallback[0]),
+  realValue(pluginId, label, value[1], fallback[1]),
+];
+
+/** A limit that is a real number, or nothing, so a limit that is not real is no limit and not a NaN that every comparison fails. */
+const realOrUndefined = (value: number | undefined) => (isReal(value) ? value : undefined);
+
+/** A step that is more than nothing, or 1. */
+const positiveStep = (step: number | undefined) => (isReal(step) && step > 0 ? step : 1);
+
 export function createPluginSizeItem(pluginId: string, label: string, options: PluginSizeOptions = {}): PluginInspectorItem {
   return {
     id: nextId++,
@@ -203,11 +355,11 @@ export function createPluginSizeItem(pluginId: string, label: string, options: P
     pluginId,
     kind: 'size',
     label,
-    value: options.value ?? [0, 0],
+    value: realPair(pluginId, label, options.value ?? [0, 0], [0, 0]),
     labels: options.labels ?? ['Width', 'Height'],
     reset: options.reset ?? true,
-    min: options.min,
-    max: options.max,
+    min: realOrUndefined(options.min),
+    max: realOrUndefined(options.max),
     onChange: options.onChange,
   };
 }
@@ -303,6 +455,112 @@ export function addPluginToggle(pluginId: string, label: string, options?: Plugi
   }
 }
 
+export function createPluginColorItem(pluginId: string, label: string, options: PluginColorOptions = {}): PluginInspectorItem {
+  const alpha = options.alpha ?? false;
+  const given = options.value ?? (alpha ? [255, 255, 255, 255] : [255, 255, 255]);
+  // Each channel is a whole number from 0 to 255; one that is not real is white (or solid, for the strength).
+  const value = [0, 1, 2, 3].map(at => Math.round(realBetween(realValue(pluginId, label, given[at] ?? 255, 255), 0, 255, 255)));
+  return {
+    id: nextId++,
+    key: label,
+    surface: 'inspector',
+    pluginId,
+    kind: 'color',
+    label,
+    value: alpha ? [value[0], value[1], value[2], value[3] ?? 255] : value.slice(0, 3),
+    alpha,
+    title: options.title,
+    swatches: options.swatches,
+    onChange: options.onChange,
+    onPreview: options.onPreview,
+  };
+}
+
+export function addPluginColor(pluginId: string, label: string, options?: PluginColorOptions): void {
+  const item = createPluginColorItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+/** A gradient with every stop real and in range, each list sorted and not empty, whatever the plugin gave. */
+const realGradient = (pluginId: string, label: string, value: GradientValue | undefined): GradientValue => {
+  const place = (at: unknown) => realBetween(realValue(pluginId, label, at, 0), 0, 1, 0);
+  const channel = (each: unknown) => Math.round(realBetween(realValue(pluginId, label, each, 255), 0, 255, 255));
+  const colors = (value?.colors ?? [])
+    .map(stop => ({ at: place(stop?.at), color: [0, 1, 2].map(index => channel(stop?.color?.[index])) as [number, number, number] }))
+    .sort((a, b) => a.at - b.at);
+  const alphas = (value?.alphas ?? []).map(stop => ({ at: place(stop?.at), alpha: channel(stop?.alpha) })).sort((a, b) => a.at - b.at);
+  return {
+    colors: colors.length ? colors : [{ at: 0, color: [255, 255, 255] }],
+    alphas: alphas.length ? alphas : [{ at: 0, alpha: 255 }],
+  };
+};
+
+export function createPluginGradientItem(pluginId: string, label: string, options: PluginGradientOptions = {}): PluginInspectorItem {
+  return {
+    id: nextId++,
+    key: label,
+    surface: 'inspector',
+    pluginId,
+    kind: 'gradient',
+    label,
+    value: realGradient(pluginId, label, options.value),
+    title: options.title,
+    swatches: options.swatches,
+    onChange: options.onChange,
+    onPreview: options.onPreview,
+  };
+}
+
+export function addPluginGradient(pluginId: string, label: string, options?: PluginGradientOptions): void {
+  const item = createPluginGradientItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
+export function createPluginCurveItem(pluginId: string, label: string, options: PluginCurveOptions = {}): PluginInspectorItem {
+  const low = realOr(options.min ?? 0, 0);
+  const given = realOr(options.max ?? 1, low + 1);
+  const high = given > low ? given : low + 1;
+  const held = (value: unknown, fallback: number, from: number, to: number) => realBetween(realValue(pluginId, label, value, fallback), from, to, fallback);
+  const points = (options.value ?? [])
+    .map(point => [held(point?.[0], 0, 0, 1), held(point?.[1], high, low, high)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  return {
+    id: nextId++,
+    key: label,
+    surface: 'inspector',
+    pluginId,
+    kind: 'curve',
+    label,
+    value: points.length ? points : [[0, high], [1, high]],
+    min: low,
+    max: high,
+    title: options.title,
+    presets: options.presets,
+    onChange: options.onChange,
+    onPreview: options.onPreview,
+  };
+}
+
+export function addPluginCurve(pluginId: string, label: string, options?: PluginCurveOptions): void {
+  const item = createPluginCurveItem(pluginId, label, options);
+  const layout = activeLayouts.get(pluginId);
+  if (layout) {
+    layout.push(item);
+  } else {
+    pluginInspectorItems$.next([...pluginInspectorItems$.value, item]);
+  }
+}
+
 export function createPluginNumberItem(pluginId: string, label: string, options: PluginNumberOptions = {}): PluginInspectorItem {
   return {
     id: nextId++,
@@ -311,10 +569,10 @@ export function createPluginNumberItem(pluginId: string, label: string, options:
     pluginId,
     kind: 'number',
     label,
-    value: options.value ?? options.min ?? 0,
-    min: options.min,
-    max: options.max,
-    step: options.step ?? 1,
+    value: realValue(pluginId, label, options.value ?? options.min ?? 0, realOr(options.min, 0)),
+    min: realOrUndefined(options.min),
+    max: realOrUndefined(options.max),
+    step: positiveStep(options.step),
     reset: options.reset ?? true,
     onChange: options.onChange,
   };
@@ -331,6 +589,15 @@ export function addPluginNumber(pluginId: string, label: string, options ?: Plug
 }
 
 export function createPluginSliderItem(pluginId: string, label: string, options: PluginSliderOptions): PluginInspectorItem {
+  // A slider needs a lowest and a highest that are real and the right way round, or it cannot be drawn and its value means nothing.
+  const min = realOr(options.min ?? 0, 0);
+  const given = realOr(options.max, min + 1);
+  const max = given > min ? given : min + 1;
+  const held = (value: number) => realBetween(value, min, max, min);
+  const start = options.value ?? (options.range ? [min, max] : min);
+  const value: number | [number, number] = Array.isArray(start)
+    ? [held(realValue(pluginId, label, start[0], min)), held(realValue(pluginId, label, start[1], max))]
+    : held(realValue(pluginId, label, start, min));
   return {
     id: nextId++,
     key: label,
@@ -338,14 +605,14 @@ export function createPluginSliderItem(pluginId: string, label: string, options:
     pluginId,
     kind: 'slider',
     label,
-    min: options.min ?? 0,
-    max: options.max,
-    step: options.step ?? 1,
+    min,
+    max,
+    step: positiveStep(options.step),
     range: options.range ?? false,
     multiline: options.multiline ?? options.range ?? false,
     reset: options.reset ?? true,
     rebuild: options.rebuild ?? false,
-    value: options.value ?? (options.range ? [options.min ?? 0, options.max] : options.min ?? 0),
+    value,
     onChange: options.onChange as ((value: number | [number, number]) => void) | undefined,
   };
 }
@@ -406,12 +673,34 @@ export function renderPluginInspector(pluginId: string, render: () => void): Plu
     if (item.kind === 'header' && replacement.kind === 'header') {
       return item.label === replacement.label && item.level === replacement.level && item.back === replacement.back;
     }
+    if (item.kind === 'group' && replacement.kind === 'group') {
+      return item.label === replacement.label && item.open === replacement.open && item.enabled === replacement.enabled &&
+        item.onToggle === replacement.onToggle;
+    }
+    if (item.kind === 'submenu' && replacement.kind === 'submenu') {
+      return item.label === replacement.label && item.onOpen === replacement.onOpen;
+    }
     if (item.kind === 'select' && replacement.kind === 'select') {
       return item.label === replacement.label && item.value === replacement.value && item.onChange === replacement.onChange &&
         item.options.length === replacement.options.length && item.options.every((each, at) => each === replacement.options[at]);
     }
     if (item.kind === 'toggle' && replacement.kind === 'toggle') {
       return item.label === replacement.label && item.value === replacement.value && item.onChange === replacement.onChange;
+    }
+    if (item.kind === 'color' && replacement.kind === 'color') {
+      return item.label === replacement.label && item.alpha === replacement.alpha && item.title === replacement.title &&
+        item.swatches === replacement.swatches && item.onChange === replacement.onChange && item.onPreview === replacement.onPreview &&
+        item.value.length === replacement.value.length && item.value.every((each, at) => each === replacement.value[at]);
+    }
+    if (item.kind === 'gradient' && replacement.kind === 'gradient') {
+      return item.label === replacement.label && item.title === replacement.title && item.swatches === replacement.swatches &&
+        item.onChange === replacement.onChange && item.onPreview === replacement.onPreview &&
+        JSON.stringify(item.value) === JSON.stringify(replacement.value);
+    }
+    if (item.kind === 'curve' && replacement.kind === 'curve') {
+      return item.label === replacement.label && item.min === replacement.min && item.max === replacement.max && item.title === replacement.title &&
+        item.presets === replacement.presets && item.onChange === replacement.onChange && item.onPreview === replacement.onPreview &&
+        JSON.stringify(item.value) === JSON.stringify(replacement.value);
     }
     if (item.kind === 'text' && replacement.kind === 'text') {
       return item.label === replacement.label && item.value === replacement.value && item.placeholder === replacement.placeholder &&

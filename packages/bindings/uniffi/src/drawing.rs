@@ -31,7 +31,7 @@ impl Brush {
   }
 
   /// A copy of this brush with this size (its width, in pixels).
-  pub fn with_size(&self, size: u32) -> Arc<Brush> {
+  pub fn with_size(&self, size: f32) -> Arc<Brush> {
     Arc::new(Brush(self.0.clone().with_size(size)))
   }
 
@@ -69,7 +69,7 @@ impl Brush {
   }
 
   /// The size of the brush.
-  pub fn size(&self) -> u32 {
+  pub fn size(&self) -> f32 {
     self.0.size()
   }
 
@@ -160,20 +160,20 @@ mod tests {
 
   #[test]
   fn a_brush_keeps_what_it_is_given() {
-    let brush = Brush::new().with_size(12).with_hardness(0.25).with_opacity(0.5).with_color(white());
-    assert_eq!((brush.size(), brush.hardness(), brush.opacity().constant_opacity()), (12, 0.25, Some(0.5)));
+    let brush = Brush::new().with_size(12.0).with_hardness(0.25).with_opacity(0.5).with_color(white());
+    assert_eq!((brush.size(), brush.hardness(), brush.opacity().constant_opacity()), (12.0, 0.25, Some(0.5)));
     assert_eq!(Brush::new().opacity().constant_opacity(), Some(1.0));
     // The first brush is not changed by the copies.
-    assert_eq!(Brush::new().size(), 5);
+    assert_eq!(Brush::new().size(), 5.0);
   }
 
   #[test]
   fn a_stroke_that_tapers_is_drawn_thinner_toward_its_end() {
     let image = Arc::new(Image::new(100, 40));
     let path = Path::line(crate::point_f_new(10.0, 20.0), crate::point_f_new(90.0, 20.0));
-    let brush = Brush::new().with_size(20).with_hardness(1.0).with_color(white()).with_width_along(Arc::new(StrokeWidth::from_to(20.0, 2.0)));
+    let brush = Brush::new().with_size(20.0).with_hardness(1.0).with_color(white()).with_width_along(Arc::new(StrokeWidth::from_to(20.0, 2.0)));
     assert_eq!(brush.width().width_at(1.0), 2.0);
-    assert_eq!(Brush::new().with_size(7).width().width_at(0.5), 7.0);
+    assert_eq!(Brush::new().with_size(7.0).width().width_at(0.5), 7.0);
     Painter::new(image.clone()).stroke_with_brush(Arc::new(path), brush);
     let painted = |x: u32| (0..40).filter(|y| image.get_pixel(x, *y).is_some_and(|pixel| pixel[3] > 127)).count();
     assert!(painted(15) > painted(50) && painted(50) > painted(85), "{} {} {}", painted(15), painted(50), painted(85));
@@ -181,13 +181,13 @@ mod tests {
 
   #[test]
   fn a_stroke_that_fades_out_is_drawn_clearer_toward_its_end() {
-    let brush = Brush::new().with_size(10).with_hardness(1.0).with_color(white()).with_opacity_along(Arc::new(StrokeOpacity::from_to(1.0, 0.0)));
+    let brush = Brush::new().with_size(10.0).with_hardness(1.0).with_color(white()).with_opacity_along(Arc::new(StrokeOpacity::from_to(1.0, 0.0)));
     assert_eq!(brush.opacity().opacity_at(0.5), 0.5);
     let image = stroke_overlay(100, 30, vec![vec![10.0, 15.0], vec![90.0, 15.0]], brush);
     let alpha = |x: u32| image.get_pixel(x, 15).unwrap()[3];
     assert!(alpha(14) > 220 && alpha(50) > 100 && alpha(50) < 150 && alpha(86) < 40, "{} {} {}", alpha(14), alpha(50), alpha(86));
     // A number is the same opacity all the way, and a width given as a number is the same width.
-    let half = stroke_overlay(100, 30, vec![vec![10.0, 15.0], vec![90.0, 15.0]], Brush::new().with_size(3).with_hardness(1.0).with_color(white()).with_width(10.0).with_opacity(0.5));
+    let half = stroke_overlay(100, 30, vec![vec![10.0, 15.0], vec![90.0, 15.0]], Brush::new().with_size(3.0).with_hardness(1.0).with_color(white()).with_width(10.0).with_opacity(0.5));
     assert!((half.get_pixel(50, 15).unwrap()[3] as i32 - 128).abs() <= 2);
     assert!(half.get_pixel(50, 11).unwrap()[3] > 0);
   }
@@ -196,7 +196,7 @@ mod tests {
   fn a_painter_dabs_and_fills_in_place() {
     let image = Arc::new(Image::new(30, 30));
     let painter = Painter::new(image.clone());
-    let brush = Brush::new().with_size(8).with_hardness(1.0).with_color(white());
+    let brush = Brush::new().with_size(8.0).with_hardness(1.0).with_color(white());
     painter.dab_brush(15.0, 15.0, brush.clone());
     assert_eq!(image.get_pixel(15, 15).unwrap()[3], 255);
     assert_eq!(image.get_pixel(2, 2).unwrap()[3], 0);
@@ -207,7 +207,7 @@ mod tests {
 
   #[test]
   fn a_line_is_drawn_through_the_points_and_clear_elsewhere() {
-    let brush = Brush::new().with_size(9).with_hardness(1.0).with_color(white());
+    let brush = Brush::new().with_size(9.0).with_hardness(1.0).with_color(white());
     let image = stroke_overlay(40, 20, vec![vec![5.0, 10.0], vec![35.0, 10.0]], brush.clone());
     assert_eq!(image.get_pixel(20, 10), Some(vec![255, 255, 255, 255]));
     assert_eq!(image.get_pixel(20, 2).unwrap()[3], 0);

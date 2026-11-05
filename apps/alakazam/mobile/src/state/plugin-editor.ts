@@ -44,6 +44,10 @@ export const pluginEditorBuilding$ = pluginEditorBuilding.asObservable();
 export const pluginEditorPicked = new BehaviorSubject<Record<string, PickedImage[]>>({});
 export const pluginEditorPicked$ = pluginEditorPicked.asObservable();
 
+/** Which groups the person opened or closed, by the group's `key`. A group not here is as the plugin made it (`open`), so the plugin running again does not undo a tap. */
+export const pluginEditorGroups = new BehaviorSubject<Record<string, boolean>>({});
+export const pluginEditorGroups$ = pluginEditorGroups.asObservable();
+
 /** What the open plugin asked the project to keep (`app.saved`), by the plugin's own names. It is put back from the project before the plugin runs. */
 export const pluginEditorSaved = new BehaviorSubject<Record<string, unknown>>({});
 export const pluginEditorSaved$ = pluginEditorSaved.asObservable();

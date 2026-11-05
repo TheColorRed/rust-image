@@ -14,6 +14,15 @@ metadata:
 
 # Abra Library
 
+## Abra Is Not Only For Apps
+
+Abra is not just the engine of the desktop and mobile apps. It is a standalone library and must work anywhere Rust runs: headless on servers, in a CLI, in batch jobs, in WebAssembly, and inside desktop or mobile apps. So:
+
+- A feature must work from plain Rust (`effect.apply(&mut image)`) with no app, UI, plugin host or bindings present.
+- Never make the library depend on an app, and never let the app's needs (plugins in TS, uniffi, a live view) shape a library API. The app adapts to the library.
+- A feature may exist in the library for standalone users even when the apps do not use it, or the app may ship its own version (for example as a plugin). Both should share the generic pieces that live in abra. Example: a particle system can be a Rust effect for CLI users while the app runs its own as a plugin, and both draw through the same generic sprite renderer in abra.
+- Do not assume a GPU, a screen or a main thread. Anything GPU-accelerated needs a CPU path that gives the same result.
+
 The Abra library is located in the `/abra` directory of the repository. It is broken down into several modules, each responsible for different aspects of image manipulation and processing.
 
 ## Reuse First (Read Before Writing Code)

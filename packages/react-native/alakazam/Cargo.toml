@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 abra = { workspace = true }
+abra-ai-core = { workspace = true, features = ["onnx"] }
 # The Abra library's own types and functions for TypeScript (`Color`, `Image`, `blend`).
 abra-uniffi = { workspace = true }
 abra-body-segmentation = { workspace = true }

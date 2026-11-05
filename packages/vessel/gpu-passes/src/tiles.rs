@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 
-use crate::context::{FORMAT, GpuContext};
+use crate::context::{FORMAT, GpuContext, RenderEntry, RenderKey};
 use crate::{GpuPass, LiveRenderer};
 
 /// Paints what is past the photo, after the effects have run, so they cannot tint it. The uniform is the color.
@@ -381,6 +381,8 @@ struct TileCache {
 impl TileCache {
   fn new(p_ctx: GpuContext, p_pyramid: Pyramid, p_options: TileOptions) -> TileCache {
     let device = &p_ctx.device;
+    // The pipeline and the layout its bind groups use are kept together, so every cache shares one pair.
+    let entry = p_ctx.render_pipeline(RenderKey { name: "tiles", format: FORMAT }, || {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("tiles::layout"),
       entries: &[
@@ -432,8 +434,12 @@ impl TileCache {
       depth_stencil: None,
       multisample: wgpu::MultisampleState::default(),
       multiview_mask: None,
-      cache: None,
+      cache: p_ctx.driver_cache(),
     });
+    RenderEntry { pipeline, layout: Some(layout) }
+    });
+    let pipeline = entry.pipeline;
+    let layout = entry.layout.expect("the tile pipeline is cached with its layout");
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
       mag_filter: p_options.filter,
       min_filter: p_options.filter,

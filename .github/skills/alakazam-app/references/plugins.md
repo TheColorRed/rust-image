@@ -10,5 +10,5 @@ Plugins maintained by the Alakazam team are located at `apps/alakazam/{desktop,m
 
 When converting a plugin from a built-in feature to a plugin feature:
 
-1. Make sure `@alakazam/plugin-toolkit` is generic and not tightly coupled to any specific plugin.
-2. Move all the logic to the plugin needs into the plugin itself, ensuring that the plugin is self-contained and does not rely on built-in features. It should use the `@alakazam/plugin-toolkit` to interact with the application, or `@abra/core/*` to interact with the image processing core.
+1. Make sure `@alakazam/sdk` is generic and not tightly coupled to any specific plugin.
+2. Move all the logic to the plugin needs into the plugin itself, ensuring that the plugin is self-contained and does not rely on built-in features. It should use the `@alakazam/sdk` to interact with the application, or `@abra/core/*` to interact with the image processing core.

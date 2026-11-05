@@ -204,7 +204,8 @@ impl Trackable for PreviewSource {
         let height = to_box(bottom, viewport.y, viewport.height, size.1).saturating_sub(y).max(1);
         let mut part = fitted(&whole, &Viewport { x: left, y: top, width: right - left, height: bottom - top }, u32::MAX, u32::MAX);
         if part.dimensions::<u32>() != (width, height) {
-          abra::transform::prelude::resize(abra::abra_core::ResizeTarget::Exact(abra::abra_core::Size::new(width as f32, height as f32)))
+          abra::transform::prelude::transform()
+            .with_size(abra::abra_core::ResizeTarget::Exact(abra::abra_core::Size::new(width as f32, height as f32)))
             .apply(&mut part);
         }
         let (part_width, part_height) = part.dimensions::<u32>();
@@ -235,16 +236,15 @@ impl Trackable for PreviewSource {
 pub(crate) fn fitted(image: &abra::prelude::Image, region: &Viewport, width: u32, height: u32) -> abra::prelude::Image {
   let (full_width, full_height) = image.dimensions::<u32>();
   let (x, y, cut_width, cut_height) = region.in_pixels(full_width, full_height);
-  let mut shrunk = image.clone();
+  // The region is cut out and then shrunk, if it does not fit, in one transform.
+  let mut change = abra::transform::prelude::transform();
   if (x, y, cut_width, cut_height) != (0, 0, full_width, full_height) {
-    abra::transform::prelude::crop(x, y, cut_width, cut_height).apply(&mut shrunk);
+    change = change.with_crop(abra::abra_core::Rect::new((x, y), (cut_width, cut_height)));
   }
-  let (current_width, current_height) = shrunk.dimensions::<u32>();
-  if current_width > width || current_height > height {
-    abra::transform::prelude::resize(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(width as f32, height as f32)))
-      .apply(&mut shrunk);
+  if cut_width > width || cut_height > height {
+    change = change.with_size(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(width as f32, height as f32)));
   }
-  shrunk
+  change.applied(image)
 }
 
 fn frame_of(image: &abra::prelude::Image) -> Frame {
@@ -573,8 +573,9 @@ mod tests {
     let whole = fitted(&photo, &Viewport::default(), 40, 20);
     assert_eq!(whole.rgba(), photo.rgba());
     let smaller = fitted(&photo, &Viewport::default(), 20, 10);
-    let mut expected = photo.clone();
-    abra::transform::prelude::resize(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(20.0, 10.0))).apply(&mut expected);
+    let expected = abra::transform::prelude::transform()
+      .with_size(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(20.0, 10.0)))
+      .applied(&photo);
     assert_eq!(smaller.rgba(), expected.rgba());
   }
 
@@ -588,8 +589,7 @@ mod tests {
     // A quarter in the middle, shown at its own size, is a plain crop with no resampling.
     let middle = fitted(&photo, &Viewport { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }, 100, 100);
     assert_eq!(middle.dimensions::<u32>(), (20, 10));
-    let mut expected = photo.clone();
-    abra::transform::prelude::crop(10, 5, 20, 10).apply(&mut expected);
+    let expected = abra::transform::prelude::transform().with_crop(abra::abra_core::Rect::new((10, 5), (20, 10))).applied(&photo);
     assert_eq!(middle.rgba(), expected.rgba());
   }
 

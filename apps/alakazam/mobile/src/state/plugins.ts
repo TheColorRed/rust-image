@@ -13,6 +13,8 @@ export type PluginListing = {
   id: string;
   name: string;
   description: string;
+  /** Who made it, when its `plugin.yml` says. */
+  author?: string;
   version: string;
   /** `false` keeps it out of the list until it is installed. */
   enabled: boolean;

@@ -1,4 +1,7 @@
 use abra_core::blend::blend as blend_images;
+use abra_core::image::effect::deferred;
+use abra_core::image::recipe::{gpu_ready, lay_over};
+use abra_core::layers::{scale_alpha, silhouette};
 use abra_core::{BlendMode, Color, Fill, Image, PointF};
 
 use filters::Effect;
@@ -101,6 +104,24 @@ pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &Dro
   let original_image = p_image.as_ref();
   let (width, height) = original_image.dimensions::<usize>();
 
+  // The same steps as a chain for the GPU, with nothing copied back to the CPU in between. The spread (which grows or shrinks the shape a
+  // pixel at a time) has no shader, so a shadow with one is made on the CPU.
+  if gpu_ready() && p_options.spread <= 0.0 {
+    let color = match &p_options.fill {
+      Fill::Solid(color) => *color,
+      _ => Color::black(),
+    };
+    let shape = silhouette(original_image, [color.r, color.g, color.b], 128);
+    let (offset_x, offset_y) = shadow_offset(p_options);
+    let (padding_left, padding_top, canvas_width, canvas_height) = shadow_room(p_options, (width as u32, height as u32), (offset_x, offset_y));
+    let mut composite = Image::new(canvas_width, canvas_height);
+    lay_over(&mut composite, &shape, (padding_left + offset_x, padding_top + offset_y), p_options.blend_mode, 1.0);
+    gaussian_blur(p_options.size).apply(deferred(&mut composite));
+    scale_alpha(&mut composite, p_options.opacity);
+    lay_over(&mut composite, original_image, (padding_left, padding_top), BlendMode::Normal, 1.0);
+    return (Arc::new(composite), (padding_left, padding_top));
+  }
+
   // Create shadow by copying the original image
   let mut shadow_image = original_image.clone();
 
@@ -135,22 +156,8 @@ pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &Dro
   }
 
   // Calculate offset from distance and angle
-  let angle_rad = p_options.angle.to_radians();
-  let offset_x = (p_options.distance * angle_rad.cos()).round() as i32;
-  let offset_y = (p_options.distance * angle_rad.sin()).round() as i32;
-
-  // Determine padding needed for the expanded canvas
-  // Positive offset means shadow is displaced in that direction, so we need padding on the opposite side
-  // Also add padding for the blur radius to prevent blur artifacts at the edges
-  let blur_padding = p_options.size as i32;
-  let padding_left = (-offset_x).max(0) + blur_padding;
-  let padding_top = (-offset_y).max(0) + blur_padding;
-  let padding_right = offset_x.max(0) + blur_padding;
-  let padding_bottom = offset_y.max(0) + blur_padding;
-
-  // Create an expanded canvas to contain shadow offset
-  let canvas_width = width as u32 + padding_left as u32 + padding_right as u32;
-  let canvas_height = height as u32 + padding_top as u32 + padding_bottom as u32;
+  let (offset_x, offset_y) = shadow_offset(p_options);
+  let (padding_left, padding_top, canvas_width, canvas_height) = shadow_room(p_options, (width as u32, height as u32), (offset_x, offset_y));
 
   // Position shadow at offset
   let shadow_x = padding_left + offset_x;
@@ -183,6 +190,23 @@ pub(crate) fn apply_drop_shadow_with_offset(p_image: Arc<Image>, p_options: &Dro
   // DebugEffects::DropShadow(options.clone(), duration.elapsed()).log();
 
   (Arc::new(composite), (padding_left, padding_top))
+}
+
+/// How far the shadow is displaced, from its distance and angle.
+fn shadow_offset(p_options: &DropShadow) -> (i32, i32) {
+  let angle_rad = p_options.angle.to_radians();
+  ((p_options.distance * angle_rad.cos()).round() as i32, (p_options.distance * angle_rad.sin()).round() as i32)
+}
+
+/// The room the picture needs for the shadow: the padding on the left and at the top, and the size of the picture with it. A positive offset
+/// moves the shadow that way, so the room is on the opposite side, and the blur needs room all round to keep its edges.
+fn shadow_room(p_options: &DropShadow, p_size: (u32, u32), p_offset: (i32, i32)) -> (i32, i32, u32, u32) {
+  let blur_padding = p_options.size as i32;
+  let padding_left = (-p_offset.0).max(0) + blur_padding;
+  let padding_top = (-p_offset.1).max(0) + blur_padding;
+  let padding_right = p_offset.0.max(0) + blur_padding;
+  let padding_bottom = p_offset.1.max(0) + blur_padding;
+  (padding_left, padding_top, p_size.0 + padding_left as u32 + padding_right as u32, p_size.1 + padding_top as u32 + padding_bottom as u32)
 }
 
 /// Converts an image to a single color while preserving and applying opacity to the alpha channel.

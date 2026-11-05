@@ -1,6 +1,8 @@
 use abra_core::{Color, Fill, Image, Path, PointF};
 
-use std::sync::Arc;
+use abra_core::image::recipe::{gpu_ready, lay_over};
+use abra_core::BlendMode;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use drawing::Brush;
@@ -69,11 +71,67 @@ impl<'a> Stroke<'a> {
   }
 }
 
+/// The outlines drawn lately, as a transparent picture with only the outline in it, so a stroke that does not change is drawn once and not
+/// each time the layer is composed. Keyed by the size of the picture, the thickness and the color.
+static OUTLINES: Mutex<Vec<((u32, u32, u32, [u8; 4]), Image)>> = Mutex::new(Vec::new());
+
+/// How many outlines are kept.
+const OUTLINES_KEPT: usize = 8;
+
+/// The color the outline is drawn in, with the opacity folded into its alpha (a fill that is not a solid color is black).
+fn outline_color(p_options: &Stroke) -> Color {
+  let mut color = match &p_options.fill {
+    Fill::Solid(cow) => *cow,
+    _ => Color::black(),
+  };
+  color.a = ((color.a as f32) * p_options.opacity.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8;
+  color
+}
+
+/// Draws the outline of a picture of `p_width` x `p_height` with `painter` on `p_target`.
+fn draw_outline(p_target: &mut Image, p_options: &Stroke) {
+  let (width, height) = p_target.dimensions::<u32>();
+  let (max_x, max_y) = (width.saturating_sub(1) as i32, height.saturating_sub(1) as i32);
+  let corners: Vec<PointF> = [(0, 0), (max_x, 0), (max_x, max_y), (0, max_y), (0, 0)].into_iter().map(PointF::from).collect();
+  let mut path = Path::new();
+  path.move_to((corners[0].x, corners[0].y));
+  for point in corners.iter().skip(1) {
+    path.line_to((point.x, point.y));
+  }
+  let brush = Brush::new().with_size(p_options.size).with_color(Fill::Solid(outline_color(p_options))).with_hardness(1.0);
+  Painter::new(p_target).stroke_with_brush(&path, &brush);
+}
+
 /// Applies a stroke effect to an image by drawing an outline around its edges.
 pub(crate) fn apply_stroke(p_image: Arc<Image>, p_options: &Stroke) -> Arc<Image> {
   let _duration = Instant::now();
   let original_image = p_image.as_ref();
   let (width, height) = original_image.dimensions::<u32>();
+
+  // With a GPU the outline is a transparent picture laid over the layer as one more step of its chain, and the layer's pixels are not
+  // copied or read.
+  if gpu_ready() {
+    let color = outline_color(p_options);
+    let key = (width, height, p_options.size, [color.r, color.g, color.b, color.a]);
+    let outline = {
+      let mut kept = OUTLINES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+      match kept.iter().position(|(entry, _)| *entry == key) {
+        Some(at) => kept[at].1.clone(),
+        None => {
+          let mut outline = Image::new(width, height);
+          draw_outline(&mut outline, p_options);
+          if kept.len() >= OUTLINES_KEPT {
+            kept.remove(0);
+          }
+          kept.push((key, outline.clone()));
+          outline
+        }
+      }
+    };
+    let mut composite = original_image.clone();
+    lay_over(&mut composite, &outline, (0, 0), BlendMode::Normal, 1.0);
+    return Arc::new(composite);
+  }
 
   let mut composite = Image::new(width, height);
   composite.copy_channel_data(original_image);

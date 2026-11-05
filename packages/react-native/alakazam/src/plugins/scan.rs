@@ -89,8 +89,18 @@ pub struct PluginInfo {
   pub name: String,
   pub version: String,
   pub description: String,
+  /// Who made the plugin, when `plugin.yml` says.
+  pub author: Option<String>,
   /// The plugin's folder, as a path on this device.
   pub dir: String,
+  /// The plugin's `README.md` as a path on this device, when it ships one.
+  pub readme_path: Option<String>,
+  /// The plugin's `CHANGELOG.md` as a path on this device, when it ships one.
+  pub changelog_path: Option<String>,
+  /// The store page's screenshots as paths on this device, in the order shown.
+  pub screenshot_paths: Vec<String>,
+  /// The words the store groups the plugin by.
+  pub tags: Vec<String>,
   /// The ids of the plugins this one depends on.
   pub dependencies: Vec<String>,
   /// The ids of the plugins it depends on that cannot be used, so it adds nothing until they are installed. Empty when it can be used.
@@ -138,7 +148,12 @@ fn info(p_plugin: &Plugin, p_registry: &PluginRegistry) -> PluginInfo {
     name: manifest.name.clone(),
     version: manifest.version.clone(),
     description: manifest.description.clone(),
+    author: manifest.author.clone(),
     dir: p_plugin.dir.to_string_lossy().into_owned(),
+    readme_path: p_plugin.path("README.md").is_file().then(|| path(p_plugin, "README.md")),
+    changelog_path: p_plugin.path("CHANGELOG.md").is_file().then(|| path(p_plugin, "CHANGELOG.md")),
+    screenshot_paths: manifest.store.screenshots.iter().map(|screenshot| path(p_plugin, screenshot)).collect(),
+    tags: manifest.store.tags.clone(),
     dependencies: manifest.dependencies.iter().map(|dependency| dependency.id.clone()).collect(),
     missing_dependencies: p_registry.missing_dependencies(p_plugin),
     models: manifest
@@ -266,6 +281,7 @@ contributes:
     std::fs::create_dir_all(&pack).unwrap();
     std::fs::write(pack.join("a.js"), b"x").unwrap();
     std::fs::write(pack.join("b.js"), b"x").unwrap();
+    std::fs::write(pack.join("README.md"), b"# Pack").unwrap();
     std::fs::write(
       pack.join("plugin.yml"),
       "id: test.pack
@@ -297,7 +313,10 @@ contributes:
     let needy = scan.plugins.iter().find(|plugin| plugin.id == "test.beauty").unwrap();
     assert_eq!(needy.dependencies, ["test.remover", "test.ghost"]);
     assert_eq!(needy.missing_dependencies, ["test.ghost"], "what is installed is not missing");
+    assert!(found.readme_path.is_none() && found.changelog_path.is_none(), "the documents are optional");
     let pack = scan.plugins.iter().find(|plugin| plugin.id == "test.pack").unwrap();
+    assert!(pack.readme_path.as_deref().is_some_and(|file| file.ends_with("README.md")));
+    assert!(pack.changelog_path.is_none());
     let controls: Vec<(&str, &str)> = pack.controls.iter().map(|control| (control.root.as_str(), control.path.as_str())).collect();
     assert_eq!(controls, [("Beauty/Makeup", "Lipstick"), ("Beauty/Hair", "Eyes/Color")]);
     assert!(pack.controls[0].entry_path.ends_with("a.js") && pack.controls[0].entry_path.starts_with(&pack.dir));

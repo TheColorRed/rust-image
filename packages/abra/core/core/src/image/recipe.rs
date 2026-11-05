@@ -49,10 +49,11 @@ enum Node {
   Generated(Arc<dyn Generator>),
   /// `base` with an effect applied to all of it.
   Effect { base: Image, effect: Step },
-  /// `top` put over `base` with a blend mode.
+  /// `top` put over `base` with a blend mode, with its top left corner at `offset` in `base`.
   Blend {
     base: Image,
     top: Image,
+    offset: (i32, i32),
     mode: BlendMode,
     opacity: f32,
   },
@@ -77,7 +78,7 @@ fn recipe_of(p_image: &Image) -> Option<&Recipe> {
 }
 
 /// Whether recipes are worth making: the GPU is allowed and has started.
-fn gpu_ready() -> bool {
+pub fn gpu_ready() -> bool {
   ready_gpu_provider(Hardware::Auto).is_some()
 }
 
@@ -98,32 +99,66 @@ pub fn generated(p_width: u32, p_height: u32, p_generator: Arc<dyn Generator>) -
 }
 
 /// `p_top` put over `p_base` with `p_mode`, as a new image, with `p_opacity` from 0 to 1 on top of the top's own alpha.
-/// Neither image is changed. Deferred when the GPU can do it (same-size images and a built-in mode); otherwise made now,
-/// with the same pixels either way.
+/// Neither image is changed. Deferred when the GPU can do it (a built-in mode); otherwise made now, with the same pixels
+/// either way. The top's top left corner is the base's, and it can be any size.
 pub fn blended(p_base: &Image, p_top: &Image, p_mode: BlendMode, p_opacity: f32) -> Image {
+  laid(p_base, p_top, (0, 0), p_mode, p_opacity)
+}
+
+/// Whether `p_top`, with its top left corner at `p_offset` in `p_base`, covers any of it.
+fn overlaps(p_base: &Image, p_top: &Image, p_offset: (i32, i32)) -> bool {
+  let (base_width, base_height) = p_base.dimensions::<i64>();
+  let (top_width, top_height) = p_top.dimensions::<i64>();
+  let (left, top) = (p_offset.0 as i64, p_offset.1 as i64);
+  left < base_width && top < base_height && left + top_width > 0 && top + top_height > 0
+}
+
+/// `p_top` put over `p_base` with its top left corner at `p_offset` in the base (negative or past an edge is fine: only the part that
+/// covers the base is used), as a new image, with `p_mode` and `p_opacity` from 0 to 1 on top of the top's own alpha. Neither image is changed.
+/// Deferred when the GPU can do it (a built-in mode), so a stack of layers is one chain that runs on the GPU in one go when it is read or drawn;
+/// otherwise made now, with the same pixels either way.
+pub fn laid(p_base: &Image, p_top: &Image, p_offset: (i32, i32), p_mode: BlendMode, p_opacity: f32) -> Image {
   let opacity = p_opacity.clamp(0.0, 1.0);
-  let size = p_base.dimensions::<u32>();
-  if opacity == 0.0 || p_top.dimensions::<u32>() != size || p_mode.shader_index().is_none() || !gpu_ready() {
+  if opacity == 0.0 || !overlaps(p_base, p_top, p_offset) {
+    return p_base.clone();
+  }
+  let (width, height) = p_base.dimensions::<u32>();
+  if p_mode.shader_index().is_none() || !gpu_ready() {
     let mut result = p_base.clone();
-    blend(p_top).with_mode(p_mode).with_opacity(opacity).apply(&mut result);
+    blend(p_top).with_offset(p_offset).with_mode(p_mode).with_opacity(opacity).apply(&mut result);
     return result;
   }
   // A top made by a generator without a shader would have to be made on the CPU first; that is still correct, so it stays
   // deferred and the plan simply uses the top's pixels.
   Image::from_deferred(
-    size.0,
-    size.1,
+    width,
+    height,
     Arc::new(Recipe {
-      width: size.0,
-      height: size.1,
+      width,
+      height,
       node: Node::Blend {
         base: p_base.clone(),
         top: p_top.clone(),
+        offset: p_offset,
         mode: p_mode,
         opacity,
       },
     }),
   )
+}
+
+/// Puts `p_top` over `p_base` in place, as [`laid`] does: with its top left corner at `p_offset`, the mode and the opacity. With a GPU the base
+/// becomes a deferred image that has the blend as one more step; without one the blend is made on the base's pixels, with no copy.
+pub fn lay_over(p_base: &mut Image, p_top: &Image, p_offset: (i32, i32), p_mode: BlendMode, p_opacity: f32) {
+  let opacity = p_opacity.clamp(0.0, 1.0);
+  if opacity == 0.0 || !overlaps(p_base, p_top, p_offset) {
+    return;
+  }
+  if p_mode.shader_index().is_some() && gpu_ready() {
+    *p_base = laid(p_base, p_top, p_offset, p_mode, opacity);
+  } else {
+    blend(p_top).with_offset(p_offset).with_mode(p_mode).with_opacity(opacity).apply(p_base);
+  }
 }
 
 /// `p_base` with `p_effect` applied to all of it, as a new image that is not computed until somebody looks at it. The effect's
@@ -146,23 +181,32 @@ pub fn effect_applied(p_base: &Image, p_effect: Arc<dyn CpuProcessor>) -> Image 
   )
 }
 
-/// The passes that blend `p_top` over an image the same size as it. The top is handed to the shader as pixels, as a texture.
-/// If it is itself deferred, reading its pixels makes it first.
-fn top_passes(p_top: &Image, p_mode: BlendMode, p_opacity: f32) -> Option<Vec<GpuPass>> {
-  let mode = p_mode.shader_index()?;
-  let (width, height) = p_top.dimensions::<u32>();
-  let aux = GpuAux {
+/// An image's pixels as the GPU is given them, kept for as long as the pixels are the same, so a layer that does not change is uploaded once and not
+/// again every time the picture it is in is drawn.
+struct Upload(Arc<[u8]>);
+
+/// The pixels of `p_image` as a texture for a pass. If it is itself deferred, reading its pixels makes it first.
+fn upload(p_image: &Image) -> GpuAux {
+  let (width, height) = p_image.dimensions::<u32>();
+  let pixels = p_image.derived(|image| Upload(Arc::from(image.rgba())));
+  GpuAux {
     width,
     height,
-    rgba: Arc::from(p_top.rgba()),
-  };
+    rgba: Arc::clone(&pixels.0),
+  }
+}
+
+/// The passes that blend `p_top` over an image, with its top left corner at `p_offset`. The top is handed to the shader as pixels, as a texture.
+/// If it is itself deferred, reading its pixels makes it first.
+fn top_passes(p_top: &Image, p_offset: (i32, i32), p_mode: BlendMode, p_opacity: f32) -> Option<Vec<GpuPass>> {
+  let mode = p_mode.shader_index()?;
   Some(vec![
     GpuPass::new(
       concat!(include_str!("../combine/blend_modes.wgsl"), include_str!("../combine/blend.wgsl")),
-      [p_opacity.to_le_bytes(), mode.to_le_bytes(), [0; 4], [0; 4]].concat(),
+      [p_opacity.to_le_bytes(), mode.to_le_bytes(), p_offset.0.to_le_bytes(), p_offset.1.to_le_bytes()].concat(),
     )
     .with_window()
-    .with_aux(aux),
+    .with_aux(upload(p_top)),
   ])
 }
 
@@ -211,11 +255,12 @@ impl Recipe {
       Node::Blend {
         base,
         top,
+        offset,
         mode,
         opacity,
       } => {
         let mut result = base.clone();
-        blend(top).with_mode(*mode).with_opacity(*opacity).apply(&mut result);
+        blend(top).with_offset(*offset).with_mode(*mode).with_opacity(*opacity).apply(&mut result);
         result.into_rgba_vec()
       }
     }
@@ -240,11 +285,12 @@ fn plan_of(p_recipe: &Recipe) -> Option<Plan> {
     Node::Blend {
       base,
       top,
+      offset,
       mode,
       opacity,
     } => {
       let mut plan = plan(base)?;
-      plan.passes.push(top_passes(top, *mode, *opacity)?);
+      plan.passes.push(top_passes(top, *offset, *mode, *opacity)?);
       Some(plan)
     }
   }
@@ -468,16 +514,55 @@ mod tests {
   }
 
   #[test]
-  fn images_of_different_sizes_or_no_opacity_are_blended_at_once() {
+  fn a_top_of_any_size_at_any_offset_waits_for_the_gpu_and_no_opacity_or_no_overlap_changes_nothing() {
     let _guard = GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     fake_gpu();
     let small = Image::new_from_color(2, 2, Color::from_rgba(0, 0, 0, 255));
-    assert!(blended(&photo(), &small, BlendMode::Normal, 1.0).deferred().is_none());
+    assert!(blended(&photo(), &small, BlendMode::Normal, 1.0).deferred().is_some(), "a smaller top is a step of the chain");
+    assert!(laid(&photo(), &small, (3, 2), BlendMode::Normal, 1.0).deferred().is_some(), "and so is one that hangs over an edge");
     let flat = Image::new_from_color(4, 3, Color::from_rgba(0, 0, 0, 255));
     assert_eq!(blended(&photo(), &flat, BlendMode::Normal, 0.0).get_pixel(0, 0), Some((200, 100, 50, 255)));
+    // A top that is entirely off the base is nothing to do: the base comes back as it was, not as a step.
+    for offset in [(4, 0), (0, 3), (-2, 0), (0, -2), (100, 100)] {
+      assert!(laid(&photo(), &small, offset, BlendMode::Normal, 1.0).deferred().is_none(), "{offset:?} misses the base");
+    }
     assert_eq!(RUNS.load(Ordering::SeqCst), 0);
     clear_gpu_provider();
   }
+
+  #[test]
+  fn a_top_laid_at_an_offset_gives_the_cpu_blend_at_that_offset_with_and_without_a_gpu() {
+    let _guard = GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let top = Image::new_from_color(2, 2, Color::from_rgba(0, 0, 0, 255));
+    for offset in [(0, 0), (1, 1), (3, 2), (-1, -1)] {
+      let mut expected = photo();
+      blend(&top).with_offset(offset).with_opacity(0.5).apply(&mut expected);
+      clear_gpu_provider();
+      assert_eq!(laid(&photo(), &top, offset, BlendMode::Normal, 0.5).rgba(), expected.rgba(), "no GPU, {offset:?}");
+      broken_gpu();
+      let waiting = laid(&photo(), &top, offset, BlendMode::Normal, 0.5);
+      assert_eq!(waiting.rgba(), expected.rgba(), "a GPU that fails, {offset:?}");
+      let mut in_place = photo();
+      lay_over(&mut in_place, &top, offset, BlendMode::Normal, 0.5);
+      assert_eq!(in_place.rgba(), expected.rgba(), "in place, {offset:?}");
+    }
+    clear_gpu_provider();
+  }
+
+  #[test]
+  fn a_layer_is_uploaded_once_however_often_the_picture_it_is_in_is_made_again() {
+    let _guard = GPU_PROVIDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    fake_gpu();
+    let layer = Image::new_from_color(3, 3, Color::from_rgba(0, 0, 0, 255));
+    let first = laid(&photo(), &layer, (0, 0), BlendMode::Normal, 1.0);
+    let second = laid(&photo(), &layer, (1, 0), BlendMode::Normal, 0.5);
+    let (_, first_passes) = gpu_run(&first).expect("a run");
+    let (_, second_passes) = gpu_run(&second).expect("a run");
+    let (a, b) = (first_passes[0][0].aux.as_ref().unwrap(), second_passes[0][0].aux.as_ref().unwrap());
+    assert!(Arc::ptr_eq(&a.rgba, &b.rgba), "the same pixels are handed over again and not copied, so the GPU keeps what it has");
+    clear_gpu_provider();
+  }
+
   /// An effect with no shader that sets each pixel to the one to its right (the last column keeps its own), so it reads one
   /// pixel around the one it changes and needs a pixel of padding at the edge of a part. A level at half the size shifts by
   /// the same one pixel there, which is what makes a test of the levels easy to follow.

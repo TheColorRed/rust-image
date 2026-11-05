@@ -6,6 +6,7 @@ build = "build.rs"
 
 [dependencies]
 abra-core = { workspace = true }
+animation = { workspace = true }
 canvas = { workspace = true }
 drawing = { workspace = true }
 adjustments = { workspace = true }

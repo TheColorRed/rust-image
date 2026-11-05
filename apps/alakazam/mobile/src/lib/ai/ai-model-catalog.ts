@@ -298,6 +298,7 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
   const source: AiModelSource = {
     type: 'plugin',
     pluginId: manifest.id,
+    author: typeof manifest.author === 'string' && manifest.author.trim() ? manifest.author.trim() : undefined,
     version: String(manifest.version),
     manifestUrl,
     manifestSha256: manifestSha256.toLowerCase(),
@@ -311,6 +312,7 @@ const pluginModels = async (item: Record<string, unknown>, addons: PluginListing
       id: manifest.id,
       name: String(manifest.name ?? manifest.id),
       description: typeof manifest.description === 'string' ? manifest.description : '',
+      author: source.author,
       version: source.version,
       enabled: item.enabled !== false,
       manifestUrl,

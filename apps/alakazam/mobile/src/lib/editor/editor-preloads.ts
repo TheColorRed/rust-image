@@ -200,6 +200,9 @@ export const preloadFor = (
   return held;
 };
 
+/** A monotonically changing id for the current photo's preload work. A worker can check it to stop work after the editor changes photos. */
+export const preloadSession = () => session;
+
 /**
  * Runs `preload` on the photo and keeps what it makes, like a control that needs it would, and gives back when it is done. It does
  * nothing for one that is made or running already. It is for building the analyses one after another, because their models are large

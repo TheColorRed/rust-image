@@ -478,7 +478,7 @@ mod tests {
     let Some(_) = gpu::context() else { return };
     let (width, height) = (96u32, 64u32);
     let component = Gizmos::new();
-    let soft = abra_uniffi::Brush::new().with_size(12).with_hardness(0.3).with_opacity(0.8);
+    let soft = abra_uniffi::Brush::new().with_size(12.0).with_hardness(0.3).with_opacity(0.8);
     let points = [(8.0, 50.0), (30.0, 12.0), (60.5, 40.0), (90.0, 8.0)];
     let mut held = None;
     let alpha_of = |frame: Option<RenderedFrame>| -> Vec<u8> {
@@ -511,8 +511,8 @@ mod tests {
     let Some(_) = gpu::context() else { return };
     let (width, height) = (1080u32, 2400u32);
     let component = Gizmos::new();
-    let glow = abra_uniffi::Brush::new().with_size(42).with_hardness(0.0).with_opacity(0.5);
-    let line = abra_uniffi::Brush::new().with_size(9).with_hardness(1.0);
+    let glow = abra_uniffi::Brush::new().with_size(42.0).with_hardness(0.0).with_opacity(0.5);
+    let line = abra_uniffi::Brush::new().with_size(9.0).with_hardness(1.0);
     let mut held = None;
     let mut times = Vec::new();
     for step in 0..300 {

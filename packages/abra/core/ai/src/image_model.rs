@@ -53,7 +53,7 @@ use crate::progress::{Listening, ReportsProgress};
 use crate::tensor::image_to_nchw;
 use crate::tiled::{TileAccumulator, TileConfig, generate_tiles};
 use abra_core::Image;
-use abra_core::crop;
+use abra_core::{Rect, transform};
 use std::path::Path;
 use std::time::Instant;
 
@@ -395,8 +395,9 @@ impl ImageModel {
 
     for tile_info in &tiles {
       // Crop tile from input
-      let mut tile_image = p_input.clone();
-      crop(tile_info.x, tile_info.y, tile_info.width, tile_info.height).apply(&mut tile_image);
+      let tile_image = transform()
+        .with_crop(Rect::new((tile_info.x, tile_info.y), (tile_info.width, tile_info.height)))
+        .applied(p_input);
 
       // Convert to tensor
       let tensor = image_to_nchw(&tile_image);

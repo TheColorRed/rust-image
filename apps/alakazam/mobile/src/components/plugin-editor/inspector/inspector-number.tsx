@@ -1,3 +1,4 @@
+import { isReal } from '@/src/lib/plugins/plugin-values';
 import { pluginEditorItems, pluginEditorRebuild } from '@/src/state/plugin-editor';
 import { memo, useEffect, useRef, useState } from 'react';
 import { InspectorNumberField } from './inspector-number-field';
@@ -35,6 +36,8 @@ export const InspectorNumber = memo(function InspectorNumber({
   const original = useRef(value);
 
   const set = (typed: number) => {
+    // What is typed that is not a number is not taken, so the plugin is never given a NaN.
+    if (!isReal(typed)) return;
     const limited = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, typed));
     setCurrent(limited);
     const item = pluginEditorItems.value.find(each => each.key === itemKey);

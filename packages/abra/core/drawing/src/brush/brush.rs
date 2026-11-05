@@ -16,7 +16,7 @@ use crate::Blend;
 #[derive(Clone, Debug)]
 pub struct Brush<'a> {
   /// The size of the brush. It is the width of a stroke, unless `width` says otherwise, and the size of a dab.
-  size: u32,
+  size: f32,
   /// How wide a stroke along a path is, when it changes along the path. Nothing means the stroke is `size` wide all the way.
   width: Option<StrokeWidth>,
   /// The shape of the brush as an area.
@@ -34,7 +34,7 @@ pub struct Brush<'a> {
 impl<'a> Default for Brush<'a> {
   fn default() -> Self {
     Brush {
-      size: 5,
+      size: 5.0,
       width: None,
       area: Area::circle((0, 0), 5),
       color: Fill::Solid(Color::black()),
@@ -59,9 +59,9 @@ impl<'a> Brush<'a> {
   }
   /// Sets the size of the brush: the size of a dab and the width of a stroke, the same all the way along it. It replaces a width set with
   /// [`Brush::with_width`].
-  /// - `p_size`: The size to set for the brush.
-  pub fn with_size(mut self, p_size: u32) -> Self {
-    self.size = p_size;
+  /// - `p_size`: The size to set for the brush, in pixels. A whole number or a fraction: a dab can be 2.5 pixels across.
+  pub fn with_size(mut self, p_size: impl Into<f64>) -> Self {
+    self.size = p_size.into().max(0.0) as f32;
     self.width = None;
     self
   }
@@ -106,7 +106,7 @@ impl<'a> Brush<'a> {
     self
   }
   /// Returns the size of the brush.
-  pub fn size(&self) -> u32 {
+  pub fn size(&self) -> f32 {
     self.size
   }
   /// Returns how wide a stroke along a path is: what was set with [`Brush::with_width`], or the brush's size all the way along.

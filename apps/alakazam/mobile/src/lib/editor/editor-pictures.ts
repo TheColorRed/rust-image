@@ -7,7 +7,7 @@ import { previewSourceImage, showingCheckpoint } from '@/src/state/preview';
 import { originalImage } from '@/src/state/session';
 import { ResizeTarget } from '@abra/core/canvas';
 import { Mask, TransformAlgorithm, type MaskLike } from '@abra/core/mask';
-import { resize } from '@abra/core/transform';
+import { transform } from '@abra/core/transform';
 import type { AbraImage } from '@alakazam/mobile';
 import { Dimensions, PixelRatio } from 'react-native';
 import { building, owning, release } from '@/src/lib/native/native-handles';
@@ -27,7 +27,7 @@ export function fitted(source: AbraImage, width: number, height: number): AbraIm
     () => source.clone() as AbraImage,
     copy => {
       if (copy.width() > width || copy.height() > height) {
-        owning(keep => keep(resize(ResizeTarget.Fit.new({ width, height }))).apply(copy));
+        owning(keep => keep(transform().withSize(ResizeTarget.Fit.new({ width, height }))).apply(copy));
       }
     },
   );

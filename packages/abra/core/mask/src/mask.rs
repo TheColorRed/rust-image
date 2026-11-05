@@ -1,6 +1,6 @@
 pub use abra_core::rgba_to_gray;
 use abra_core::{
-  Area, Channels, Color, ColorStat, Fill, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, Transform, TransformAlgorithm,
+  Area, Channels, Color, ColorStat, Fill, GrayPlane, Image, PointF, Rect, ResizeTarget, Size, TransformAlgorithm, transform,
   blend,
 };
 use std::borrow::Cow;
@@ -356,8 +356,7 @@ impl Mask {
   /// - `p_width`, `p_height`: The new size.
   /// - `p_algorithm`: How values between pixels are worked out.
   pub fn resized(&self, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm) -> Mask {
-    let mut image = self.to_image();
-    image.resize(ResizeTarget::Exact(Size::new(p_width, p_height)), p_algorithm);
+    let image = transform().with_size(ResizeTarget::Exact(Size::new(p_width, p_height))).with_algorithm(p_algorithm).applied(&self.to_image());
     Mask::from_image(image)
   }
 

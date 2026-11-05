@@ -1,9 +1,9 @@
-import { AiModel } from '@abra/core';
 import { loadAiModelAsync } from '@alakazam/mobile';
 import { release } from '@/src/lib/native/native-handles';
 
-const models: Record<string, ReturnType<typeof AiModel.load>> = {};
-const loads = new Map<string, Promise<ReturnType<typeof AiModel.load>>>();
+type LoadedModel = Awaited<ReturnType<typeof loadAiModelAsync>>;
+const models: Record<string, LoadedModel> = {};
+const loads = new Map<string, Promise<LoadedModel>>();
 const users = new Map<string, Set<string>>();
 const activeRuns = new Map<string, number>();
 const pendingUnload = new Set<string>();
@@ -86,7 +86,7 @@ const lifetimeReleaseHooks = new Map<string, Map<string, () => void>>();
 /** Gets a warmed model and keeps it alive until the AI run settles. */
 export const runWithAiModel = async <T>(
   registration: AiModelRegistration,
-  run: (model: ReturnType<typeof AiModel.load>) => Promise<T>,
+  run: (model: LoadedModel) => Promise<T>,
 ): Promise<T> => {
   const { owner, role, lifetime } = registration;
   activeRuns.set(role, (activeRuns.get(role) ?? 0) + 1);
@@ -130,7 +130,7 @@ const deferUnload = (role: string): void => {
   }, 0));
 };
 
-const load = (role: string): Promise<ReturnType<typeof AiModel.load>> => {
+const load = (role: string): Promise<LoadedModel> => {
   if (models[role]) return Promise.resolve(models[role]);
   let pending = loads.get(role);
   if (!pending) {
@@ -138,7 +138,7 @@ const load = (role: string): Promise<ReturnType<typeof AiModel.load>> => {
       .then(model => {
         models[role] = model;
         if (pendingUnload.has(role) && !users.has(role) && (activeRuns.get(role) ?? 0) === 0) unload(role);
-        return model as ReturnType<typeof AiModel.load>;
+        return model;
       })
       .finally(() => loads.delete(role));
     loads.set(role, pending);

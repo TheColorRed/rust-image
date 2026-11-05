@@ -2,7 +2,7 @@ use crate::common::*;
 
 use abra_core::Size;
 use abra_core::image::gpu::{GpuPass, GpuProcessor};
-use abra_core::transform::{ResizeTarget, Transform, TransformAlgorithm};
+use abra_core::transform::{ResizeTarget, TransformAlgorithm, transform};
 use abra_core::{Channel, Histogram};
 
 /// Past this radius the CPU blurs a half-size copy of the image and scales it back up, for speed.
@@ -23,13 +23,13 @@ fn apply_surface_blur(p_image: &mut Image, p_radius: u32, p_threshold: u8, p_ste
 
       // Downsample using bilinear for speed
       let mut downsampled = p_image.clone();
-      downsampled.resize(ResizeTarget::Exact(Size::new(new_w, new_h)), TransformAlgorithm::Bilinear);
+      transform().with_size(ResizeTarget::Exact(Size::new(new_w, new_h))).with_algorithm(TransformAlgorithm::Bilinear).apply(&mut downsampled);
 
       // Apply blur at reduced resolution
       apply_surface_blur(&mut downsampled, p_radius / factor, p_threshold, p_step);
 
       // Upsample using bicubic for better quality
-      downsampled.resize(ResizeTarget::Exact(Size::new(w, h)), TransformAlgorithm::Bicubic);
+      transform().with_size(ResizeTarget::Exact(Size::new(w, h))).with_algorithm(TransformAlgorithm::Bicubic).apply(&mut downsampled);
       *p_image = downsampled;
       return;
     }

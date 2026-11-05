@@ -1,6 +1,7 @@
 // The same whole-number steps as `draw` in linear_gradient.rs, so the GPU gives exactly the CPU's pixels: the position
 // along the gradient is the integer line `a * x + b * y + c` (in units of 2^-shift table texels), and the color is put
-// over the pixel with source-over and straight alpha in whole numbers.
+// over the pixel with source-over and straight alpha in whole numbers. Another blend mode goes through `composite` of
+// `blend_modes.wgsl` (this file is joined after it), the same as a layer with that mode.
 struct Params {
   a: i32,
   b: i32,
@@ -8,7 +9,8 @@ struct Params {
   shift: u32,
   // The overall opacity, 0 to 255.
   opacity: u32,
-  pad0: u32,
+  // The blend mode, its index in `BlendMode::ALL`. 0 is Normal.
+  mode: u32,
   pad1: u32,
   pad2: u32,
 }
@@ -44,6 +46,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let lut_index = clamp((position + half) >> params.shift, 0, lut_size - 1);
   let gradient = vec4<u32>(round(textureLoad(lut_tex, vec2<i32>(lut_index, 0), 0) * 255.0));
   let base = vec4<u32>(round(textureLoad(input_tex, pos, 0) * 255.0));
+
+  if (params.mode != 0u) {
+    let blended = composite(vec4<f32>(base), vec4<f32>(gradient), f32(params.opacity) / 255.0, params.mode);
+    textureStore(output_tex, pos, blended / 255.0);
+    return;
+  }
 
   let source_alpha = (gradient.a * params.opacity + 127u) / 255u;
   let out_alpha = source_alpha + (base.a * (255u - source_alpha) + 127u) / 255u;

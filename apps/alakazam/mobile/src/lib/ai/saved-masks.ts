@@ -15,6 +15,7 @@ import { faceBoxes, people, skinMask } from '@/src/state/analysis';
 import { historyReady, openProject } from '@/src/state/project-session';
 import { updateProject } from '@/src/state/projects';
 import { release } from '@/src/lib/native/native-handles';
+import { aiProgress } from '@/src/state/ai-progress';
 import { EDIT_SECTIONS, leafControls } from '@/src/lib/project/edit-sections';
 import type { SliderControl } from '@/src/lib/project/edit-sections';
 
@@ -242,29 +243,47 @@ export async function saveMasksInBackground() {
  * for the moment a control needs it, which offers the download.
  */
 export async function buildMasks(photo: AbraImage, isCancelled: () => boolean) {
-  const step = async (work: () => Promise<unknown>) => {
-    if (isCancelled()) return;
-    try {
-      await work();
-    } catch (error) {
-      devDebug('masks', 'background build failed:', errorMessage(error));
-    } finally {
-      // The next step loads its own models, so this step's are freed first, and only one step's models are in memory at a time.
-      unloadModelsWhenIdle();
-      // What this step found goes to disk before the next step starts, because a later step can run the phone out of memory and
-      // close the app, and what was only in memory would be found again.
-      saveMasksInBackground();
+  const progressKey = 'preload';
+  aiProgress.next({ ...aiProgress.value, [progressKey]: null });
+  let stepIndex = 0;
+  const stepCount = 2 + analysisGroups().size;
+  try {
+    const step = async (name: string, work: () => Promise<unknown>) => {
+      if (isCancelled()) return;
+      aiProgress.next({ ...aiProgress.value, [progressKey]: stepIndex / stepCount });
+      const started = Date.now();
+      try {
+        await work();
+      } catch (error) {
+        devDebug('masks', 'background build failed:', errorMessage(error));
+      } finally {
+        devDebug('masks', `${name} took`, Date.now() - started, 'ms');
+        // The next step loads its own models, so this step's are freed first, and only one step's models are in memory at a time.
+        unloadModelsWhenIdle();
+        // What this step found goes to disk before the next step starts, because a later step can run the phone out of memory and
+        // close the app, and what was only in memory would be found again.
+        saveMasksInBackground();
+        stepIndex++;
+        aiProgress.next({ ...aiProgress.value, [progressKey]: stepIndex / stepCount });
+      }
+    };
+    if (!skinMask.value) await step('skin', () => detectSkin(photo));
+    if (!people.value && personDetectionDownloaded()) {
+      await step('people', async () => {
+        const found = await detectPeople(photo, { isCancelled });
+        if (found.length > 0 && !isCancelled()) await findFaceBoxes(photo);
+      });
     }
-  };
-  if (!skinMask.value) await step(() => detectSkin(photo));
-  if (!people.value && personDetectionDownloaded()) {
-    await step(async () => {
-      const found = await detectPeople(photo, { isCancelled });
-      if (found.length > 0 && !isCancelled()) await findFaceBoxes(photo);
-    });
+    // The faces, the hair and the clothes are parts of people, so a photo with none has nothing for them to find. A control that is
+    // used on such a photo makes them itself.
+    if (!people.value?.length) return;
+    for (const [name, preload] of analysisGroups()) await step(name, () => buildAnalysis(preload, photo));
+  } finally {
+    if (isCancelled()) {
+      const { [progressKey]: _cancelled, ...others } = aiProgress.value;
+      aiProgress.next(others);
+    } else {
+      aiProgress.next({ ...aiProgress.value, [progressKey]: 1 });
+    }
   }
-  // The faces, the hair and the clothes are parts of people, so a photo with none has nothing for them to find. A control that is
-  // used on such a photo makes them itself.
-  if (!people.value?.length) return;
-  for (const preload of analysisGroups().values()) await step(() => buildAnalysis(preload, photo));
 }

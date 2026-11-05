@@ -39,6 +39,9 @@ plugins/
 | `name`         | yes      | The name to show.                                                                                                |
 | `version`      | yes      | The version, such as `1.0.0`.                                                                                    |
 | `description`  | no       | What the plugin does.                                                                                            |
+| `author`       | no       | Who made the plugin, as the store page shows it. Without it the page shows the author part of the `id`.          |
+| `store`        | no       | What the store page shows: `screenshots` (image files) and `tags`. Nothing here changes how the plugin runs.     |
+| `assets`       | no       | Extra files to ship, such as sprites: files, folders (`sprites/`) or globs (`sounds/*.ogg`). See [Assets](#assets).  |
 | `contributes`  | yes      | What it adds: `models`, `pipelines`, `scripts`, `controls` or `workspaces`. At least one contribution is needed. |
 | `settings`     | no       | An ordered list of setting fields. Supports `text` and single-select `option`.                                   |
 | `dependencies` | no       | The plugins that must be installed for this one to be used. See [Dependencies](#dependencies).                   |
@@ -147,6 +150,18 @@ export function inspectorGUI() {
 
 To add a heading, like an `<h1>` to `<h6>`: `inspector.header('Options')` is an `h1`, and `inspector.header('Options', { level: 2 })` is an `h2`. The `level` option is 1 to 6 and defaults to 1.
 
+To fold controls away, start a group: `inspector.group('Motion')` adds a title with an arrow, and every control added after it, up to the next `inspector.group`, is inside it. Tapping the title shows or hides them. Controls added before the first group are always showing. A group starts folded; pass `{ open: true }` to start it unfolded. Once the user has tapped a group their choice stays while the editor is open, even though the controls are made again after each change.
+
+To let a group be switched on and off as a whole, pass `enabled` and `onToggle`: `inspector.group('Trail', { enabled: trailOn, onToggle: on => (trailOn = on) })` puts a checkbox before the title, ticked when `enabled` is `true`. The arrow still only folds the group. The editor runs the plugin again after the checkbox is tapped, and what the group's controls change is still kept while it is off, so the plugin decides what an off group means.
+
+```ts
+inspector.slider('Opacity', { max: 100 }); // always showing
+inspector.group('Motion');
+inspector.slider('Speed', { max: 10 });
+inspector.group('Color', { open: true });
+inspector.color('Tint');
+```
+
 To add two number fields side by side, such as a size or a point:
 
 ```ts
@@ -197,6 +212,62 @@ inspector.toggle('Keep Aspect Ratio', {
 ```
 
 `toggle` takes `value` (false by default) and `onChange`. Like `select` and `number` it changes what the plugin makes and is not a drag, so the editor runs the plugin's controls and `previewCanvas` again after each change.
+
+#### Color
+
+`color` shows a swatch of a color with its web color beside it, and opens the app's color picker when it is tapped:
+
+```ts
+inspector.color('Glow', {
+  value: [255, 170, 40],
+  onChange: ([red, green, blue]) => {
+    glow = [red, green, blue];
+  },
+});
+```
+
+The picker has a square to drag a finger over for how colorful and how bright the color is, a bar for which color it is, the new color beside the one it started as (tap the current one to go back to it), named colors for the common choices, and boxes to type the color as numbers or a web color. `value` is `[red, green, blue]`, each from 0 to 255, and white by default. With `alpha: true` the value has a fourth number, the strength from 0 to 255, and the picker has a Strength bar. `title` is the words over the picker (the control's name by default) and `swatches` is a list of `{ label, rgb: [r, g, b] }` for the named colors it shows (a common set by default), so a plugin can offer the colors that suit what it makes. `onChange` gets the color when the person presses OK, and the editor runs the plugin again after it.
+
+`onPreview` gets the color as the person drags in the picker, before OK, so the plugin can show it at once, and it is called once more with the color the control had if the picker is cancelled, so the change is taken back. The editor does not run the plugin again for it, so change what is showing (as a slider's `onChange` does), such as a color in an animation that is already playing.
+
+To ask for a color anywhere else in a script, `app.colors.pick({ title, value, alpha, swatches, onPreview })` opens the same picker and answers with the color on OK (in the same form) or `null` on Cancel.
+
+#### Gradient
+
+`gradient` shows a bar of a gradient (over a checkerboard, so how strong it is shows), and opens the gradient editor when it is tapped:
+
+```ts
+inspector.gradient('Color Over Life', {
+  value: {
+    colors: [{ at: 0, color: [255, 240, 160] }, { at: 1, color: [220, 40, 10] }],
+    alphas: [{ at: 0, alpha: 255 }, { at: 1, alpha: 0 }],
+  },
+  onChange: value => {
+    fire = value;
+  },
+});
+```
+
+The editor shows the gradient as a bar with the strength stops above it and the color stops below it, as in Unity. Drag a stop to move it, touch an empty place to add one, and tap a stop to set its color (it opens the color picker), its strength or its location, or to remove it. `at` is from 0 (the start) to 1 (the end), `alpha` from 0 (not there) to 255 (solid), and each list needs at least one stop. `title` and `swatches` are as for `color`, and `onChange` and `onPreview` work the same way (`onChange` on OK, and the editor runs the plugin again after it; `onPreview` as the gradient is edited, and once more with the old gradient on Cancel).
+
+#### Curve
+
+`curve` shows a small drawing of a curve across the row, and opens the curve editor when it is tapped:
+
+```ts
+inspector.curve('Size Over Life', {
+  value: [[0, 0.2], [1, 1]],
+  presets: [
+    { label: 'Grow', value: [[0, 0.2], [1, 1]] },
+    { label: 'Shrink', value: [[0, 1], [1, 0.2]] },
+  ],
+  onChange: points => {
+    size = points;
+  },
+});
+```
+
+The editor draws the curve on a grid with its points to drag. Touch an empty place to add a point, and tap a point to set its time and value or to remove it. The curve is a smooth line through the points, drawn by the library's own curve, so it is the line your plugin makes when it builds a `Curve` from the same points (the library's `x` runs from 0 to 255, so multiply the first number of each point by 255). Each point is `[x, y]` with `x` from 0 (the start) to 1 (the end) and `y` from `min` to `max` (0 and 1 by default, which is also the range of the editor). The curve needs a point, and is flat before the first point and after the last. `presets` are named shapes to start from, `title` is the words over the editor, and `onChange` and `onPreview` work as for `gradient`.
 
 To add a box for a line of text:
 
@@ -249,7 +320,7 @@ app.events.taps.subscribe(({ imageX, imageY }) => {
 });
 ```
 
-`header` takes `back`, which shows a Back button with the heading, and `inspector.refresh()` runs `inspectorGUI` and `previewCanvas` again for a change that did not come from one of the controls (a tap on the preview). `canvas.childAt(x, y)` gives the canvas on top at a point (in the canvas's own pixels), and `canvas.quadInParent()` gives the four corners of a canvas as it sits in its parent, after its position, scale and rotation. `app.events.taps` gives `imageX` and `imageY` in the pixels of the canvas `previewCanvas` returned.
+`header` takes `back`, which shows a Back button with the heading, and `inspector.refresh()` runs `inspectorGUI` and `previewCanvas` again for a change that did not come from one of the controls (a tap on the preview). `canvas.childAt(x, y)` gives the canvas on top at a point (in the canvas's own pixels), and `canvas.quadInParent()` gives the four corners of a canvas as it sits in its parent, after its position, scale and rotation. `app.events.taps` gives `imageX` and `imageY` in the pixels of the canvas `previewCanvas` returned. `canvas.setViewInFrame(width, height, { zoom, turn, pan })` zooms, turns and moves a picture canvas inside a frame it has to cover (a photo in a cell): a zoom of 1 just covers the frame, and the library keeps it from showing empty corners at any turn or move, so a pinch only has to pass the numbers on.
 
 To show what is picked, draw a frame with a gizmo:
 
@@ -267,6 +338,15 @@ release(red);
 ```
 
 `app.gizmos.setBox(name, corners)` draws a frame round four corners (top left, top right, bottom right, bottom left) in pixels of the canvas, and the app keeps it on the picture as the preview is zoomed, moved and turned. It is drawn in the color set with `app.gizmos.color(color)`, which stays until it is set again (`null` goes back to white), and as wide as `app.gizmos.size(pixels)` says (3 screen pixels by default). A gizmo that is already drawn keeps the color it was drawn in. A soft dark line is drawn under each frame so it shows on any picture. Setting a name again moves it, and `app.gizmos.remove(name)` takes it away. They go away when the workspace closes. Move a frame again when what it frames moves (a slider that turns the cell).
+
+`app.gizmos.setPoint(name, [x, y])` draws a dot at a point given as shares of the canvas: `[0, 0]` is its top left and `[1, 1]` its bottom right. The dot has a dark halo, a white ring and the gizmo color in the middle, stays the same size on the screen at any zoom, and follows the picture. `app.gizmos.pickPoint(name, onPick)` lets the person tap the preview to choose a point: each tap on the canvas calls `onPick` with the point in the same shares and puts the dot there (a tap off the canvas does nothing), and it stops when the workspace closes. Use it for any point the person chooses, such as where an effect comes from or where a gradient ends:
+
+```ts
+app.gizmos.pickPoint('source', point => {
+  source = point;
+  inspector.refresh(); // makes the preview again
+});
+```
 
 To add a slider:
 
@@ -339,6 +419,47 @@ The build updates the `files:` list and SHA-256 hashes in `plugin.yml`, then wri
 In this repository, `node scripts/build-plugins.mjs <folder>` delegates to the same npm builder and also type-checks app-owned plugins. `scripts/pack-plugins.mjs [folder ...]` is for maintainers preparing catalog uploads; plugin authors do not need it. It checks files and assembles upload folders under `target/plugin-packages/`, including model files from the AI crates when needed. Each upload folder contains exactly `plugin.yml` and `<id>.akzx`; the catalog entry has `uri`/`sha256` for the manifest and `archive_uri`/`archive_sha256` for the `.akzx` package. The app reads the manifest for metadata and dependencies, then installs the package after verifying both hashes and each file hash in the manifest.
 
 A plugin script runs with all of the app's rights. Install only packages from authors you trust. File hashes detect a damaged or mismatched package; they do not identify who made it.
+
+## Assets
+
+List the extra files a plugin needs (sprites, sounds, data) under `assets:`. Each entry is a file, a folder (everything under it) or a glob, relative to the plugin's folder:
+
+```yaml
+assets:
+  - sprites/
+  - sounds/*.ogg
+  - noise.png
+```
+
+The build expands the entries, hashes every file it finds and adds them to `files:`, so they are packaged, installed and synced by the dev server with the rest of the plugin. An entry that matches no file fails the build. In a script, `app.assets.path('sprites/spark.png')` from `@alakazam/sdk` gives the path of an asset on the device; it throws for a file the plugin did not ship.
+
+## Saves
+
+A plugin that makes things for other projects to use later (a particle maker's systems, say) keeps them with `app.saves` from `@alakazam/sdk`. A save is named text, so write JSON:
+
+```ts
+import { app } from '@alakazam/sdk';
+
+app.saves.write('fire.json', JSON.stringify(system));
+app.saves.list(); // ['fire.json', 'snow.json']
+const text = app.saves.read('fire.json'); // undefined when there is no such save
+app.saves.remove('fire.json');
+```
+
+Saves are shared by every project and are the plugin's own: a plugin cannot reach another's. They are kept beside the plugins and not inside the plugin, so removing a plugin keeps what it saved, and installing it again finds the saves where they were. A name is letters, digits, spaces, `-`, `_` and `.` (at most 100, and it cannot start with a dot), a save is at most 5 MB, and each function throws for a name that is not allowed or a write the device cannot do. Use `app.saved` instead for what belongs only to one project.
+
+## Numbers that are not real
+
+A number that is NaN or infinite is easy to make (a field a save did not have, a division by zero) and hard to find: it goes on to the library as a radius or a size, and the picture is just blank. The editor guards the edges for every plugin, so a plugin does not have to remember to:
+
+- **Controls:** a number a plugin gives a control (`value`, `min`, `max`, `step`, a color channel) that is not real is replaced (the lowest value for a slider or number, white for a color) and said in the log, once, with the plugin's id. A slider whose `max` is not above its `min` gets a range of one. A step that is not above 0 is 1.
+- **Callbacks:** the editor never calls `onChange` with a number that is not real. A slider, number or size field ignores a value that is NaN or infinite, so a plugin's `onChange` only ever sees real numbers.
+- **Saved data:** `app.saved.set` says in the log when what it was given holds a number that is not real, because JSON writes it as `null` and it is read back as nothing. The editor cannot fix that for you, since it does not know what the value is for, so check what you read back from `app.saved` and `app.saves`.
+- **Sprites:** the library's `Sprites` effect leaves out a sprite or trail that has a number that is not real, so one bad value draws nothing and does not put a dot at the corner of the picture.
+
+## README and changelog
+
+A plugin can have a `README.md` and a `CHANGELOG.md` in its folder, next to `plugin.yml`. Both are optional. When the build finds them it adds them to `files:` with their hashes, so they are packaged and installed with the plugin. The app finds them through `readme_path` and `changelog_path` on the plugin returned by `scanPlugins`; each is empty when the plugin does not ship that file.
 
 ## Dependencies
 

@@ -8,21 +8,39 @@ use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+
+/// The thread count sessions use when their config does not say (see [`OnnxConfig::set_default_threads`]). 0 is every core.
+static DEFAULT_THREADS: AtomicUsize = AtomicUsize::new(0);
+/// Whether sessions made without a choice spin their threads (see [`OnnxConfig::set_default_spinning`]). 0 leaves ONNX Runtime's own setting,
+/// 1 is on and 2 is off.
+static DEFAULT_SPINNING: AtomicU8 = AtomicU8::new(0);
 
 /// Configuration for ONNX session creation.
 #[derive(Debug)]
 pub struct OnnxConfig {
   /// Graph optimization level (default: Level3 for maximum optimization).
   pub optimization_level: GraphOptimizationLevel,
-  /// Number of threads for intra-op parallelism (default: auto-detect).
+  /// Number of threads for intra-op parallelism (default: auto-detect, unless a process-wide default was set).
   pub num_threads: Option<usize>,
+  /// Whether the threads keep spinning while they wait for work, which answers a little sooner and uses a core while it does. `None` leaves
+  /// ONNX Runtime's own choice (on), unless a process-wide default was set.
+  pub intra_op_spinning: Option<bool>,
 }
 
 impl Default for OnnxConfig {
   fn default() -> Self {
     Self {
       optimization_level: GraphOptimizationLevel::Level3,
-      num_threads: None,
+      num_threads: match DEFAULT_THREADS.load(Ordering::Relaxed) {
+        0 => None,
+        threads => Some(threads),
+      },
+      intra_op_spinning: match DEFAULT_SPINNING.load(Ordering::Relaxed) {
+        1 => Some(true),
+        2 => Some(false),
+        _ => None,
+      },
     }
   }
 }
@@ -43,6 +61,32 @@ impl OnnxConfig {
   pub fn with_threads(mut self, p_threads: usize) -> Self {
     self.num_threads = Some(p_threads);
     self
+  }
+
+  /// Sets whether the threads keep spinning while they wait for work. Turn it off for a session that runs beside something that has to stay
+  /// responsive (a screen), since spinning threads take cores while they wait.
+  pub fn with_intra_op_spinning(mut self, p_spinning: bool) -> Self {
+    self.intra_op_spinning = Some(p_spinning);
+    self
+  }
+
+  /// Sets the number of threads every session uses unless its own config says otherwise, for sessions made from now on. `None` goes back to
+  /// every core. An application that shares the device with a screen sets this once at start, so a model run leaves cores for the screen.
+  pub fn set_default_threads(p_threads: Option<usize>) {
+    DEFAULT_THREADS.store(p_threads.unwrap_or(0), Ordering::Relaxed);
+  }
+
+  /// Sets whether every session's threads spin while they wait, unless its own config says otherwise, for sessions made from now on. `None`
+  /// goes back to ONNX Runtime's own choice.
+  pub fn set_default_spinning(p_spinning: Option<bool>) {
+    DEFAULT_SPINNING.store(
+      match p_spinning {
+        None => 0,
+        Some(true) => 1,
+        Some(false) => 2,
+      },
+      Ordering::Relaxed,
+    );
   }
 }
 
@@ -105,12 +149,18 @@ impl OnnxSession {
     let num_threads =
       p_config.num_threads.unwrap_or_else(|| std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4));
 
-    let session = Session::builder()
+    let mut builder = Session::builder()
       .map_err(|e| AiError::model_load_failed(format!("Failed to create session builder: {}", e)))?
       .with_optimization_level(p_config.optimization_level)
       .map_err(|e| AiError::model_load_failed(format!("Failed to set optimization level: {}", e)))?
       .with_intra_threads(num_threads)
-      .map_err(|e| AiError::model_load_failed(format!("Failed to set thread count: {}", e)))?
+      .map_err(|e| AiError::model_load_failed(format!("Failed to set thread count: {}", e)))?;
+    if let Some(spinning) = p_config.intra_op_spinning {
+      builder = builder
+        .with_intra_op_spinning(spinning)
+        .map_err(|e| AiError::model_load_failed(format!("Failed to set thread spinning: {}", e)))?;
+    }
+    let session = builder
       .commit_from_memory(p_bytes)
       .map_err(|e| AiError::model_load_failed(format!("Failed to load ONNX model: {}", e)))?;
 
@@ -289,5 +339,32 @@ impl OnnxSession {
     let out_data: Vec<f32> = out_view.iter().copied().collect();
 
     Ok((out_shape_vec, out_data))
+  }
+}
+
+#[cfg(test)]
+mod config_tests {
+  use super::*;
+
+  /// The process-wide defaults are shared by every test, so the tests that change them take turns.
+  static DEFAULTS_LOCK: Mutex<()> = Mutex::new(());
+
+  #[test]
+  fn a_config_follows_the_process_wide_defaults_unless_it_says_otherwise() {
+    let _turn = DEFAULTS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(OnnxConfig::default().num_threads, None, "every core until an application chooses");
+    assert_eq!(OnnxConfig::default().intra_op_spinning, None, "ONNX Runtime's own choice until an application chooses");
+
+    OnnxConfig::set_default_threads(Some(3));
+    OnnxConfig::set_default_spinning(Some(false));
+    let config = OnnxConfig::new();
+    assert_eq!((config.num_threads, config.intra_op_spinning), (Some(3), Some(false)));
+    let own = OnnxConfig::new().with_threads(7).with_intra_op_spinning(true);
+    assert_eq!((own.num_threads, own.intra_op_spinning), (Some(7), Some(true)), "its own choice wins");
+
+    OnnxConfig::set_default_threads(None);
+    OnnxConfig::set_default_spinning(None);
+    assert_eq!(OnnxConfig::default().num_threads, None);
+    assert_eq!(OnnxConfig::default().intra_op_spinning, None);
   }
 }

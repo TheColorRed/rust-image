@@ -1,4 +1,4 @@
-use crate::{Image, IntoNumber, PointF, ResizeTarget, TransformAlgorithm, crop, resize};
+use crate::{Image, IntoNumber, PointF, Rect, ResizeTarget, TransformAlgorithm, transform};
 
 /// A zoom that has been described but not yet run. Create one with [`zoom`], optionally set the algorithm
 /// with [`ZoomImage::with_algorithm`], then run it with [`ZoomImage::apply`].
@@ -35,8 +35,12 @@ impl ZoomImage {
     let x = (anchor.x / width as f32 * max_x).round().clamp(0.0, max_x) as u32;
     let y = (anchor.y / height as f32 * max_y).round().clamp(0.0, max_y) as u32;
 
-    crop(x, y, crop_width, crop_height).apply(p_image);
-    resize(ResizeTarget::Exact((width, height).into())).with_algorithm(self.algorithm).apply(p_image);
+    // The part is cut out and enlarged back to the original size in one transform.
+    transform()
+      .with_crop(Rect::new((x, y), (crop_width, crop_height)))
+      .with_size(ResizeTarget::Exact((width, height).into()))
+      .with_algorithm(self.algorithm)
+      .apply(p_image);
   }
 }
 

@@ -1,4 +1,5 @@
 import { setControlTraits } from '@/src/state/control-traits';
+import { type ComponentType } from 'react';
 import { type ImageSourcePropType } from 'react-native';
 import { skinMaskSized } from '@/src/lib/ai/analysis';
 import { preloadFor } from '@/src/lib/editor/editor-preloads';
@@ -12,6 +13,7 @@ import { blur } from '@/src/lib/project/edit-sections/blur';
 import { cleanup } from '@/src/lib/project/edit-sections/cleanup';
 import { detail } from '@/src/lib/project/edit-sections/detail';
 import { effects } from '@/src/lib/project/edit-sections/effects';
+import { overlays } from '@/src/lib/project/edit-sections/overlays';
 import { BLEMISH_TOOL_KEY, CROP_TOOL_KEY, RED_EYE_TOOL_KEY, SKIN_SMOOTH_KEY, SKIN_TAN_KEY, SKIN_TONE_KEY } from '@/src/lib/project/edit-sections/keys';
 import { colorization } from '@/src/lib/project/edit-sections/mood';
 import { sharpen } from '@/src/lib/project/edit-sections/sharpen';
@@ -364,7 +366,11 @@ export type MixedControl = {
  * A picture the user taps to choose an item: either a file shipped with the app, or the thumbnail the library renders for the
  * item's key (the same way effect thumbnails are drawn).
  */
-export type PickerPicture = { kind: 'asset'; source: ImageSourcePropType } | { kind: 'rendered' };
+export type PickerPicture =
+  | { kind: 'asset'; source: ImageSourcePropType }
+  | { kind: 'rendered' }
+  /** An icon with the item's label under it, for a choice that is not a look of the photo (make your own, take from the photo). */
+  | { kind: 'icon'; icon: ComponentType<{ color?: string; size?: number }> };
 
 export type PickerItem = {
   key: string;
@@ -372,6 +378,18 @@ export type PickerItem = {
   picture: PickerPicture;
   /** What tapping the item does, besides committing its `value` when the picker has a `commitTo`. */
   onTap?: () => void;
+  /**
+   * Tapping the item starts something that makes the choice later (a dialog that can be cancelled) instead of committing its `value` at
+   * once. The item is still marked when its `value` is what the picker has saved, but nothing is saved by the tap itself: whatever `pick`
+   * starts saves the choice when it is done, so cancelling leaves things as they were.
+   */
+  pick?: () => void;
+  /**
+   * A sub-menu: tapping the item shows these items in place of the row, with the item's label added to the breadcrumbs. They stay until the
+   * person steps back with the back button, as from any other sub-menu, so several can be tried one after the other. The item itself
+   * chooses nothing. The items may have a `thumb`, which is drawn like any other picker item's.
+   */
+  items?: PickerItem[];
   /** The number saved when the item is chosen, for a picker with a `commitTo`. */
   value?: number;
   /**
@@ -680,6 +698,7 @@ export const EDIT_SECTIONS: EditSection[] = [
   sharpen,
   effects,
   specialEffects,
+  overlays,
   blur,
   detail,
   cleanup,

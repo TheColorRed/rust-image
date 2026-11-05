@@ -22,18 +22,20 @@ let brush = Brush::new()
   .with_opacity(0.9);
 ```
 
-Defaults are size `5`, a circular area with radius `5`, black color, hardness `0.0`, and opacity `1.0`.
+Defaults are size `5` (a whole number or a fraction: `with_size(2.5)`), a circular area with radius `5`, black color, hardness `0.0`, and opacity `1.0`.
 
 Hardness and opacity are clamped to `0.0..=1.0`:
 
 - Hardness `0.0` produces a soft falloff.
-- Hardness `1.0` produces a sharp edge.
+- Hardness `1.0` produces a sharp edge that is solid all the way out to the brush's size (with about a pixel of anti-aliasing at the edge), so a size 12 brush at hardness `1.0` is 12 pixels wide.
 - Opacity `0.0` is transparent.
 - Opacity `1.0` is fully opaque.
 
 The brush fill can be a solid color, gradient, or image fill.
 
 ## Paint a dab
+
+A round dab of a solid color, and a stroke of a solid color (or of a gradient that runs along the stroke's own path), are drawn by the stamping engine: on the GPU when there is one, and the image waits (see `abra_core::image::recipe`) so a run of dabs and strokes costs one shader run; otherwise on the CPU with the same pixels. Other fills, such as an image fill, and brushes with another tip shape are drawn by the rasterizer on the CPU.
 
 Use `Painter::dab_brush` to paint one dab at an image coordinate:
 
@@ -117,7 +119,7 @@ let points = [(40.0, 180.0), (200.0, 120.0), (360.0, 200.0), (600.0, 150.0)];
 let line = stroke_overlay(640, 360, &points, &brush);
 ```
 
-The brush's size, hardness, opacity and solid color are used (a gradient or image fill draws in black), and so is its width, read along the points: `0` is the first point and `1` is the last, by length. A line of more than `MAX_STROKE_POINTS` (256) points is thinned evenly, keeping both ends. A width that tapers to a point follows the end of the line as it grows, since the end is always `1`.
+The line is drawn the way every brush edge is, by the brush's hardness, so it looks like the stroke you get from `Painter::stroke_with_brush`. The brush's size, hardness, opacity and solid color are used (a gradient or image fill draws in black), and so is its width, read along the points: `0` is the first point and `1` is the last, by length. A line of more than `MAX_STROKE_POINTS` (256) points is thinned evenly, keeping both ends. A width that tapers to a point follows the end of the line as it grows, since the end is always `1`.
 
 ## Fill an area with brush dabs
 

@@ -1,4 +1,5 @@
 use crate::Shader;
+use crate::falloff::brush_falloff;
 
 /// Brush shader that wraps an inner shader and applies radial alpha falloff.
 ///
@@ -60,21 +61,7 @@ impl BrushShader {
       return 0.0;
     }
 
-    let normalized_dist = distance / self.max_distance;
-
-    let falloff = if self.hardness < 0.5 {
-      let t = self.hardness * 2.0;
-      let quadratic = 1.0 - (normalized_dist * normalized_dist);
-      let linear = 1.0 - normalized_dist;
-      quadratic * (1.0 - t) + linear * t
-    } else {
-      let t = (self.hardness - 0.5) * 2.0;
-      let linear = 1.0 - normalized_dist;
-      let hard_edge = if normalized_dist < 0.5 { 1.0 } else { 0.0 };
-      linear * (1.0 - t) + hard_edge * t
-    };
-
-    falloff.max(0.0)
+    brush_falloff(distance, self.max_distance, self.hardness)
   }
 }
 

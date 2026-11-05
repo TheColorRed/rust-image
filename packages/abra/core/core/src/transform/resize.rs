@@ -1,4 +1,4 @@
-use crate::image::gpu::{CpuProcessor, GpuPass, GpuProcessor, Hardware, ready_gpu_provider};
+use crate::image::gpu::{GpuPass, Hardware, ready_gpu_provider};
 use crate::transform::TransformAlgorithm;
 use crate::transform::interpolation;
 use crate::{Channels, Image, Size};
@@ -56,7 +56,7 @@ pub(crate) fn get_resize_algorithm(
 }
 
 /// Resolves an image resize target to exact pixel dimensions, for an image of `p_old_width` x `p_old_height`.
-fn target_dimensions(p_old_width: u32, p_old_height: u32, p_target: ResizeTarget) -> Option<(u32, u32)> {
+pub(crate) fn target_dimensions(p_old_width: u32, p_old_height: u32, p_target: ResizeTarget) -> Option<(u32, u32)> {
   let (old_width, old_height) = (p_old_width, p_old_height);
   match p_target {
     ResizeTarget::Exact(size) => Some((size.width.max(0.0) as u32, size.height.max(0.0) as u32)),
@@ -87,132 +87,56 @@ fn target_dimensions(p_old_width: u32, p_old_height: u32, p_target: ResizeTarget
   }
 }
 
-/// A resize that has been described but not yet run. Create one with [`resize`], optionally set the algorithm
-/// with [`ResizeImage::with_algorithm`], then run it with [`ResizeImage::apply`].
-pub struct ResizeImage {
-  pub target: ResizeTarget,
-  pub algorithm: Option<TransformAlgorithm>,
-  /// Which hardware resizes. `Auto`, the default, follows the `gpu.enabled` setting and uses the CPU when no GPU is ready or the GPU
-  /// fails.
-  pub hardware: Hardware,
+/// The resampled pixels of `p_image` at `p_width` x `p_height`, from the GPU when `p_hardware` allows it, and from the CPU otherwise,
+/// including when the GPU fails.
+fn resample_pixels(
+  p_image: &Image, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm, p_hardware: Hardware,
+) -> Vec<u8> {
+  let (old_width, old_height) = p_image.dimensions::<u32>();
+  if let Some(provider) = ready_gpu_provider(p_hardware)
+    && let Ok(pixels) = (provider.process)(
+      &[resample_passes((old_width, old_height), (p_width, p_height), Some(p_algorithm))],
+      old_width,
+      old_height,
+      p_image.rgba(),
+    )
+  {
+    return pixels;
+  }
+  interpolation::resample(p_image, p_width, p_height, p_algorithm.interpolation())
 }
 
-impl ResizeImage {
-  /// Sets the resizing algorithm. When `None` (the default), the best algorithm is selected automatically.
-  pub fn with_algorithm(mut self, p_algorithm: impl Into<Option<TransformAlgorithm>>) -> Self {
-    self.algorithm = p_algorithm.into();
-    self
+/// Resamples the image to `p_width` x `p_height` on the hardware `p_hardware` names. `None` picks the algorithm from how much the image
+/// is scaled. Nothing happens when the size is the same as the image's.
+pub(crate) fn resample_to(
+  p_image: &mut Image, p_width: u32, p_height: u32, p_algorithm: Option<TransformAlgorithm>, p_hardware: Hardware,
+) {
+  let (old_width, old_height) = p_image.dimensions::<u32>();
+  if (p_width == old_width && p_height == old_height) || p_width == 0 || p_height == 0 {
+    return;
   }
-
-  /// Chooses the hardware that resizes: the CPU, the GPU (the CPU when there is no GPU, or it fails), or `Auto`, which follows the
-  /// `gpu.enabled` setting.
-  pub fn with_hardware(mut self, p_hardware: Hardware) -> Self {
-    self.hardware = p_hardware;
-    self
-  }
-
-  /// The resized pixels of `p_image` at `p_width` x `p_height`, from the GPU when `p_hardware` allows it, and from the CPU
-  /// otherwise, including when the GPU fails.
-  fn resample(
-    &self, p_image: &Image, p_width: u32, p_height: u32, p_algorithm: TransformAlgorithm, p_hardware: Hardware,
-  ) -> Vec<u8> {
-    let (old_width, old_height) = p_image.dimensions::<u32>();
-    if let Some(gpu) = self.gpu()
-      && let Some(provider) = ready_gpu_provider(p_hardware)
-      && let Ok(pixels) =
-        (provider.process)(&[gpu.passes(old_width, old_height)], old_width, old_height, p_image.rgba())
-    {
-      return pixels;
-    }
-    interpolation::resample(p_image, p_width, p_height, p_algorithm.interpolation())
-  }
-
-  /// Resizes the image on the hardware set with [`ResizeImage::with_hardware`]. Nothing happens when the resolved dimensions are the
-  /// same as the image's.
-  pub fn apply(&self, p_image: &mut Image) {
-    let (old_width, old_height) = p_image.dimensions::<u32>();
-    let Some((width, height)) = target_dimensions(old_width, old_height, self.target) else {
-      return;
-    };
-    if width == old_width && height == old_height {
-      return;
-    }
-
-    let algorithm = get_resize_algorithm(self.algorithm, old_width, old_height, width, height);
-    let pixels = self.resample(p_image, width, height, algorithm, self.hardware);
-    p_image.set_pixels(width, height, pixels, Channels::RGBA);
-  }
-
-  /// Returns a resized copy and leaves the source untouched. Only the output is allocated, so this is cheaper
-  /// than cloning and then calling [`ResizeImage::apply`].
-  pub fn resized(&self, p_image: &Image) -> Image {
-    let (old_width, old_height) = p_image.dimensions::<u32>();
-    let Some((width, height)) = target_dimensions(old_width, old_height, self.target) else {
-      return p_image.clone();
-    };
-    if width == old_width && height == old_height {
-      return p_image.clone();
-    }
-
-    let algorithm = get_resize_algorithm(self.algorithm, old_width, old_height, width, height);
-    let pixels = self.resample(p_image, width, height, algorithm, self.hardware);
-    Image::new_from_pixels(width, height, pixels, Channels::RGBA)
-  }
+  let algorithm = get_resize_algorithm(p_algorithm, old_width, old_height, p_width, p_height);
+  let pixels = resample_pixels(p_image, p_width, p_height, algorithm, p_hardware);
+  p_image.set_pixels(p_width, p_height, pixels, Channels::RGBA);
 }
 
-impl CpuProcessor for ResizeImage {
-  /// Resizes on the CPU, whatever the hardware setting.
-  fn process(&self, p_image: &mut Image) {
-    ResizeImage {
-      target: self.target,
-      algorithm: self.algorithm,
-      hardware: Hardware::Cpu,
-    }
-    .apply(p_image);
+/// The one pass that resamples an image of `p_from` to `p_to` on the GPU (see [`GpuPass::output`]), or none when the size is the same.
+pub(crate) fn resample_passes(
+  p_from: (u32, u32), p_to: (u32, u32), p_algorithm: Option<TransformAlgorithm>,
+) -> Vec<GpuPass> {
+  if p_from == p_to || p_to.0 == 0 || p_to.1 == 0 {
+    return Vec::new();
   }
-
-  fn gpu(&self) -> Option<&dyn GpuProcessor> {
-    Some(self)
-  }
-
-  /// The size of the result depends on the size of the image, so the resize cannot be run on a part of it.
-  fn positional(&self) -> bool {
-    true
-  }
-}
-
-impl GpuProcessor for ResizeImage {
-  /// One pass that writes the resized image (see [`GpuPass::output`]), or none when the resize changes nothing.
-  fn passes(&self, p_width: u32, p_height: u32) -> Vec<GpuPass> {
-    let Some((width, height)) = target_dimensions(p_width, p_height, self.target) else {
-      return Vec::new();
-    };
-    if (width == p_width && height == p_height) || width == 0 || height == 0 {
-      return Vec::new();
-    }
-    let algorithm = get_resize_algorithm(self.algorithm, p_width, p_height, width, height);
-    // The shader finds the spot an output pixel reads from the sizes of its two textures, so all it is told is the algorithm.
-    let uniforms: Vec<u8> = [algorithm.interpolation().shader_mode().to_le_bytes(), [0; 4], [0; 4], [0; 4]].concat();
-    vec![GpuPass::new(RESIZE_SHADER, uniforms).with_output(width, height).with_pixel_exact()]
-  }
-}
-
-/// Resizes an image according to an exact or aspect-preserving target.
-/// # Arguments
-/// - `p_target`: The desired dimensions or resizing strategy.
-///
-/// The resizing algorithm is chosen automatically unless set with [`ResizeImage::with_algorithm`].
-pub fn resize(p_target: ResizeTarget) -> ResizeImage {
-  ResizeImage {
-    target: p_target,
-    algorithm: None,
-    hardware: Hardware::Auto,
-  }
+  let algorithm = get_resize_algorithm(p_algorithm, p_from.0, p_from.1, p_to.0, p_to.1);
+  // The shader finds the spot an output pixel reads from the sizes of its two textures, so all it is told is the algorithm.
+  let uniforms: Vec<u8> = [algorithm.interpolation().shader_mode().to_le_bytes(), [0; 4], [0; 4], [0; 4]].concat();
+  vec![GpuPass::new(RESIZE_SHADER, uniforms).with_output(p_to.0, p_to.1).with_pixel_exact()]
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::transform;
 
   fn image(p_width: u32, p_height: u32) -> Image {
     Image::new_from_pixels(p_width, p_height, &[10, 20, 30, 255].repeat((p_width * p_height) as usize), Channels::RGBA)
@@ -221,17 +145,17 @@ mod tests {
   #[test]
   fn builder_resizes_to_the_target() {
     let mut img = image(20, 10);
-    resize(ResizeTarget::Exact(Size::new(8, 4))).apply(&mut img);
+    transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Exact(Size::new(8, 4))).apply(&mut img);
     assert_eq!(img.dimensions::<u32>(), (8, 4));
 
-    resize(ResizeTarget::FitWidth(16)).apply(&mut img);
+    transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::FitWidth(16)).apply(&mut img);
     assert_eq!(img.dimensions::<u32>(), (16, 8));
   }
 
   #[test]
   fn resized_returns_a_copy_and_leaves_the_source() {
     let img = image(40, 20);
-    let copy = resize(ResizeTarget::Fit(Size::new(10, 10))).resized(&img);
+    let copy = transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Fit(Size::new(10, 10))).applied(&img);
     assert_eq!(copy.dimensions::<u32>(), (10, 5));
     assert_eq!(img.dimensions::<u32>(), (40, 20));
     // An interior pixel: resampling blends edge pixels with transparent samples outside the image.
@@ -242,11 +166,11 @@ mod tests {
   #[test]
   fn fit_preserves_aspect_ratio_inside_the_box() {
     let mut img = image(40, 20);
-    resize(ResizeTarget::Fit(Size::new(10, 10))).apply(&mut img);
+    transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Fit(Size::new(10, 10))).apply(&mut img);
     assert_eq!(img.dimensions::<u32>(), (10, 5));
 
     let mut img = image(20, 40);
-    resize(ResizeTarget::Fit(Size::new(10, 10))).apply(&mut img);
+    transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Fit(Size::new(10, 10))).apply(&mut img);
     assert_eq!(img.dimensions::<u32>(), (5, 10));
   }
 
@@ -254,7 +178,7 @@ mod tests {
   fn builder_accepts_an_algorithm() {
     for algorithm in [TransformAlgorithm::NearestNeighbor, TransformAlgorithm::Lanczos] {
       let mut img = image(20, 10);
-      resize(ResizeTarget::Scale(2.0)).with_algorithm(algorithm).apply(&mut img);
+      transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Scale(2.0)).with_algorithm(algorithm).apply(&mut img);
       assert_eq!(img.dimensions::<u32>(), (40, 20));
     }
   }
@@ -263,23 +187,16 @@ mod tests {
   fn builder_leaves_an_image_alone_when_the_size_is_unchanged() {
     let mut img = image(6, 3);
     let before = img.rgba().to_vec();
-    resize(ResizeTarget::Exact(Size::new(6, 3))).apply(&mut img);
+    transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Exact(Size::new(6, 3))).apply(&mut img);
     assert_eq!(img.dimensions::<u32>(), (6, 3));
     assert_eq!(img.rgba(), before.as_slice());
-  }
-
-  #[test]
-  fn trait_method_still_works() {
-    let mut img = image(10, 10);
-    crate::Transform::resize(&mut img, ResizeTarget::Exact(Size::new(5, 5)), None);
-    assert_eq!(img.dimensions::<u32>(), (5, 5));
   }
 
   #[test]
   fn edge_directed_algorithms_resize() {
     for algorithm in [TransformAlgorithm::EdgeDirectNEDI, TransformAlgorithm::EdgeDirectEDI] {
       let mut img = image(10, 6);
-      resize(ResizeTarget::Scale(2.0)).with_algorithm(algorithm).apply(&mut img);
+      transform().with_hardware(Hardware::Cpu).with_size(ResizeTarget::Scale(2.0)).with_algorithm(algorithm).apply(&mut img);
       assert_eq!(img.dimensions::<u32>(), (20, 12), "{algorithm}");
       // A flat color stays flat away from the transparent border.
       assert_eq!(img.get_pixel(10, 6), Some((10, 20, 30, 255)), "{algorithm}");

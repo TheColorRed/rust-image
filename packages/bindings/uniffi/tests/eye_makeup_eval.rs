@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use abra::abra_core::{ImageExt, PointF, Rect, Transform};
+use abra::abra_core::{ImageExt, PointF, Rect, transform};
 use abra::tools::prelude::{Tool, atlas_with};
 use abra_uniffi::{AiModel, Color, Image, Mask, channel_mix, gaussian_blur};
 
@@ -270,9 +270,7 @@ fn eye_makeup_contact_sheet() {
 
   let mut cells = Vec::new();
   let mut cell = |image: &Arc<Image>| {
-    let mut core = image.core();
-    core.crop(crop.0, crop.1, crop.2, crop.3);
-    cells.push(core);
+    cells.push(transform().with_crop(Rect::new((crop.0, crop.1), (crop.2, crop.3))).applied(&image.core()));
   };
   for (name, kind, hue, strength, saturation, brightness) in makeup {
     cell(&photo);
