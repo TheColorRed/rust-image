@@ -15,7 +15,8 @@ import {
   pluginEditorPicked$,
 } from '@/src/state/plugin-editor';
 import { Fragment, useMemo } from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
+import { KeyboardScrollView } from '@/src/components/keyboard-scroll';
 import { useObservable } from 'react-rx';
 import { InspectorColor } from './inspector-color';
 import { InspectorFilePicker, type InspectorFiles } from './inspector-file-picker';
@@ -58,7 +59,7 @@ export function Inspector({
   let shown = true;
 
   return (
-    <ScrollView style={styles.tools} contentContainerStyle={styles.toolList}>
+    <KeyboardScrollView style={styles.tools} contentContainerStyle={styles.toolList}>
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       {items.length === 0 && !error ? (
         <Text style={{ color: colors.textSecondary }}>This plugin added no inspector controls.</Text>
@@ -200,7 +201,7 @@ export function Inspector({
           />
         );
       })}
-    </ScrollView>
+    </KeyboardScrollView>
   );
 }
 

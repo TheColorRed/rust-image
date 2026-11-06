@@ -1,6 +1,7 @@
 //! Rendering a stream's newest state without a window or a surface.
 
 use std::any::Any;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -214,6 +215,49 @@ impl WeakOffscreen {
   /// The renderer, if it is still alive.
   pub fn upgrade(&self) -> Option<Offscreen> {
     self.inner.upgrade().map(|inner| Offscreen { inner })
+  }
+}
+
+/// A count of changes that wakes a renderer, for a picture whose changes the renderer cannot see (a list of shapes, an image edited in place).
+///
+/// Give the renderer [`version`](Self::version) as its version (see [`Offscreen::tracking`]), tie it with [`attach`](Self::attach), and call
+/// [`bump`](Self::bump) after each change: the renderer draws once more and then sleeps. The renderer is held weakly, so a renderer whose own
+/// drawing code holds the `Revisions` is still freed when its last stream is dropped.
+#[derive(Default)]
+pub struct Revisions {
+  version: AtomicU64,
+  renderer: Mutex<Option<WeakOffscreen>>,
+}
+
+impl Revisions {
+  /// A count at zero that wakes nothing until a renderer is attached.
+  pub fn new() -> Arc<Self> {
+    Arc::default()
+  }
+
+  /// The number of changes so far: a different number whenever there is something new to draw.
+  pub fn version(&self) -> u64 {
+    self.version.load(Ordering::SeqCst)
+  }
+
+  /// Wakes `p_renderer` when this changes.
+  pub fn attach(&self, p_renderer: &Offscreen) {
+    *self.renderer.lock().unwrap() = Some(p_renderer.downgrade());
+  }
+
+  /// Counts a change and wakes the renderer so it draws it.
+  pub fn bump(&self) {
+    self.version.fetch_add(1, Ordering::SeqCst);
+    self.wake();
+  }
+
+  /// Wakes the renderer without counting a change, for a version that is counted somewhere else.
+  pub fn wake(&self) {
+    // The lock is not held while waking: waking takes the engine's own locks.
+    let renderer = self.renderer.lock().unwrap().as_ref().and_then(WeakOffscreen::upgrade);
+    if let Some(renderer) = renderer {
+      renderer.wake();
+    }
   }
 }
 
@@ -480,6 +524,26 @@ mod tests {
     wait_for(&count, 2);
     std::thread::sleep(Duration::from_millis(60));
     assert_eq!(frames(&count), 2, "one draw for one change, and then it sleeps again");
+  }
+
+  #[test]
+  fn bumping_revisions_draws_once_and_a_renderer_that_holds_them_is_still_freed() {
+    let state = BehaviorSubject::new(5u8);
+    let revisions = Revisions::new();
+    let output = Offscreen::tracking(&state, { let revisions = Arc::clone(&revisions); move || revisions.version() }, || false, |value| frame(*value));
+    revisions.attach(&output);
+    let (count, _subscription) = counted(&output);
+    state.next(5);
+    wait_for(&count, 1);
+    revisions.bump();
+    wait_for(&count, 2);
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(frames(&count), 2, "one draw for one change, and then it sleeps again");
+    // The renderer only has a weak link to the revisions' renderer, so dropping every stream frees it.
+    let weak = output.downgrade();
+    drop((output, _subscription));
+    assert!((0..200).any(|_| { std::thread::sleep(Duration::from_millis(10)); weak.upgrade().is_none() }), "the revisions kept the renderer alive");
+    revisions.bump();
   }
 
   #[test]

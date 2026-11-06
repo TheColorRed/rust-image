@@ -13,7 +13,7 @@ use crate::layout::{Align, Container, Direction, Display, Hints, Justify, Length
 use crate::theme::Background;
 use crate::theme::ThemePatch;
 use crate::tween::{Animatable, Tween, TweenOptions};
-use crate::{Canvas, Face, Font, GpuPicture, KeyEvent, PointerEvent, Quit, TextAlign, Theme};
+use crate::{Canvas, Drag, Face, Font, GpuPicture, KeyEvent, PointerButton, PointerEvent, Quit, TextAlign, Theme};
 
 /// Sent on a component's `subject::<Tick>()` before each frame while it is animating (see `Component::set_animating`). It
 /// holds the time since the previous frame.
@@ -83,6 +83,8 @@ struct Inner {
   pointer: Mutex<(f32, f32)>,
   /// Whether this component already passes input on to its children.
   routing: AtomicBool,
+  /// Whether this component already turns its pointer events into [`Drag`] events.
+  drags: AtomicBool,
   /// True while the component moves by itself and needs a frame on every tick.
   animating: AtomicBool,
   /// The tweens running now, each moving one property of this component (see [`Component::animate`]).
@@ -315,6 +317,7 @@ impl Component {
         captured: Mutex::new(None),
         pointer: Mutex::new((0.0, 0.0)),
         routing: AtomicBool::new(false),
+        drags: AtomicBool::new(false),
         animating: AtomicBool::new(false),
         tweens: Mutex::new(Vec::new()),
         stepping: AtomicBool::new(false),
@@ -812,6 +815,23 @@ impl Component {
     self.with_height(p_height)
   }
 
+  /// Puts the component `p_x` pixels from the left and `p_y` from the top of its parent, with the size `p_width` by `p_height`, when the
+  /// parent stacks its children (the default). A move alone does not draw the component again: the parent keeps its picture and only
+  /// updates the places the component left and arrived at. Only a new size makes it draw again. Use it for a mark that follows a value.
+  pub fn place(&self, p_x: u32, p_y: u32, p_width: u32, p_height: u32) {
+    self.inner.container.lock().unwrap().margin = Edges::from([p_y, 0, 0, p_x]);
+    {
+      let mut hints = self.inner.hints.lock().unwrap();
+      hints.width = Length::from(Units::from(p_width));
+      hints.height = Length::from(Units::from(p_height));
+    }
+    // The link to the parent is let go before the parent is told, so nothing is held while it takes its own locks.
+    let parent = self.inner.parent.lock().unwrap().upgrade();
+    if let Some(parent) = parent {
+      parent.changed_children();
+    }
+  }
+
   /// Asks its parent's layout for all the room that is left, in both directions, shared equally with the other children
   /// that fill. This is what a child does when it asks for nothing. Returns the component so calls can be chained.
   pub fn fill(&self) -> Self {
@@ -902,7 +922,55 @@ impl Component {
     if TypeId::of::<E>() == TypeId::of::<Canvas>() {
       self.inner.changed_self();
     }
+    if TypeId::of::<E>() == TypeId::of::<Drag>() {
+      self.install_drags();
+    }
     self.events::<E>()
+  }
+
+  /// Starts turning the pointer's moves and the main button into [`Drag`] events. Done once, when they are first asked for.
+  fn install_drags(&self) {
+    if self.inner.drags.swap(true, Ordering::SeqCst) {
+      return;
+    }
+    let drags = self.events::<Drag>();
+    // Where the pointer last was, and whether the main button is down.
+    let state = Mutex::new(((0.0f32, 0.0f32), false));
+    let subscription = self.events::<PointerEvent>().subscribe(move |event| {
+      let mut state = state.lock().unwrap();
+      let drag = match event {
+        PointerEvent::Moved { x, y } => {
+          state.0 = (*x, *y);
+          state.1.then_some(Drag::Move { x: *x, y: *y })
+        }
+        PointerEvent::Button { button: PointerButton::Left, pressed } => {
+          state.1 = *pressed;
+          let (x, y) = state.0;
+          Some(if *pressed { Drag::Start { x, y } } else { Drag::End { x, y } })
+        }
+        PointerEvent::Button { .. } => None,
+      };
+      drop(state);
+      if let Some(drag) = drag {
+        drags.next(drag);
+      }
+    });
+    self.inner.watching.lock().unwrap().push(subscription);
+  }
+
+  /// A component that shows the picture `p_paint` makes at the component's own size. The picture is kept until the size changes or a
+  /// property `p_paint` reads (with `value()`) changes, so a part that does not depend on what changes is not drawn again. Use it for a
+  /// layer of something bigger, and `place` for a mark that moves over it.
+  pub fn painted(p_name: &str, p_paint: impl Fn((u32, u32)) -> Frame + Send + Sync + 'static) -> Self {
+    let component = Self::new(p_name);
+    component.subject::<Canvas>().subscribe(move |canvas| {
+      let (width, height) = (canvas.width(), canvas.height());
+      if width > 0 && height > 0 {
+        let frame = p_paint((width, height));
+        canvas.draw_pixels(0, 0, frame.width, frame.height, frame.pixels.as_slice());
+      }
+    });
+    component
   }
 
   /// The subject for events of type `E`, made the first time it is asked for.
@@ -1087,10 +1155,17 @@ impl Component {
     let placed_ids: Vec<(usize, Rect)> =
       placed.iter().map(|(child, rect)| (Arc::as_ptr(&child.inner) as usize, *rect)).collect();
 
-    let layout_unchanged = {
+    // The same children in the same order, and the rectangles of the ones that moved or changed size: both the place a child
+    // left and the place it went to must be drawn again. `None` when children were added, removed or reordered.
+    let moved: Option<Vec<Rect>> = {
       let cached = self.inner.cached_placed.lock().unwrap();
-      cached.as_ref().is_some_and(|old| *old == placed_ids)
+      cached.as_ref().and_then(|old| {
+        (old.len() == placed_ids.len() && old.iter().zip(&placed_ids).all(|(before, now)| before.0 == now.0)).then(|| {
+          old.iter().zip(&placed_ids).filter(|(before, now)| before.1 != now.1).flat_map(|(before, now)| [before.1, now.1]).collect()
+        })
+      })
     };
+    let layout_unchanged = moved.is_some();
 
     let theme = self.theme();
     let style = self.inner.container.lock().unwrap().clone();
@@ -1116,6 +1191,13 @@ impl Component {
           });
         }
         frames.push(slot.cache.clone());
+      }
+      for rect in moved.iter().flatten() {
+        let (left, top, right, bottom) = (rect.x, rect.y, rect.x + rect.width as i32, rect.y + rect.height as i32);
+        dirty_union = Some(match dirty_union {
+          None => (left, top, right, bottom),
+          Some((l, t, r, b)) => (l.min(left), t.min(top), r.max(right), b.max(bottom)),
+        });
       }
       (dirty_union, frames)
     };
@@ -2133,6 +2215,143 @@ mod tests {
       (1, 0),
       "the margin itself is empty"
     );
+  }
+
+  #[test]
+  fn a_drag_is_the_main_button_down_with_the_moves_until_it_comes_up_and_each_carries_its_place() {
+    let component = Component::new("drag");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    component.subject::<Drag>().subscribe({
+      let seen = Arc::clone(&seen);
+      move |drag| seen.lock().unwrap().push(*drag)
+    });
+    // A second request for the stream must not make every drag arrive twice.
+    component.subject::<Drag>();
+    let moved = |x, y| component.next(PointerEvent::Moved { x, y });
+    let button = |button, pressed| component.next(PointerEvent::Button { button, pressed });
+    moved(1.0, 2.0);
+    button(PointerButton::Right, true);
+    button(PointerButton::Left, true);
+    moved(3.0, 4.0);
+    moved(500.0, -9.0);
+    button(PointerButton::Left, false);
+    moved(7.0, 7.0);
+    assert_eq!(
+      *seen.lock().unwrap(),
+      vec![
+        Drag::Start { x: 1.0, y: 2.0 },
+        Drag::Move { x: 3.0, y: 4.0 },
+        Drag::Move { x: 500.0, y: -9.0 },
+        Drag::End { x: 500.0, y: -9.0 },
+      ]
+    );
+  }
+
+  #[test]
+  fn a_painted_component_is_drawn_at_its_size_and_again_only_when_a_property_it_read_changes() {
+    let page = Component::new("page").with_size(6, 4);
+    let color = BehaviorSubject::new(7u8);
+    let painted = Arc::new(AtomicUsize::new(0));
+    let layer = Component::painted("layer", {
+      let (color, painted) = (color.clone(), Arc::clone(&painted));
+      move |(width, height)| {
+        painted.fetch_add(1, Ordering::SeqCst);
+        Frame { width, height, pixels: Arc::new([color.value(), 0, 0, 255].repeat((width * height) as usize)) }
+      }
+    });
+    page.add(&layer);
+    let first = page.clone().render(Duration::ZERO);
+    assert_eq!((first.pixels[0], layer.size().peek()), (7, (6, 4)), "drawn at the room it was given");
+    page.clone().render(Duration::ZERO);
+    assert_eq!(painted.load(Ordering::SeqCst), 1, "nothing changed, so it is not painted again");
+    color.next(9);
+    assert_eq!(page.clone().render(Duration::ZERO).pixels[0], 9);
+    assert_eq!(painted.load(Ordering::SeqCst), 2);
+  }
+
+  /// Placing children and dragging on one thread while another draws must not leave either waiting for the other. A hang fails the
+  /// test at the timeout instead of hanging the run.
+  #[test]
+  fn placing_children_and_dragging_while_another_thread_draws_does_not_wait_forever() {
+    let page = Component::new("page").with_size(40, 40);
+    let marks: Vec<Component> = (0..4)
+      .map(|_| {
+        let mark = Component::new("mark");
+        mark.subject::<Canvas>().subscribe(|canvas| canvas.fill([1, 0, 0, 255]));
+        page.add(&mark);
+        mark
+      })
+      .collect();
+    let seen = Arc::new(AtomicUsize::new(0));
+    page.subject::<Drag>().subscribe({
+      let seen = Arc::clone(&seen);
+      move |_| {
+        seen.fetch_add(1, Ordering::SeqCst);
+      }
+    });
+    let (done, finished) = mpsc::channel();
+    let drawing = {
+      let (mut page, done) = (page.clone(), done.clone());
+      std::thread::spawn(move || {
+        for _ in 0..300 {
+          page.render(Duration::ZERO);
+        }
+        done.send("drawing").unwrap();
+      })
+    };
+    let moving = {
+      let page = page.clone();
+      std::thread::spawn(move || {
+        for step in 0..300u32 {
+          for (index, mark) in marks.iter().enumerate() {
+            mark.place(step % 30, index as u32 * 5, 8, 4 + step % 3);
+          }
+          page.next(PointerEvent::Moved { x: step as f32, y: 1.0 });
+          page.next(PointerEvent::Button { button: PointerButton::Left, pressed: step % 2 == 0 });
+        }
+        done.send("moving").unwrap();
+      })
+    };
+    for _ in 0..2 {
+      finished.recv_timeout(Duration::from_secs(20)).expect("drawing or placing is waiting for the other");
+    }
+    drawing.join().unwrap();
+    moving.join().unwrap();
+    assert!(seen.load(Ordering::SeqCst) > 0, "the drags arrived");
+  }
+
+  #[test]
+  fn a_component_that_listens_for_drags_is_freed_when_it_is_dropped() {
+    let component = Component::new("drag");
+    component.subject::<Drag>().subscribe(|_| {});
+    let weak = component.downgrade();
+    drop(component);
+    assert!(weak.upgrade().is_none(), "turning the pointer into drags kept the component alive");
+  }
+
+  #[test]
+  fn a_placed_child_moves_without_being_drawn_again_and_leaves_nothing_behind() {
+    let page = Component::new("page").with_size(20, 10);
+    let drawn = Arc::new(AtomicUsize::new(0));
+    let mark = Component::new("mark");
+    mark.subject::<Canvas>().subscribe({
+      let drawn = Arc::clone(&drawn);
+      move |canvas| {
+        drawn.fetch_add(1, Ordering::SeqCst);
+        canvas.fill([9, 0, 0, 255]);
+      }
+    });
+    page.add(&mark);
+    mark.place(2, 1, 3, 3);
+    let first = page.clone().render(Duration::ZERO);
+    assert_eq!((first.pixels[(2 * 20 + 3) * 4], first.pixels[(2 * 20 + 12) * 4]), (9, 0));
+    mark.place(10, 5, 3, 3);
+    let moved = page.clone().render(Duration::ZERO);
+    assert_eq!((moved.pixels[(2 * 20 + 3) * 4], moved.pixels[(6 * 20 + 12) * 4]), (0, 9), "it is at the new place and gone from the old one");
+    assert_eq!(drawn.load(Ordering::SeqCst), 1, "moving did not draw it again");
+    mark.place(10, 5, 4, 4);
+    page.clone().render(Duration::ZERO);
+    assert_eq!(drawn.load(Ordering::SeqCst), 2, "a new size does");
   }
 
   struct Picture;

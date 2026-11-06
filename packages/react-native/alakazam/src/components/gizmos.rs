@@ -7,7 +7,7 @@
 
 use std::sync::{
   Arc, Mutex,
-  atomic::{AtomicBool, AtomicU64, Ordering},
+  atomic::{AtomicBool, Ordering},
 };
 
 use abra::abra_core::{
@@ -18,7 +18,7 @@ use abra::drawing::prelude::{Brush, StrokeLook, draw_area_fill, draw_area_stroke
 use gpu_passes::strokes::{StrokeCanvas, StrokeStyle};
 use vessel::prelude::*;
 
-use crate::components::frame_of;
+use crate::components::{camera::Camera, frame_of, image_preview::ImagePreview};
 
 /// One thing drawn over the photo. Points and areas are in pixels of the view.
 enum Gizmo {
@@ -32,29 +32,6 @@ enum Gizmo {
   /// view, so it stays on the photo while the photo is zoomed, moved or turned (see [`Camera`]). `drawn` is whether the GPU's canvas
   /// already has it.
   Box { corners: [(f32, f32); 4], brush: Brush<'static>, drawn: bool },
-}
-
-/// Where the view looks at the photo, so a gizmo placed on the photo is drawn where that part of the photo is on the screen. Set with the
-/// same numbers as the photo's own view, so the two always agree.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Camera {
-  /// The size of the photo in pixels.
-  photo: (f32, f32),
-  /// The part of the photo the view shows, as shares of the photo: left, top, width, height. It can reach past the photo's edges.
-  viewport: [f32; 4],
-  /// How far the photo is turned, clockwise, in radians, about the middle of the view.
-  angle: f32,
-}
-
-impl Camera {
-  /// A point of the photo, in photo pixels, as a point of a view of `size` pixels.
-  fn to_view(&self, p_point: (f32, f32), p_size: (u32, u32)) -> (f32, f32) {
-    let (width, height) = (p_size.0 as f32, p_size.1 as f32);
-    let across = (p_point.0 / self.photo.0 - self.viewport[0]) / self.viewport[2] * width - width / 2.0;
-    let down = (p_point.1 / self.photo.1 - self.viewport[1]) / self.viewport[3] * height - height / 2.0;
-    let (sin, cos) = self.angle.sin_cos();
-    (width / 2.0 + across * cos - down * sin, height / 2.0 + across * sin + down * cos)
-  }
 }
 
 /// The corners of a box on the photo as points of the view: through the camera when there is one, and as they are when there is not.
@@ -88,13 +65,10 @@ impl Gizmo {
 /// The gizmos, shared by the component and the pictures made from it.
 struct GizmoList {
   gizmos: Mutex<Vec<(String, Gizmo)>>,
-  /// Changes whenever the gizmos do, so the renderer knows there is something new to draw.
-  version: AtomicU64,
+  /// Counts the changes, so the renderer knows there is something new to draw, and wakes the renderer when one is made.
+  revisions: Arc<Revisions>,
   /// Whether the GPU's canvas no longer matches the lines (one was replaced or taken away), so it is drawn again from the start.
   rebuild: AtomicBool,
-  /// The renderer that makes the pictures, once there is one, so it can be woken when a gizmo changes. Weak, because the renderer's
-  /// drawing code holds this list, and a strong link back would keep the renderer and its last frame alive after the component is gone.
-  renderer: Mutex<Option<WeakOffscreen>>,
   /// Where the view looks at the photo, once the photo's view says. Gizmos placed on the photo wait for it.
   camera: Mutex<Option<Camera>>,
 }
@@ -141,16 +115,12 @@ impl GizmoList {
   }
 
   fn changed(&self) {
-    self.version.fetch_add(1, Ordering::SeqCst);
-    let renderer = self.renderer.lock().unwrap().as_ref().and_then(WeakOffscreen::upgrade);
-    if let Some(renderer) = renderer {
-      renderer.wake();
-    }
+    self.revisions.bump();
   }
 }
 
 /// The canvas the lines are drawn on, kept for as long as the view is the same size so a frame draws only what is new.
-struct OnTheGpu {
+struct StrokesOnTheGpu {
   canvas: StrokeCanvas,
 }
 
@@ -159,7 +129,7 @@ impl GizmoList {
   /// new since the last frame are drawn, so a frame costs the length of what a finger added and not the size of the view. `None`
   /// when there is nothing to draw, when a gizmo is not a line (an outline or a fill is made on the CPU), or when there is no GPU:
   /// the caller draws the frame on the CPU then.
-  fn gpu_frame(&self, size: (u32, u32), held: &mut Option<OnTheGpu>) -> Option<RenderedFrame> {
+  fn gpu_frame(&self, size: (u32, u32), held: &mut Option<StrokesOnTheGpu>) -> Option<RenderedFrame> {
     let mut gizmos = self.gizmos.lock().unwrap();
     if gizmos.is_empty() || gizmos.iter().any(|(_, gizmo)| !matches!(gizmo, Gizmo::Line { .. } | Gizmo::Box { .. })) {
       self.rebuild.store(true, Ordering::SeqCst);
@@ -167,7 +137,7 @@ impl GizmoList {
     }
     let context = gpu::context()?;
     if held.as_ref().is_none_or(|on_the_gpu| on_the_gpu.canvas.size() != size) {
-      *held = Some(OnTheGpu { canvas: StrokeCanvas::new(context, size.0, size.1) });
+      *held = Some(StrokesOnTheGpu { canvas: StrokeCanvas::new(context, size.0, size.1) });
       self.rebuild.store(true, Ordering::SeqCst);
     }
     let canvas = &held.as_ref()?.canvas;
@@ -217,7 +187,7 @@ impl GizmoList {
   /// last frame had something on it. A view with no gizmos makes no frame at all, so the view stays empty without a transparent picture
   /// the size of the screen being made, kept and scaled each time the view changes size. When the last gizmo is taken away, one clear
   /// frame replaces what was drawn, and the GPU canvas that held it is let go.
-  fn next_frame(&self, size: (u32, u32), held: &mut Option<OnTheGpu>, visible: &mut bool) -> Option<RenderedFrame> {
+  fn next_frame(&self, size: (u32, u32), held: &mut Option<StrokesOnTheGpu>, visible: &mut bool) -> Option<RenderedFrame> {
     if size.0 == 0 || size.1 == 0 {
       return None;
     }
@@ -246,17 +216,14 @@ impl Trackable for GizmoSource {
   fn pictures(&self, size: &BehaviorSubject<(u32, u32)>, _viewport: &BehaviorSubject<Viewport>, _rotation: &BehaviorSubject<f32>) -> Subject<Picture> {
     let list = Arc::clone(&self.0);
     let version = {
-      let list = Arc::clone(&self.0);
-      move || list.version.load(Ordering::SeqCst)
+      let revisions = Arc::clone(&self.0.revisions);
+      move || revisions.version()
     };
-    let mut held: Option<OnTheGpu> = None;
+    let mut held: Option<StrokesOnTheGpu> = None;
     let mut visible = false;
     let renderer = Offscreen::tracking(size, version, || false, move |size| list.next_frame(*size, &mut held, &mut visible));
-    *self.0.renderer.lock().unwrap() = Some(renderer.downgrade());
-    renderer.map(|frame| match frame {
-      RenderedFrame::Pixels(frame) => Picture::Pixels(Arc::clone(frame)),
-      RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
-    })
+    self.0.revisions.attach(&renderer);
+    renderer.map(|frame| Picture::from(frame))
   }
 }
 
@@ -266,6 +233,8 @@ impl Trackable for GizmoSource {
 pub struct Gizmos {
   image: Image,
   list: Arc<GizmoList>,
+  /// What keeps the gizmos on the part of the photo the view they follow shows (see [`follow`](Self::follow)).
+  following: Mutex<Option<Subscription>>,
 }
 
 #[uniffi::export]
@@ -273,9 +242,9 @@ impl Gizmos {
   /// A view with no gizmos on it.
   #[uniffi::constructor]
   pub fn new() -> Arc<Self> {
-    let list = Arc::new(GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None), camera: Mutex::new(None) });
+    let list = Arc::new(GizmoList { gizmos: Mutex::new(Vec::new()), revisions: Revisions::new(), rebuild: AtomicBool::new(true), camera: Mutex::new(None) });
     let image = Image::new().track(&GizmoSource(Arc::clone(&list)));
-    Arc::new(Self { image, list })
+    Arc::new(Self { image, list, following: Mutex::new(None) })
   }
 
   /// Draws a line through `points` (each `[x, y]`) with the brush, as the gizmo `name`. Panics when a point is not two numbers.
@@ -317,7 +286,7 @@ impl Gizmos {
   }
 
   /// Draws a frame round the four corners (each `[x, y]`, top left, top right, bottom right, bottom left) with the brush, as the gizmo
-  /// `name`. The corners are in pixels of the photo, not of the view: the frame stays on the photo as the camera (`set_camera`) moves.
+  /// `name`. The corners are in pixels of the photo, not of the view: the frame stays on the photo as the view it follows (`follow`) moves.
   /// Panics when there are not four corners of two numbers each.
   pub fn set_box(&self, name: String, corners: Vec<Vec<f32>>, brush: Arc<abra_uniffi::Brush>) {
     let points: Vec<(f32, f32)> = corners
@@ -331,13 +300,14 @@ impl Gizmos {
     self.list.set(name, Gizmo::Box { corners, brush: brush.0.clone(), drawn: false });
   }
 
-  /// Tells the gizmos where the view looks at the photo, with the same numbers the photo's own view is given: the photo's size in
-  /// pixels, the part of it that shows (`left`, `top`, `width`, `height`, each as a share of the photo) and how far it is turned,
-  /// clockwise, in radians. Call it whenever the camera moves; gizmos placed on the photo (`set_box`) follow.
-  pub fn set_camera(&self, photo_width: f32, photo_height: f32, left: f32, top: f32, width: f32, height: f32, angle: f32) {
-    if photo_width > 0.0 && photo_height > 0.0 && width > 0.0 && height > 0.0 {
-      self.list.look(Camera { photo: (photo_width, photo_height), viewport: [left, top, width, height], angle });
-    }
+  /// Makes the gizmos follow `preview`: gizmos placed on the photo (`set_box`) stay on the part of the photo it shows as it is zoomed, moved or
+  /// turned, on every frame of a glide too. Following another view stops following the first.
+  pub fn follow(&self, preview: Arc<ImagePreview>) {
+    let list = Arc::clone(&self.list);
+    let following = preview.follow_camera(move |camera| list.look(camera));
+    // The old subscription is let go outside the lock.
+    let before = self.following.lock().unwrap().replace(following);
+    drop(before);
   }
 
   /// Takes the gizmo `name` away, if there is one.
@@ -367,32 +337,14 @@ impl Gizmos {
 mod tests {
   use super::*;
   use abra::abra_core::Color;
+  use crate::components::pixel;
 
   fn list() -> GizmoList {
-    GizmoList { gizmos: Mutex::new(Vec::new()), version: AtomicU64::new(0), rebuild: AtomicBool::new(true), renderer: Mutex::new(None), camera: Mutex::new(None) }
+    GizmoList { gizmos: Mutex::new(Vec::new()), revisions: Revisions::new(), rebuild: AtomicBool::new(true), camera: Mutex::new(None) }
   }
 
   fn brush(color: &Color, size: u32) -> Brush<'static> {
     Brush::new().with_size(size).with_hardness(1.0).with_color(color)
-  }
-
-  fn pixel(frame: &Frame, x: usize, y: usize) -> [u8; 4] {
-    let at = (y * frame.width as usize + x) * 4;
-    [frame.pixels[at], frame.pixels[at + 1], frame.pixels[at + 2], frame.pixels[at + 3]]
-  }
-
-  #[test]
-  fn the_camera_puts_a_point_of_the_photo_where_it_is_on_the_screen() {
-    // A 200 x 100 photo seen whole in a 400 x 200 view: everything is twice as far from the corner.
-    let whole = Camera { photo: (200.0, 100.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 };
-    assert_eq!(whole.to_view((50.0, 25.0), (400, 200)), (100.0, 50.0));
-    // Zoomed to its right half, the middle of the photo is the left edge of the view.
-    let right_half = Camera { viewport: [0.5, 0.0, 0.5, 1.0], ..whole };
-    assert_eq!(right_half.to_view((100.0, 50.0), (400, 200)), (0.0, 100.0));
-    // Turned a quarter, clockwise, about the middle of the view: the top-left corner goes to the top-right.
-    let turned = Camera { angle: std::f32::consts::FRAC_PI_2, ..Camera { photo: (100.0, 100.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 } };
-    let (x, y) = turned.to_view((0.0, 0.0), (100, 100));
-    assert!((x - 100.0).abs() < 1e-3 && y.abs() < 1e-3, "{x} {y}");
   }
 
   #[test]
@@ -402,13 +354,13 @@ mod tests {
     let corners = [(10.0, 10.0), (30.0, 10.0), (30.0, 20.0), (10.0, 20.0)];
     list.set("box".into(), Gizmo::Box { corners, brush: brush(&color, 2), drawn: false });
     // With the photo seen whole at the view's size, the frame is where its corners say.
-    list.look(Camera { photo: (100.0, 50.0), viewport: [0.0, 0.0, 1.0, 1.0], angle: 0.0 });
+    list.look(Camera { photo: (100.0, 50.0), viewport: Viewport::default(), angle: 0.0 });
     let frame = list.frame(100, 50);
     assert_eq!(pixel(&frame, 20, 10)[3], 255, "the top edge");
     assert_eq!(pixel(&frame, 20, 15)[3], 0, "inside the frame is clear");
     // The camera moves to the right half of the photo: the same frame is now off the left of the view, and a box that is not in view
     // draws nothing.
-    list.look(Camera { photo: (100.0, 50.0), viewport: [0.5, 0.0, 0.5, 1.0], angle: 0.0 });
+    list.look(Camera { photo: (100.0, 50.0), viewport: Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 }, angle: 0.0 });
     let moved = list.frame(100, 50);
     assert_eq!(pixel(&moved, 20, 10)[3], 0, "the frame moved with the photo");
   }
@@ -576,14 +528,98 @@ mod tests {
   #[test]
   fn removing_a_gizmo_clears_its_pixels_and_a_change_is_a_new_version() {
     let component = Gizmos::new();
-    let before = component.list.version.load(Ordering::SeqCst);
+    let before = component.list.revisions.version();
     component.add_point("lasso".into(), 5.0, 10.0, Arc::new(abra_uniffi::Brush::new()));
     component.add_point("lasso".into(), 30.0, 10.0, Arc::new(abra_uniffi::Brush::new()));
     assert_eq!(component.point_count("lasso".into()), 2);
-    assert_ne!(component.list.version.load(Ordering::SeqCst), before);
+    assert_ne!(component.list.revisions.version(), before);
     assert!(component.list.frame(40, 20).pixels.iter().any(|&byte| byte != 0));
     component.remove("lasso".into());
     assert_eq!(component.point_count("lasso".into()), 0);
     assert!(component.list.frame(40, 20).pixels.iter().all(|&byte| byte == 0));
+  }
+
+  /// A view of a 100 x 50 photo, whose size is set as the first picture would set it.
+  fn preview() -> Arc<ImagePreview> {
+    let photo = abra_uniffi::Image::from_core(abra::abra_core::Image::new_from_color(100, 50, Color::from_rgba(90, 90, 90, 255)));
+    let preview = ImagePreview::new(Arc::new(photo));
+    preview.source.photo.next((100, 50));
+    preview
+  }
+
+  /// Whether anything is drawn in the box of pixels `x` in `left..right`, `y` in `top..bottom`.
+  fn drawn_in(gizmos: &Gizmos, left: usize, right: usize, top: usize, bottom: usize) -> bool {
+    let frame = gizmos.list.frame(100, 50);
+    (top..bottom).any(|y| (left..right).any(|x| pixel(&frame, x as u32, y as u32)[3] > 0))
+  }
+
+  #[test]
+  fn gizmos_on_the_photo_follow_the_view_they_are_told_to_follow() {
+    let preview = preview();
+    let gizmos = Gizmos::new();
+    let red = abra_uniffi::Brush::new().with_size(4.0).with_hardness(1.0);
+    gizmos.set_box("box".into(), vec![vec![10.0, 10.0], vec![30.0, 10.0], vec![30.0, 20.0], vec![10.0, 20.0]], red);
+    gizmos.follow(Arc::clone(&preview));
+    assert!(drawn_in(&gizmos, 15, 25, 8, 12), "the whole photo is shown, so the box is where its corners say");
+    // The view moves to the right half of the photo: the box is off the left of the view.
+    preview.set_viewport(0.5, 0.0, 0.5, 1.0);
+    assert!(!drawn_in(&gizmos, 15, 25, 8, 12), "the box moved with the photo");
+    // And back.
+    preview.set_viewport(0.0, 0.0, 1.0, 1.0);
+    assert!(drawn_in(&gizmos, 15, 25, 8, 12));
+  }
+
+  #[test]
+  fn following_another_view_stops_following_the_first() {
+    let (first, second) = (preview(), preview());
+    let gizmos = Gizmos::new();
+    let brush = abra_uniffi::Brush::new().with_size(4.0).with_hardness(1.0);
+    gizmos.set_box("box".into(), vec![vec![10.0, 10.0], vec![30.0, 10.0], vec![30.0, 20.0], vec![10.0, 20.0]], brush);
+    gizmos.follow(Arc::clone(&first));
+    gizmos.follow(Arc::clone(&second));
+    first.set_viewport(0.5, 0.0, 0.5, 1.0);
+    assert!(drawn_in(&gizmos, 15, 25, 8, 12), "the first view moved, and the gizmos are not on it any more");
+    second.set_viewport(0.5, 0.0, 0.5, 1.0);
+    assert!(!drawn_in(&gizmos, 15, 25, 8, 12), "the second one is the one they follow");
+  }
+
+  /// The view moving on one thread while gizmos are changed and drawn on another must not leave either waiting for the other. A hang
+  /// fails the test at the timeout.
+  #[test]
+  fn following_a_view_that_moves_while_the_gizmos_draw_does_not_wait_forever() {
+    let preview = preview();
+    let gizmos = Gizmos::new();
+    gizmos.follow(Arc::clone(&preview));
+    let brush = abra_uniffi::Brush::new().with_size(3.0).with_hardness(1.0);
+    let corners = vec![vec![10.0, 10.0], vec![30.0, 10.0], vec![30.0, 20.0], vec![10.0, 20.0]];
+    let (done, finished) = std::sync::mpsc::channel();
+    let moving = {
+      let (preview, done) = (Arc::clone(&preview), done.clone());
+      std::thread::spawn(move || {
+        for step in 0..300u32 {
+          preview.set_viewport(step as f32 / 600.0, 0.0, 0.5, 1.0);
+          preview.set_rotation(step as f32 / 100.0);
+        }
+        done.send(()).unwrap();
+      })
+    };
+    let drawing = {
+      let gizmos = Arc::clone(&gizmos);
+      std::thread::spawn(move || {
+        for step in 0..300u32 {
+          gizmos.set_box("box".into(), corners.clone(), Arc::clone(&brush));
+          gizmos.list.frame(100, 50);
+          if step % 7 == 0 {
+            gizmos.remove("box".into());
+          }
+        }
+        done.send(()).unwrap();
+      })
+    };
+    for _ in 0..2 {
+      finished.recv_timeout(std::time::Duration::from_secs(30)).expect("the view and the gizmos are waiting for each other");
+    }
+    moving.join().unwrap();
+    drawing.join().unwrap();
   }
 }

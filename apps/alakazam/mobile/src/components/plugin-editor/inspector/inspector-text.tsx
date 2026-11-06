@@ -1,7 +1,8 @@
 import { useTheme } from '@/src/lib/ui/theme';
 import { pluginEditorItems, pluginEditorRebuild } from '@/src/state/plugin-editor';
 import { memo, useEffect, useRef, useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { RevealInput } from '@/src/components/keyboard-scroll';
 import { InspectorRow } from './inspector-row';
 
 /** How long typing has to stop before the plugin is told, so it is not run again for every letter. */
@@ -43,7 +44,7 @@ export const InspectorText = memo(function InspectorText({
 
   return (
     <InspectorRow label={label}>
-      <TextInput
+      <RevealInput
         accessibilityLabel={label}
         value={text}
         onChangeText={change}

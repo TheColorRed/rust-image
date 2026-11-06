@@ -21,6 +21,33 @@ pub const MAX_GRADIENT_POINTS: usize = 64;
 /// The longest side of an image or mask that is drawn on the GPU.
 const MAX_TEXTURE_SIDE: u32 = 8192;
 
+/// What it costs to draw a fill, in milliseconds, measured with `timing_of_gpu_and_cpu_fills` on a desktop. They decide, in
+/// [`FillArea::apply`] and nowhere else, whether the GPU or the CPU draws a fill. The CPU draws only the pixels the fill's bounds cover, but
+/// each costs something. The GPU draws the whole target however small the fill is, and the result is read back as a whole, so it costs about
+/// the same for any fill and more for a bigger target. A fill is drawn where it is cheaper. Adjust them when measuring on another device.
+mod cost {
+  /// The CPU's fixed cost for any fill.
+  pub(super) const CPU_FIXED: f32 = 0.4;
+  /// The CPU's cost for each pixel a solid fill's bounds cover.
+  pub(super) const CPU_PER_SOLID_PIXEL: f32 = 0.0001;
+  /// The CPU's cost for each pixel a gradient or image fill's bounds cover, which works out a color for each.
+  pub(super) const CPU_PER_SHADED_PIXEL: f32 = 0.0002;
+  /// The GPU's fixed cost for a run.
+  pub(super) const GPU_FIXED: f32 = 3.0;
+  /// The GPU's cost for each pixel of the target.
+  pub(super) const GPU_PER_TARGET_PIXEL: f32 = 0.00001;
+}
+
+/// What the cost of drawing a fill on the GPU depends on, for a target that can take one there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuState {
+  /// The width and height of the target in pixels.
+  pub size: (u32, u32),
+  /// Whether GPU work is already waiting on the target. Another pass then costs little, where drawing on the CPU would make the target
+  /// run it now.
+  pub pending: bool,
+}
+
 /// A fill that has been described but not yet drawn. Create one with [`fill`], then either draw it into an existing
 /// image with [`FillArea::apply`] or get it as a new image with [`FillArea::to_image`] or `into()`.
 #[derive(Clone)]
@@ -36,8 +63,13 @@ pub trait FillTarget {
   /// Draws a rasterized fill at its requested position.
   fn draw_fill(&mut self, p_image: &Image, p_position: (i32, i32));
 
+  /// What the GPU would cost for this target, or `None` (the default) when it cannot take a fill there.
+  fn gpu_state(&self) -> Option<GpuState> {
+    None
+  }
+
   /// Draws `p_fill` with the GPU and returns `true`, or returns `false` (the default) to have it rasterized on the CPU and
-  /// drawn with [`FillTarget::draw_fill`].
+  /// drawn with [`FillTarget::draw_fill`]. [`FillArea::apply`] asks only when the GPU is the cheaper way (see [`FillTarget::gpu_state`]).
   fn draw_fill_on_gpu(&mut self, _p_fill: &FillArea<'_>) -> bool {
     false
   }
@@ -47,6 +79,10 @@ impl FillTarget for Image {
   /// Composites the fill over the image, so the clear pixels around a shape leave what is under them as it was.
   fn draw_fill(&mut self, p_image: &Image, p_position: (i32, i32)) {
     abra_core::blend::blend(p_image).with_offset(PointF::new(p_position.0 as f32, p_position.1 as f32)).apply(self);
+  }
+
+  fn gpu_state(&self) -> Option<GpuState> {
+    Some(GpuState { size: self.dimensions::<u32>(), pending: self.deferred().is_some() })
   }
 
   fn draw_fill_on_gpu(&mut self, p_fill: &FillArea<'_>) -> bool {
@@ -132,15 +168,57 @@ impl<'a> FillArea<'a> {
 
   /// Draws the filled area into the specified target, at the position set by [`FillArea::with_position`] or else where the area is.
   ///
-  /// The GPU does it when the target can take it (an image, with a GPU ready) and the fill fits the shader: any solid color,
-  /// gradient or image fill, with or without a mask or feathering, of a shape of up to [`MAX_FILL_POINTS`] points. The image is then
-  /// not changed until its pixels are read, so a run of fills, blends and filters is one GPU run. Anything else, or no GPU, is
-  /// drawn now on the CPU. Both give the same pixels, to within a level or two of rounding.
+  /// This is the one place that chooses between the GPU and the CPU, so a caller only says what to draw. The GPU does it when it is the
+  /// cheaper way (a fill that covers much of a target, or a target that is already waiting on the GPU: see `cost`), the target can take it
+  /// (an image, with a GPU ready) and the fill fits the shader: any solid color, gradient or image fill, with or without a mask or
+  /// feathering, of a shape of up to [`MAX_FILL_POINTS`] points. The image is then not changed until its pixels are read, so a run of fills,
+  /// blends and filters is one GPU run. Anything else, or no GPU, is drawn now on the CPU. Both give the same pixels, to within a level or
+  /// two of rounding.
   pub fn apply(&self, p_target: &mut impl FillTarget) {
-    if p_target.draw_fill_on_gpu(self) {
+    if let Some(state) = p_target.gpu_state()
+      && self.cheaper_on_gpu(state)
+      && p_target.draw_fill_on_gpu(self)
+    {
       return;
     }
     self.apply_on_cpu(p_target);
+  }
+
+  /// Whether the GPU draws this fill onto a target in `p_state` for less than the CPU does, by the numbers in `cost`.
+  fn cheaper_on_gpu(&self, p_state: GpuState) -> bool {
+    if p_state.pending {
+      return true;
+    }
+    let (width, height) = p_state.size;
+    let target_pixels = width as f32 * height as f32;
+    let (min_x, min_y, max_x, max_y) = self.area.bounds().edges::<f32>();
+    // The part of the bounds that is on the target is all the CPU draws.
+    let covered = ((max_x.min(width as f32) - min_x.max(0.0)).max(0.0)) * ((max_y.min(height as f32) - min_y.max(0.0)).max(0.0));
+    let per_pixel = match self.fill {
+      Fill::Solid(_) => cost::CPU_PER_SOLID_PIXEL,
+      Fill::Gradient(_) | Fill::Image(..) => cost::CPU_PER_SHADED_PIXEL,
+    };
+    let on_the_cpu = |p_pixels: f32| cost::CPU_FIXED + p_pixels * per_pixel;
+    let on_the_gpu = cost::GPU_FIXED + target_pixels * cost::GPU_PER_TARGET_PIXEL;
+    if on_the_cpu(covered) <= on_the_gpu {
+      return false;
+    }
+    // The bounds of a thin or sparse shape, such as a line across the target, are mostly empty and overstate the CPU's work, so the shape
+    // itself is measured before the GPU is chosen.
+    on_the_cpu(covered.min(self.shape_pixels())) > on_the_gpu
+  }
+
+  /// About how many pixels the CPU has work on for this shape: the area its outline encloses, and the pixels along the outline.
+  fn shape_pixels(&self) -> f32 {
+    let points = self.area.path.flatten(0.5);
+    let mut twice_area = 0.0f32;
+    let mut perimeter = 0.0f32;
+    for (index, point) in points.iter().enumerate() {
+      let next = points[(index + 1) % points.len()];
+      twice_area += point.x * next.y - next.x * point.y;
+      perimeter += point.distance_to(next);
+    }
+    twice_area.abs() / 2.0 + perimeter
   }
 
   /// [`FillArea::apply`] always on the CPU, whatever the target and the hardware.
@@ -466,7 +544,7 @@ mod gpu_tests {
       let mut expected = photo(width, height);
       fill_area.apply_on_cpu(&mut expected);
       let mut made = photo(width, height);
-      fill_area.apply(&mut made);
+      assert!(made.draw_fill_on_gpu(fill_area), "{name}: the GPU did not take the fill");
       assert!(made.deferred().is_some(), "{name}: with a GPU the result is not made until it is read");
       let worst = made.rgba().iter().zip(expected.rgba()).map(|(a, e)| a.abs_diff(*e)).max().unwrap_or(0);
       let first = made.rgba().chunks_exact(4).zip(expected.rgba().chunks_exact(4)).position(|(a, e)| a.iter().zip(e).any(|(a, e)| a.abs_diff(*e) > 3));
@@ -481,7 +559,7 @@ mod gpu_tests {
     let mut expected = photo(260, 260);
     big.apply_on_cpu(&mut expected);
     let mut made = photo(260, 260);
-    big.apply(&mut made);
+    assert!(made.draw_fill_on_gpu(&big), "a large shape was not taken by the GPU");
     assert!(made.deferred().is_some(), "a large shape was not made by the GPU");
     let differences: Vec<u8> = made.rgba().iter().zip(expected.rgba()).map(|(a, e)| a.abs_diff(*e)).collect();
     let (worst, wrong) = (differences.iter().max().copied().unwrap_or(0), differences.iter().filter(|difference| **difference > 3).count());
@@ -566,6 +644,105 @@ mod fill_area_tests {
     assert_eq!(column(Some(ImageRepeat::NoRepeat)), vec![255, 0, 0, 0, 0, 0]);
     assert_eq!(column(Some(ImageRepeat::Y)), vec![255, 0, 255, 0, 255, 0]);
     assert_eq!(column(Some(ImageRepeat::X)), vec![255, 0, 0, 0, 0, 0]);
+  }
+
+  #[test]
+  fn a_checkerboard_fills_an_area_with_alternating_squares_from_its_top_left_corner() {
+    let (light, dark) = ((200, 200, 200), (100, 100, 100));
+    // Over a whole image, and over an area that starts away from the corner: the light square is at the area's own top left.
+    for origin in [(0u32, 0u32), (3, 1)] {
+      let mut image = Image::new_from_color(12, 9, Color::from_rgba(0, 0, 0, 0));
+      fill(Area::rect((origin.0 as f32, origin.1 as f32), (7.0, 5.0)), Fill::checkerboard(2, light, dark)).apply_on_cpu(&mut image);
+      for y in 0..5u32 {
+        for x in 0..7u32 {
+          let expected = if (x / 2 + y / 2) % 2 == 0 { (200, 200, 200, 255) } else { (100, 100, 100, 255) };
+          assert_eq!(image.get_pixel(origin.0 + x, origin.1 + y), Some(expected), "origin {origin:?}, square at {x},{y}");
+        }
+      }
+      assert_eq!(image.get_pixel(origin.0 + 7, origin.1).unwrap().3, 0, "nothing outside the area");
+    }
+  }
+
+  #[test]
+  fn a_fill_is_drawn_where_it_is_cheaper_and_a_target_with_gpu_work_waiting_keeps_it_there() {
+    use abra_core::{Gradient, Path};
+    let on = |size: (u32, u32), pending: bool| GpuState { size, pending };
+    let disc = fill(Area::circle((100.0, 100.0), 36.0), Color::white());
+    let whole = |side: f32| fill(Area::rect((0.0, 0.0), (side, side)), Gradient::from_to(Color::white(), Color::black()));
+    // A small shape on a big picture is not worth a run of the GPU over the whole picture.
+    assert!(!disc.cheaper_on_gpu(on((1000, 700), false)));
+    assert!(!disc.cheaper_on_gpu(on((200, 200), false)));
+    // A gradient over a whole picture is: the CPU works out a color for every pixel.
+    assert!(whole(200.0).cheaper_on_gpu(on((200, 200), false)));
+    assert!(whole(600.0).cheaper_on_gpu(on((600, 600), false)));
+    // The same gradient over a small part of a big picture is not.
+    assert!(!whole(100.0).cheaper_on_gpu(on((1000, 700), false)));
+    // A line across a picture covers few of the pixels in its bounds.
+    let mut across = Path::new();
+    across.move_to((10.0, 190.0)).line_to((190.0, 10.0));
+    assert!(!fill(across.stroke(4.0), Color::white()).cheaper_on_gpu(on((200, 200), false)));
+    // A picture that is already waiting for the GPU takes anything there, because drawing on the CPU would make it run now.
+    assert!(disc.cheaper_on_gpu(on((1000, 700), true)));
+    // Only the part of the bounds on the target counts.
+    assert!(!fill(Area::circle((-5000.0, -5000.0), 36.0), Color::white()).cheaper_on_gpu(on((200, 200), false)));
+  }
+
+  #[test]
+  fn apply_draws_a_small_fill_now_and_leaves_a_target_with_nothing_waiting() {
+    let mut image = Image::new_from_color(300, 200, Color::from_rgba(0, 0, 0, 255));
+    fill(Area::circle((50.0, 50.0), 10.0), Color::white()).apply(&mut image);
+    assert!(image.deferred().is_none(), "a small fill was left for the GPU");
+    assert_eq!(image.get_pixel(50, 50), Some((255, 255, 255, 255)));
+  }
+
+  /// Where the GPU and the CPU each win, which is what the numbers in `cost` come from, and what `apply` does with them. Run with
+  /// `cargo test -p drawing --lib timing_of_gpu_and_cpu_fills -- --ignored --nocapture`.
+  #[test]
+  #[ignore]
+  fn timing_of_gpu_and_cpu_fills() {
+    use abra_core::{Gradient, Path};
+    if gpu::GpuContext::new_default_blocking().is_err() {
+      return;
+    }
+    gpu::register();
+    let shapes: Vec<(&str, Box<dyn Fn() -> FillArea<'static>>)> = vec![
+      ("small disc, solid", Box::new(|| fill(Area::circle((100.0, 100.0), 36.0), Color::white()))),
+      ("thin diagonal line, solid", Box::new(|| {
+        let mut path = Path::new();
+        path.move_to((10.0, 190.0)).line_to((190.0, 10.0));
+        fill(path.stroke(4.0), Color::white())
+      })),
+      ("half-size rect, solid", Box::new(|| fill(Area::rect((0.0, 0.0), (100.0, 100.0)), Color::white()))),
+      ("half-size rect, gradient", Box::new(|| fill(Area::rect((0.0, 0.0), (100.0, 100.0)), Gradient::from_to(Color::white(), Color::black())))),
+      ("whole rect, gradient", Box::new(|| fill(Area::rect((0.0, 0.0), (200.0, 200.0)), Gradient::from_to(Color::white(), Color::black())))),
+    ];
+    for (width, height) in [(200u32, 200u32), (1000, 700)] {
+      for (name, make) in &shapes {
+        // The shapes are described for a 200 x 200 target; on a bigger target they are the same shapes, smaller in proportion.
+        let time = |how: u8| {
+          let run = || {
+            let mut image = Image::new(width, height);
+            match how {
+              0 => {
+                image.draw_fill_on_gpu(&make());
+              }
+              1 => make().apply_on_cpu(&mut image),
+              _ => make().apply(&mut image),
+            }
+            let _ = image.rgba().len();
+          };
+          for _ in 0..3 {
+            run();
+          }
+          let started = std::time::Instant::now();
+          for _ in 0..10 {
+            run();
+          }
+          started.elapsed().as_secs_f64() * 100.0
+        };
+        println!("{width}x{height} {name}: gpu {:.2} ms, cpu {:.2} ms, apply {:.2} ms", time(0), time(1), time(2));
+      }
+    }
   }
 
   #[test]

@@ -1,6 +1,7 @@
 import { useTheme } from '@/src/lib/ui/theme';
 import { useEffect, useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { RevealInput } from '@/src/components/keyboard-scroll';
 
 /** How many decimals a step shows: 1 for 1, 1 for 0.1, 2 for 0.05. */
 const decimalsOf = (step: number) => Math.min(6, (String(step).split('.')[1] ?? '').length);
@@ -35,7 +36,7 @@ export function InspectorNumberField({
   }, [shown, typing]);
 
   return (
-    <TextInput
+    <RevealInput
       accessibilityLabel={label}
       value={text}
       onFocus={() => setTyping(true)}

@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use vessel_api::prelude::*;
@@ -17,6 +16,20 @@ const STEP: f32 = 0.05;
 /// sent when the program calls `set_value`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Changed(pub f32);
+
+/// The track picture made ready to draw: stretched to the slider's width and its ends rounded. It is the same for every position of the
+/// thumb, so it is made once for a picture and a size and kept (one at most, so a replaced picture is let go).
+struct PreparedTrack {
+  /// The picture it was made from, which names it: another picture is another track.
+  source: Arc<Frame>,
+  /// The room it was made for: the slider's width and the height of the band.
+  room: (u32, u32),
+  /// Where it starts across, its size, and its pixels.
+  x: i32,
+  width: u32,
+  height: u32,
+  pixels: Arc<Vec<u8>>,
+}
 
 /// The width of the thumb: its picture's width if it has one (never wider than the slider), otherwise `p_size`.
 fn thumb_width(p_width: u32, p_height: u32, p_size: u32, p_picture: &Option<Arc<Frame>>) -> u32 {
@@ -60,6 +73,7 @@ impl Slider {
     let key_step = BehaviorSubject::new(STEP);
 
     let component = Component::new("slider");
+    let prepared_track = Mutex::new(None::<PreparedTrack>);
     component.subject::<Canvas>().subscribe({
       let (value, color) = (value.clone(), color.clone());
       let (track_image, thumb_image) = (track_image.clone(), thumb_image.clone());
@@ -76,19 +90,29 @@ impl Slider {
         let theme = canvas.theme();
         let fill = color.value().unwrap_or(theme.accent);
 
-        if let Some(frame) = track_picture.as_deref() {
+        if let Some(frame) = track_picture.as_ref() {
           // The picture's own height is the bar's thickness, stretched to the slider's width, with rounded ends like the
-          // standard track and a faint outline.
+          // standard track and a faint outline. It does not depend on where the thumb is, so it is not made again for each move.
           let band = frame.height.min(height).max(1);
-          if let Some((x, _, bar_width, bar_height, mut pixels)) = fitted(frame, width, band, Fit::Stretch) {
-            let rounding = bar_height as f32 / 2.0;
-            for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
-              let (px, py) = ((index as u32 % bar_width) as f32 + 0.5, (index as u32 / bar_width) as f32 + 0.5);
-              // How far this pixel is outside the pill shape, which only the two rounded ends can be.
-              let across = (rounding - px).max(px - (bar_width as f32 - rounding)).max(0.0);
-              let distance = (across * across + (py - rounding) * (py - rounding)).sqrt();
-              pixel[3] = (pixel[3] as f32 * (rounding - distance + 0.5).clamp(0.0, 1.0)) as u8;
+          let ready = {
+            let mut kept = prepared_track.lock().unwrap();
+            if !kept.as_ref().is_some_and(|track| Arc::ptr_eq(&track.source, frame) && track.room == (width, band)) {
+              *kept = fitted(frame, width, band, Fit::Stretch).map(|(x, _, bar_width, bar_height, mut pixels)| {
+                let rounding = bar_height as f32 / 2.0;
+                for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+                  let (px, py) = ((index as u32 % bar_width) as f32 + 0.5, (index as u32 / bar_width) as f32 + 0.5);
+                  // How far this pixel is outside the pill shape, which only the two rounded ends can be.
+                  let across = (rounding - px).max(px - (bar_width as f32 - rounding)).max(0.0);
+                  let distance = (across * across + (py - rounding) * (py - rounding)).sqrt();
+                  pixel[3] = (pixel[3] as f32 * (rounding - distance + 0.5).clamp(0.0, 1.0)) as u8;
+                }
+                PreparedTrack { source: Arc::clone(frame), room: (width, band), x, width: bar_width, height: bar_height, pixels: Arc::new(pixels) }
+              });
             }
+            kept.as_ref().map(|track| (track.x, track.width, track.height, Arc::clone(&track.pixels)))
+          };
+          if let Some((x, bar_width, bar_height, pixels)) = ready {
+            let rounding = bar_height as f32 / 2.0;
             let top = (height as i32 - bar_height as i32) / 2;
             canvas.draw_pixels(x, top, bar_width, bar_height, &pixels);
             let [red, green, blue, _] = theme.border;
@@ -137,24 +161,9 @@ impl Slider {
       }
     };
 
-    let (dragging, at) = (AtomicBool::new(false), Mutex::new(0.0f32));
-    component.subject::<PointerEvent>().subscribe(move |event| match event {
-      PointerEvent::Moved { x, .. } => {
-        *at.lock().unwrap() = *x;
-        if dragging.load(Ordering::SeqCst) {
-          moved_to(*x);
-        }
-      }
-      PointerEvent::Button {
-        button: PointerButton::Left,
-        pressed,
-      } => {
-        dragging.store(*pressed, Ordering::SeqCst);
-        if *pressed {
-          moved_to(*at.lock().unwrap());
-        }
-      }
-      PointerEvent::Button { .. } => {}
+    component.subject::<Drag>().subscribe(move |drag| match drag {
+      Drag::Start { x, .. } | Drag::Move { x, .. } => moved_to(*x),
+      Drag::End { .. } => {}
     });
 
     let this = component.downgrade();
@@ -222,7 +231,7 @@ impl Slider {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::Arc;
+  use std::sync::{Arc, Mutex};
   use std::time::Duration;
 
   use super::*;
@@ -415,5 +424,44 @@ mod tests {
     pointer(&slider, 115.0, Some(false));
     assert!((slider.value() - 1.0).abs() < 0.01);
     assert!(!heard.lock().unwrap().is_empty());
+  }
+
+  #[test]
+  fn a_track_made_for_one_picture_and_size_is_not_used_for_another() {
+    let red = [200, 0, 0, 255];
+    let green = [0, 200, 0, 255];
+    let slider = sized(0.5).with_track_image(flat(4, 4, red));
+    assert_eq!(pixel(&render(&slider), 100, 10), red);
+    // The thumb moves: the same track is drawn.
+    slider.set_value(0.0);
+    assert_eq!(pixel(&render(&slider), 100, 10), red);
+    // Another picture is another track.
+    slider.set_track_image(flat(4, 4, green));
+    assert_eq!(pixel(&render(&slider), 100, 10), green);
+    // Another size is another track: the picture is stretched across the new width.
+    slider.size().next((240, 20));
+    assert_eq!(pixel(&render(&slider), 200, 10), green);
+  }
+
+  /// How long a drag takes to draw on a phone-sized slider with a picture for the track: the thumb moves a little each frame, so the
+  /// track is the same each time. Run with `cargo test -p vessel-ui --release timing -- --ignored --nocapture`.
+  #[test]
+  #[ignore]
+  fn timing_of_a_frame_while_dragging_a_slider_with_a_track_picture() {
+    let slider = Slider::new(0.0).with_track_image(flat(200, 14, [200, 0, 0, 255])).with_thumb_image(flat(36, 36, [0, 0, 200, 255]));
+    slider.size().next((1080, 60));
+    render(&slider);
+    let mut times = Vec::new();
+    for step in 0..300 {
+      slider.set_value((step % 100) as f32 / 100.0);
+      let started = std::time::Instant::now();
+      render(&slider);
+      times.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    println!(
+      "a slider frame: {:.3} ms on average, worst {:.3} ms",
+      times.iter().sum::<f64>() / times.len() as f64,
+      times.iter().cloned().fold(0.0, f64::max)
+    );
   }
 }

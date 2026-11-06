@@ -90,12 +90,13 @@ export function CurvePickerDialog({ request, onDone }: { request: CurvePickerReq
 
           {point ? (
             <View style={styles.pointRow}>
-              <NumberBox label="Time" value={Math.round(point[0] * 100)} max={100} suffix="%" onCommit={percent => setSelectedPoint({ x: percent / 100 })} />
+              <NumberBox label="Time" value={Math.round(point[0] * 100)} max={100} suffix="%" slider onCommit={percent => setSelectedPoint({ x: percent / 100 })} />
               <NumberBox
                 label="Value"
                 value={Math.round(((point[1] - min) / span) * 100)}
                 max={100}
                 suffix="%"
+                slider
                 onCommit={percent => setSelectedPoint({ y: min + (percent / 100) * span })}
               />
               <Pressable

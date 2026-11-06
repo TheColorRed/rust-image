@@ -9,6 +9,7 @@ import { pluginTouchListeners$ } from '@/src/state/plugin-touch';
 import { areaDrawKey$, areaDrawMode, areaTarget$ } from '@/src/state/draw-area';
 import { CropGizmos } from '@/src/components/tools/crop-tool';
 import { GradientHandles } from '@/src/components/tools/gradient-tool';
+import { StripeTextTaps } from '@/src/components/tools/stripe-text-taps';
 import { StripeWordsDialog } from '@/src/components/tools/stripe-words-dialog';
 import { useBasePreview } from '@/src/hooks/useBasePreview';
 import { usePreviewBox } from '@/src/hooks/usePreviewBox';
@@ -217,7 +218,8 @@ export function EditorPreview() {
         ) : null}
         {pluginListening && !(areaTarget && drawingArea === areaTarget.key) && <PluginTouchOverlay />}
         {cropFocused && <CropGizmos />}
-        {gradientFocused && <GradientHandles />}
+        {gradientFocused && <GradientHandles view={(liveShown ? liveView : null) ?? baseView} />}
+        {stripeFocused && <StripeTextTaps />}
         {stripeFocused && <StripeWordsDialog />}
         <ViewControls />
         {busy && <ActivityIndicator style={styles.busy} color={colors.textPrimary} />}

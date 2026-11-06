@@ -63,6 +63,37 @@ impl Viewport {
     let top = top.min(p_height.saturating_sub(1));
     (left, top, right.saturating_sub(left).max(1), bottom.saturating_sub(top).max(1))
   }
+
+  /// The viewport that fills a view of `p_view` pixels with the middle of a source of `p_source` pixels, keeping the source's proportions, so
+  /// the part that does not fit is cropped on both sides (CSS `object-fit: cover`).
+  pub fn covering(p_source: (u32, u32), p_view: (u32, u32)) -> Self {
+    let source_shape = p_source.0.max(1) as f32 / p_source.1.max(1) as f32;
+    let view_shape = p_view.0.max(1) as f32 / p_view.1.max(1) as f32;
+    if view_shape < source_shape {
+      let width = view_shape / source_shape;
+      Self { x: (1.0 - width) / 2.0, y: 0.0, width, height: 1.0 }
+    } else {
+      let height = source_shape / view_shape;
+      Self { x: 0.0, y: (1.0 - height) / 2.0, width: 1.0, height }
+    }
+  }
+
+  /// Where a point of the source (in the source's pixels) is in a view of `p_view` pixels that shows this viewport of a source of
+  /// `p_source` pixels turned `p_angle` radians clockwise about the middle of the view. The point may be outside the view.
+  pub fn to_view(&self, p_point: (f32, f32), p_source: (f32, f32), p_view: (f32, f32), p_angle: f32) -> (f32, f32) {
+    let across = (p_point.0 / p_source.0 - self.x) / self.width * p_view.0 - p_view.0 / 2.0;
+    let down = (p_point.1 / p_source.1 - self.y) / self.height * p_view.1 - p_view.1 / 2.0;
+    let (sin, cos) = p_angle.sin_cos();
+    (p_view.0 / 2.0 + across * cos - down * sin, p_view.1 / 2.0 + across * sin + down * cos)
+  }
+
+  /// Where a point of the view (in the view's pixels) is in the source, in the source's pixels: the opposite of [`to_view`](Self::to_view).
+  pub fn to_source(&self, p_point: (f32, f32), p_source: (f32, f32), p_view: (f32, f32), p_angle: f32) -> (f32, f32) {
+    let (across, down) = (p_point.0 - p_view.0 / 2.0, p_point.1 - p_view.1 / 2.0);
+    let (sin, cos) = p_angle.sin_cos();
+    let (along, below) = (across * cos + down * sin, -across * sin + down * cos);
+    ((self.x + self.width / 2.0 + along / p_view.0 * self.width) * p_source.0, (self.y + self.height / 2.0 + below / p_view.1 * self.height) * p_source.1)
+  }
 }
 
 /// A picture an [`Image`] can show: pixels, or a picture that was made on the GPU.
@@ -104,6 +135,16 @@ struct PictureInner {
   picture: Option<Picture>,
   /// CPU composition reads a published GPU picture at most once, even when fit or host styling changes.
   readback: Option<Arc<Frame>>,
+}
+
+/// What an [`Offscreen`] renderer publishes is what an [`Image`] shows.
+impl From<&RenderedFrame> for Picture {
+  fn from(p_frame: &RenderedFrame) -> Self {
+    match p_frame {
+      RenderedFrame::Pixels(frame) => Picture::Pixels(Arc::clone(frame)),
+      RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
+    }
+  }
 }
 
 impl<T: Trackable> Trackable for Arc<T> {
@@ -397,6 +438,17 @@ impl Image {
     self.rotation.value()
   }
 
+  /// The viewport as a stream that sends the part shown each time it changes, including on every frame of a glide or a tween. Something
+  /// laid over the picture subscribes to it (or combines it with [`rotations`](Self::rotations)) to stay on the same part.
+  pub fn viewports(&self) -> &BehaviorSubject<Viewport> {
+    &self.viewport
+  }
+
+  /// The rotation as a stream, in radians, in the same way as [`viewports`](Self::viewports).
+  pub fn rotations(&self) -> &BehaviorSubject<f32> {
+    &self.rotation
+  }
+
   properties! {
     fit: Fit => set_fit, with_fit;
   }
@@ -483,6 +535,58 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+
+  #[test]
+  fn a_viewport_puts_a_point_of_the_source_where_it_is_in_the_view_and_back() {
+    // A 200 x 100 source seen whole in a 400 x 200 view: everything is twice as far from the corner.
+    let whole = Viewport::default();
+    assert_eq!(whole.to_view((50.0, 25.0), (200.0, 100.0), (400.0, 200.0), 0.0), (100.0, 50.0));
+    // Zoomed to its right half, the middle of the source is the left edge of the view.
+    let right_half = Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 };
+    assert_eq!(right_half.to_view((100.0, 50.0), (200.0, 100.0), (400.0, 200.0), 0.0), (0.0, 100.0));
+    // Turned a quarter, clockwise, about the middle of the view: the top left corner goes to the top right.
+    let (x, y) = whole.to_view((0.0, 0.0), (100.0, 100.0), (100.0, 100.0), std::f32::consts::FRAC_PI_2);
+    assert!((x - 100.0).abs() < 1e-3 && y.abs() < 1e-3, "{x} {y}");
+    // And back, for a zoomed and turned view.
+    let zoomed = Viewport { x: 0.2, y: 0.1, width: 0.5, height: 0.6 };
+    for point in [(10.0, 20.0), (123.0, 45.0), (199.0, 99.0)] {
+      let there = zoomed.to_view(point, (200.0, 100.0), (320.0, 240.0), 0.7);
+      let back = zoomed.to_source(there, (200.0, 100.0), (320.0, 240.0), 0.7);
+      assert!((back.0 - point.0).abs() < 1e-2 && (back.1 - point.1).abs() < 1e-2, "{point:?} came back as {back:?}");
+    }
+  }
+
+  #[test]
+  fn the_viewport_and_rotation_streams_send_each_change_to_something_laid_over_the_picture() {
+    let image = Image::new();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let _viewports = image.viewports().subscribe({
+      let seen = Arc::clone(&seen);
+      move |viewport| seen.lock().unwrap().push((viewport.x, 0.0))
+    });
+    let _rotations = image.rotations().subscribe({
+      let seen = Arc::clone(&seen);
+      move |angle| seen.lock().unwrap().push((-1.0, *angle))
+    });
+    image.jump_viewport(Viewport { x: 0.25, y: 0.0, width: 0.5, height: 1.0 });
+    image.set_rotation(1.5);
+    // Each stream first sends where it is now, so something laid over the picture learns it at once, and then every change.
+    assert_eq!(*seen.lock().unwrap(), vec![(0.0, 0.0), (-1.0, 0.0), (0.25, 0.0), (-1.0, 1.5)]);
+  }
+
+  #[test]
+  fn a_covering_viewport_is_the_middle_of_the_source_with_the_views_shape() {
+    // A square source in a wide view: the full width and the middle 70% of the height.
+    let wide = Viewport::covering((30, 30), (112, 80));
+    assert_eq!((wide.x, wide.width, wide.height), (0.0, 1.0, 80.0 / 112.0));
+    assert!((wide.y - (1.0 - wide.height) / 2.0).abs() < 1e-6);
+    // A wide source in a tall view: the full height and the middle of the width.
+    let tall = Viewport::covering((200, 100), (50, 100));
+    assert_eq!((tall.y, tall.height, tall.width), (0.0, 1.0, 0.25));
+    assert_eq!(tall.x, 0.375);
+    // The same shape needs the whole source.
+    assert_eq!(Viewport::covering((16, 9), (160, 90)), Viewport::default());
+  }
 
   /// Makes a 1x1 picture whose red is the viewport's left edge in percent, so a test can see which viewport it was given.
   struct ViewportEcho;

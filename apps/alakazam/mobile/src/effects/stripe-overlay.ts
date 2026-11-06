@@ -92,6 +92,74 @@ const STRIPE_TUCK = 0.2;
 /** The shorter side of a stripe's picture, in pixels. A stripe is one color, so its picture is made small and the sprite scales it up; this many pixels keep its shape true. */
 const STRIPE_PICTURE = 16;
 
+/** A piece of text on the photo: where its middle is (in pixels of the photo), how big its letters are, and how much it is turned, in degrees. */
+export type StripeTextBox = { x: number; y: number; width: number; height: number; angle: number };
+
+/**
+ * Works out where everything goes for a photo `width` by `height`: the text pictures and where the stripes and the text are. It makes the text
+ * pictures (the caller owns them through `keep`) because how big the letters come out sets how thick the stripes are, which sets where the sub
+ * stripe goes. `stripeOverlay` draws from it and `stripeTextBoxes` answers where a tap lands, so the two always agree.
+ */
+const layoutStripes = (keep: <T>(value: T) => T, width: number, photoHeight: number, values: number[], placed: Partial<StripePlace>) => {
+  const [strength, lookAt, showSub, capsTitle, capsSub] = stripeValues(values);
+  const { size, position, angle, gap, shift: sideways, padding } = { ...STRIPE_PLACE_DEFAULTS, ...placed };
+  const tall = STRIPE_PADDING.least + padding * (STRIPE_PADDING.most - STRIPE_PADDING.least);
+  const look = STRIPE_LOOKS[lookAt] ?? STRIPE_LOOKS[0];
+  const words = decodeWords(values);
+  const family = installedFamilies().some(each => each.family === words.family) ? words.family : (installedFamilies()[0]?.family ?? '');
+  const letters = Math.min(width, photoHeight) * (0.05 + 0.1 * size);
+  const ink = (rgb: Rgb) => keep(Color.fromRgba(rgb[0], rgb[1], rgb[2], 255));
+  const title = family ? renderText({ text: capsTitle ? words.title.toUpperCase() : words.title, family, size: letters, color: ink(look.ink) }) : null;
+  // The subtitle is optional: with it off, or with nothing typed, there is no short stripe either.
+  const subtitle =
+    family && showSub
+      ? renderText({ text: capsSub ? words.subtitle.toUpperCase() : words.subtitle, family, size: letters * 0.55, color: ink(look.underInk) })
+      : null;
+  if (title) keep(title);
+  if (subtitle) keep(subtitle);
+
+  const radians = (angle * Math.PI) / 180;
+  const [sin, cos] = [Math.sin(radians), Math.cos(radians)];
+  const centre = [width / 2, photoHeight * position] as const;
+  // The long stripe reaches past the corners at any angle. Without a title it is as thick as a line of letters would make it.
+  const longStripe = { length: Math.hypot(width, photoHeight) * 1.3, thick: (title?.height() ?? letters) * tall };
+  const shortThick = (subtitle?.height() ?? letters * 0.55) * tall * STRIPE_PADDING.sub;
+  const shortLength = subtitle ? subtitle.width() + shortThick : 0;
+
+  // The short stripe hangs under the long one and is placed by where its whole turned shape can go on the photo: across from 0 (its text's left end at
+  // the photo's left edge) to 1 (its text's right end at the right edge, with the stripe running on off the photo), and down from 0 (tucked under the long stripe's edge) to 1 (its lower edge on the
+  // photo's lower edge), or up to -1 (its upper edge on the photo's upper edge, above the long stripe). The text's size is counted, so it never leaves the photo however long it is.
+  let under: { x: number; y: number } | null = null;
+  if (subtitle) {
+    const halfAcross = (shortLength * Math.abs(cos) + shortThick * Math.abs(sin)) / 2;
+    const halfDown = (shortLength * Math.abs(sin) + shortThick * Math.abs(cos)) / 2;
+    const between = (low: number, high: number, share: number) => (high < low ? (low + high) / 2 : low + share * (high - low));
+    const x = between(halfAcross, width - halfAcross, sideways);
+    // How far the short stripe's middle is from the long one's when it overlaps the long stripe's edge by `STRIPE_TUCK`, across the stripes.
+    const tucked = (longStripe.thick + shortThick) / 2 - longStripe.thick * STRIPE_TUCK;
+    // Where its middle is then, straight down from the long stripe's middle and then along it to `x`.
+    const touching = centre[1] + Math.tan(radians) * (x - centre[0]) + tucked / cos;
+    // Above the long stripe it is the same in the other direction: tucked under its upper edge, then up to the photo's upper edge.
+    const touchingAbove = touching - (2 * tucked) / cos;
+    const y = gap >= 0 ? touching + gap * (Math.max(touching, photoHeight - halfDown) - touching) : touchingAbove + -gap * (Math.min(touchingAbove, halfDown) - touchingAbove);
+    under = { x, y };
+  }
+  return { strength, look, angle, sin, cos, ink, title, subtitle, centre, longStripe, shortThick, shortLength, under };
+};
+
+/**
+ * Where the main text and the sub text are on a photo `width` by `height`, for the saved `values` and the settings with sliders of their own
+ * (`placed`), so a tap on the photo can be matched to the text under it. The text is left out when it is not shown (no font, or the sub text is off).
+ */
+export const stripeTextBoxes = (width: number, height: number, values: number[], placed: Partial<StripePlace> = {}): { main?: StripeTextBox; sub?: StripeTextBox } =>
+  owning(keep => {
+    const { angle, title, subtitle, centre, under } = layoutStripes(keep, width, height, values, placed);
+    return {
+      main: title ? { x: centre[0], y: centre[1], width: title.width(), height: title.height(), angle } : undefined,
+      sub: subtitle && under ? { x: under.x, y: under.y, width: subtitle.width(), height: subtitle.height(), angle } : undefined,
+    };
+  });
+
 /**
  * Lays the stripes over `photo` in place, from the control's saved values (see `STRIPE_AT`): a long stripe across the photo with the title on
  * it, and a shorter stripe under it with the subtitle. The photo remembers the effect and the GPU draws it, so this does no image work on the
@@ -99,35 +167,10 @@ const STRIPE_PICTURE = 16;
  */
 export const stripeOverlay = (photo: ImageLike, values: number[], placed: Partial<StripePlace> = {}): void =>
   owning(keep => {
-    const [strength, lookAt, showSub, capsTitle, capsSub] = stripeValues(values);
-    const { size, position, angle, gap, shift: sideways, padding } = { ...STRIPE_PLACE_DEFAULTS, ...placed };
-    const tall = STRIPE_PADDING.least + padding * (STRIPE_PADDING.most - STRIPE_PADDING.least);
-    if (strength <= 0) return;
-    const look = STRIPE_LOOKS[lookAt] ?? STRIPE_LOOKS[0];
-    const words = decodeWords(values);
-    const family = installedFamilies().some(each => each.family === words.family) ? words.family : (installedFamilies()[0]?.family ?? '');
     const width = photo.width();
     const photoHeight = photo.height();
-    const shorter = Math.min(width, photoHeight);
-    const letters = shorter * (0.05 + 0.1 * size);
-    const ink = (rgb: Rgb) => keep(Color.fromRgba(rgb[0], rgb[1], rgb[2], 255));
-    const title = family
-      ? renderText({ text: capsTitle ? words.title.toUpperCase() : words.title, family, size: letters, color: ink(look.ink) })
-      : null;
-    // The subtitle is optional: with it off, or with nothing typed, there is no short stripe either.
-    const subtitle =
-      family && showSub
-        ? renderText({ text: capsSub ? words.subtitle.toUpperCase() : words.subtitle, family, size: letters * 0.55, color: ink(look.underInk) })
-        : null;
-    if (title) keep(title);
-    if (subtitle) keep(subtitle);
-
-    const radians = (angle * Math.PI) / 180;
-    const centre = [width / 2, photoHeight * position] as const;
-    // The long stripe reaches past the corners at any angle. Without a title it is as thick as a line of letters would make it.
-    const longStripe = { length: Math.hypot(width, photoHeight) * 1.3, thick: (title?.height() ?? letters) * tall };
-    const shortThick = (subtitle?.height() ?? letters * 0.55) * tall * STRIPE_PADDING.sub;
-    const shortLength = subtitle ? subtitle.width() + shortThick : 0;
+    const { strength, look, angle, sin, cos, ink, title, subtitle, centre, longStripe, shortThick, shortLength, under } = layoutStripes(keep, width, photoHeight, values, placed);
+    if (strength <= 0) return;
 
     // One sprite as the numbers the library takes: where, half its longer side, how solid, the tint (white leaves the picture as it is), how much
     // it is turned, and the values that are not used.
@@ -144,28 +187,13 @@ export const stripeOverlay = (photo: ImageLike, values: number[], placed: Partia
       drawn = keep(drawn.addSpriteValues(sprite(x, y, Math.max(length, thick)), normal, picture));
     };
     stripe(look.stripe, longStripe.length, longStripe.thick, centre[0], centre[1]);
-    if (subtitle) {
-      // The short stripe hangs under the long one and is placed by where its whole turned shape can go on the photo: across from 0 (its text's left end at
-      // the photo's left edge) to 1 (its text's right end at the right edge, with the stripe running on off the photo), and down from 0 (tucked under the long stripe's edge) to 1 (its lower edge on the
-      // photo's lower edge), or up to -1 (its upper edge on the photo's upper edge, above the long stripe). The text's size is counted, so it never leaves the photo however long it is.
-      const [sin, cos] = [Math.sin(radians), Math.cos(radians)];
-      const halfAcross = (shortLength * Math.abs(cos) + shortThick * Math.abs(sin)) / 2;
-      const halfDown = (shortLength * Math.abs(sin) + shortThick * Math.abs(cos)) / 2;
-      const between = (low: number, high: number, share: number) => (high < low ? (low + high) / 2 : low + share * (high - low));
-      const x = between(halfAcross, width - halfAcross, sideways);
-      // How far the short stripe's middle is from the long one's when it overlaps the long stripe's edge by `STRIPE_TUCK`, across the stripes.
-      const tucked = (longStripe.thick + shortThick) / 2 - longStripe.thick * STRIPE_TUCK;
-      // Where its middle is then, straight down from the long stripe's middle and then along it to `x`.
-      const touching = centre[1] + Math.tan(radians) * (x - centre[0]) + tucked / cos;
-      // Above the long stripe it is the same in the other direction: tucked under its upper edge, then up to the photo's upper edge.
-      const touchingAbove = touching - (2 * tucked) / cos;
-      const y = gap >= 0 ? touching + gap * (Math.max(touching, photoHeight - halfDown) - touching) : touchingAbove + -gap * (Math.min(touchingAbove, halfDown) - touchingAbove);
+    if (subtitle && under) {
       // The stripe starts where the text's place starts and runs off the right edge of the photo, as the long stripe runs off both, so wherever the
       // text is the stripe is never seen to end on that side.
-      const start = [x - (cos * shortLength) / 2, y - (sin * shortLength) / 2] as const;
+      const start = [under.x - (cos * shortLength) / 2, under.y - (sin * shortLength) / 2] as const;
       const reach = Math.max(shortLength, (width - start[0]) / cos + shortThick);
       stripe(look.under, reach, shortThick, start[0] + (cos * reach) / 2, start[1] + (sin * reach) / 2);
-      add(subtitle, x, y);
+      add(subtitle, under.x, under.y);
     }
     if (title) add(title, centre[0], centre[1]);
     drawn.applyDeferred(photo);

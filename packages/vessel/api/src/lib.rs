@@ -48,7 +48,7 @@ pub use self::{
   component::{Component, Renderable, Tick, WeakComponent},
   font::{Face, Font, TextAlign},
   gpu::GpuPicture,
-  input::{KeyEvent, PointerButton, PointerEvent, Quit},
+  input::{Drag, KeyEvent, PointerButton, PointerEvent, Quit},
   layout::{Align, Direction, Display, Edges, Justify, Rect, Track, Units},
   sequence::{Animation, PlayOptions, Playback, Step},
   theme::{Background, Theme, ThemePatch},
@@ -61,7 +61,7 @@ pub mod prelude {
   #[cfg(all(feature = "desktop-window", not(any(target_os = "android", target_os = "ios"))))]
   pub use crate::run;
   pub use crate::{
-    Align, Animatable, Animation, App, AppFrame, AppOptions, Background, Canvas, Component, Direction, Display, Easing, Edges,
+    Align, Animatable, Animation, App, AppFrame, AppOptions, Background, Canvas, Component, Direction, Display, Drag, Easing, Edges,
     Face, Font, GpuPicture, Justify, KeyEvent, PlayOptions, Playback, PointerButton, PointerEvent, Quit, Renderable, Step, TextAlign,
     Theme, ThemePatch, Tick, Track, Tween, TweenOptions, Units, WeakComponent,
   };

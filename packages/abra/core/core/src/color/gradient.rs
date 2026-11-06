@@ -24,6 +24,42 @@ impl ColorStop {
   }
 }
 
+#[derive(Clone, Debug, Copy, Default, PartialEq)]
+/// How solid a gradient is at one place along it, apart from its colors. See [`Gradient::with_alpha_stops`].
+pub struct AlphaStop {
+  /// How solid the gradient is at this stop, from 0 (clear) to 255 (solid).
+  pub alpha: u8,
+  /// A value between 0 and 1 representing the position of the stop.
+  pub time: f32,
+}
+
+impl AlphaStop {
+  /// Creates a stop with the given alpha and position.
+  pub fn new(p_alpha: u8, p_time: f32) -> AlphaStop {
+    AlphaStop { alpha: p_alpha, time: p_time }
+  }
+
+  /// How solid the gradient is at `p_time`, mixed in a straight line between the stops around it. Before the first stop and after the last
+  /// it is held at that stop's alpha. The stops can be in any order. With no stops it is solid (255).
+  pub fn alpha_at(p_stops: &[AlphaStop], p_time: f32) -> u8 {
+    let mut sorted = p_stops.to_vec();
+    sorted.sort_by(|a, b| a.time.total_cmp(&b.time));
+    Self::alpha_in_order(&sorted, p_time)
+  }
+
+  /// [`alpha_at`](Self::alpha_at) for stops that are already sorted by position.
+  fn alpha_in_order(p_sorted: &[AlphaStop], p_time: f32) -> u8 {
+    let Some(last) = p_sorted.last() else { return 255 };
+    let Some(after) = p_sorted.iter().position(|stop| stop.time >= p_time) else { return last.alpha };
+    if after == 0 {
+      return p_sorted[0].alpha;
+    }
+    let (before, after) = (p_sorted[after - 1], p_sorted[after]);
+    let along = if after.time > before.time { (p_time - before.time) / (after.time - before.time) } else { 0.0 };
+    (before.alpha as f32 + (after.alpha as f32 - before.alpha as f32) * along).round() as u8
+  }
+}
+
 #[derive(Debug, Clone)]
 /// Describes how to interpolate between colors in a gradient.
 pub struct Gradient {
@@ -170,6 +206,31 @@ impl Gradient {
     start.color.mix(end.color, t, self.interpolation)
   }
 
+  /// A gradient with this one's colors and its own alpha taken from `p_alphas` instead, so the colors and how solid they are can be placed
+  /// independently (a color stop at 0 and 1, and a gradient that fades out in the middle). The result has a stop at every place either has
+  /// one: this gradient's stops keep their own colors (and hard edges), with the alpha the stops give there, and each alpha stop where the
+  /// gradient has none gets the color the gradient has there. Direction and interpolation are kept. With no alpha stops the gradient is
+  /// returned as it is.
+  /// - `p_alphas`: The alpha stops, in any order.
+  pub fn with_alpha_stops(&self, p_alphas: &[AlphaStop]) -> Gradient {
+    if p_alphas.is_empty() {
+      return self.clone();
+    }
+    let mut sorted = p_alphas.to_vec();
+    sorted.sort_by(|a, b| a.time.total_cmp(&b.time));
+    let solid_at = |p_time: f32| AlphaStop::alpha_in_order(&sorted, p_time);
+    let mut stops: Vec<ColorStop> =
+      self.stops.iter().map(|stop| ColorStop::new(Color::from_rgba(stop.color.r, stop.color.g, stop.color.b, solid_at(stop.time)), stop.time)).collect();
+    for alpha in &sorted {
+      if !self.stops.iter().any(|stop| stop.time == alpha.time) {
+        let color = self.color_at(alpha.time);
+        stops.push(ColorStop::new(Color::from_rgba(color.r, color.g, color.b, alpha.alpha), alpha.time));
+      }
+    }
+    stops.sort_by(|a, b| a.time.total_cmp(&b.time));
+    Gradient { stops, direction: self.direction.clone(), interpolation: self.interpolation }
+  }
+
   /// Reverses the gradient.
   pub fn reverse(&self) -> Gradient {
     let mut stops = Vec::new();
@@ -218,6 +279,44 @@ impl<'a> From<Gradient> for Cow<'a, Gradient> {
 mod tests {
   use super::*;
   use crate::{ColorSpace, HueDirection};
+
+  #[test]
+  fn alpha_is_mixed_in_a_straight_line_between_its_stops_and_held_past_the_ends() {
+    // Solid at both ends and clear in the middle, given out of order.
+    let stops = [AlphaStop::new(255, 1.0), AlphaStop::new(0, 0.5), AlphaStop::new(255, 0.0)];
+    assert_eq!(AlphaStop::alpha_at(&stops, 0.5), 0);
+    assert_eq!(AlphaStop::alpha_at(&stops, 0.25), 128, "halfway to nothing");
+    assert_eq!(AlphaStop::alpha_at(&stops, -1.0), 255, "held before the first stop");
+    assert_eq!(AlphaStop::alpha_at(&stops, 5.0), 255, "and after the last");
+    assert_eq!(AlphaStop::alpha_at(&[], 0.5), 255, "with no stops it is solid");
+  }
+
+  #[test]
+  fn alpha_stops_are_placed_apart_from_the_color_stops() {
+    let red_to_blue = Gradient::from_to(Color::from_rgb(255, 0, 0), Color::from_rgb(0, 0, 255));
+    let faded = red_to_blue.with_alpha_stops(&[AlphaStop::new(255, 0.0), AlphaStop::new(0, 0.5), AlphaStop::new(255, 1.0)]);
+    // The two color stops keep their colors, and a stop appears where the alpha has one, with the color the gradient has there.
+    let stops: Vec<_> = faded.stops().iter().map(|stop| (stop.time, stop.color.rgba())).collect();
+    assert_eq!(stops, vec![(0.0, (255, 0, 0, 255)), (0.5, (128, 0, 128, 0)), (1.0, (0, 0, 255, 255))]);
+    assert_eq!(faded.color_at(0.25).a, 128, "the alpha fades in a straight line");
+    // No alpha stops leaves the gradient as it was; the direction and the mixing are kept.
+    assert_eq!(red_to_blue.with_alpha_stops(&[]).stops(), red_to_blue.stops());
+    let turned = red_to_blue.clone().with_direction(crate::geometry::Path::line((0, 0), (0, 10))).with_interpolation(crate::ColorSpace::Oklab);
+    let kept = turned.with_alpha_stops(&[AlphaStop::new(10, 0.5)]);
+    assert!(kept.direction().is_some() && kept.interpolation() == turned.interpolation());
+  }
+
+  #[test]
+  fn a_hard_edge_in_the_colors_survives_the_alpha_stops() {
+    let hard = Gradient::new(vec![
+      ColorStop::new(Color::from_rgb(255, 0, 0), 0.0),
+      ColorStop::new(Color::from_rgb(255, 0, 0), 0.5),
+      ColorStop::new(Color::from_rgb(0, 0, 255), 0.5),
+      ColorStop::new(Color::from_rgb(0, 0, 255), 1.0),
+    ]);
+    let stops: Vec<_> = hard.with_alpha_stops(&[AlphaStop::new(100, 0.0), AlphaStop::new(100, 1.0)]).stops().iter().map(|stop| stop.color.rgba()).collect();
+    assert_eq!(stops, vec![(255, 0, 0, 100), (255, 0, 0, 100), (0, 0, 255, 100), (0, 0, 255, 100)]);
+  }
 
   #[test]
   fn color_at_blends_between_stops_and_holds_past_the_ends() {

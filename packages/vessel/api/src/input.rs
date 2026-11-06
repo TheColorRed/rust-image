@@ -58,6 +58,34 @@ pub enum PointerEvent {
   },
 }
 
+/// A press of the main button (or a touch) and what follows it, with the pointer's place each time, so a component that is dragged does not
+/// have to remember where the pointer was. Listen with `component.subject::<Drag>()`. Positions are in pixels from the component's top left
+/// corner, as in [`PointerEvent`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Drag {
+  /// The button went down here.
+  Start {
+    /// Distance from the left edge.
+    x: f32,
+    /// Distance from the top edge.
+    y: f32,
+  },
+  /// The pointer moved here while the button was down, including past the component's edge.
+  Move {
+    /// Distance from the left edge.
+    x: f32,
+    /// Distance from the top edge.
+    y: f32,
+  },
+  /// The button came up here.
+  End {
+    /// Distance from the left edge.
+    x: f32,
+    /// Distance from the top edge.
+    y: f32,
+  },
+}
+
 /// A request from a component to end the app. The host listens for it on the component it shows, closes its window or
 /// activity, and returns. Send it with `component.next(Quit)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

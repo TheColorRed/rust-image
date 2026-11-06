@@ -136,10 +136,11 @@ export function GradientPickerDialog({ request, onDone }: { request: GradientPic
                   value={Math.round(((stop as GradientValue['alphas'][number]).alpha / 255) * 100)}
                   max={100}
                   suffix="%"
+                  slider
                   onCommit={percent => setSelectedStop({ alpha: Math.round((percent / 100) * 255) })}
                 />
               )}
-              <NumberBox label="Location" value={Math.round(stop.at * 100)} max={100} suffix="%" onCommit={percent => setSelectedStop({ at: percent / 100 })} />
+              <NumberBox label="Location" value={Math.round(stop.at * 100)} max={100} suffix="%" slider onCommit={percent => setSelectedStop({ at: percent / 100 })} />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Remove stop"

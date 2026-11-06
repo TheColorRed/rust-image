@@ -6,12 +6,14 @@
 //! native view, the GPU target) is the engine's.
 
 use std::sync::{
-  Arc, Mutex,
+  Arc,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use abra::prelude::ImageExt;
 use vessel::prelude::*;
+
+use crate::components::{camera::Camera, frame_of};
 
 
 pub(crate) struct PreviewSource {
@@ -21,8 +23,10 @@ pub(crate) struct PreviewSource {
   image: Arc<dyn Fn() -> abra::prelude::Image + Send + Sync>,
   /// Names what is shown: it is a different number each time the picture has to be made again.
   version: Arc<dyn Fn() -> u64 + Send + Sync>,
-  /// The renderer that makes the pictures, once there is one, so it can be woken when the image is edited.
-  renderer: Mutex<Option<Offscreen>>,
+  /// Wakes the renderer that makes the pictures, once there is one, when the image is edited.
+  revisions: Arc<Revisions>,
+  /// The size in pixels of the picture that is shown, which is the size the photo's points are in. It is `(0, 0)` until the first picture is made.
+  pub(crate) photo: BehaviorSubject<(u32, u32)>,
 }
 
 impl PreviewSource {
@@ -34,7 +38,8 @@ impl PreviewSource {
         move || image.core()
       }),
       version: Arc::new(move || version.core().version()),
-      renderer: Mutex::new(None),
+      revisions: Revisions::new(),
+      photo: BehaviorSubject::new((0, 0)),
     }
   }
 
@@ -54,15 +59,14 @@ impl PreviewSource {
         }
         changes.load(Ordering::SeqCst)
       }),
-      renderer: Mutex::new(None),
+      revisions: Revisions::new(),
+      photo: BehaviorSubject::new((0, 0)),
     }
   }
 
   /// Draws again at once if what is shown has changed since it was drawn, such as a photo that was edited in place.
   fn refresh(&self) {
-    if let Some(renderer) = self.renderer.lock().unwrap().as_ref() {
-      renderer.wake();
-    }
+    self.revisions.wake();
   }
 }
 
@@ -77,7 +81,7 @@ const SLOW_FRAME: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// A photo on the GPU, kept for as long as the same pixels are drawn, so a slider that only changes the effects over it moves
 /// nothing but a few uniforms.
-struct OnTheGpu {
+struct PhotoOnTheGpu {
   /// Names the pixels: which version of the image and how big.
   key: (u64, (u32, u32)),
   _root: abra::prelude::Image,
@@ -87,6 +91,7 @@ struct OnTheGpu {
 impl Trackable for PreviewSource {
   fn pictures(&self, size: &BehaviorSubject<(u32, u32)>, viewport: &BehaviorSubject<Viewport>, rotation: &BehaviorSubject<f32>) -> Subject<Picture> {
     let source = Arc::clone(&self.image);
+    let photo = self.photo.clone();
     let changes = size.combine_latest(viewport).combine_latest(rotation);
     // The renderer draws again whenever the image is a different one (see `ImagePreview::refresh`), and keeps drawing while tiles
     // are still on their way; between them it sleeps.
@@ -97,13 +102,17 @@ impl Trackable for PreviewSource {
     let busy = Arc::new(AtomicBool::new(false));
     // The photos on the GPU, the one drawn last at the end. An edit that is a smaller picture (a mood, say) and then undone brings
     // the full-size photo back, which must not be copied up and built again.
-    let mut held: Vec<OnTheGpu> = Vec::new();
+    let mut held: Vec<PhotoOnTheGpu> = Vec::new();
     let renderer = Offscreen::tracking(&changes, version, { let busy = Arc::clone(&busy); move || busy.load(Ordering::SeqCst) }, move |((size, viewport), angle)| {
       busy.store(false, Ordering::SeqCst);
       if size.0 == 0 || size.1 == 0 { return None }
       // An image that is still a recipe is the pixels it started from and the passes over them, so the GPU keeps those pixels
       // and a drag only changes the passes.
       let image = source();
+      let shown = image.dimensions::<u32>();
+      if photo.peek() != shown {
+        photo.next(shown);
+      }
       let (root, passes) = abra::abra_core::image::recipe::gpu_run(&image).unwrap_or_else(|| (image.clone(), Vec::new()));
       let (photo_width, photo_height) = root.dimensions::<u32>();
       // The view is the whole box and the viewport says which part of the photo it shows, which may reach past the photo.
@@ -133,7 +142,7 @@ impl Trackable for PreviewSource {
           let photo = gpu::TiledRenderer::from_regions(context.clone(), photo_width, photo_height, regions, options)
             .map_err(|error| vessel::surface::log(&format!("[preview] the photo could not be put on the GPU: {error}")))
             .ok()?;
-          held.push(OnTheGpu { key, _root: root.clone(), photo });
+          held.push(PhotoOnTheGpu { key, _root: root.clone(), photo });
           if held.len() > PHOTOS_ON_THE_GPU {
             held.remove(0);
           }
@@ -154,111 +163,35 @@ impl Trackable for PreviewSource {
       if on_the_gpu.is_some() {
         return on_the_gpu;
       }
-      // No GPU, or it could not draw this: the pixels the tool made (or the photo), with the part in view cut out and set on
-      // black, which is what the GPU draws where the view reaches past the photo.
-      let whole = image;
-      let frame = frame_of(&whole);
-      if *angle != 0.0 {
-        // A turned view: every pixel of the box looks up the photo pixel it shows (the GPU's own mapping, see `Window::angle`),
-        // smoothly, and is black where that is past the photo.
-        let (turn_cos, turn_sin) = (angle.cos(), angle.sin());
-        let (photo_w, photo_h) = (frame.width as f32, frame.height as f32);
-        let (scale_x, scale_y) = (viewport.width * photo_w / size.0 as f32, viewport.height * photo_h / size.1 as f32);
-        let (middle_x, middle_y) = ((viewport.x + viewport.width / 2.0) * photo_w, (viewport.y + viewport.height / 2.0) * photo_h);
-        let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
-        for out_y in 0..size.1 {
-          for out_x in 0..size.0 {
-            let step_x = (out_x as f32 + 0.5 - size.0 as f32 / 2.0) * scale_x;
-            let step_y = (out_y as f32 + 0.5 - size.1 as f32 / 2.0) * scale_y;
-            let at = (middle_x + turn_cos * step_x + turn_sin * step_y, middle_y - turn_sin * step_x + turn_cos * step_y);
-            let target = (out_y as usize * size.0 as usize + out_x as usize) * 4;
-            if at.0 < 0.0 || at.1 < 0.0 || at.0 >= photo_w || at.1 >= photo_h {
-              pixels[target + 3] = 255;
-              continue;
-            }
-            let (left, top) = ((at.0 - 0.5).floor(), (at.1 - 0.5).floor());
-            let (share_x, share_y) = (at.0 - 0.5 - left, at.1 - 0.5 - top);
-            let load = |x: f32, y: f32, channel: usize| {
-              let (x, y) = (x.clamp(0.0, photo_w - 1.0) as usize, y.clamp(0.0, photo_h - 1.0) as usize);
-              frame.pixels[(y * frame.width as usize + x) * 4 + channel] as f32
-            };
-            for channel in 0..3 {
-              let above = load(left, top, channel) * (1.0 - share_x) + load(left + 1.0, top, channel) * share_x;
-              let below = load(left, top + 1.0, channel) * (1.0 - share_x) + load(left + 1.0, top + 1.0, channel) * share_x;
-              pixels[target + channel] = (above * (1.0 - share_y) + below * share_y).round() as u8;
-            }
-            pixels[target + 3] = 255;
-          }
-        }
-        return Some(RenderedFrame::Pixels(Arc::new(Frame { width: size.0, height: size.1, pixels: pixels.into() })));
-      }
-      let whole = abra::prelude::Image::new_from_pixels(frame.width, frame.height, frame.pixels.to_vec(), abra::abra_core::Channels::RGBA);
-      let mut pixels = [0u8, 0, 0, 255].repeat(size.0 as usize * size.1 as usize);
-      let (left, top) = (viewport.x.max(0.0), viewport.y.max(0.0));
-      let (right, bottom) = ((viewport.x + viewport.width).min(1.0), (viewport.y + viewport.height).min(1.0));
-      if right > left && bottom > top {
-        let to_box = |at: f32, from: f32, extent: f32, room: u32| ((at - from) / extent * room as f32).round().clamp(0.0, room as f32) as u32;
-        let x = to_box(left, viewport.x, viewport.width, size.0).min(size.0 - 1);
-        let y = to_box(top, viewport.y, viewport.height, size.1).min(size.1 - 1);
-        let width = to_box(right, viewport.x, viewport.width, size.0).saturating_sub(x).max(1);
-        let height = to_box(bottom, viewport.y, viewport.height, size.1).saturating_sub(y).max(1);
-        let mut part = fitted(&whole, &Viewport { x: left, y: top, width: right - left, height: bottom - top }, u32::MAX, u32::MAX);
-        if part.dimensions::<u32>() != (width, height) {
-          abra::transform::prelude::transform()
-            .with_size(abra::abra_core::ResizeTarget::Exact(abra::abra_core::Size::new(width as f32, height as f32)))
-            .apply(&mut part);
-        }
-        let (part_width, part_height) = part.dimensions::<u32>();
-        let part_rgba = part.rgba();
-        let (columns, rows) = (part_width.min(size.0 - x) as usize, part_height.min(size.1 - y));
-        // Only the colors are copied: the view is opaque, and resizing fades the alpha at the edges of a small crop.
-        for row in 0..rows {
-          let source = row as usize * part_width as usize * 4;
-          let target = ((y + row) as usize * size.0 as usize + x as usize) * 4;
-          for column in 0..columns {
-            pixels[target + column * 4..target + column * 4 + 3].copy_from_slice(&part_rgba[source + column * 4..source + column * 4 + 3]);
-          }
-        }
-      }
-      Some(RenderedFrame::Pixels(Arc::new(Frame { width: size.0, height: size.1, pixels: pixels.into() })))
+      // No GPU, or it could not draw this: the pixels the tool made (or the photo) on the CPU.
+      Some(RenderedFrame::Pixels(Arc::new(view_on_the_cpu(&image, viewport, *angle, *size))))
     });
-    *self.renderer.lock().unwrap() = Some(renderer.clone());
-    renderer.map(|frame| match frame {
-      RenderedFrame::Pixels(frame) => Picture::Pixels(Arc::clone(frame)),
-      RenderedFrame::Gpu(frame) => Picture::Gpu(Arc::clone(frame)),
-    })
+    self.revisions.attach(&renderer);
+    renderer.map(|frame| Picture::from(frame))
   }
 }
 
-/// The part of the image inside `region` shrunk to fit within `width` x `height`, or as it is when it already fits. The
-/// default region is the whole image. The region is cut out of the image as it is, so a small region of a large photo
-/// keeps the photo's own pixels.
-pub(crate) fn fitted(image: &abra::prelude::Image, region: &Viewport, width: u32, height: u32) -> abra::prelude::Image {
-  let (full_width, full_height) = image.dimensions::<u32>();
-  let (x, y, cut_width, cut_height) = region.in_pixels(full_width, full_height);
-  // The region is cut out and then shrunk, if it does not fit, in one transform.
-  let mut change = abra::transform::prelude::transform();
-  if (x, y, cut_width, cut_height) != (0, 0, full_width, full_height) {
-    change = change.with_crop(abra::abra_core::Rect::new((x, y), (cut_width, cut_height)));
-  }
-  if cut_width > width || cut_height > height {
-    change = change.with_size(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(width as f32, height as f32)));
-  }
-  change.applied(image)
-}
-
-fn frame_of(image: &abra::prelude::Image) -> Frame {
+/// The picture the GPU would draw, made on the CPU: `image` seen through the part of it that `viewport` names (shares of the image, which may
+/// reach past its edges) turned `angle` radians clockwise, in a box of `size` pixels, on black where the view reaches past the image.
+fn view_on_the_cpu(image: &abra::prelude::Image, viewport: &Viewport, angle: f32, size: (u32, u32)) -> Frame {
   let (width, height) = image.dimensions::<u32>();
-  Frame { width, height, pixels: image.rgba().to_vec().into() }
+  let window = abra::transform::prelude::ViewWindow::new(
+    viewport.x * width as f32,
+    viewport.y * height as f32,
+    viewport.width * width as f32,
+    viewport.height * height as f32,
+  )
+  .with_angle(angle);
+  frame_of(&abra::transform::prelude::view(image, window, size, abra::abra_core::Color::black()))
 }
 
 /// The photo being edited: an image that follows the photo and the controls React touches. A `VesselView` shows it on a
 /// native view, and the Vessel engine does the rest.
 #[derive(uniffi::Object, Component)]
 pub struct ImagePreview {
-  image: Image,
+  pub(crate) image: Image,
   presented: Arc<AtomicBool>,
-  source: Arc<PreviewSource>,
+  pub(crate) source: Arc<PreviewSource>,
 }
 
 #[uniffi::export]
@@ -294,15 +227,14 @@ impl ImagePreview {
   /// Moves the view to this part of the photo in `p_milliseconds`, easing in and out, with a frame for every tick on the way. The
   /// part is a rectangle of the whole photo from 0 to 1, like [`set_viewport`](Self::set_viewport), which cancels the move.
   pub fn tween_viewport(&self, p_x: f32, p_y: f32, p_width: f32, p_height: f32, p_milliseconds: u32) {
-    vessel::surface::log(&format!("[tween] to {p_x:.3},{p_y:.3},{p_width:.3},{p_height:.3} in {p_milliseconds} ms, from {:?}", self.image.viewport()));
     self.image.tween_viewport(
       Viewport { x: p_x, y: p_y, width: p_width, height: p_height },
       TweenOptions::default().with_duration(std::time::Duration::from_millis(p_milliseconds as u64)),
     );
   }
 
-  /// Turns the photo to this many radians clockwise about the middle of what the view shows, at once. 0 is upright. The turn is
-  /// drawn by the GPU; a photo drawn on the CPU (no GPU, or an effect that needs the photo's own pixel positions) stays upright.
+  /// Turns the photo to this many radians clockwise about the middle of what the view shows, at once. 0 is upright. The GPU draws the
+  /// turn; without a GPU (or when it cannot draw the photo) the CPU turns it, smoothly, on black where the turn leaves the photo.
   pub fn set_rotation(&self, p_radians: f32) {
     self.image.set_rotation(p_radians);
   }
@@ -323,6 +255,26 @@ impl ImagePreview {
 }
 
 impl ImagePreview {
+  /// What something laid over this view needs to stay on the same part of the photo: the part shown, how far it is turned, and the size of the
+  /// picture, each sent when it changes (a glide or a tween sends every frame of it).
+  pub(crate) fn looks(&self) -> Subject<((Viewport, f32), (u32, u32))> {
+    self.image.viewports().combine_latest(self.image.rotations()).combine_latest(&self.source.photo)
+  }
+
+  /// Calls `p_apply` with the camera of this view now, once it has one, and again each time the view moves, turns or shows a picture of another size
+  /// (a glide or a tween sends every frame of it). Something laid over the view uses it to stay on the same part of the photo; it follows until the
+  /// subscription is dropped.
+  pub(crate) fn follow_camera(&self, p_apply: impl Fn(Camera) + Send + Sync + 'static) -> Subscription {
+    let apply = move |viewport: &Viewport, angle: f32, photo: (u32, u32)| {
+      if let Some(camera) = Camera::of(*viewport, angle, photo) {
+        p_apply(camera);
+      }
+    };
+    // Something that is already showing the photo has a camera to start from; the stream only sends what changes after this.
+    apply(&self.image.viewport(), self.image.rotation(), self.source.photo.peek());
+    self.looks().subscribe(move |((viewport, angle), photo)| apply(viewport, *angle, *photo))
+  }
+
   /// The view over a source, made to follow it and to say when a frame has been drawn.
   fn over(p_source: PreviewSource) -> Arc<Self> {
     let source = Arc::new(p_source);
@@ -561,36 +513,24 @@ mod tests {
     assert_eq!(newest(&surface, |pixel| pixel == 100), 100, "the undone edit is still on screen");
   }
 
-  /// A 40x20 photo whose red is the column and green is the row, so every pixel tells where it came from.
-  fn gradient_photo() -> AbraPixels {
-    let pixels = (0..20u32).flat_map(|row| (0..40u32).flat_map(move |column| [column as u8 * 6, row as u8 * 12, 0, 255]));
-    AbraPixels::new_from_pixels(40, 20, pixels.collect::<Vec<u8>>(), Channels::RGBA)
-  }
-
   #[test]
-  fn the_default_region_gives_the_whole_photo_as_before() {
-    let photo = gradient_photo();
-    let whole = fitted(&photo, &Viewport::default(), 40, 20);
-    assert_eq!(whole.rgba(), photo.rgba());
-    let smaller = fitted(&photo, &Viewport::default(), 20, 10);
-    let expected = abra::transform::prelude::transform()
-      .with_size(abra::abra_core::ResizeTarget::Fit(abra::abra_core::Size::new(20.0, 10.0)))
-      .applied(&photo);
-    assert_eq!(smaller.rgba(), expected.rgba());
-  }
-
-  #[test]
-  fn a_region_is_cut_from_the_photo_before_it_is_shrunk() {
-    let photo = gradient_photo();
-    // The right half, touching the edge: columns 20..40, all rows. Not square and not the photo's shape.
-    let right = fitted(&photo, &Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 }, 100, 100);
-    assert_eq!(right.dimensions::<u32>(), (20, 20));
-    assert_eq!(&right.rgba()[..4], &[20 * 6, 0, 0, 255]);
-    // A quarter in the middle, shown at its own size, is a plain crop with no resampling.
-    let middle = fitted(&photo, &Viewport { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }, 100, 100);
-    assert_eq!(middle.dimensions::<u32>(), (20, 10));
-    let expected = abra::transform::prelude::transform().with_crop(abra::abra_core::Rect::new((10, 5), (20, 10))).applied(&photo);
-    assert_eq!(middle.rgba(), expected.rgba());
+  fn without_a_gpu_the_photo_is_seen_through_the_viewport_on_black() {
+    // Red is the column and green the row, times 40.
+    let pixels = (0..4u32).flat_map(|row| (0..4u32).flat_map(move |column| [(column * 40) as u8, (row * 40) as u8, 0, 255])).collect::<Vec<u8>>();
+    let photo = AbraPixels::new_from_pixels(4, 4, pixels, Channels::RGBA);
+    let pixel = |frame: &Frame, x: u32, y: u32| -> [u8; 3] {
+      let at = ((y * frame.width + x) * 4) as usize;
+      frame.pixels[at..at + 3].try_into().unwrap()
+    };
+    let whole = view_on_the_cpu(&photo, &Viewport::default(), 0.0, (4, 4));
+    assert_eq!(&whole.pixels[..], photo.rgba(), "the whole photo at its own size is the photo");
+    let right = view_on_the_cpu(&photo, &Viewport { x: 0.5, y: 0.0, width: 0.5, height: 1.0 }, 0.0, (2, 4));
+    assert_eq!(pixel(&right, 0, 0), [80, 0, 0], "the right half fills the view");
+    let zoomed_out = view_on_the_cpu(&photo, &Viewport { x: -1.0, y: 0.0, width: 2.0, height: 1.0 }, 0.0, (8, 4));
+    assert_eq!(pixel(&zoomed_out, 0, 0), [0, 0, 0], "past the photo is black");
+    assert_eq!(pixel(&zoomed_out, 7, 3), [120, 120, 0], "and the photo is on the right");
+    let turned = view_on_the_cpu(&photo, &Viewport::default(), std::f32::consts::FRAC_PI_2, (4, 4));
+    assert_eq!(pixel(&turned, 3, 0), pixel(&whole, 0, 0), "turned a quarter clockwise, the top left corner is at the top right");
   }
 
   #[test]

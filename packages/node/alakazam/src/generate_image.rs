@@ -4,22 +4,7 @@ use abra::prelude::*;
 use crate::common::*;
 
 pub fn transparent_pattern(width: u32, height: u32, checker_size: u32) -> AbraImage {
-  let mut image = AbraImage::new_from_color(width, height, Color::transparent());
-
-  let light_color = Color::from_rgb(200, 200, 200);
-  let dark_color = Color::from_rgb(100, 100, 100);
-
-  for y in 0..height {
-    for x in 0..width {
-      let checker_x = x / checker_size;
-      let checker_y = y / checker_size;
-      let is_light_square = (checker_x + checker_y) % 2 == 0;
-      let color = if is_light_square { light_color } else { dark_color };
-      image.set_pixel(x, y, color.rgba());
-    }
-  }
-
-  image
+  abra::drawing::prelude::fill(Area::rect((0.0, 0.0), (width as f32, height as f32)), Fill::checkerboard(checker_size, (200, 200, 200), (100, 100, 100))).to_image()
 }
 
 #[napi]

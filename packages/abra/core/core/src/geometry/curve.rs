@@ -148,7 +148,8 @@ impl Curve {
   /// The points can be in any order. A point that shares its `x` with another replaces it, the last one given winning,
   /// and a point that is not a finite number is left out. Between the points the curve is a monotone cubic: it never
   /// goes above the higher of two neighbouring points or below the lower one, so a curve through rising points only
-  /// rises and does not overshoot. Beyond the first and last points it stays level. No points give [`Curve::identity`],
+  /// rises and does not overshoot. It bends all the way to its first and last points, as one smooth line, instead of starting out
+  /// straight along the first chord. Beyond the first and last points it stays level. No points give [`Curve::identity`],
   /// and one point gives a level line.
   /// - `p_points`: The points `(x, y)` the curve goes through.
   pub fn new(p_points: impl IntoIterator<Item = impl Into<PointF>>) -> Curve {
@@ -268,13 +269,22 @@ impl From<Curve> for Path {
 }
 
 /// The slope the curve has at each point. Where the points stop rising or stop falling the slope is level, and elsewhere
-/// it is the weighted harmonic mean of the slopes either side, which keeps the curve from going past its points.
+/// it is the weighted harmonic mean of the slopes either side, which keeps the curve from going past its points. At the two
+/// end points it is worked out from the three points nearest, so the curve bends all the way to its ends instead of starting
+/// out along the first chord.
 fn tangents(p_points: &[PointF]) -> Vec<f32> {
   let widths: Vec<f32> = p_points.windows(2).map(|pair| pair[1].x - pair[0].x).collect();
   let slopes: Vec<f32> = p_points.windows(2).map(|pair| (pair[1].y - pair[0].y) / (pair[1].x - pair[0].x)).collect();
   let mut tangents = vec![0.0; p_points.len()];
-  tangents[0] = slopes[0];
-  tangents[p_points.len() - 1] = slopes[slopes.len() - 1];
+  let last = slopes.len() - 1;
+  if slopes.len() == 1 {
+    // Two points are a straight line.
+    tangents[0] = slopes[0];
+    tangents[1] = slopes[0];
+    return tangents;
+  }
+  tangents[0] = end_tangent(widths[0], widths[1], slopes[0], slopes[1]);
+  tangents[p_points.len() - 1] = end_tangent(widths[last], widths[last - 1], slopes[last], slopes[last - 1]);
   for index in 1..p_points.len() - 1 {
     let (before, after) = (slopes[index - 1], slopes[index]);
     if before * after > 0.0 {
@@ -286,12 +296,44 @@ fn tangents(p_points: &[PointF]) -> Vec<f32> {
   tangents
 }
 
+/// The slope at an end point, from the segment next to it and the one after: the slope of the parabola through the three points nearest,
+/// held so the curve cannot go past its points. It is level when that slope would point the wrong way, and no more than three times the
+/// slope of the segment next to it when the next segment turns the other way.
+/// - `p_width_near`, `p_slope_near`: The width and slope of the segment that has the end point.
+/// - `p_width_far`, `p_slope_far`: The width and slope of the segment after it.
+fn end_tangent(p_width_near: f32, p_width_far: f32, p_slope_near: f32, p_slope_far: f32) -> f32 {
+  let sign = |p_value: f32| if p_value > 0.0 { 1 } else if p_value < 0.0 { -1 } else { 0 };
+  let slope = ((2.0 * p_width_near + p_width_far) * p_slope_near - p_width_near * p_slope_far) / (p_width_near + p_width_far);
+  if sign(slope) != sign(p_slope_near) {
+    0.0
+  } else if sign(p_slope_near) != sign(p_slope_far) && slope.abs() > 3.0 * p_slope_near.abs() {
+    3.0 * p_slope_near
+  } else {
+    slope
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
 
   fn close(p_a: f32, p_b: f32) -> bool {
     (p_a - p_b).abs() < 0.01
+  }
+
+  #[test]
+  fn the_curve_bends_all_the_way_to_its_ends() {
+    // A hump through three points. Along the chords it would start at a slope of 2 and be straight at its ends; it starts steeper than that
+    // and flattens into the peak.
+    let hump = Curve::new([(0.0, 0.0), (128.0, 255.0), (255.0, 0.0)]);
+    assert!(hump.value(10.0) > 10.0 * 255.0 / 128.0 + 5.0, "it starts steeper than the chord: {}", hump.value(10.0));
+    assert!(hump.value(245.0) > 10.0 * 255.0 / 127.0 + 5.0, "and ends the same way: {}", hump.value(245.0));
+    // Points on a straight line stay on it.
+    let straight = Curve::new([(0.0, 0.0), (100.0, 100.0), (255.0, 255.0)]);
+    assert!((0..=255).all(|x| close(straight.value(x as f32), x as f32)));
+    // A flat start stays flat, and a rise after it does not make the curve dip below it.
+    let step = Curve::new([(0.0, 0.0), (100.0, 0.0), (200.0, 100.0)]);
+    assert!((0..=100).all(|x| step.value(x as f32) >= -0.01 && step.value(x as f32) <= 0.01));
   }
 
   #[test]

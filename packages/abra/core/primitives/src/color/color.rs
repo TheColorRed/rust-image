@@ -36,6 +36,20 @@ impl From<(u8, u8, u8, u8)> for Color {
   }
 }
 
+impl From<[u8; 4]> for Color {
+  /// A color from `[red, green, blue, alpha]`.
+  fn from(p_rgba: [u8; 4]) -> Self {
+    Color::from_rgba(p_rgba[0], p_rgba[1], p_rgba[2], p_rgba[3])
+  }
+}
+
+impl From<Color> for [u8; 4] {
+  /// The color as `[red, green, blue, alpha]`.
+  fn from(p_color: Color) -> Self {
+    [p_color.r, p_color.g, p_color.b, p_color.a]
+  }
+}
+
 impl<'a> From<Color> for Cow<'a, Color> {
   fn from(p_color: Color) -> Self {
     Cow::Owned(p_color)
@@ -216,6 +230,13 @@ impl Color {
 #[cfg(test)]
 mod tests {
   use super::Color;
+
+  #[test]
+  fn a_color_goes_to_and_from_an_array_of_red_green_blue_and_alpha() {
+    let color = Color::from([10, 20, 30, 40]);
+    assert_eq!(color.rgba(), (10, 20, 30, 40));
+    assert_eq!(<[u8; 4]>::from(color), [10, 20, 30, 40]);
+  }
 
   #[test]
   fn the_hue_turns_around_the_wheel_and_the_rest_is_kept() {

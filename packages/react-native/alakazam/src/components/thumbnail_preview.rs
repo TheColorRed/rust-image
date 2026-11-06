@@ -18,16 +18,7 @@ pub struct ThumbnailPreview {
 /// The thumbnail's photo, drawn by the same source the editor preview uses. That source draws the part of the photo the
 /// viewport names across the whole card, so the viewport is the centered part of the photo with the card's shape.
 fn background(p_image: &Arc<abra_uniffi::Image>, p_width: u32, p_height: u32) -> Image {
-  let (photo_width, photo_height) = p_image.core().dimensions::<u32>();
-  let photo_shape = photo_width.max(1) as f32 / photo_height.max(1) as f32;
-  let card_shape = p_width.max(1) as f32 / p_height.max(1) as f32;
-  let shown = if card_shape < photo_shape {
-    let width = card_shape / photo_shape;
-    Viewport { x: (1.0 - width) / 2.0, y: 0.0, width, height: 1.0 }
-  } else {
-    let height = photo_shape / card_shape;
-    Viewport { x: 0.0, y: (1.0 - height) / 2.0, width: 1.0, height }
-  };
+  let shown = Viewport::covering(p_image.core().dimensions::<u32>(), (p_width, p_height));
   let image = Image::new().with_fit(Fit::Cover).track(&super::image_preview::PreviewSource::new(Arc::clone(p_image)));
   image.jump_viewport(shown);
   image
@@ -99,6 +90,7 @@ mod tests {
 
   use super::*;
   use abra::prelude::{Color, Image as AbraPixels};
+  use crate::components::pixel;
 
   #[test]
   fn gradient_pixels_are_black_with_increasing_alpha_and_no_color_tint() {
@@ -158,11 +150,6 @@ mod tests {
       32,
       Color::from_rgba(p_color[0], p_color[1], p_color[2], p_color[3]),
     )))
-  }
-
-  fn pixel(p_frame: &Frame, p_x: u32, p_y: u32) -> [u8; 4] {
-    let at = ((p_y * p_frame.width + p_x) * 4) as usize;
-    p_frame.pixels[at..at + 4].try_into().unwrap()
   }
 
   fn rendered(p_preview: &ThumbnailPreview, p_color: [u8; 4]) -> Frame {

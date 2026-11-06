@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Switch, Text, useWindowDimensions, View } from 'react-native';
+import { KeyboardScrollView, RevealInput } from '@/src/components/keyboard-scroll';
 import { useObservable } from 'react-rx';
 import { FontBrowser } from '@/src/components/font-browser';
 import { STRIPE_AT, decodeWords, stripeValues, withWords, type StripeWords } from '@/src/effects/stripe-overlay';
@@ -25,6 +26,7 @@ const settings = leafControls([stripeControl]).find(
  */
 export function StripeWordsDialog() {
   const { colors } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const edits = useObservable(adjustments$, adjustments.value);
   const onLiveChange = useSliderPreview(settings);
   const saved = stripeValues(sliderValues(settings, edits[STRIPE_SETTINGS_KEY]));
@@ -67,7 +69,7 @@ export function StripeWordsDialog() {
   const capsAt = main ? STRIPE_AT.capsTitle : STRIPE_AT.capsSub;
   const row = (label: string, control: ReactNode) => (
     <View style={styles.row}>
-      <Text style={{ color: colors.textSecondary }}>{label}</Text>
+      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</Text>
       {control}
     </View>
   );
@@ -75,14 +77,14 @@ export function StripeWordsDialog() {
     row(label, <Switch accessibilityLabel={label} value={draft[at] === 1} onValueChange={on => setSwitch(at, on)} style={styles.switch} />);
 
   return (
-    <Modal visible={which !== null} transparent animationType="fade" onRequestClose={() => finish(false)}>
-      <View style={styles.backdrop}>
-        <View style={[styles.card, { backgroundColor: colors.surface }]}>
+    <Modal visible={which !== null} transparent animationType="fade" statusBarTranslucent onRequestClose={() => finish(false)}>
+      <KeyboardScrollView style={styles.backdropFill} contentContainerStyle={styles.backdrop}>
+        <View style={[styles.card, { width: Math.min(windowWidth - 24, 440), maxHeight: windowHeight - 40, backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>{main ? 'Main Text' : 'Sub Text'}</Text>
           {!main && toggle('Show sub text', STRIPE_AT.showSub)}
           {(main || draft[STRIPE_AT.showSub] === 1) && (
             <>
-              <TextInput
+              <RevealInput
                 accessibilityLabel={main ? 'Main text' : 'Sub text'}
                 value={words[key]}
                 onChangeText={typed => setWords({ ...words, [key]: typed })}
@@ -104,15 +106,23 @@ export function StripeWordsDialog() {
             </Pressable>,
           )}
           <View style={styles.buttons}>
-            <Pressable accessibilityRole="button" onPress={() => finish(false)} style={styles.button}>
-              <Text style={{ color: colors.textSecondary }}>Cancel</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => finish(false)}
+              style={[styles.button, { backgroundColor: colors.chip, borderColor: colors.border }]}
+            >
+              <Text style={[styles.buttonText, { color: colors.textPrimary }]}>Cancel</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => finish(true)} style={styles.button}>
-              <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>OK</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => finish(true)}
+              style={[styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+            >
+              <Text style={[styles.buttonText, { color: '#ffffff' }]}>OK</Text>
             </Pressable>
           </View>
         </View>
-      </View>
+      </KeyboardScrollView>
       <Modal visible={choosingFont} animationType="slide" onRequestClose={() => setChoosingFont(false)}>
         <FontBrowser
           selected={words.family}
@@ -127,13 +137,18 @@ export function StripeWordsDialog() {
   );
 }
 
+// The look of the color picker and the gradient editor: the same backdrop, card, title and buttons.
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 16 },
-  card: { width: '100%', maxWidth: 420, borderRadius: 14, padding: 16, gap: 12 },
-  title: { fontSize: 17, fontWeight: '600' },
+  backdropFill: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  // `flexGrow` and not `flex`, so the card is centered when it fits and scrolls when it does not (a small phone with the keyboard open).
+  backdrop: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
+  card: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 10 },
+  title: { fontSize: 16, fontWeight: '600' },
   row: { gap: 4 },
+  fieldLabel: { fontSize: 12 },
+  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14 },
   switch: { alignSelf: 'flex-start' },
-  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
-  buttons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-  button: { paddingHorizontal: 14, paddingVertical: 8 },
+  buttons: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end', marginTop: 4 },
+  button: { minWidth: 92, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
+  buttonText: { fontSize: 15, fontWeight: '600' },
 });

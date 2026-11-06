@@ -12,6 +12,7 @@ mod interpolation;
 mod resize;
 mod rotate;
 mod transform_image;
+mod view;
 mod warp;
 mod zoom;
 
@@ -21,6 +22,7 @@ pub use flip::FlipAxis;
 pub use interpolation::*;
 pub use resize::ResizeTarget;
 pub use transform_image::*;
+pub use view::*;
 pub use warp::*;
 
 pub(crate) use crop::crop;

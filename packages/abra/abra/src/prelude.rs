@@ -31,7 +31,7 @@ pub use crate::abra_core::Shape;
 pub use crate::abra_core::Size;
 
 // Gradient and drawing helpers
-pub use crate::abra_core::{ColorStop, Gradient};
+pub use crate::abra_core::{AlphaStop, ColorStop, Gradient};
 // pub use crate::drawing::fill;
 
 // Transform options

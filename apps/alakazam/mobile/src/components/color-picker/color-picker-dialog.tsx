@@ -4,33 +4,41 @@ import { COLOR_SURFACE_RING, COLOR_SURFACE_SHADOW } from '@/src/lib/color/surfac
 import { useOwning } from '@/src/lib/native/native-handles';
 import { useTheme } from '@/src/lib/ui/theme';
 import type { ColorPickerRequest, ColorPickerResult } from '@/src/state/color-picker';
-import { ColorSquare } from '@alakazam/mobile';
+import { ColorPicker } from '@alakazam/mobile';
+import RNSlider from '@react-native-community/slider';
 import { VesselView } from '@vessel/react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, PixelRatio, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Modal, PixelRatio, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { KeyboardScrollView, RevealInput } from '@/src/components/keyboard-scroll';
 
 /** The width of the bar that picks which color it is, and the room between it and the square. */
 const HUE_BAR_WIDTH = 56;
 const GAP = 12;
 const CARD_PADDING = 14;
-/** The height of the bar that picks how solid the color is, and the room above it. These are the native surface's own measures (`ColorSquare`). */
+/** The height of the bar that picks how solid the color is, and the room above it. These are the native surface's own measures (`ColorPicker`). */
 const STRENGTH_HEIGHT = 28;
 
 const same = (a: Rgb, b: Rgb) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 const css = (rgb: Rgb) => `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 
-/** A box for one number, such as red or colorfulness. What is typed is taken when the person is done with the box, and a number that is not allowed is put back. */
+/**
+ * A box for one number, such as red or colorfulness. What is typed is taken when the person is done with the box, and a number that is not allowed is put back.
+ * With `slider` the box has a slider to its left, so the number can be dragged to without typing; the box takes the whole line then, and every move of the
+ * slider is a new number for `onCommit`.
+ */
 export function NumberBox({
   label,
   value,
   max,
   suffix,
+  slider = false,
   onCommit,
 }: {
   label: string;
   value: number;
   max: number;
   suffix?: string;
+  slider?: boolean;
   onCommit: (value: number) => void;
 }) {
   const { colors } = useTheme();
@@ -43,11 +51,28 @@ export function NumberBox({
     else setText(String(value));
   };
   return (
-    <View style={styles.field}>
-      <Text numberOfLines={1} style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+    <View style={[styles.field, slider ? styles.fieldWithSlider : null]}>
+      <Text numberOfLines={1} style={[styles.fieldLabel, slider ? styles.fieldLabelWithSlider : null, { color: colors.textSecondary }]}>
         {label}
       </Text>
-      <TextInput
+      {slider ? (
+        <RNSlider
+          accessibilityLabel={`${label} slider`}
+          style={styles.fieldSlider}
+          minimumValue={0}
+          maximumValue={max}
+          step={1}
+          value={value}
+          minimumTrackTintColor={colors.accent}
+          maximumTrackTintColor={colors.chip}
+          thumbTintColor={colors.accent}
+          onValueChange={next => {
+            const rounded = Math.round(next);
+            if (rounded !== value) onCommit(rounded);
+          }}
+        />
+      ) : null}
+      <RevealInput
         accessibilityLabel={label}
         value={text}
         onChangeText={setText}
@@ -101,13 +126,13 @@ export function ColorPickerDialog({ request, onDone }: { request: ColorPickerReq
   // The square takes the room the bar leaves, and no more than the screen has height for, so the whole picker still fits.
   const squareSize = Math.max(140, cardWidth - CARD_PADDING * 2 - HUE_BAR_WIDTH - GAP);
 
-  // The square, the bar of colors and the bar of strengths are one native surface (`ColorSquare`: abra draws them and Vessel renders them and takes the
+  // The square, the bar of colors and the bar of strengths are one native surface (`ColorPicker`: abra draws them and Vessel renders them and takes the
   // touches). It holds the color while a finger is on it, which is read on each move, and is told the color when it changes from anywhere else.
   const hasStrength = options.alpha !== undefined;
   const surface = useOwning(
     keep =>
       keep(
-        new ColorSquare(
+        new ColorPicker(
           hsb.hue,
           hsb.saturation,
           hsb.brightness,
@@ -143,7 +168,7 @@ export function ColorPickerDialog({ request, onDone }: { request: ColorPickerReq
       <View style={styles.backdrop}>
         <View style={[styles.card, { width: cardWidth, backgroundColor: colors.surface, borderColor: colors.border, maxHeight: windowHeight - 40 }]}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>{options.title ?? 'Pick a color'}</Text>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <KeyboardScrollView showsVerticalScrollIndicator={false}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.swatchRow}>
               {swatches.map(swatch => {
                 const chosen = same(swatch.rgb, rgb);
@@ -222,7 +247,7 @@ export function ColorPickerDialog({ request, onDone }: { request: ColorPickerReq
 
             <View style={styles.hexRow}>
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Web color</Text>
-              <TextInput
+              <RevealInput
                 accessibilityLabel="Web color"
                 value={hex}
                 onChangeText={setHex}
@@ -238,7 +263,7 @@ export function ColorPickerDialog({ request, onDone }: { request: ColorPickerReq
                 <Text style={{ color: readableOn(rgb), fontSize: 11 }}>{rgbToHex(rgb)}</Text>
               </View>
             </View>
-          </ScrollView>
+          </KeyboardScrollView>
 
           <View style={styles.buttons}>
             <Pressable
@@ -278,6 +303,9 @@ const styles = StyleSheet.create({
   fieldColumn: { flex: 1, gap: 6 },
   field: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fieldLabel: { fontSize: 12, flexShrink: 1, minWidth: 0, flexGrow: 1 },
+  fieldWithSlider: { width: '100%' },
+  fieldLabelWithSlider: { flexGrow: 0, width: 64 },
+  fieldSlider: { flex: 1, height: 30 },
   input: { width: 46, height: 30, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, textAlign: 'center', paddingVertical: 0, fontSize: 14 },
   suffix: { width: 12, fontSize: 12 },
   hexRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
